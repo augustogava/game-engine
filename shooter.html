@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stick Shooter — AntiGravity Engine</title>
+    <meta name="description" content="A 2D stick shooter with side-scrolling physics. Built with AntiGravity Engine.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a0c;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        #game-canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        /* Loading basic layout */
+        #loading {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #0a0a0c;
+            z-index: 200;
+            gap: 20px;
+            transition: opacity 0.5s ease;
+        }
+
+        #loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-title {
+            font-size: 28px;
+            font-weight: 800;
+            color: #ff3344;
+            letter-spacing: 0.1em;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 2px solid rgba(255, 50, 50, 0.2);
+            border-top-color: #ff3344;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loading">
+        <div class="loading-title">SHOOTER</div>
+        <div class="loading-spinner"></div>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+
+    <script type="module" src="dist/shooter-main.js"></script>
+    <script>
+        window.__hideLoading = function () {
+            const el = document.getElementById('loading');
+            if (el) { el.classList.add('hidden'); setTimeout(() => el.remove(), 600); }
+        };
+        setTimeout(() => window.__hideLoading && window.__hideLoading(), 2000);
+    </script>
+</body>
+
+</html>

@@ -7,9 +7,9 @@ const path = require('path');
 const PORT = 3000;
 
 const ctx = esbuild.context({
-    entryPoints: ['src/main.ts'],
+    entryPoints: ['src/main.ts', 'src/shooter-main.ts'],
     bundle: true,
-    outfile: 'dist/main.js',
+    outdir: 'dist',
     sourcemap: true,
     target: 'es2020',
     format: 'iife',
