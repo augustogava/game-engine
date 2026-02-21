@@ -1,8 +1,8 @@
 /**
  * shooter-main.ts - Entry point for the Stick Shooter game
  */
-import { GameCore } from './engine/GameCore.js';
-import { ShooterScene } from './game/ShooterScene.js';
+import { GameCore } from './engine/GameCore';
+import { ShooterScene } from './game/ShooterScene';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 if (!canvas) throw new Error('Canvas element not found!');

@@ -39,18 +39,22 @@ export class ShooterScene extends Scene {
     private camX = 0;
 
     // Background Layers
-    private bgFar: number[] = [];
-    private bgMid: number[] = [];
-    private bgNear: { x: number, h: number }[] = [];
+    private bgFar: { w: number, h: number, windows: boolean[] }[] = [];
+    private bgMid: { w: number, h: number, type: number }[] = [];
+    private stars: { x: number, y: number, r: number }[] = [];
 
     override onEnter(ctx: SceneContext): void {
         super.onEnter(ctx);
 
-        // Generate Parallax Background
-        for (let i = 0; i < 30; i++) {
-            this.bgFar.push(Math.random() * 200 + 100);
-            this.bgMid.push(Math.random() * 150 + 50);
-            this.bgNear.push({ x: i * 400 + Math.random() * 200, h: Math.random() * 80 + 20 });
+        // Generate Parallax City Background
+        for (let i = 0; i < 150; i++) { // More buildings for long level
+            const windows = [];
+            for (let j = 0; j < 20; j++) windows.push(Math.random() > 0.6);
+            this.bgFar.push({ w: Math.random() * 100 + 80, h: Math.random() * 300 + 100, windows });
+            this.bgMid.push({ w: Math.random() * 80 + 60, h: Math.random() * 200 + 50, type: Math.floor(Math.random() * 3) });
+        }
+        for (let i = 0; i < 200; i++) {
+            this.stars.push({ x: Math.random() * this.levelLength, y: Math.random() * 400, r: Math.random() * 1.5 });
         }
 
         // Spawn Clouds
@@ -480,13 +484,23 @@ export class ShooterScene extends Scene {
     }
 
     private spawnDeathCloud(x: number, y: number) {
-        for (let i = 0; i < 20; i++) {
+        // Massive fiery explosion
+        for (let i = 0; i < 25; i++) {
             this.particles.push({
                 x: x + (Math.random() - 0.5) * 40,
                 y: y + (Math.random() - 0.5) * 40,
-                vx: (Math.random() - 0.5) * 100,
-                vy: (Math.random() - 0.5) * 100 - 50,
-                age: 0, maxAge: 0.5 + Math.random() * 0.5, type: 'smoke'
+                vx: (Math.random() - 0.5) * 150,
+                vy: (Math.random() - 0.5) * 150 - 50,
+                age: 0, maxAge: 0.6 + Math.random() * 0.4, type: 'explosion'
+            });
+        }
+        // Debris chunks
+        for (let i = 0; i < 15; i++) {
+            this.particles.push({
+                x, y: y - 20,
+                vx: (Math.random() - 0.5) * 400,
+                vy: -Math.random() * 400 - 100,
+                age: 0, maxAge: 0.8 + Math.random() * 0.5, type: 'debris'
             });
         }
     }
@@ -549,55 +563,92 @@ export class ShooterScene extends Scene {
     }
 
     private drawParallax(ctx: CanvasRenderingContext2D, W: number, H: number) {
-        // Clouds
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        // Sky Gradient
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+        skyGrad.addColorStop(0, '#0a0a1a'); // Dark deep blue space
+        skyGrad.addColorStop(1, '#2a1a3a'); // Twilight purple horizon
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(this.camX - W, 0, W * 3, GROUND_Y);
+
+        // Stars
+        ctx.fillStyle = '#ffffff';
+        const sOffset = this.camX * 0.05;
+        for (const s of this.stars) {
+            const sx = s.x - sOffset;
+            // Only draw if roughly on screen to save perf
+            if (sx > this.camX - W && sx < this.camX + W * 2) {
+                ctx.globalAlpha = Math.random() * 0.5 + 0.5;
+                ctx.beginPath(); ctx.arc(sx, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+        ctx.globalAlpha = 1;
+
+        // Clouds (cyberpunk smog)
+        ctx.fillStyle = 'rgba(255, 100, 150, 0.05)';
         const cOffset = this.camX * 0.1;
         for (const c of this.clouds) {
             ctx.beginPath();
             const cx = c.x - cOffset;
-            ctx.ellipse(cx, c.y, 80 * c.scale, 30 * c.scale, 0, 0, Math.PI * 2);
-            ctx.ellipse(cx - 30 * c.scale, c.y + 10 * c.scale, 50 * c.scale, 20 * c.scale, 0, 0, Math.PI * 2);
-            ctx.ellipse(cx + 40 * c.scale, c.y + 5 * c.scale, 60 * c.scale, 25 * c.scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx, c.y, 180 * c.scale, 40 * c.scale, 0, 0, Math.PI * 2);
             ctx.fill();
         }
 
-        // Far mountains (moves very slow: camX * 0.9 relative offset -> speed 0.1)
-        ctx.fillStyle = '#181e30';
-        ctx.beginPath();
+        // Far City (speed 0.1 -> relative offset camX * 0.9)
         const fOffset = this.camX * 0.9;
-        ctx.moveTo(this.camX - W, GROUND_Y);
-        for (let i = 0; i < 30; i++) {
-            const x = i * 200 - (fOffset % 200) + this.camX - 200;
-            const h = this.bgFar[i];
-            ctx.lineTo(x, GROUND_Y - h);
+        let currX = this.camX - W - (fOffset % 200);
+        for (let i = 0; i < this.bgFar.length; i++) {
+            const b = this.bgFar[i];
+            if (currX > this.camX + W) break; // skip rest
+            if (currX + b.w > this.camX - W) {
+                // Building silhouette
+                ctx.fillStyle = '#0f111a'; // Very dark
+                ctx.fillRect(currX, GROUND_Y - b.h, b.w, b.h);
+                // Windows
+                ctx.fillStyle = '#ffaa33'; // Warm neon yellow
+                for (let wy = 10; wy < b.h - 10; wy += 15) {
+                    for (let wx = 10; wx < b.w - 10; wx += 15) {
+                        if (b.windows[(wx + wy) % 20]) {
+                            ctx.globalAlpha = 0.6;
+                            ctx.fillRect(currX + wx, GROUND_Y - b.h + wy, 6, 8);
+                        }
+                    }
+                }
+                ctx.globalAlpha = 1;
+            }
+            currX += b.w + 10;
         }
-        ctx.lineTo(this.camX + W * 2, GROUND_Y);
-        ctx.fill();
 
-        // Mid trees (moves medium: camX * 0.6 relative offset -> speed 0.4)
-        ctx.fillStyle = '#1f2538';
-        ctx.beginPath();
-        const mOffset = this.camX * 0.6;
-        ctx.moveTo(this.camX - W, GROUND_Y);
-        for (let i = 0; i < 30; i++) {
-            const x = i * 150 - (mOffset % 150) + this.camX - 200;
-            const h = this.bgMid[i];
-            ctx.lineTo(x, GROUND_Y - h);
-            ctx.lineTo(x + 40, GROUND_Y - h - 30);
-            ctx.lineTo(x + 80, GROUND_Y - h);
-        }
-        ctx.lineTo(this.camX + W * 2, GROUND_Y);
-        ctx.fill();
+        // Mid City (speed 0.3 -> relative offset camX * 0.7)
+        const mOffset = this.camX * 0.7;
+        currX = this.camX - W - (mOffset % 200);
+        for (let i = 0; i < this.bgMid.length; i++) {
+            const b = this.bgMid[i];
+            if (currX > this.camX + W) break;
+            if (currX + b.w > this.camX - W) {
+                // Base structure
+                ctx.fillStyle = '#1a1f2e';
+                ctx.fillRect(currX, GROUND_Y - b.h, b.w, b.h);
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(currX, GROUND_Y - b.h, b.w, b.h);
 
-        // Near bushes (moves fast: camX * 0.3 relative offset -> speed 0.7)
-        ctx.fillStyle = '#2a3148';
-        const nOffset = this.camX * 0.3;
-        for (let i = 0; i < 30; i++) {
-            const n = this.bgNear[i];
-            const x = (n.x) - (nOffset % 1200) + this.camX - 200;
-            ctx.beginPath();
-            ctx.arc(x, GROUND_Y, n.h, Math.PI, 0);
-            ctx.fill();
+                // Details based on type
+                if (b.type === 0) {
+                    // Antenna
+                    ctx.beginPath(); ctx.moveTo(currX + b.w / 2, GROUND_Y - b.h); ctx.lineTo(currX + b.w / 2, GROUND_Y - b.h - 40); ctx.stroke();
+                    ctx.fillStyle = '#ff0055'; ctx.beginPath(); ctx.arc(currX + b.w / 2, GROUND_Y - b.h - 40, 3, 0, Math.PI * 2); ctx.fill(); // blinking red light
+                } else if (b.type === 1) {
+                    // Neon strip
+                    ctx.fillStyle = '#00ffff'; // Cyan
+                    ctx.fillRect(currX + 10, GROUND_Y - b.h + 20, 4, b.h - 40);
+                    ctx.fillRect(currX + b.w - 14, GROUND_Y - b.h + 20, 4, b.h - 40);
+                } else {
+                    // Blocky top
+                    ctx.fillStyle = '#141824';
+                    ctx.fillRect(currX + 10, GROUND_Y - b.h - 20, b.w - 20, 20);
+                }
+            }
+            currX += b.w + 20;
         }
     }
 
@@ -608,82 +659,83 @@ export class ShooterScene extends Scene {
         ctx.save();
         ctx.translate(x, y);
 
-        // Player is facing right if mouse is to the right
         const screenPx = this.px - this.camX;
         const mousePos = this.ctx.input.getMousePosition();
         const mx = mousePos.x;
         const facingRight = mx > screenPx;
+        if (!facingRight) ctx.scale(-1, 1);
 
-        if (!facingRight) {
-            ctx.scale(-1, 1);
-        }
-
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 4;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        // Walk cycle angles
         const legA = Math.sin(this.walkCycle) * 0.6;
         const legB = Math.sin(this.walkCycle + Math.PI) * 0.6;
 
-        // Draw Left Leg (back)
-        ctx.strokeStyle = '#aaa'; // Darker for depth
-        ctx.beginPath();
-        ctx.moveTo(0, -25);
-        ctx.lineTo(Math.sin(legB) * 20, -5 + Math.cos(legB) * 5);
-        ctx.stroke();
+        const coatColor = '#3a2d45';
+        const pantColor = '#1d1a29';
+        const skinColor = '#ffccaa';
 
-        // Draw Body
-        ctx.strokeStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.moveTo(0, -60); // Neck
-        ctx.lineTo(0, -25); // Pelvis
-        ctx.stroke();
+        // Left Arm (back)
+        ctx.fillStyle = coatColor;
+        ctx.fillRect(-5, -60, 10, 25);
 
-        // Draw Right Leg (front)
-        ctx.beginPath();
-        ctx.moveTo(0, -25);
-        ctx.lineTo(Math.sin(legA) * 25, 0);
-        ctx.stroke();
+        // Left Leg (back)
+        ctx.save();
+        ctx.translate(0, -25);
+        ctx.rotate(legB);
+        ctx.fillStyle = pantColor;
+        ctx.fillRect(-6, 0, 12, 25);
+        ctx.fillStyle = '#111'; // boot
+        ctx.fillRect(-8, 20, 16, 8);
+        ctx.restore();
 
-        // Head
-        ctx.fillStyle = '#fff';
+        // Body (Trench coat)
+        ctx.fillStyle = coatColor;
         ctx.beginPath();
-        ctx.arc(0, -70, 10, 0, Math.PI * 2);
+        ctx.moveTo(-15, -60);
+        ctx.lineTo(15, -60);
+        ctx.lineTo(20, -15);
+        ctx.lineTo(-20, -15);
         ctx.fill();
 
-        // Left Arm (back) - idle
-        ctx.strokeStyle = '#aaa';
-        ctx.beginPath();
-        ctx.moveTo(0, -55);
-        ctx.lineTo(-10, -35); // Hang down
-        ctx.stroke();
+        // Right Leg (front)
+        ctx.save();
+        ctx.translate(0, -25);
+        ctx.rotate(legA);
+        ctx.fillStyle = pantColor;
+        ctx.fillRect(-6, 0, 12, 25);
+        ctx.fillStyle = '#111'; // boot
+        ctx.fillRect(-8, 20, 16, 8);
+        ctx.restore();
+
+        // Head
+        ctx.fillStyle = skinColor;
+        ctx.beginPath(); ctx.arc(0, -70, 12, 0, Math.PI * 2); ctx.fill();
+        // Hair/Bandana
+        ctx.fillStyle = '#aa2233';
+        ctx.beginPath(); ctx.arc(0, -75, 13, Math.PI, 0); ctx.fill();
+        ctx.fillRect(-15, -75, 30, 8);
 
         // Right Arm (front) holding gun
-        ctx.strokeStyle = '#ffffff';
         ctx.save();
         ctx.translate(0, -55);
-        // Correct aim angle for flipping
         let localAim = this.aimAngle;
-        if (!facingRight) {
-            localAim = Math.PI - localAim;
-        }
+        if (!facingRight) localAim = Math.PI - localAim;
         ctx.rotate(localAim);
 
         // Arm
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(25, 0);
-        ctx.stroke();
+        ctx.fillStyle = coatColor;
+        ctx.fillRect(-5, -6, 25, 12);
+        // Hand
+        ctx.fillStyle = skinColor;
+        ctx.beginPath(); ctx.arc(20, 0, 6, 0, Math.PI * 2); ctx.fill();
 
-        // Gun
-        ctx.lineWidth = 6;
-        ctx.strokeStyle = '#666';
-        ctx.beginPath();
-        ctx.moveTo(15, 0);
-        ctx.lineTo(40, 0);
-        ctx.stroke();
+        // Chunky Gun
+        ctx.fillStyle = '#222';
+        ctx.fillRect(15, -5, 25, 10);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(20, -8, 15, 3);
+        ctx.fillStyle = '#111';
+        ctx.fillRect(15, 5, 8, 10); // Grip
+        ctx.fillStyle = '#0a0';
+        ctx.fillRect(25, 0, 4, 4); // glow sight
 
         ctx.restore();
         ctx.restore();
@@ -691,38 +743,50 @@ export class ShooterScene extends Scene {
 
     private renderEnemies(ctx: CanvasRenderingContext2D) {
         for (const e of this.enemies) {
-            if (!e.active) continue; // Skip rendering far away enemies
+            if (!e.active) continue;
 
             ctx.save();
             ctx.translate(e.x, e.y);
-
             const facingRight = e.vx > 0;
             if (!facingRight) ctx.scale(-1, 1);
-
-            ctx.strokeStyle = '#ff4444';
-            ctx.lineWidth = 4;
-            ctx.lineCap = 'round';
 
             const legA = Math.sin(e.walkCycle) * 0.6;
             const legB = Math.sin(e.walkCycle + Math.PI) * 0.6;
 
-            // Legs
-            ctx.beginPath();
-            ctx.moveTo(0, -25);
-            ctx.lineTo(Math.sin(legB) * 20, -5 + Math.cos(legB) * 5);
-            ctx.moveTo(0, -25);
-            ctx.lineTo(Math.sin(legA) * 25, 0);
-            ctx.stroke();
+            const armorColor = '#2d3345';
+            const accent = '#ff0044';
+
+            // Left leg
+            ctx.save(); ctx.translate(0, -25); ctx.rotate(legB);
+            ctx.fillStyle = '#111'; ctx.fillRect(-6, 0, 12, 25);
+            ctx.restore();
 
             // Body
-            ctx.beginPath(); ctx.moveTo(0, -60); ctx.lineTo(0, -25); ctx.stroke();
+            ctx.fillStyle = armorColor;
+            ctx.fillRect(-12, -60, 24, 35);
+            // Armor plate
+            ctx.fillStyle = '#445';
+            ctx.fillRect(-8, -55, 16, 20);
 
-            // Arms (zombie pose)
-            ctx.beginPath(); ctx.moveTo(0, -55); ctx.lineTo(25, -55); ctx.stroke();
+            // Right leg
+            ctx.save(); ctx.translate(0, -25); ctx.rotate(legA);
+            ctx.fillStyle = '#111'; ctx.fillRect(-6, 0, 12, 25);
+            ctx.restore();
 
-            // Head
-            ctx.fillStyle = '#ff4444';
-            ctx.beginPath(); ctx.arc(0, -70, 10, 0, Math.PI * 2); ctx.fill();
+            // Head / Helmet
+            ctx.fillStyle = armorColor;
+            ctx.beginPath(); ctx.arc(0, -70, 14, 0, Math.PI * 2); ctx.fill();
+            // Visor
+            ctx.fillStyle = accent;
+            ctx.fillRect(-8, -75, 18, 8);
+
+            // Arm/Gun merged (zombie pose but holding a blaster)
+            ctx.fillStyle = armorColor;
+            ctx.fillRect(-5, -60, 25, 12);
+            ctx.fillStyle = '#222';
+            ctx.fillRect(15, -58, 20, 8); // Gun barrel
+            ctx.fillStyle = accent;
+            ctx.fillRect(30, -56, 5, 4); // Red glow tip
 
             ctx.restore();
         }
@@ -762,29 +826,54 @@ export class ShooterScene extends Scene {
 
     private renderPlatforms(ctx: CanvasRenderingContext2D) {
         for (const p of this.platforms) {
-            ctx.fillStyle = '#1d2334';
+            // Main Girder
+            ctx.fillStyle = '#242a3a';
             ctx.fillRect(p.x, p.y, p.w, p.h);
-            ctx.fillStyle = '#2f3851';
+
+            // Girder cross-patterns
+            ctx.strokeStyle = '#181e2b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < p.w - 20; i += 30) {
+                ctx.moveTo(p.x + i, p.y);
+                ctx.lineTo(p.x + i + 20, p.y + p.h);
+                ctx.moveTo(p.x + i + 20, p.y);
+                ctx.lineTo(p.x + i, p.y + p.h);
+            }
+            ctx.stroke();
+
+            // Top edge walkway
+            ctx.fillStyle = '#454e66';
             ctx.fillRect(p.x, p.y, p.w, 4);
+
+            // Hazard striping at the bottom edge
+            ctx.fillStyle = '#111';
+            ctx.fillRect(p.x, p.y + p.h - 4, p.w, 4);
+            ctx.fillStyle = '#ffaa00';
+            ctx.beginPath();
+            for (let i = 0; i < p.w; i += 16) {
+                ctx.moveTo(p.x + i, p.y + p.h - 4);
+                ctx.lineTo(p.x + i + 8, p.y + p.h - 4);
+                ctx.lineTo(p.x + i + 4, p.y + p.h);
+                ctx.lineTo(p.x + i - 4, p.y + p.h);
+            }
+            ctx.fill();
         }
     }
 
     private renderCollectibles(ctx: CanvasRenderingContext2D) {
-        ctx.fillStyle = '#ffcc00';
-        ctx.strokeStyle = '#aa8800';
         ctx.lineWidth = 2;
         for (const c of this.collectibles) {
-            // Blink if about to despawn
             if (c.maxAge - c.age < 2 && Math.floor(c.age * 10) % 2 === 0) continue;
 
-            ctx.beginPath();
-            ctx.arc(c.x, c.y, 6, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            // Inner mark
-            ctx.fillStyle = '#aa8800';
+            const r = 8;
+            ctx.fillStyle = '#ffaa00'; // Outer ring
+            ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#ffee00'; // Inner core
+            ctx.beginPath(); ctx.arc(c.x, c.y, r - 3, 0, Math.PI * 2); ctx.fill();
+            // Centered 'C' or Slot
+            ctx.fillStyle = '#cc8800';
             ctx.fillRect(c.x - 1, c.y - 3, 2, 6);
-            ctx.fillStyle = '#ffcc00';
         }
     }
 
@@ -799,32 +888,46 @@ export class ShooterScene extends Scene {
                 ctx.fillStyle = '#ffa500';
                 ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
             } else if (p.type === 'smoke') {
-                ctx.fillStyle = '#888888';
+                ctx.fillStyle = '#444';
                 ctx.beginPath(); ctx.arc(p.x, p.y, 8 + (1 - life) * 15, 0, Math.PI * 2); ctx.fill();
+            } else if (p.type === 'explosion') {
+                // Expanding fireball
+                const r = 20 + (1 - life) * 80;
+                const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+                grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+                grad.addColorStop(0.2, 'rgba(255, 200, 50, 1)');
+                grad.addColorStop(0.5, 'rgba(255, 50, 0, 0.8)');
+                grad.addColorStop(1, 'rgba(50, 10, 10, 0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+            } else if (p.type === 'debris') {
+                ctx.fillStyle = '#222';
+                ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
             }
         }
         ctx.globalAlpha = 1;
     }
 
     private renderHUD(ctx: CanvasRenderingContext2D, W: number, H: number) {
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 24px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`SCORE: ${this.score}`, W / 2, 40);
+        ctx.font = 'bold 28px Inter, sans-serif';
 
-        ctx.fillStyle = '#ffcc00';
-        ctx.textAlign = 'right';
-        ctx.fillText(`COINS: ${this.coins}`, W - 30, 40);
+        const drawText = (text: string, x: number, y: number, color: string, align: CanvasTextAlign) => {
+            ctx.textAlign = align;
+            ctx.fillStyle = '#000';
+            ctx.fillText(text, x + 2, y + 2);
+            ctx.fillStyle = color;
+            ctx.fillText(text, x, y);
+        };
+
+        drawText(`SCORE: ${this.score}`, W / 2, 40, '#fff', 'center');
+        drawText(`COINS: ${this.coins}`, W - 30, 40, '#ffcc00', 'right');
 
         // Lives map
-        ctx.textAlign = 'left';
-        ctx.font = '24px Inter';
-        ctx.fillStyle = '#ff4444';
         let hearts = '';
         for (let i = 0; i < this.maxLives; i++) {
             hearts += i < this.lives ? '♥ ' : '♡ ';
         }
-        ctx.fillText(hearts, 30, 40);
+        drawText(hearts, 30, 40, '#ff4444', 'left');
 
         if (this.lives <= 0 && !this.levelComplete) {
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
