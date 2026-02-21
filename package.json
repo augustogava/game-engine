@@ -1,0 +1,14 @@
+{
+  "name": "engine-anti",
+  "version": "1.0.0",
+  "description": "AntiGravity Game Engine + Galaxy Simulation",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "node scripts/build.js",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
+  }
+}
