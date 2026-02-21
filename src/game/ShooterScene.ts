@@ -21,10 +21,14 @@ export class ShooterScene extends Scene {
     private score = 0;
     private lastFired = 0;
 
+    // Level System
+    private levelLength = 7000;
+    private levelComplete = false;
+
     // Entities
     private bullets: { x: number, y: number, vx: number, vy: number, age: number }[] = [];
     private boxes: { x: number, y: number, w: number, h: number, vx: number, vy: number, angularVel: number, angle: number }[] = [];
-    private enemies: { x: number, y: number, vx: number, vy: number, hp: number, walkCycle: number }[] = [];
+    private enemies: { x: number, y: number, vx: number, vy: number, hp: number, walkCycle: number, active: boolean }[] = [];
     private particles: { x: number, y: number, vx: number, vy: number, age: number, maxAge: number, type: string }[] = [];
 
     // Camera
@@ -45,26 +49,42 @@ export class ShooterScene extends Scene {
             this.bgNear.push({ x: i * 400 + Math.random() * 200, h: Math.random() * 80 + 20 });
         }
 
-        // Spawn some boxes
-        this.spawnBoxes();
-        this.spawnEnemy();
+        this.loadLevel();
     }
 
-    private spawnBoxes() {
-        // Stack of boxes
-        for (let i = 0; i < 6; i++) {
-            this.boxes.push({
-                x: 600 + Math.random() * 50,
-                y: GROUND_Y - 50 - i * 60,
-                w: 50, h: 50,
-                vx: 0, vy: 0,
-                angularVel: 0, angle: 0
-            });
+    private loadLevel() {
+        this.boxes = [];
+        this.enemies = [];
+
+        // Pre-defined enemy checkpoints and ambushes
+        const enemySpawns = [
+            1200, 1800, 2400, 2500, 3200, 4000, 4100, 4200, 5000, 5500, 5800, 6500, 6800
+        ];
+
+        for (const ex of enemySpawns) {
+            this.enemies.push({ x: ex, y: GROUND_Y, vx: -50, vy: 0, hp: 2, walkCycle: 0, active: false });
         }
-    }
 
-    private spawnEnemy() {
-        this.enemies.push({ x: 1200, y: GROUND_Y, vx: -50, vy: 0, hp: 2, walkCycle: 0 });
+        // Pre-defined box structures/barricades
+        const boxStacks = [
+            { x: 800, count: 3 },
+            { x: 2000, count: 5 },
+            { x: 3500, count: 4 },
+            { x: 4800, count: 6 },
+            { x: 6000, count: 3 }
+        ];
+
+        for (const stack of boxStacks) {
+            for (let i = 0; i < stack.count; i++) {
+                this.boxes.push({
+                    x: stack.x + (Math.random() * 10 - 5), // Slight scatter so they settle naturally
+                    y: GROUND_Y - 50 - i * 50,
+                    w: 50, h: 50,
+                    vx: 0, vy: 0,
+                    angularVel: 0, angle: 0
+                });
+            }
+        }
     }
 
     override update(dt: number): void {
@@ -116,9 +136,9 @@ export class ShooterScene extends Scene {
         // Aiming
         const screenPx = this.px - this.camX;
         const screenPy = this.py; // Camera Y is fixed
-        // Arm pivot
+        // Arm pivot matches ctx.translate(0, -55) in renderPlayer
         const pivotX = screenPx;
-        const pivotY = screenPy - 35; // Shoulder height
+        const pivotY = screenPy - 55;
 
         const mousePos = input.getMousePosition();
         const mx = mousePos.x;
@@ -170,7 +190,7 @@ export class ShooterScene extends Scene {
                         this.score += 100;
                         this.spawnDeathCloud(e.x, e.y - 35);
                         this.enemies.splice(j, 1);
-                        setTimeout(() => this.spawnEnemy(), 1500); // Respawn
+                        // No longer infinite respawning: removed setTimeout
                     }
                     break;
                 }
@@ -222,6 +242,15 @@ export class ShooterScene extends Scene {
 
         // Update Enemies
         for (const e of this.enemies) {
+            // Distance culling: only simulate if within 1500px of player
+            const dist = e.x - this.px;
+            if (Math.abs(dist) > 1500) {
+                e.active = false;
+                continue;
+            } else {
+                e.active = true;
+            }
+
             e.vy += GRAVITY * simDt;
             e.x += e.vx * simDt;
             e.y += e.vy * simDt;
@@ -242,7 +271,7 @@ export class ShooterScene extends Scene {
             // Player hit
             if (Math.abs(e.x - this.px) < 30 && Math.abs(e.y - this.py) < 70) {
                 // Hit player
-                if (this.lives > 0) {
+                if (this.lives > 0 && !this.levelComplete) {
                     this.lives--;
                     // Bounce player
                     this.vy = -300;
@@ -251,6 +280,12 @@ export class ShooterScene extends Scene {
                     e.vx = Math.sign(e.x - this.px) * 200;
                 }
             }
+        }
+
+        // Win Condition
+        if (this.px >= this.levelLength && !this.levelComplete) {
+            this.levelComplete = true;
+            this.score += 5000; // Win bonus
         }
 
         // Update Particles
@@ -334,6 +369,14 @@ export class ShooterScene extends Scene {
         // Ground top highlight
         ctx.fillStyle = '#3a4466';
         ctx.fillRect(this.camX - W, GROUND_Y, W * 3, 4);
+
+        // Finish Line
+        ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
+        ctx.fillRect(this.levelLength, GROUND_Y - 500, 150, 500);
+        ctx.fillStyle = '#6f6';
+        ctx.font = 'bold 32px Inter';
+        ctx.textAlign = 'center';
+        ctx.fillText('FINISH', this.levelLength + 75, GROUND_Y - 450);
 
         // Entities
         this.renderBoxes(ctx);
@@ -468,8 +511,8 @@ export class ShooterScene extends Scene {
         ctx.lineWidth = 6;
         ctx.strokeStyle = '#666';
         ctx.beginPath();
-        ctx.moveTo(15, 2);
-        ctx.lineTo(40, -2);
+        ctx.moveTo(15, 0);
+        ctx.lineTo(40, 0);
         ctx.stroke();
 
         ctx.restore();
@@ -478,6 +521,8 @@ export class ShooterScene extends Scene {
 
     private renderEnemies(ctx: CanvasRenderingContext2D) {
         for (const e of this.enemies) {
+            if (!e.active) continue; // Skip rendering far away enemies
+
             ctx.save();
             ctx.translate(e.x, e.y);
 
@@ -572,7 +617,7 @@ export class ShooterScene extends Scene {
         }
         ctx.fillText(hearts, 30, 40);
 
-        if (this.lives <= 0) {
+        if (this.lives <= 0 && !this.levelComplete) {
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
             ctx.fillRect(0, 0, W, H);
             ctx.fillStyle = '#ff4444';
@@ -582,6 +627,17 @@ export class ShooterScene extends Scene {
             ctx.font = '24px Inter';
             ctx.fillStyle = '#fff';
             ctx.fillText('Refresh page to restart', W / 2, H / 2 + 50);
+        } else if (this.levelComplete) {
+            ctx.fillStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#66ff66';
+            ctx.font = 'bold 64px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText('LEVEL COMPLETE!', W / 2, H / 2 - 20);
+            ctx.font = '24px Inter';
+            ctx.fillStyle = '#fff';
+            ctx.fillText(`Final Score: ${this.score}`, W / 2, H / 2 + 30);
+            ctx.fillText('Refresh page to replay', W / 2, H / 2 + 80);
         }
     }
 }
