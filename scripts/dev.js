@@ -4,10 +4,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 3000;
+const PORT = 3002;
 
 const ctx = esbuild.context({
-    entryPoints: ['src/main.ts', 'src/shooter-main.ts'],
+    entryPoints: ['src/main.ts', 'src/shooter-main.ts', 'src/rpg-main.ts'],
     bundle: true,
     outdir: 'dist',
     sourcemap: true,
@@ -21,7 +21,7 @@ ctx.then(async (context) => {
 
     const server = http.createServer((req, res) => {
         let filePath = req.url === '/' ? '/index.html' : req.url;
-        const fullPath = path.join(__dirname, '..', filePath.split('?')[0]);
+        const fullPath = path.join(__dirname, '..', decodeURIComponent(filePath.split('?')[0]));
 
         fs.readFile(fullPath, (err, data) => {
             if (err) {
@@ -35,6 +35,11 @@ ctx.then(async (context) => {
                 '.js': 'application/javascript',
                 '.css': 'text/css',
                 '.map': 'application/json',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp',
             };
             res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
             res.end(data);

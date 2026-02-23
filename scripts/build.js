@@ -2,16 +2,16 @@
 const esbuild = require('esbuild');
 
 esbuild.build({
-    entryPoints: ['src/main.ts'],
+    entryPoints: ['src/main.ts', 'src/shooter-main.ts', 'src/rpg-main.ts'],
     bundle: true,
-    outfile: 'dist/main.js',
+    outdir: 'dist',
     sourcemap: true,
     target: 'es2020',
     format: 'iife',
     minify: true,
     logLevel: 'info',
 }).then(() => {
-    console.log('✅ Build complete → dist/main.js');
+    console.log('✅ Build complete → dist/');
 }).catch((err) => {
     console.error(err);
     process.exit(1);
