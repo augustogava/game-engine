@@ -120,13 +120,13 @@ export class RpgScene extends Scene {
         // Define some prop frames from rpg_map.jpg
         // The image is 512x512. Tightening up the bounding boxes visually.
         // Huge Oak Tree
-        this.propSheet.defineFrame('oak_tree', 292, 132, 95, 120);
+        this.propSheet.defineFrame('oak_tree', 300, 132, 85, 110);
         // Pine Tree 1
-        this.propSheet.defineFrame('pine_tree', 184, 8, 35, 80);
+        this.propSheet.defineFrame('pine_tree', 175, 8, 35, 80);
         // Bush
-        this.propSheet.defineFrame('bush', 84, 136, 25, 25);
+        this.propSheet.defineFrame('bush', 72, 136, 25, 25);
         // Boulder
-        this.propSheet.defineFrame('boulder', 134, 68, 22, 22);
+        this.propSheet.defineFrame('boulder', 140, 68, 20, 20);
 
         // Set up map sizes
         this.mapWidth = 2000;
