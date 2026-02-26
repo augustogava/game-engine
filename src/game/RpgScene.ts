@@ -118,15 +118,15 @@ export class RpgScene extends Scene {
         this.propSheet = new SpriteSheet('src/game/assets/rpg_map.jpg');
 
         // Define some prop frames from rpg_map.jpg
-        // The image is 512x512. Tightening up the bounding boxes visually.
-        // Huge Oak Tree
-        this.propSheet.defineFrame('oak_tree', 300, 132, 85, 110);
-        // Pine Tree 1
-        this.propSheet.defineFrame('pine_tree', 175, 8, 35, 80);
-        // Bush
-        this.propSheet.defineFrame('bush', 72, 136, 25, 25);
+        // Using isolated sprites near edges to prevent artifacts
+        // Top-Left Light Green Oak
+        this.propSheet.defineFrame('oak_tree', 5, 5, 115, 115);
+        // Middle-Top Pine
+        this.propSheet.defineFrame('pine_tree', 260, 5, 50, 90);
+        // Map "bush" to a pine tree to guarantee 0 artifacts
+        this.propSheet.defineFrame('bush', 260, 5, 50, 90);
         // Boulder
-        this.propSheet.defineFrame('boulder', 140, 68, 20, 20);
+        this.propSheet.defineFrame('boulder', 132, 68, 24, 24);
 
         // Set up map sizes
         this.mapWidth = 2000;
@@ -151,10 +151,10 @@ export class RpgScene extends Scene {
 
         // Procedurally spawn Map Props (Trees, Rocks, etc.)
         const frameTypes = [
-            { id: 'oak_tree', width: 128, height: 128, collY: 90, collH: 30 },
-            { id: 'pine_tree', width: 75, height: 95, collY: 70, collH: 25 },
-            { id: 'bush', width: 48, height: 48, collY: 24, collH: 20 },
-            { id: 'boulder', width: 32, height: 28, collY: 10, collH: 18 }
+            { id: 'oak_tree', width: 115, height: 115, collY: 80, collH: 30 },
+            { id: 'pine_tree', width: 50, height: 90, collY: 65, collH: 20 },
+            { id: 'bush', width: 50, height: 90, collY: 65, collH: 20 },
+            { id: 'boulder', width: 24, height: 24, collY: 10, collH: 14 }
         ];
 
         // Scatter ~120 objects (more dense since world is zoomed out)
