@@ -19,15 +19,30 @@
     html,
     body {
       width: 100%;
-      height: 100%;
+      min-height: 100%;
       background: #00000a;
       font-family: 'Inter', system-ui, sans-serif;
       color: #fff;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #050508;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #15152a;
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #252545;
     }
 
     /* Animated background */
@@ -43,8 +58,10 @@
       position: relative;
       z-index: 10;
       text-align: center;
-      max-width: 900px;
+      max-width: 1100px;
       width: 100%;
+      margin: 0 auto;
+      padding: 60px 20px 80px;
     }
 
     h1 {
@@ -138,6 +155,129 @@
       background: rgba(100, 120, 255, 0.3);
       color: #fff;
     }
+
+    /* Documentation Section */
+    .docs-section {
+      margin-top: 80px;
+      padding: 0;
+      text-align: left;
+      width: 100%;
+    }
+
+    .docs-section h2 {
+      font-size: 2rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #dfe4ff;
+      text-align: center;
+    }
+
+    .docs-section > p {
+      font-size: 1rem;
+      color: #8f96cc;
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+
+    .feature-card {
+      background: rgba(20, 20, 40, 0.3);
+      border: 1px solid rgba(100, 120, 255, 0.1);
+      border-radius: 16px;
+      padding: 24px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #aab2ff;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .feature-card h3::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: linear-gradient(135deg, #6478ff, #aab2ff);
+      border-radius: 50%;
+    }
+
+    .feature-card p {
+      font-size: 0.9rem;
+      color: #7a82b8;
+      line-height: 1.5;
+    }
+
+    .code-section {
+      margin-bottom: 40px;
+    }
+
+    .code-section h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #dfe4ff;
+      margin-bottom: 16px;
+    }
+
+    .code-block {
+      background: rgba(10, 10, 25, 0.8);
+      border: 1px solid rgba(100, 120, 255, 0.15);
+      border-radius: 12px;
+      padding: 20px;
+      overflow-x: auto;
+      margin-bottom: 24px;
+    }
+
+    .code-block pre {
+      margin: 0;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: #c5cae9;
+    }
+
+    .code-block .comment { color: #5c6370; }
+    .code-block .keyword { color: #c678dd; }
+    .code-block .string { color: #98c379; }
+    .code-block .number { color: #d19a66; }
+    .code-block .class { color: #e5c07b; }
+    .code-block .function { color: #61afef; }
+    .code-block .property { color: #e06c75; }
+
+    .architecture-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .arch-item {
+      background: rgba(20, 20, 40, 0.25);
+      border-left: 3px solid #6478ff;
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .arch-item strong {
+      color: #aab2ff;
+      font-size: 0.9rem;
+    }
+
+    .arch-item span {
+      display: block;
+      color: #7a82b8;
+      font-size: 0.8rem;
+      margin-top: 4px;
+    }
   </style>
 </head>
 
@@ -168,6 +308,517 @@
           animation, parallax layers, and particle effects.</p>
         <span class="btn">Launch Shooter</span>
       </a>
+
+      <a href="ocean.html" target="_blank" class="card">
+        <h2>Ocean Simulation</h2>
+        <p>A realistic 2D fluid simulation using SPH (Smoothed Particle Hydrodynamics). Features adjustable viscosity,
+          pressure, surface tension, and interactive water dynamics.</p>
+        <span class="btn">Launch Ocean</span>
+      </a>
+
+      <a href="gta.html" target="_blank" class="card">
+        <h2>GTA Top-Down</h2>
+        <p>A GTA 1 inspired top-down driving game. Features realistic car physics with drift, AI traffic with 
+          pathfinding, pedestrians on sidewalks, and dynamic lighting effects.</p>
+        <span class="btn">Launch GTA</span>
+      </a>
+    </div>
+
+    <!-- Documentation Section -->
+    <div class="docs-section">
+      <h2>Engine Documentation</h2>
+      <p>A lightweight, modular 2D game engine built with TypeScript and Canvas API</p>
+
+      <!-- Core Features -->
+      <div class="features-grid">
+        <div class="feature-card">
+          <h3>Fixed-Timestep Game Loop</h3>
+          <p>Deterministic physics with configurable timestep (default 60 FPS). Prevents spiral of death with delta clamping and accumulator-based updates. Built-in FPS counter and frame time tracking.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Scene Management</h3>
+          <p>Stack-based scene system with lifecycle hooks (onEnter, onExit, onResize). Automatic context injection with renderer, input, camera, and physics. Easy scene transitions and state management.</p>
+        </div>
+        <div class="feature-card">
+          <h3>2D Camera System</h3>
+          <p>World-to-screen and screen-to-world transforms. Smooth pan/zoom with mouse support. Viewport culling via getWorldBounds(). Configurable min/max zoom limits (0.01 to 50x).</p>
+        </div>
+        <div class="feature-card">
+          <h3>Collision Detection</h3>
+          <p>Full SAT (Separating Axis Theorem) implementation. Supports Circle, AABB, OBB, Polygon, and Capsule shapes. All shape pairs supported with contact point generation and penetration depth.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Rigid Body Physics</h3>
+          <p>Full rigid body dynamics with linear/angular velocity. Force, impulse, and torque accumulation. Material properties (restitution, friction, damping). Static, kinematic, and dynamic body types. Auto-sleep optimization.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Collision Shapes</h3>
+          <p>CircleShape, AABBShape, OBBShape (oriented box), PolygonShape (convex), CapsuleShape. Automatic inertia computation. World-space vertex/normal transforms for SAT tests.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Particle System</h3>
+          <p>Object-pooled particles with zero GC pressure. Emission shapes: point, circle, rect, line. Velocity cones with spread. Color/size gradients over lifetime. Gravity, drag, and blend modes.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Sprite System</h3>
+          <p>SpriteSheet loading with named frame definitions. defineRow() for animation strips. AnimatedSprite with FPS control and loop/one-shot modes. TiledSprite for parallax scrolling backgrounds.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Lighting System</h3>
+          <p>Dynamic 2D lighting via off-screen compositing. PointLight with radial falloff. SpotLight with cone angle and direction. DirectionalLight for ambient. Configurable color, intensity, and inner radius.</p>
+        </div>
+        <div class="feature-card">
+          <h3>QuadTree</h3>
+          <p>Generic spatial partitioning for broad-phase collision. Rectangle and circle queries. Nearest neighbor search. Barnes-Hut gravity approximation for N-body simulations (O(n log n) complexity).</p>
+        </div>
+        <div class="feature-card">
+          <h3>TileMap System</h3>
+          <p>Multi-layer tile rendering with visibility control. Tile types: road, sidewalk, grass, building. Solid/walkable flags per tile. World-to-tile coordinate conversion. Viewport culling for efficient rendering.</p>
+        </div>
+        <div class="feature-card">
+          <h3>SPH Fluid Simulation</h3>
+          <p>Smoothed Particle Hydrodynamics with Poly6, Spiky, and Viscosity kernels. Configurable rest density, stiffness, viscosity, and surface tension. Interactive forces (push/attract). SpatialHashGrid for O(n) neighbor queries.</p>
+        </div>
+        <div class="feature-card">
+          <h3>A* Pathfinding</h3>
+          <p>Grid-based pathfinding with 4 or 8-directional movement. Manhattan/diagonal heuristics. Walkability map with obstacle marking. Path reconstruction. Random walkable tile selection for spawning.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Input Management</h3>
+          <p>Unified keyboard, mouse, and wheel input. Per-frame state tracking: isKeyDown, isKeyPressed, isKeyReleased. Mouse position and delta. Event emission for reactive patterns.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Object Pooling</h3>
+          <p>Generic ObjectPool&lt;T&gt; to minimize GC pressure. Factory and reset callbacks. Configurable initial and max size. Used by particles, fluid, and projectiles. prewarm() for initialization.</p>
+        </div>
+        <div class="feature-card">
+          <h3>HiDPI Rendering</h3>
+          <p>Automatic devicePixelRatio scaling for crisp retina rendering. Canvas abstraction with primitives: fillCircle, strokeCircle, fillRect, line, text. Radial gradients, shadows, and composite operations.</p>
+        </div>
+      </div>
+
+      <!-- Architecture -->
+      <div class="code-section">
+        <h3>Architecture Overview</h3>
+        <div class="architecture-list">
+          <div class="arch-item">
+            <strong>GameCore</strong>
+            <span>Central orchestrator with game loop</span>
+          </div>
+          <div class="arch-item">
+            <strong>Renderer</strong>
+            <span>Canvas 2D abstraction layer</span>
+          </div>
+          <div class="arch-item">
+            <strong>SceneManager</strong>
+            <span>Scene stack and lifecycle</span>
+          </div>
+          <div class="arch-item">
+            <strong>PhysicsWorld</strong>
+            <span>Bodies and gravity attractors</span>
+          </div>
+          <div class="arch-item">
+            <strong>Camera2D</strong>
+            <span>View transforms and culling</span>
+          </div>
+          <div class="arch-item">
+            <strong>InputManager</strong>
+            <span>Unified input handling</span>
+          </div>
+          <div class="arch-item">
+            <strong>ParticleEmitter</strong>
+            <span>Pooled particle effects</span>
+          </div>
+          <div class="arch-item">
+            <strong>LightingRenderer</strong>
+            <span>Dynamic 2D lighting pass</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Start -->
+      <div class="code-section">
+        <h3>Quick Start</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">GameCore</span>, <span class="class">Scene</span>, <span class="class">Renderer</span> } <span class="keyword">from</span> <span class="string">'./engine'</span>;
+
+<span class="comment">// Create your game scene</span>
+<span class="keyword">class</span> <span class="class">MyScene</span> <span class="keyword">extends</span> <span class="class">Scene</span> {
+  <span class="function">update</span>(<span class="property">dt</span>: <span class="class">number</span>) {
+    <span class="comment">// Game logic here</span>
+  }
+
+  <span class="function">render</span>(<span class="property">renderer</span>: <span class="class">Renderer</span>) {
+    <span class="property">renderer</span>.<span class="function">clear</span>(<span class="string">'#0a0a1a'</span>);
+    <span class="property">renderer</span>.<span class="function">fillCircle</span>(<span class="number">400</span>, <span class="number">300</span>, <span class="number">50</span>, <span class="string">'#6478ff'</span>);
+  }
+}
+
+<span class="comment">// Initialize and start</span>
+<span class="keyword">const</span> <span class="property">game</span> = <span class="keyword">new</span> <span class="class">GameCore</span>({
+  <span class="property">canvas</span>: <span class="property">document</span>.<span class="function">getElementById</span>(<span class="string">'canvas'</span>),
+  <span class="property">fixedDt</span>: <span class="number">1</span> / <span class="number">60</span>
+});
+<span class="property">game</span>.<span class="function">start</span>(<span class="keyword">new</span> <span class="class">MyScene</span>());</pre>
+        </div>
+      </div>
+
+      <!-- Camera Example -->
+      <div class="code-section">
+        <h3>Camera & Input</h3>
+        <div class="code-block">
+          <pre><span class="comment">// Pan with mouse drag</span>
+<span class="keyword">if</span> (<span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">input</span>.<span class="function">isMouseDown</span>(<span class="number">0</span>)) {
+  <span class="keyword">const</span> <span class="property">delta</span> = <span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">input</span>.<span class="function">getMouseDelta</span>();
+  <span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">camera</span>.<span class="function">pan</span>(<span class="property">delta</span>);
+}
+
+<span class="comment">// Zoom with mouse wheel</span>
+<span class="keyword">const</span> <span class="property">wheel</span> = <span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">input</span>.<span class="function">getWheelDelta</span>();
+<span class="keyword">if</span> (<span class="property">wheel</span> !== <span class="number">0</span>) {
+  <span class="keyword">const</span> <span class="property">factor</span> = <span class="property">wheel</span> > <span class="number">0</span> ? <span class="number">0.9</span> : <span class="number">1.1</span>;
+  <span class="keyword">const</span> <span class="property">mousePos</span> = <span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">input</span>.<span class="function">getMousePosition</span>();
+  <span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">camera</span>.<span class="function">zoomAt</span>(<span class="property">mousePos</span>, <span class="property">factor</span>);
+}
+
+<span class="comment">// Keyboard input</span>
+<span class="keyword">if</span> (<span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">input</span>.<span class="function">isKeyDown</span>(<span class="string">'KeyW'</span>)) {
+  <span class="property">player</span>.<span class="property">velocity</span>.<span class="property">y</span> -= <span class="number">200</span> * <span class="property">dt</span>;
+}</pre>
+        </div>
+      </div>
+
+      <!-- Particle System -->
+      <div class="code-section">
+        <h3>Particle Effects</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">ParticleEmitter</span> } <span class="keyword">from</span> <span class="string">'./engine/particles/ParticleEmitter'</span>;
+
+<span class="keyword">const</span> <span class="property">emitter</span> = <span class="keyword">new</span> <span class="class">ParticleEmitter</span>(<span class="number">400</span>, <span class="number">300</span>, {
+  <span class="property">emitRate</span>: <span class="number">50</span>,
+  <span class="property">maxParticles</span>: <span class="number">500</span>,
+  <span class="property">lifeMin</span>: <span class="number">0.5</span>,
+  <span class="property">lifeMax</span>: <span class="number">2.0</span>,
+  <span class="property">speedMin</span>: <span class="number">50</span>,
+  <span class="property">speedMax</span>: <span class="number">150</span>,
+  <span class="property">emitAngle</span>: -<span class="class">Math</span>.<span class="property">PI</span> / <span class="number">2</span>,
+  <span class="property">emitSpread</span>: <span class="class">Math</span>.<span class="property">PI</span> / <span class="number">4</span>,
+  <span class="property">colorStart</span>: [<span class="number">255</span>, <span class="number">200</span>, <span class="number">100</span>, <span class="number">1</span>],
+  <span class="property">colorEnd</span>: [<span class="number">255</span>, <span class="number">50</span>, <span class="number">0</span>, <span class="number">0</span>],
+  <span class="property">gravity</span>: <span class="number">100</span>,
+  <span class="property">blendMode</span>: <span class="string">'lighter'</span>,
+  <span class="property">emissionShape</span>: { <span class="property">type</span>: <span class="string">'circle'</span>, <span class="property">radius</span>: <span class="number">20</span> }
+});
+
+<span class="comment">// In update loop</span>
+<span class="property">emitter</span>.<span class="function">update</span>(<span class="property">dt</span>);
+
+<span class="comment">// One-shot burst</span>
+<span class="property">emitter</span>.<span class="function">burst</span>(<span class="number">100</span>);</pre>
+        </div>
+      </div>
+
+      <!-- Sprite Animation -->
+      <div class="code-section">
+        <h3>Sprite Animation</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">SpriteSheet</span>, <span class="class">AnimatedSprite</span> } <span class="keyword">from</span> <span class="string">'./engine/sprites/SpriteSheet'</span>;
+
+<span class="comment">// Load sprite sheet</span>
+<span class="keyword">const</span> <span class="property">sheet</span> = <span class="keyword">new</span> <span class="class">SpriteSheet</span>(<span class="string">'assets/character.png'</span>);
+
+<span class="comment">// Define animation frames (row of sprites)</span>
+<span class="property">sheet</span>.<span class="function">defineRow</span>(<span class="string">'walk_down'</span>, <span class="number">0</span>, <span class="number">64</span>, <span class="number">64</span>, <span class="number">4</span>);
+<span class="property">sheet</span>.<span class="function">defineRow</span>(<span class="string">'walk_up'</span>, <span class="number">64</span>, <span class="number">64</span>, <span class="number">64</span>, <span class="number">4</span>);
+<span class="property">sheet</span>.<span class="function">defineRow</span>(<span class="string">'walk_left'</span>, <span class="number">128</span>, <span class="number">64</span>, <span class="number">64</span>, <span class="number">4</span>);
+<span class="property">sheet</span>.<span class="function">defineRow</span>(<span class="string">'walk_right'</span>, <span class="number">192</span>, <span class="number">64</span>, <span class="number">64</span>, <span class="number">4</span>);
+
+<span class="comment">// Create animated sprite</span>
+<span class="keyword">const</span> <span class="property">walkAnim</span> = <span class="keyword">new</span> <span class="class">AnimatedSprite</span>(
+  <span class="property">sheet</span>,
+  [<span class="string">'walk_down_0'</span>, <span class="string">'walk_down_1'</span>, <span class="string">'walk_down_2'</span>, <span class="string">'walk_down_3'</span>],
+  <span class="number">10</span> <span class="comment">// FPS</span>
+);
+
+<span class="comment">// In update/render</span>
+<span class="property">walkAnim</span>.<span class="function">update</span>(<span class="property">dt</span>);
+<span class="property">walkAnim</span>.<span class="function">draw</span>(<span class="property">ctx</span>, <span class="property">x</span>, <span class="property">y</span>);</pre>
+        </div>
+      </div>
+
+      <!-- Lighting -->
+      <div class="code-section">
+        <h3>Dynamic Lighting</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">LightingRenderer</span> } <span class="keyword">from</span> <span class="string">'./engine/lighting/LightingRenderer'</span>;
+<span class="keyword">import</span> { <span class="class">PointLight</span>, <span class="class">SpotLight</span> } <span class="keyword">from</span> <span class="string">'./engine/lighting/Light'</span>;
+
+<span class="keyword">const</span> <span class="property">lighting</span> = <span class="keyword">new</span> <span class="class">LightingRenderer</span>(<span class="property">renderer</span>);
+<span class="property">lighting</span>.<span class="property">ambientColor</span> = { <span class="property">r</span>: <span class="number">15</span>, <span class="property">g</span>: <span class="number">15</span>, <span class="property">b</span>: <span class="number">30</span> };
+<span class="property">lighting</span>.<span class="property">ambientIntensity</span> = <span class="number">0.9</span>;
+
+<span class="comment">// Add point light (torch, lamp)</span>
+<span class="keyword">const</span> <span class="property">torch</span> = <span class="property">lighting</span>.<span class="function">addLight</span>(<span class="keyword">new</span> <span class="class">PointLight</span>(
+  <span class="keyword">new</span> <span class="class">Vector2</span>(<span class="number">400</span>, <span class="number">300</span>),
+  <span class="number">200</span>,  <span class="comment">// radius</span>
+  { <span class="property">r</span>: <span class="number">255</span>, <span class="property">g</span>: <span class="number">200</span>, <span class="property">b</span>: <span class="number">100</span> },
+  <span class="number">1.2</span>   <span class="comment">// intensity</span>
+));
+
+<span class="comment">// Add spotlight (flashlight, headlights)</span>
+<span class="keyword">const</span> <span class="property">flashlight</span> = <span class="property">lighting</span>.<span class="function">addLight</span>(<span class="keyword">new</span> <span class="class">SpotLight</span>(
+  <span class="keyword">new</span> <span class="class">Vector2</span>(<span class="number">200</span>, <span class="number">200</span>),
+  <span class="number">300</span>,
+  <span class="class">Math</span>.<span class="property">PI</span> / <span class="number">4</span>,  <span class="comment">// direction</span>
+  <span class="class">Math</span>.<span class="property">PI</span> / <span class="number">6</span>   <span class="comment">// cone angle</span>
+));
+
+<span class="comment">// In render (after world, before HUD)</span>
+<span class="property">lighting</span>.<span class="function">render</span>(<span class="property">camera</span>);</pre>
+        </div>
+      </div>
+
+      <!-- Physics & QuadTree -->
+      <div class="code-section">
+        <h3>Physics & Spatial Queries</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">QuadTree</span> } <span class="keyword">from</span> <span class="string">'./engine/spatial/QuadTree'</span>;
+<span class="keyword">import</span> { <span class="class">PhysicsBody</span> } <span class="keyword">from</span> <span class="string">'./engine/physics/PhysicsBody'</span>;
+
+<span class="comment">// QuadTree for spatial queries</span>
+<span class="keyword">const</span> <span class="property">qt</span> = <span class="keyword">new</span> <span class="class">QuadTree</span>(
+  { <span class="property">x</span>: <span class="number">0</span>, <span class="property">y</span>: <span class="number">0</span>, <span class="property">hw</span>: <span class="number">2000</span>, <span class="property">hh</span>: <span class="number">2000</span> },
+  <span class="number">6</span>  <span class="comment">// capacity per node</span>
+);
+
+<span class="comment">// Insert points</span>
+<span class="property">qt</span>.<span class="function">insert</span>({ <span class="property">x</span>: <span class="number">100</span>, <span class="property">y</span>: <span class="number">200</span>, <span class="property">data</span>: <span class="property">entity</span> });
+
+<span class="comment">// Query nearby entities</span>
+<span class="keyword">const</span> <span class="property">nearby</span> = <span class="property">qt</span>.<span class="function">queryCircle</span>(<span class="property">playerX</span>, <span class="property">playerY</span>, <span class="number">100</span>);
+
+<span class="comment">// Barnes-Hut gravity (N-body simulation)</span>
+<span class="keyword">const</span> [<span class="property">ax</span>, <span class="property">ay</span>] = <span class="property">qt</span>.<span class="function">barnesHutForce</span>(<span class="property">x</span>, <span class="property">y</span>, <span class="property">G</span>, <span class="number">0.7</span>);
+
+<span class="comment">// Physics body with gravity attractor</span>
+<span class="keyword">this</span>.<span class="property">ctx</span>.<span class="property">physics</span>.<span class="function">addAttractor</span>(
+  <span class="keyword">new</span> <span class="class">Vector2</span>(<span class="number">400</span>, <span class="number">300</span>),
+  <span class="number">10000</span>,  <span class="comment">// mass</span>
+  <span class="number">50</span>      <span class="comment">// softening</span>
+);</pre>
+        </div>
+      </div>
+
+      <!-- SPH Fluid -->
+      <div class="code-section">
+        <h3>Fluid Simulation (SPH)</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">SPHFluid</span> } <span class="keyword">from</span> <span class="string">'./engine/fluid/SPHFluid'</span>;
+
+<span class="keyword">const</span> <span class="property">fluid</span> = <span class="keyword">new</span> <span class="class">SPHFluid</span>({
+  <span class="property">smoothingRadius</span>: <span class="number">20</span>,
+  <span class="property">restDensity</span>: <span class="number">1000</span>,
+  <span class="property">stiffness</span>: <span class="number">500</span>,
+  <span class="property">viscosity</span>: <span class="number">0.2</span>,
+  <span class="property">gravity</span>: <span class="number">400</span>,
+  <span class="property">surfaceTension</span>: <span class="number">0.5</span>
+});
+
+<span class="comment">// Set container bounds</span>
+<span class="property">fluid</span>.<span class="function">setBoundary</span>(<span class="number">0</span>, <span class="number">0</span>, <span class="number">800</span>, <span class="number">600</span>);
+
+<span class="comment">// Spawn particles in a block</span>
+<span class="property">fluid</span>.<span class="function">spawnBlock</span>(<span class="number">100</span>, <span class="number">100</span>, <span class="number">20</span>, <span class="number">15</span>);
+
+<span class="comment">// Interactive forces</span>
+<span class="property">fluid</span>.<span class="function">applyForceAt</span>(<span class="property">mouseX</span>, <span class="property">mouseY</span>, <span class="number">80</span>, <span class="number">500</span>);
+<span class="property">fluid</span>.<span class="function">applyAttractAt</span>(<span class="property">mouseX</span>, <span class="property">mouseY</span>, <span class="number">100</span>, <span class="number">300</span>);
+
+<span class="comment">// Update simulation</span>
+<span class="property">fluid</span>.<span class="function">update</span>(<span class="property">dt</span>);</pre>
+        </div>
+      </div>
+
+      <!-- Pathfinding -->
+      <div class="code-section">
+        <h3>A* Pathfinding</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">AStar</span> } <span class="keyword">from</span> <span class="string">'./engine/pathfinding/AStar'</span>;
+
+<span class="comment">// Create grid (width, height, allow diagonal)</span>
+<span class="keyword">const</span> <span class="property">pathfinder</span> = <span class="keyword">new</span> <span class="class">AStar</span>(<span class="number">50</span>, <span class="number">50</span>, <span class="keyword">true</span>);
+
+<span class="comment">// Mark obstacles</span>
+<span class="property">pathfinder</span>.<span class="function">setWalkable</span>(<span class="number">10</span>, <span class="number">10</span>, <span class="keyword">false</span>);
+<span class="property">pathfinder</span>.<span class="function">setWalkable</span>(<span class="number">10</span>, <span class="number">11</span>, <span class="keyword">false</span>);
+
+<span class="comment">// Find path</span>
+<span class="keyword">const</span> <span class="property">path</span> = <span class="property">pathfinder</span>.<span class="function">findPath</span>(<span class="number">0</span>, <span class="number">0</span>, <span class="number">40</span>, <span class="number">40</span>);
+
+<span class="keyword">if</span> (<span class="property">path</span>) {
+  <span class="keyword">for</span> (<span class="keyword">const</span> <span class="property">point</span> <span class="keyword">of</span> <span class="property">path</span>) {
+    <span class="comment">// Move entity along path</span>
+    <span class="property">console</span>.<span class="function">log</span>(<span class="property">point</span>.<span class="property">x</span>, <span class="property">point</span>.<span class="property">y</span>);
+  }
+}
+
+<span class="comment">// Get random walkable position</span>
+<span class="keyword">const</span> <span class="property">spawn</span> = <span class="property">pathfinder</span>.<span class="function">getRandomWalkableTile</span>();</pre>
+        </div>
+      </div>
+
+      <!-- Collision Detection -->
+      <div class="code-section">
+        <h3>Collision Detection</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">RigidBody</span> } <span class="keyword">from</span> <span class="string">'./engine/physics/RigidBody'</span>;
+<span class="keyword">import</span> { <span class="class">CircleShape</span>, <span class="class">AABBShape</span>, <span class="class">OBBShape</span>, <span class="class">PolygonShape</span> } <span class="keyword">from</span> <span class="string">'./engine/physics/Shape'</span>;
+<span class="keyword">import</span> { <span class="class">CollisionDetector</span> } <span class="keyword">from</span> <span class="string">'./engine/physics/CollisionDetector'</span>;
+
+<span class="comment">// Create bodies with different shapes</span>
+<span class="keyword">const</span> <span class="property">player</span> = <span class="keyword">new</span> <span class="class">RigidBody</span>(<span class="number">100</span>, <span class="number">100</span>, <span class="number">1</span>, <span class="string">'dynamic'</span>);
+<span class="property">player</span>.<span class="function">setShape</span>(<span class="keyword">new</span> <span class="class">CircleShape</span>(<span class="number">25</span>));
+
+<span class="keyword">const</span> <span class="property">wall</span> = <span class="keyword">new</span> <span class="class">RigidBody</span>(<span class="number">200</span>, <span class="number">100</span>, <span class="number">0</span>, <span class="string">'static'</span>);
+<span class="property">wall</span>.<span class="function">setShape</span>(<span class="keyword">new</span> <span class="class">AABBShape</span>(<span class="number">50</span>, <span class="number">100</span>)); <span class="comment">// halfW, halfH</span>
+
+<span class="keyword">const</span> <span class="property">rotatedBox</span> = <span class="keyword">new</span> <span class="class">RigidBody</span>(<span class="number">300</span>, <span class="number">100</span>, <span class="number">2</span>, <span class="string">'dynamic'</span>);
+<span class="property">rotatedBox</span>.<span class="function">setShape</span>(<span class="keyword">new</span> <span class="class">OBBShape</span>(<span class="number">40</span>, <span class="number">20</span>));
+<span class="property">rotatedBox</span>.<span class="property">angle</span> = <span class="class">Math</span>.<span class="property">PI</span> / <span class="number">4</span>; <span class="comment">// 45 degrees</span>
+
+<span class="comment">// Test for collision</span>
+<span class="keyword">const</span> <span class="property">manifold</span> = <span class="class">CollisionDetector</span>.<span class="function">test</span>(<span class="property">player</span>, <span class="property">wall</span>);
+
+<span class="keyword">if</span> (<span class="property">manifold</span>) {
+  <span class="comment">// Collision detected!</span>
+  <span class="property">console</span>.<span class="function">log</span>(<span class="string">'Depth:'</span>, <span class="property">manifold</span>.<span class="property">depth</span>);
+  <span class="property">console</span>.<span class="function">log</span>(<span class="string">'Normal:'</span>, <span class="property">manifold</span>.<span class="property">normal</span>);
+  <span class="property">console</span>.<span class="function">log</span>(<span class="string">'Contacts:'</span>, <span class="property">manifold</span>.<span class="property">contacts</span>);
+  
+  <span class="comment">// Separate bodies</span>
+  <span class="property">player</span>.<span class="property">position</span>.<span class="property">x</span> += <span class="property">manifold</span>.<span class="property">normal</span>.<span class="property">x</span> * <span class="property">manifold</span>.<span class="property">depth</span>;
+  <span class="property">player</span>.<span class="property">position</span>.<span class="property">y</span> += <span class="property">manifold</span>.<span class="property">normal</span>.<span class="property">y</span> * <span class="property">manifold</span>.<span class="property">depth</span>;
+}</pre>
+        </div>
+      </div>
+
+      <!-- Rigid Body Physics -->
+      <div class="code-section">
+        <h3>Rigid Body Physics</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">RigidBody</span> } <span class="keyword">from</span> <span class="string">'./engine/physics/RigidBody'</span>;
+<span class="keyword">import</span> { <span class="class">OBBShape</span> } <span class="keyword">from</span> <span class="string">'./engine/physics/Shape'</span>;
+
+<span class="comment">// Create a dynamic rigid body</span>
+<span class="keyword">const</span> <span class="property">box</span> = <span class="keyword">new</span> <span class="class">RigidBody</span>(<span class="number">400</span>, <span class="number">100</span>, <span class="number">5</span>, <span class="string">'dynamic'</span>);
+<span class="property">box</span>.<span class="function">setShape</span>(<span class="keyword">new</span> <span class="class">OBBShape</span>(<span class="number">30</span>, <span class="number">20</span>));
+
+<span class="comment">// Configure material properties</span>
+<span class="property">box</span>.<span class="property">material</span>.<span class="property">restitution</span> = <span class="number">0.6</span>;     <span class="comment">// Bounciness (0-1)</span>
+<span class="property">box</span>.<span class="property">material</span>.<span class="property">staticFriction</span> = <span class="number">0.5</span>;
+<span class="property">box</span>.<span class="property">material</span>.<span class="property">kineticFriction</span> = <span class="number">0.3</span>;
+<span class="property">box</span>.<span class="property">material</span>.<span class="property">linearDamping</span> = <span class="number">0.1</span>;
+<span class="property">box</span>.<span class="property">material</span>.<span class="property">angularDamping</span> = <span class="number">0.05</span>;
+
+<span class="comment">// Apply forces</span>
+<span class="property">box</span>.<span class="function">applyForce</span>(<span class="keyword">new</span> <span class="class">Vector2</span>(<span class="number">0</span>, <span class="number">500</span>));  <span class="comment">// Gravity</span>
+<span class="property">box</span>.<span class="function">applyTorque</span>(<span class="number">100</span>);                  <span class="comment">// Spin</span>
+
+<span class="comment">// Apply impulse at a point (creates spin)</span>
+<span class="property">box</span>.<span class="function">applyImpulseAt</span>(
+  <span class="keyword">new</span> <span class="class">Vector2</span>(<span class="number">50</span>, <span class="number">0</span>),                <span class="comment">// Impulse direction</span>
+  <span class="keyword">new</span> <span class="class">Vector2</span>(<span class="number">430</span>, <span class="number">80</span>)               <span class="comment">// World point</span>
+);
+
+<span class="comment">// Lock rotation (useful for characters)</span>
+<span class="property">box</span>.<span class="function">lockRotation</span>();
+
+<span class="comment">// Integrate physics (in update loop)</span>
+<span class="property">box</span>.<span class="function">integrate</span>(<span class="property">dt</span>);</pre>
+        </div>
+      </div>
+
+      <!-- TileMap -->
+      <div class="code-section">
+        <h3>TileMap System</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">TileMap</span> } <span class="keyword">from</span> <span class="string">'./engine/tilemap/TileMap'</span>;
+<span class="keyword">import</span> { <span class="class">SpriteSheet</span> } <span class="keyword">from</span> <span class="string">'./engine/sprites/SpriteSheet'</span>;
+
+<span class="comment">// Create tilemap (width, height, tileSize)</span>
+<span class="keyword">const</span> <span class="property">map</span> = <span class="keyword">new</span> <span class="class">TileMap</span>(<span class="number">50</span>, <span class="number">50</span>, <span class="number">64</span>);
+
+<span class="comment">// Load tileset</span>
+<span class="keyword">const</span> <span class="property">tileset</span> = <span class="keyword">new</span> <span class="class">SpriteSheet</span>(<span class="string">'assets/tiles.png'</span>);
+<span class="property">tileset</span>.<span class="function">defineFrame</span>(<span class="string">'grass'</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">64</span>, <span class="number">64</span>);
+<span class="property">tileset</span>.<span class="function">defineFrame</span>(<span class="string">'road'</span>, <span class="number">64</span>, <span class="number">0</span>, <span class="number">64</span>, <span class="number">64</span>);
+<span class="property">tileset</span>.<span class="function">defineFrame</span>(<span class="string">'building'</span>, <span class="number">128</span>, <span class="number">0</span>, <span class="number">64</span>, <span class="number">64</span>);
+<span class="property">map</span>.<span class="function">setSpriteSheet</span>(<span class="property">tileset</span>);
+
+<span class="comment">// Add layers</span>
+<span class="property">map</span>.<span class="function">addLayer</span>(<span class="string">'ground'</span>);
+<span class="property">map</span>.<span class="function">addLayer</span>(<span class="string">'objects'</span>);
+
+<span class="comment">// Set tiles and data</span>
+<span class="property">map</span>.<span class="function">setTile</span>(<span class="string">'ground'</span>, <span class="number">5</span>, <span class="number">5</span>, <span class="string">'road'</span>);
+<span class="property">map</span>.<span class="function">setTileData</span>(<span class="number">5</span>, <span class="number">5</span>, {
+  <span class="property">type</span>: <span class="string">'road'</span>,
+  <span class="property">solid</span>: <span class="keyword">false</span>,
+  <span class="property">walkable</span>: <span class="keyword">true</span>
+});
+
+<span class="comment">// Query tile properties</span>
+<span class="keyword">if</span> (<span class="property">map</span>.<span class="function">isSolidAtWorld</span>(<span class="property">playerX</span>, <span class="property">playerY</span>)) {
+  <span class="comment">// Collision with solid tile</span>
+}
+
+<span class="comment">// Convert coordinates</span>
+<span class="keyword">const</span> <span class="property">tile</span> = <span class="property">map</span>.<span class="function">worldToTile</span>(<span class="number">320</span>, <span class="number">256</span>);
+<span class="keyword">const</span> <span class="property">world</span> = <span class="property">map</span>.<span class="function">tileToWorld</span>(<span class="number">5</span>, <span class="number">4</span>);
+
+<span class="comment">// Render with viewport culling</span>
+<span class="property">map</span>.<span class="function">render</span>(<span class="property">ctx</span>, <span class="property">cameraX</span>, <span class="property">cameraY</span>, <span class="property">viewWidth</span>, <span class="property">viewHeight</span>);</pre>
+        </div>
+      </div>
+
+      <!-- Object Pool -->
+      <div class="code-section">
+        <h3>Object Pooling</h3>
+        <div class="code-block">
+          <pre><span class="keyword">import</span> { <span class="class">ObjectPool</span> } <span class="keyword">from</span> <span class="string">'./engine/commons/ObjectPool'</span>;
+
+<span class="comment">// Define pooled object</span>
+<span class="keyword">class</span> <span class="class">Bullet</span> {
+  <span class="property">x</span> = <span class="number">0</span>; <span class="property">y</span> = <span class="number">0</span>; <span class="property">vx</span> = <span class="number">0</span>; <span class="property">vy</span> = <span class="number">0</span>; <span class="property">active</span> = <span class="keyword">false</span>;
+  <span class="function">reset</span>() { <span class="keyword">this</span>.<span class="property">x</span> = <span class="keyword">this</span>.<span class="property">y</span> = <span class="keyword">this</span>.<span class="property">vx</span> = <span class="keyword">this</span>.<span class="property">vy</span> = <span class="number">0</span>; <span class="keyword">this</span>.<span class="property">active</span> = <span class="keyword">false</span>; }
+}
+
+<span class="comment">// Create pool with factory and reset callbacks</span>
+<span class="keyword">const</span> <span class="property">bulletPool</span> = <span class="keyword">new</span> <span class="class">ObjectPool</span>&lt;<span class="class">Bullet</span>&gt;(
+  () => <span class="keyword">new</span> <span class="class">Bullet</span>(),     <span class="comment">// Factory</span>
+  (b) => <span class="property">b</span>.<span class="function">reset</span>(),       <span class="comment">// Reset callback</span>
+  <span class="number">100</span>,                    <span class="comment">// Initial size</span>
+  <span class="number">1000</span>                    <span class="comment">// Max size</span>
+);
+
+<span class="comment">// Prewarm pool at startup</span>
+<span class="property">bulletPool</span>.<span class="function">prewarm</span>(<span class="number">50</span>);
+
+<span class="comment">// Acquire from pool (zero allocation)</span>
+<span class="keyword">const</span> <span class="property">bullet</span> = <span class="property">bulletPool</span>.<span class="function">acquire</span>();
+<span class="property">bullet</span>.<span class="property">x</span> = <span class="property">playerX</span>;
+<span class="property">bullet</span>.<span class="property">y</span> = <span class="property">playerY</span>;
+<span class="property">bullet</span>.<span class="property">vx</span> = <span class="number">500</span>;
+<span class="property">bullet</span>.<span class="property">active</span> = <span class="keyword">true</span>;
+
+<span class="comment">// Return to pool when done</span>
+<span class="property">bulletPool</span>.<span class="function">release</span>(<span class="property">bullet</span>);
+
+<span class="comment">// Check available objects</span>
+<span class="property">console</span>.<span class="function">log</span>(<span class="property">bulletPool</span>.<span class="property">available</span>);</pre>
+        </div>
+      </div>
+
     </div>
   </div>
 </body>

@@ -66,4 +66,18 @@ export type { ParticleEffectName } from './particles/ParticleEffects.js';
 export { QuadTree } from './spatial/QuadTree.js';
 export type { QTBounds, QTPoint } from './spatial/QuadTree.js';
 
+// ── Fluid (SPH) ───────────────────────────────────────────────────────────
+export { FluidParticle } from './fluid/FluidParticle.js';
+export { SpatialHashGrid } from './fluid/SpatialHashGrid.js';
+export { SPHFluid, defaultSPHConfig } from './fluid/SPHFluid.js';
+export type { SPHConfig } from './fluid/SPHFluid.js';
+
+// ── Pathfinding ───────────────────────────────────────────────────────────
+export { AStar } from './pathfinding/AStar.js';
+export { NavigationGraph } from './pathfinding/NavigationGraph.js';
+export type { NavNode, NavEdge } from './pathfinding/NavigationGraph.js';
+
+// ── TileMap ───────────────────────────────────────────────────────────────
+export { TileMap } from './tilemap/TileMap.js';
+export type { TileType, TileData, TileMapLayer } from './tilemap/TileMap.js';
 

@@ -7,7 +7,7 @@ const path = require('path');
 const PORT = 3002;
 
 const ctx = esbuild.context({
-    entryPoints: ['src/main.ts', 'src/shooter-main.ts', 'src/rpg-main.ts'],
+    entryPoints: ['src/main.ts', 'src/shooter-main.ts', 'src/rpg-main.ts', 'src/ocean-main.ts', 'src/gta-main.ts'],
     bundle: true,
     outdir: 'dist',
     sourcemap: true,

@@ -42,7 +42,7 @@ async function build() {
     console.log('Building JavaScript bundles...');
     
     await esbuild.build({
-        entryPoints: ['src/main.ts', 'src/shooter-main.ts', 'src/rpg-main.ts'],
+        entryPoints: ['src/main.ts', 'src/shooter-main.ts', 'src/rpg-main.ts', 'src/ocean-main.ts', 'src/gta-main.ts'],
         bundle: true,
         outdir: DIST_DIR,
         sourcemap: true,
@@ -58,7 +58,7 @@ async function build() {
         return content.replace(/src="dist\//g, 'src="');
     };
     
-    const htmlFiles = ['index.html', 'rpg.html', 'shooter.html', 'galaxy.html'];
+    const htmlFiles = ['index.html', 'rpg.html', 'shooter.html', 'galaxy.html', 'ocean.html', 'gta.html'];
     for (const file of htmlFiles) {
         if (fs.existsSync(file)) {
             copyFile(file, DIST_DIR, transformHtml);
