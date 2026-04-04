@@ -21,6 +21,7 @@ const MIME_TYPES = {
     '.woff': 'font/woff',
     '.woff2': 'font/woff2',
     '.ttf': 'font/ttf',
+    '.glb': 'model/gltf-binary',
 };
 
 const server = http.createServer((req, res) => {
