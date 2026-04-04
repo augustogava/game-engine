@@ -175,7 +175,8 @@ export class FlightSceneSimple extends Scene3D {
         this._buildHUD();
         if (this.tiles) {
             this.ground.isVisible = false;
-            scene.fogDensity = 0.0000015;
+            scene.fogColor   = new BABYLON.Color3(0.65, 0.75, 0.90);
+            scene.fogDensity = 0.0000025;
         }
     }
 
@@ -215,7 +216,9 @@ export class FlightSceneSimple extends Scene3D {
 
         const url = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${apiKey}`;
         this.tiles = new TilesRenderer(url, scene);
-        this.tiles.errorTarget = 12;
+        this.tiles.errorTarget = 6;
+        (this.tiles as any).maxDepth = 100;
+        (this.tiles as any).errorThreshold = 60;
         try {
             this.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
         } catch (e) { console.warn('[3DTiles] Auth plugin failed:', e); }
@@ -265,23 +268,38 @@ export class FlightSceneSimple extends Scene3D {
 
         const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.4, -0.9, -0.3).normalize(), scene);
         sun.position = new BABYLON.Vector3(800, 1200, 800);
-        sun.intensity = 3.2;
+        sun.intensity = 3.0;
         sun.diffuse = new BABYLON.Color3(1.0, 0.92, 0.75);
         sun.specular = new BABYLON.Color3(1.0, 0.9, 0.6);
 
-        const shadow = new BABYLON.CascadedShadowGenerator(2048, sun);
+        const fill = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(0.4, -0.3, 0.3).normalize(), scene);
+        fill.intensity = 0.6;
+        fill.diffuse = new BABYLON.Color3(0.6, 0.7, 0.9);
+        fill.specular = BABYLON.Color3.Black();
+
+        const shadow = new BABYLON.CascadedShadowGenerator(4096, sun);
         shadow.lambda                 = 0.75;
         shadow.cascadeBlendPercentage = 0.1;
         shadow.depthClamp             = true;
         shadow.autoCalcDepthBounds    = true;
+        shadow.stabilizeCascades      = true;
+        shadow.numCascades            = 4;
+        shadow.penumbraDarkness       = 0.6;
         shadow.usePercentageCloserFiltering = true;
-        (shadow as any).filteringQuality = BABYLON.ShadowGenerator.QUALITY_MEDIUM;
+        (shadow as any).filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
         (this as any)._shadow = shadow;
+
+        scene.environmentIntensity = 1.3;
     }
 
     // ── Skybox ────────────────────────────────────────────────────────────────
 
     private _buildSkybox(scene: BABYLON.Scene): void {
+        const envTex = BABYLON.CubeTexture.CreateFromPrefilteredData(
+            'https://assets.babylonjs.com/environments/environmentSpecular.env', scene,
+        );
+        scene.environmentTexture = envTex;
+
         const skybox = BABYLON.MeshBuilder.CreateBox('skyBox', { size: 10_000_000 }, scene);
         const skyMat = new BABYLON.StandardMaterial('skyMat', scene);
         skyMat.backFaceCulling = false;
@@ -293,10 +311,6 @@ export class FlightSceneSimple extends Scene3D {
         skyMat.specularColor     = BABYLON.Color3.Black();
         skybox.material          = skyMat;
         skybox.infiniteDistance   = true;
-
-        const envTex = new BABYLON.CubeTexture('https://assets.babylonjs.com/textures/TropicalSunnyDay', scene);
-        scene.environmentTexture   = envTex;
-        scene.environmentIntensity = 1.0;
     }
 
     // ── Clouds ─────────────────────────────────────────────────────────────────
@@ -485,26 +499,38 @@ export class FlightSceneSimple extends Scene3D {
     private _setupPostProcessing(scene: BABYLON.Scene): void {
         const cam      = scene.activeCamera;
         const pipeline = new BABYLON.DefaultRenderingPipeline('pp', true, scene, cam ? [cam] : []);
-        pipeline.samples        = 4;
+        pipeline.samples        = 8;
         pipeline.bloomEnabled   = true;
         pipeline.bloomWeight    = 0.4;
         pipeline.bloomKernel    = 128;
         pipeline.bloomScale     = 0.5;
         pipeline.bloomThreshold = 0.8;
         pipeline.chromaticAberrationEnabled            = true;
-        pipeline.chromaticAberration.aberrationAmount   = 2.0;
+        pipeline.chromaticAberration.aberrationAmount   = 0.8;
         pipeline.chromaticAberration.radialIntensity    = 1.0;
         pipeline.sharpenEnabled        = true;
         pipeline.sharpen.edgeAmount    = 0.2;
         pipeline.imageProcessingEnabled                 = true;
         pipeline.imageProcessing.toneMappingEnabled     = true;
         pipeline.imageProcessing.toneMappingType        = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
-        pipeline.imageProcessing.exposure               = 1.1;
+        pipeline.imageProcessing.exposure               = 1.0;
         pipeline.imageProcessing.contrast               = 1.08;
         pipeline.imageProcessing.vignetteEnabled        = true;
         pipeline.imageProcessing.vignetteWeight         = 2.2;
         pipeline.imageProcessing.vignetteColor          = new BABYLON.Color4(0, 0, 0, 0);
         pipeline.imageProcessing.vignetteBlendMode      = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
+
+        const ssao = new BABYLON.SSAO2RenderingPipeline('ssao', scene, {
+            ssaoRatio: 0.5,
+            blurRatio: 0.5,
+        });
+        ssao.radius = 3.0;
+        ssao.totalStrength = 1.2;
+        ssao.base = 0.1;
+        ssao.samples = 16;
+        ssao.maxZ = 250;
+        ssao.minZAspect = 0.5;
+        if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
 
         const sun = scene.getLightByName('sun');
         if (sun) {
@@ -515,8 +541,6 @@ export class FlightSceneSimple extends Scene3D {
                     'https://assets.babylonjs.com/textures/flare.png', lfs);
             });
         }
-
-    
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────
