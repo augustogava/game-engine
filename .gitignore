@@ -42,3 +42,160 @@ desktop.ini
 .cache/
 .temp/
 *.map
+assets/Aircraft-Physics-master.zip
+assets/Aircraft-Physics-master/.gitattributes
+assets/Aircraft-Physics-master/.gitignore
+assets/Aircraft-Physics-master/LICENSE
+assets/Aircraft-Physics-master/README.md
+assets/Aircraft-Physics-master/Assets/Aircraft Physics.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Config.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Config/AircraftPhysicsDisplaySettings.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Config/AircraftPhysicsDisplaySettings.asset.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/AeroSurface.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/AeroSurface.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/AeroSurfaceConfig.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/AeroSurfaceConfig.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/AircraftPhysics.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/AircraftPhysics.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/BiVector3.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/BiVector3.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AeroSurfaceConfigDrawer.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AeroSurfaceConfigDrawer.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AeroSurfaceConfigEditor.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AeroSurfaceConfigEditor.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AeroSurfaceEditor.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AeroSurfaceEditor.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AircraftGizmos.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AircraftGizmos.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AircraftPhysicsDisplaySettings.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Core/Scripts/Editor/AircraftPhysicsDisplaySettings.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Cessna172.fbx
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Cessna172.fbx.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Materials.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scripts.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Slippery.physicMaterial
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Slippery.physicMaterial.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Blue1.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Blue1.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Blue2.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Blue2.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Blue3.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Blue3.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Brown.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Brown.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Cyan.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Cyan.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Green1.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Green1.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Green2.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Green2.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey1.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey1.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey2.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey2.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey3.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey3.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey4.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Grey4.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Orange.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Orange.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Purple.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Purple.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Red.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Red.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_White.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_White.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Yellow.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Materials/Prototype Grid/Prototype_512x512_Yellow.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_blue1.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_blue1.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_blue2.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_blue2.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_blue3.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_blue3.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_brown.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_brown.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_cyan.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_cyan.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_green1.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_green1.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_green2.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_green2.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey1.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey1.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey2.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey2.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey3.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey3.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey4.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_grey4.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_orange.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_orange.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_purple.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_purple.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_red.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_red.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_white.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_white.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_yellow.png
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Asset Store Stuff/Gridbox Prototype Materials/Textures/Prototype Grid/prototype_512x512_yellow.png.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Materials/Floor.mat
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Materials/Floor.mat.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes/Cessna 172.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes/Cessna 172.unity
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes/Cessna 172.unity.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes/Cessna 172/LightingData.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes/Cessna 172/LightingData.asset.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes/Cessna 172/ReflectionProbe-0.exr
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scenes/Cessna 172/ReflectionProbe-0.exr.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scripts/AirplaneController.cs
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/Scripts/AirplaneController.cs.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Body0.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Body0.asset.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Body1.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Body1.asset.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Stabilizer_H.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Stabilizer_H.asset.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Stabilizer_V.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Stabilizer_V.asset.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Wing0.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Wing0.asset.meta
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Wing1.asset
+assets/Aircraft-Physics-master/Assets/Aircraft Physics/Example/SurfaceConfigs/Wing1.asset.meta
+assets/Aircraft-Physics-master/Images/aerosurface_inspector.png
+assets/Aircraft-Physics-master/Images/aerosurfaces_gizmos.png
+assets/Aircraft-Physics-master/Images/display_settings.png
+assets/Aircraft-Physics-master/Images/Thumbnail.png
+assets/Aircraft-Physics-master/Packages/manifest.json
+assets/Aircraft-Physics-master/Packages/packages-lock.json
+assets/Aircraft-Physics-master/ProjectSettings/AudioManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/ClusterInputManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/DynamicsManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/EditorBuildSettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/EditorSettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/GraphicsSettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/InputManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/NavMeshAreas.asset
+assets/Aircraft-Physics-master/ProjectSettings/PackageManagerSettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/Physics2DSettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/PresetManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/ProjectSettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/ProjectVersion.txt
+assets/Aircraft-Physics-master/ProjectSettings/QualitySettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/TagManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/TimeManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/UnityConnectSettings.asset
+assets/Aircraft-Physics-master/ProjectSettings/VFXManager.asset
+assets/Aircraft-Physics-master/ProjectSettings/XRSettings.asset

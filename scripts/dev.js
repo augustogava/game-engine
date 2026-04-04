@@ -1,4 +1,3 @@
-// esbuild dev server script
 const esbuild = require('esbuild');
 const http = require('http');
 const fs = require('fs');
@@ -6,7 +5,21 @@ const path = require('path');
 
 const PORT = 3002;
 
-const ctx = esbuild.context({
+function loadEnv() {
+    const envPath = path.join(__dirname, '..', '.env');
+    const vars = {};
+    if (fs.existsSync(envPath)) {
+        fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
+            const match = line.match(/^\s*([^#=]+?)\s*=\s*(.*?)\s*$/);
+            if (match) vars[match[1]] = match[2];
+        });
+    }
+    return vars;
+}
+const env = loadEnv();
+
+// ── 2D Games bundle (IIFE, existing) ────────────────────────────────────────
+const ctx2D = esbuild.context({
     entryPoints: ['src/main.ts', 'src/shooter-main.ts', 'src/rpg-main.ts', 'src/ocean-main.ts', 'src/gta-main.ts'],
     bundle: true,
     outdir: 'dist',
@@ -16,8 +29,45 @@ const ctx = esbuild.context({
     logLevel: 'info',
 });
 
-ctx.then(async (context) => {
-    await context.watch();
+// ── 3D Flight Game build options ─────────────────────────────────────────────
+const flight3dOpts = {
+    entryPoints: ['src/flight-main.ts'],
+    bundle: true,
+    outdir: 'dist',
+    sourcemap: true,
+    target: 'es2022',
+    format: 'esm',
+    splitting: false,
+    logLevel: 'info',
+    external: ['three', 'three/*'],
+    define: {
+        '__GOOGLE_MAPS_API_KEY__': JSON.stringify(env.GOOGLE_MAPS_API_KEY || ''),
+    },
+};
+
+let building3D = false;
+async function buildFlight() {
+    if (building3D) return;
+    building3D = true;
+    try {
+        await esbuild.build(flight3dOpts);
+    } catch (e) {
+        console.error('[3D build error]', e.message);
+    }
+    building3D = false;
+}
+
+ctx2D.then(async (c2D) => {
+    await c2D.watch();
+    await buildFlight();
+
+    const srcDir = path.join(__dirname, '..', 'src');
+    fs.watch(srcDir, { recursive: true }, (eventType, filename) => {
+        if (filename && /\.(ts|js)$/.test(filename)) {
+            console.log(`[watch] build started (change: "src/${filename.replace(/\\/g, '/')}")`);
+            buildFlight().then(() => console.log('[watch] build finished'));
+        }
+    });
 
     const server = http.createServer((req, res) => {
         let filePath = req.url === '/' ? '/index.html' : req.url;
@@ -40,6 +90,8 @@ ctx.then(async (context) => {
                 '.png': 'image/png',
                 '.gif': 'image/gif',
                 '.webp': 'image/webp',
+                '.glb': 'model/gltf-binary',
+                '.glb_file': 'model/gltf-binary',
             };
             res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
             res.end(data);

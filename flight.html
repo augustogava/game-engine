@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sky Assault — AntiGravity 3D Engine</title>
+    <meta name="description" content="Cinematic 3D flight simulator with Google Maps Photorealistic 3D Tiles, built with BabylonJS and the AntiGravity Engine.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #020810;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        #game-canvas {
+            display: block;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            touch-action: none;
+            outline: none;
+        }
+
+        /* ── Loading Screen ───────────────────────────────── */
+        #loading {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(ellipse at 50% 60%, #081828 0%, #020810 70%);
+            z-index: 9999;
+            gap: 32px;
+            pointer-events: none;
+        }
+
+        .loading-logo {
+            font-family: 'Orbitron', monospace;
+            font-size: 11px;
+            letter-spacing: 0.45em;
+            color: rgba(80, 200, 140, 0.5);
+            text-transform: uppercase;
+            margin-bottom: -20px;
+        }
+
+        .loading-title {
+            font-family: 'Orbitron', monospace;
+            font-size: clamp(32px, 6vw, 64px);
+            font-weight: 900;
+            letter-spacing: 0.12em;
+            background: linear-gradient(135deg, #40ffaa 0%, #00ccff 50%, #7b5fff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            filter: drop-shadow(0 0 40px rgba(0, 200, 255, 0.35));
+            line-height: 1;
+        }
+
+        .loading-subtitle {
+            font-size: 13px;
+            letter-spacing: 0.28em;
+            color: rgba(100, 220, 180, 0.45);
+            text-transform: uppercase;
+            font-weight: 300;
+            margin-top: -16px;
+        }
+
+        /* Spinner ring */
+        .loading-ring {
+            width: 56px; height: 56px;
+            position: relative;
+        }
+        .loading-ring::before, .loading-ring::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+        }
+        .loading-ring::before {
+            border: 2px solid rgba(64, 255, 160, 0.12);
+        }
+        .loading-ring::after {
+            border: 2px solid transparent;
+            border-top-color: #40ffaa;
+            border-right-color: rgba(64, 255, 170, 0.4);
+            animation: spin 0.9s cubic-bezier(0.6, 0.2, 0.4, 0.8) infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .loading-status {
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            color: rgba(80, 200, 150, 0.4);
+            text-transform: uppercase;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+
+        /* Stars background */
+        .stars {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .star {
+            position: absolute;
+            border-radius: 50%;
+            background: white;
+            animation: twinkle var(--d, 3s) ease-in-out infinite;
+        }
+        @keyframes twinkle {
+            0%,100% { opacity: var(--min-op, 0.1); }
+            50%      { opacity: var(--max-op, 0.8); }
+        }
+
+        /* ── Debug UI ─────────────────────────────────────── */
+        #debug-ui {
+            position: fixed;
+            top: 20px; right: 20px;
+            width: 320px;
+            background: rgba(2, 10, 20, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(64, 255, 170, 0.3);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 10000;
+            color: #fff;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        #debug-ui.minimized {
+            transform: translateX(340px);
+        }
+        #debug-ui header {
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        #debug-ui h3 {
+            font-family: 'Orbitron', monospace;
+            font-size: 12px;
+            color: #40ffaa;
+            margin: 0;
+        }
+        #debug-toggle {
+            position: absolute;
+            left: -40px; top: 0;
+            width: 32px; height: 32px;
+            background: rgba(2, 10, 20, 0.85);
+            border: 1px solid rgba(64, 255, 170, 0.3);
+            border-radius: 4px;
+            color: #40ffaa;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-family: monospace;
+        }
+        .debug-form {
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .debug-form label {
+            font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(255,255,255,0.6);
+        }
+        .debug-form input {
+            background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+            color: #fff; padding: 6px 8px; border-radius: 4px; font-family: monospace; font-size: 12px;
+            width: 100%; outline: none;
+        }
+        .debug-form input:focus { border-color: #40ffaa; }
+        .debug-form .row { display: flex; gap: 8px; }
+        .debug-btn {
+            background: #40ffaa; color: #020810; border: none; padding: 8px;
+            border-radius: 4px; font-weight: bold; cursor: pointer;
+            text-transform: uppercase; letter-spacing: 0.1em; font-size: 11px;
+            margin-top: 4px; transition: background 0.2s;
+        }
+        .debug-btn:hover { background: #00ccff; }
+        
+    </style>
+</head>
+
+<body>
+    <!-- Stars layer -->
+    <div class="stars" id="stars-bg"></div>
+
+    <!-- Loading overlay -->
+    <div id="loading">
+        <div class="loading-logo">AntiGravity Engine · 3D</div>
+        <div class="loading-title">SKY ASSAULT</div>
+        <div class="loading-subtitle">Flight Simulator</div>
+        <div class="loading-ring"></div>
+        <div class="loading-status" id="loading-status">Initialising renderer…</div>
+    </div>
+
+    <!-- BabylonJS renders into this canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Debug UI Panel -->
+    <div id="debug-ui" class="minimized">
+        <div id="debug-toggle">⚙</div>
+        <header>
+            <h3>LOCATION</h3>
+        </header>
+        <div class="debug-form">
+            <label>Search address or airport</label>
+            <input type="text" id="dbg-address" placeholder="e.g. Guarulhos Airport, São Paulo">
+            <div id="dbg-geocode-status" style="font-size:9px;color:rgba(255,255,255,0.4);min-height:14px"></div>
+            <div class="row">
+                <div style="flex:1">
+                    <label>Latitude</label>
+                    <input type="text" id="dbg-lat" value="-23.4354" placeholder="-23.4354">
+                </div>
+                <div style="flex:1">
+                    <label>Longitude</label>
+                    <input type="text" id="dbg-lng" value="-46.4745" placeholder="-46.4745">
+                </div>
+            </div>
+            
+            <button class="debug-btn" id="dbg-reload">Apply & Reload World</button>
+        </div>
+    </div>
+
+    <!-- Our bundled flight game -->
+    <script type="module" src="dist/flight-main.js"></script>
+
+    <script>
+        // --- Debug UI Logic ---
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        const latInput = document.getElementById('dbg-lat');
+        const lngInput = document.getElementById('dbg-lng');
+        const addressInput = document.getElementById('dbg-address');
+        const geocodeStatus = document.getElementById('dbg-geocode-status');
+        
+        if (urlParams.has('lat')) latInput.value = urlParams.get('lat');
+        if (urlParams.has('lng')) lngInput.value = urlParams.get('lng');
+
+        let geocodeTimer = null;
+        addressInput.addEventListener('input', () => {
+            clearTimeout(geocodeTimer);
+            const q = addressInput.value.trim();
+            if (q.length < 3) { geocodeStatus.textContent = ''; return; }
+            geocodeStatus.textContent = 'Searching...';
+            geocodeTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+                    const data = await res.json();
+                    if (data.length > 0) {
+                        latInput.value = parseFloat(data[0].lat).toFixed(4);
+                        lngInput.value = parseFloat(data[0].lon).toFixed(4);
+                        geocodeStatus.textContent = data[0].display_name.substring(0, 60);
+                    } else {
+                        geocodeStatus.textContent = 'No results found';
+                    }
+                } catch (e) {
+                    geocodeStatus.textContent = 'Search error';
+                }
+            }, 600);
+        });
+
+        const dbgUi = document.getElementById('debug-ui');
+        document.getElementById('debug-toggle').addEventListener('click', () => {
+            dbgUi.classList.toggle('minimized');
+        });
+
+        document.getElementById('dbg-reload').addEventListener('click', () => {
+            const dest = new URL(window.location.href);
+            dest.searchParams.set('lat', latInput.value.trim());
+            dest.searchParams.set('lng', lngInput.value.trim());
+            window.location.href = dest.toString();
+        });
+
+        // --- Animated starfield for loading screen ---
+        const stars = document.getElementById('stars-bg');
+        for (let i = 0; i < 160; i++) {
+            const s = document.createElement('div');
+            s.className = 'star';
+            const size = Math.random() * 2 + 0.5;
+            s.style.cssText = [
+                `width:${size}px`, `height:${size}px`,
+                `left:${Math.random() * 100}%`, `top:${Math.random() * 100}%`,
+                `--d:${(Math.random() * 4 + 1.5).toFixed(1)}s`,
+                `--min-op:${(Math.random() * 0.1).toFixed(2)}`,
+                `--max-op:${(Math.random() * 0.6 + 0.3).toFixed(2)}`,
+                `animation-delay:${(Math.random() * 4).toFixed(1)}s`,
+            ].join(';');
+            stars.appendChild(s);
+        }
+
+        // Loading status messages
+        const statuses = [
+            'Initialising renderer…',
+            'Loading BabylonJS engine…',
+            'Building terrain…',
+            'Spawning atmosphere…',
+            'Calibrating flight controls…',
+            'Awaiting clearance for takeoff…',
+        ];
+        let idx = 0;
+        const statusEl = document.getElementById('loading-status');
+        const statusInterval = setInterval(() => {
+            idx = (idx + 1) % statuses.length;
+            statusEl.textContent = statuses[idx];
+        }, 900);
+
+        // The loading screen is hidden by flight-main.ts after init
+        // This is a safety fallback
+        setTimeout(() => {
+            clearInterval(statusInterval);
+            const el = document.getElementById('loading');
+            if (el) {
+                el.style.opacity = '0';
+                el.style.transition = 'opacity 1.2s ease';
+                setTimeout(() => el.remove(), 1300);
+            }
+        }, 5000);
+    </script>
+</body>
+
+</html>
