@@ -134,6 +134,7 @@ export class FlightSceneSimple extends Scene3D {
     private mapImg!: HTMLImageElement;
     private mapHeadingCanvas!: HTMLCanvasElement;
     private mapLastUpdate = 0;
+    private spawnAirborne = false;
     private isMobile = false;
     private touchPitchInput = 0;
     private touchRollInput = 0;
@@ -187,6 +188,7 @@ export class FlightSceneSimple extends Scene3D {
             scene.fogColor   = new BABYLON.Color3(0.65, 0.75, 0.90);
             scene.fogDensity = 0.0000025;
         }
+
     }
 
     update(dt: number): void {
@@ -220,6 +222,7 @@ export class FlightSceneSimple extends Scene3D {
         const lon = parseFloat(params.get('lng') || '-46.4745');
         const alt = parseFloat(params.get('alt') || '750');
         this.initialHeading = parseFloat(params.get('hdg') || '75');
+        this.spawnAirborne = params.has('lat');
         this.originLat = lat;
         this.originLon = lon;
         this.mapApiKey = apiKey;
@@ -402,12 +405,20 @@ export class FlightSceneSimple extends Scene3D {
         this.planeRoot = new BABYLON.TransformNode('planeRoot', scene);
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         this.planeRoot.rotationQuaternion = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
-        this.planeRoot.position.set(0, GROUND_Y + 600, 0);
-        this.thrust = 0.7;
-        this.flapIndex = 0;
-        this.currentFlapDeg = 0;
-        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, new BABYLON.Matrix()));
-        this.velocity = fwd.scale(100);
+        if (this.spawnAirborne) {
+            this.planeRoot.position.set(0, GROUND_Y + 600, 0);
+            this.thrust = 0.7;
+            this.flapIndex = 0;
+            this.currentFlapDeg = 0;
+            const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, new BABYLON.Matrix()));
+            this.velocity = fwd.scale(100);
+        } else {
+            this.planeRoot.position.set(0, GROUND_Y, 0);
+            this.thrust = 0;
+            this.flapIndex = 2;
+            this.currentFlapDeg = 15;
+            this.velocity = BABYLON.Vector3.Zero();
+        }
 
         BABYLON.SceneLoader.ImportMesh(
             '', 'models/', 'DC8_AFRC_AIR_0824.glb', scene,
@@ -613,25 +624,25 @@ export class FlightSceneSimple extends Scene3D {
         overlay.innerHTML = `
 <style>
 #touch-overlay{position:fixed;inset:0;pointer-events:none;z-index:150}
-#touch-joy{position:absolute;bottom:60px;right:40px;width:140px;height:140px;border-radius:50%;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
-#touch-joy-knob{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(0,255,128,.3);border:2px solid rgba(0,255,128,.5)}
-#touch-throttle{position:absolute;bottom:60px;left:30px;width:44px;height:180px;border-radius:22px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
-#touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
-#touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:36px;height:12px;border-radius:6px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:260px;left:24px;display:flex;flex-direction:column;gap:8px;pointer-events:auto}
-#touch-flap-btns button{width:56px;height:36px;border-radius:8px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;touch-action:manipulation}
+#touch-joy{position:absolute;width:120px;height:120px;border-radius:50%;border:none;background:none;display:none;pointer-events:none}
+#touch-joy-knob{position:absolute;top:50%;left:50%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:rgba(0,255,128,.2);border:none}
+#touch-throttle{position:absolute;bottom:24px;left:16px;width:40px;height:160px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
+#touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 18px 18px}
+#touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:32px;height:10px;border-radius:5px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
+#touch-flap-btns{position:absolute;bottom:200px;left:12px;display:flex;flex-direction:column;gap:6px;pointer-events:auto}
+#touch-flap-btns button{width:48px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:10px;cursor:pointer;touch-action:manipulation}
 </style>
 <div id="touch-joy"><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
 <div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button></div>`;
         document.body.appendChild(overlay);
 
-        const joy = document.getElementById('touch-joy')!;
+        const joyEl = document.getElementById('touch-joy')!;
         const knob = document.getElementById('touch-joy-knob')!;
         const throttleEl = document.getElementById('touch-throttle')!;
         const thrFill = document.getElementById('touch-thr-fill')!;
         const thrKnob = document.getElementById('touch-thr-knob')!;
-        const joyR = 70;
+        const maxDrag = 80;
 
         const updateThrVisual = () => {
             const pct = this.touchThrust * 100;
@@ -640,26 +651,42 @@ export class FlightSceneSimple extends Scene3D {
         };
         updateThrVisual();
 
-        joy.addEventListener('touchstart', (e: TouchEvent) => {
-            if (this.joystickTouchId !== null) return;
-            const t = e.changedTouches[0];
-            this.joystickTouchId = t.identifier;
-            const rect = joy.getBoundingClientRect();
-            this.joystickOrigin = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-            e.preventDefault();
+        const isOnWidget = (t: Touch): boolean => {
+            const el = document.elementFromPoint(t.clientX, t.clientY);
+            if (!el) return false;
+            return !!el.closest('#touch-throttle,#touch-flap-btns');
+        };
+
+        const canvas = this.scene!.getEngine().getRenderingCanvas()!;
+        canvas.style.touchAction = 'none';
+
+        canvas.addEventListener('touchstart', (e: TouchEvent) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (isOnWidget(t)) continue;
+                if (this.joystickTouchId !== null) continue;
+                this.joystickTouchId = t.identifier;
+                this.joystickOrigin = { x: t.clientX, y: t.clientY };
+                joyEl.style.display = 'block';
+                joyEl.style.left = `${t.clientX - 60}px`;
+                joyEl.style.top = `${t.clientY - 60}px`;
+                knob.style.left = '50%';
+                knob.style.top = '50%';
+                e.preventDefault();
+            }
         }, { passive: false });
 
-        joy.addEventListener('touchmove', (e: TouchEvent) => {
+        canvas.addEventListener('touchmove', (e: TouchEvent) => {
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const t = e.changedTouches[i];
                 if (t.identifier !== this.joystickTouchId) continue;
                 const dx = t.clientX - this.joystickOrigin.x;
                 const dy = t.clientY - this.joystickOrigin.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                const clamped = Math.min(dist, joyR);
+                const clamped = Math.min(dist, maxDrag);
                 const angle = Math.atan2(dy, dx);
-                const nx = (clamped * Math.cos(angle)) / joyR;
-                const ny = (clamped * Math.sin(angle)) / joyR;
+                const nx = (clamped * Math.cos(angle)) / maxDrag;
+                const ny = (clamped * Math.sin(angle)) / maxDrag;
                 this.touchRollInput = -nx;
                 this.touchPitchInput = -ny;
                 knob.style.left = `${50 + nx * 35}%`;
@@ -674,13 +701,14 @@ export class FlightSceneSimple extends Scene3D {
                     this.joystickTouchId = null;
                     this.touchPitchInput = 0;
                     this.touchRollInput = 0;
+                    joyEl.style.display = 'none';
                     knob.style.left = '50%';
                     knob.style.top = '50%';
                 }
             }
         };
-        joy.addEventListener('touchend', resetJoy);
-        joy.addEventListener('touchcancel', resetJoy);
+        canvas.addEventListener('touchend', resetJoy);
+        canvas.addEventListener('touchcancel', resetJoy);
 
         throttleEl.addEventListener('touchstart', (e: TouchEvent) => {
             if (this.throttleTouchId !== null) return;
@@ -720,39 +748,29 @@ export class FlightSceneSimple extends Scene3D {
 
     private _spawnPlane(): void {
         if (!this.planeRoot) return;
-        this.planeRoot.position.set(0, GROUND_Y + 600, 0);
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.planeRoot.rotationQuaternion!);
         this.angularVelocity.set(0, 0, 0);
-        this.thrust = 0.7;
-        this.flapIndex = 0;
-        this.currentFlapDeg = 0;
-        const rotMat = new BABYLON.Matrix();
-        BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion!, rotMat);
-        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
-        this.velocity = fwd.scale(100);
+        if (this.spawnAirborne) {
+            this.planeRoot.position.set(0, GROUND_Y + 600, 0);
+            this.thrust = 0.7;
+            this.flapIndex = 0;
+            this.currentFlapDeg = 0;
+            const rotMat = new BABYLON.Matrix();
+            BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion!, rotMat);
+            const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
+            this.velocity = fwd.scale(100);
+        } else {
+            this.planeRoot.position.set(0, GROUND_Y, 0);
+            this.velocity.set(0, 0, 0);
+            this.thrust = 0;
+            this.flapIndex = 2;
+            this.currentFlapDeg = 15;
+        }
     }
 
-    private _initFlapBar(): void {
-        this.hudFlapBar.innerHTML = '';
-        for (let i = 0; i < this.FLAP_STEPS.length; i++) {
-            const seg = document.createElement('div');
-            seg.style.cssText = 'flex:1;height:6px;border-radius:2px;transition:background .15s';
-            seg.dataset.idx = String(i);
-            this.hudFlapBar.appendChild(seg);
-        }
-        this._updateFlapDisplay();
-    }
-
-    private _updateFlapDisplay(): void {
-        const segs = this.hudFlapBar.children;
-        for (let i = 0; i < segs.length; i++) {
-            (segs[i] as HTMLElement).style.background = i <= this.flapIndex
-                ? 'linear-gradient(90deg,#00cc66,#00ffaa)'
-                : 'rgba(0,80,40,.4)';
-        }
-        this.hudFlapVal.textContent = `${this.FLAP_STEPS[this.flapIndex]}°`;
-    }
+    private _initFlapBar(): void {}
+    private _updateFlapDisplay(): void {}
 
     private _applyFlaps(): void {
         const targetDeg = this.FLAP_STEPS[this.flapIndex];
@@ -931,59 +949,59 @@ export class FlightSceneSimple extends Scene3D {
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400&display=swap');
 #flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#7df9c8; }
-.hp {
-    position:absolute;
-    background:linear-gradient(135deg,rgba(0,20,15,.72),rgba(0,30,20,.55));
-    border:1px solid rgba(80,255,160,.25);
-    border-radius:10px;padding:10px 14px;
-    backdrop-filter:blur(12px);
-    box-shadow:0 0 24px rgba(0,255,128,.08),inset 0 0 12px rgba(0,255,128,.04);
-}
-#hl{bottom:6px;left:32px;min-width:170px}
-#hr{bottom:6px;right:32px;min-width:170px}
-#hc{top:20px;left:50%;transform:translateX(-50%);font-size:10px;letter-spacing:.18em;color:rgba(100,240,180,.5);font-family:'Inter',sans-serif;text-align:center}
-#hfps{top:20px;right:20px;font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif;padding:5px 10px}
-#hw{top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border-color:rgba(255,60,0,.7);color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
+.hp{position:absolute}
+#hl,#hr{display:none}
+#hfps{position:absolute;top:20px;right:20px;font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif;padding:5px 10px}
+#hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
 @keyframes blink{to{opacity:0}}
-.lbl{font-size:8px;letter-spacing:.2em;color:rgba(100,240,180,.55);margin-bottom:2px;font-family:'Inter',sans-serif;font-weight:300}
-.val{font-size:20px;font-weight:700;line-height:1;text-shadow:0 0 12px rgba(100,255,160,.6);letter-spacing:.05em}
-.unit{font-size:11px;font-weight:400;opacity:.6}
-.sep{height:1px;background:rgba(80,255,160,.15);margin:10px 0}
-.tr{width:100%;height:5px;background:rgba(0,80,40,.5);border-radius:3px;margin-top:6px;overflow:hidden}
-.tf{height:100%;width:0%;background:linear-gradient(90deg,#00cc66,#00ffaa,#80ffdd);border-radius:3px;transition:width .08s linear;box-shadow:0 0 8px #00ffaa88}
+#bottom-bar{
+display:flex;position:absolute;bottom:0;left:0;right:0;z-index:101;
+padding:10px 24px 12px;
+background:linear-gradient(0deg,rgba(0,10,8,.85) 0%,rgba(0,10,8,0) 100%);
+justify-content:space-between;align-items:flex-end;pointer-events:none;
+font-family:'Orbitron',monospace;color:#7df9c8;
+}
+#bottom-bar .bb-col{display:flex;flex-direction:column;align-items:center;gap:2px}
+#bottom-bar .bb-val{font-size:26px;font-weight:700;text-shadow:0 0 10px rgba(0,255,128,.7),0 1px 3px rgba(0,0,0,.9);letter-spacing:.04em}
+#bottom-bar .bb-lbl{font-size:8px;letter-spacing:.2em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-transform:uppercase}
+#bottom-bar .bb-unit{font-size:11px;font-weight:400;opacity:.55}
+#bottom-bar .bb-att{font-size:13px;letter-spacing:.1em;text-shadow:0 0 8px rgba(0,255,128,.5),0 1px 3px rgba(0,0,0,.9)}
+#bottom-bar .bb-thr{width:70px;height:5px;background:rgba(0,80,40,.6);border-radius:3px;overflow:hidden;margin-top:3px}
+#bottom-bar .bb-thr-f{height:100%;background:linear-gradient(90deg,#00cc66,#00ffaa);border-radius:3px;transition:width .08s linear}
 @media(max-width:768px){
-.hp{padding:6px 10px;border-radius:6px}
-.val{font-size:16px}
-.lbl{font-size:7px}
-#hl,#hr{min-width:120px}
 #hfps{display:none}
 #dbg-panel-toggle{display:none!important}
-#flight-pfd{width:280px;height:240px}
-#gps-map{width:120px!important;height:120px!important;top:8px!important;left:4px!important}
+#flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:220px}
+#gps-map{width:100px!important;height:100px!important;top:6px!important;left:4px!important}
+#bottom-bar .bb-val{font-size:20px}
+#bottom-bar .bb-lbl{font-size:7px}
+#bottom-bar .bb-att{font-size:11px}
+#bottom-bar{padding:8px 12px 10px}
 }
+
 </style>
-<div class="hp" id="hl">
-  <div class="lbl">AIRSPEED</div>
-  <div class="val" id="hs">0 <span class="unit">m/s</span></div>
-  <div class="sep"></div>
-  <div class="lbl">THROTTLE</div>
-  <div class="tr"><div class="tf" id="ht"></div></div>
-  <div class="sep"></div>
-  <div class="lbl">FLAPS &nbsp;<span style="font-size:7px;opacity:.4">5↓ 6↑</span></div>
-  <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
-    <div id="hflap-bar" style="flex:1;display:flex;gap:2px"></div>
-    <div class="val" style="font-size:14px;min-width:32px;text-align:right" id="hflap-val">15°</div>
+<div class="hp" id="hl"></div>
+<div class="hp" id="hr"></div>
+<div id="hfps" style="position:absolute;top:20px;right:20px;font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif;padding:5px 10px"></div>
+<div class="hp" id="hw">&#9888; STALL &#9888;</div>
+<div id="bottom-bar">
+  <div class="bb-col">
+    <div class="bb-lbl">SPEED</div>
+    <div class="bb-val" id="bb-spd">0 <span class="bb-unit">km/h</span></div>
+    <div class="bb-thr"><div class="bb-thr-f" id="bb-thr" style="width:0%"></div></div>
+  </div>
+  <div class="bb-col">
+    <div class="bb-lbl">FLAPS <span style="font-size:6px;opacity:.4">5↓ 6↑</span></div>
+    <div class="bb-val" style="font-size:18px" id="bb-flp">0&deg;</div>
+  </div>
+  <div class="bb-col">
+    <div class="bb-att" id="bb-att">&#9654; LEVEL</div>
+  </div>
+  <div class="bb-col">
+    <div class="bb-lbl">ALT</div>
+    <div class="bb-val" id="bb-alt">0 <span class="bb-unit">m</span></div>
   </div>
 </div>
-<div class="hp" id="hr">
-  <div class="lbl">ALTITUDE</div>
-  <div class="val" id="ha">0 <span class="unit">m</span></div>
-  <div class="sep"></div>
-  <div class="lbl">ATTITUDE</div>
-  <div style="font-size:12px;letter-spacing:.08em" id="hatt">&#9654; LEVEL</div>
-</div>
-<div class="hp" id="hfps"></div>
-<div class="hp" id="hw">&#9888; STALL &#9888;</div>
 <canvas id="flight-pfd" width="350" height="300" style="position:absolute;top:50px;left:50%;transform:translateX(-50%);pointer-events:none"></canvas>
 <div id="gps-map" style="position:absolute;top:20px;left:8px;width:160px;height:160px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
   <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
@@ -994,14 +1012,14 @@ export class FlightSceneSimple extends Scene3D {
         document.body.appendChild(hud);
         this.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
         this.hudCtx    = this.hudCanvas.getContext('2d')!;
-        this.hudSpeed    = document.getElementById('hs')!;
-        this.hudAlt      = document.getElementById('ha')!;
-        this.hudThrottle = document.getElementById('ht')!;
-        this.hudAttitude = document.getElementById('hatt')!;
+        this.hudSpeed    = document.getElementById('bb-spd')!;
+        this.hudAlt      = document.getElementById('bb-alt')!;
+        this.hudThrottle = document.getElementById('bb-thr')!;
+        this.hudAttitude = document.getElementById('bb-att')!;
         this.hudWarning  = document.getElementById('hw')!;
         this.hudFps      = document.getElementById('hfps')!;
-        this.hudFlapVal  = document.getElementById('hflap-val')!;
-        this.hudFlapBar  = document.getElementById('hflap-bar')!;
+        this.hudFlapVal  = document.getElementById('bb-flp')!;
+        this.hudFlapBar  = document.getElementById('bb-flp')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
 
@@ -1195,9 +1213,10 @@ export class FlightSceneSimple extends Scene3D {
         const altitude = Math.round(Math.max(0, pos.y));
         const pct = Math.round(this.thrust * 100);
 
-        this.hudSpeed.innerHTML    = `${speed} <span class="unit">km/h</span>`;
-        this.hudAlt.innerHTML      = `${altitude} <span class="unit">m</span>`;
+        this.hudSpeed.innerHTML    = `${speed} <span class="bb-unit">km/h</span>`;
+        this.hudAlt.innerHTML      = `${altitude} <span class="bb-unit">m</span>`;
         this.hudThrottle.style.width = `${pct}%`;
+        this.hudFlapVal.innerHTML  = `${this.FLAP_STEPS[this.flapIndex]}&deg;`;
 
         const wm      = this.planeRoot.getWorldMatrix();
         const forward = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
@@ -1216,7 +1235,6 @@ export class FlightSceneSimple extends Scene3D {
         this.hudFps.textContent =
             `${this.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;
 
-        this._updateFlapDisplay();
         this._drawFlightHUD();
         this._updateMap();
         this._updateDebugReadouts();
