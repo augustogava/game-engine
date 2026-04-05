@@ -134,6 +134,13 @@ export class FlightSceneSimple extends Scene3D {
     private mapImg!: HTMLImageElement;
     private mapHeadingCanvas!: HTMLCanvasElement;
     private mapLastUpdate = 0;
+    private isMobile = false;
+    private touchPitchInput = 0;
+    private touchRollInput = 0;
+    private touchThrust = 0.7;
+    private joystickTouchId: number | null = null;
+    private joystickOrigin = { x: 0, y: 0 };
+    private throttleTouchId: number | null = null;
 
     private hudSpeed!:    HTMLElement;
     private hudAlt!:      HTMLElement;
@@ -154,6 +161,7 @@ export class FlightSceneSimple extends Scene3D {
     private hudFlapBar!:   HTMLElement;
 
     onCreate(scene: any, _input: InputManager): void {
+        this.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         scene.useRightHandedSystem = true;
         scene.clearColor = new BABYLON.Color4(0.04, 0.1, 0.22, 1);
         scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
@@ -173,6 +181,7 @@ export class FlightSceneSimple extends Scene3D {
         this._buildCamera(scene);
         this._setupPostProcessing(scene);
         this._buildHUD();
+        if (this.isMobile) this._setupTouchControls();
         if (this.tiles) {
             this.ground.isVisible = false;
             scene.fogColor   = new BABYLON.Color3(0.65, 0.75, 0.90);
@@ -193,6 +202,7 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('flight-hud')?.remove();
         document.getElementById('dbg-panel')?.remove();
         document.getElementById('dbg-panel-toggle')?.remove();
+        document.getElementById('touch-overlay')?.remove();
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
     }
 
@@ -392,7 +402,12 @@ export class FlightSceneSimple extends Scene3D {
         this.planeRoot = new BABYLON.TransformNode('planeRoot', scene);
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         this.planeRoot.rotationQuaternion = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
-        this.planeRoot.position.set(0, GROUND_Y, 0);
+        this.planeRoot.position.set(0, GROUND_Y + 600, 0);
+        this.thrust = 0.7;
+        this.flapIndex = 0;
+        this.currentFlapDeg = 0;
+        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, new BABYLON.Matrix()));
+        this.velocity = fwd.scale(100);
 
         BABYLON.SceneLoader.ImportMesh(
             '', 'models/', 'DC8_AFRC_AIR_0824.glb', scene,
@@ -491,6 +506,10 @@ export class FlightSceneSimple extends Scene3D {
 
         if (canvas) this.camera.attachControl(canvas, true);
 
+        if (this.isMobile) {
+            this.camera.inputs.removeByType('ArcRotateCameraPointersInput');
+        }
+
         scene.activeCamera = this.camera;
     }
 
@@ -546,47 +565,172 @@ export class FlightSceneSimple extends Scene3D {
     // ── Input ─────────────────────────────────────────────────────────────────
 
     private _handleInput(_dt: number): void {
-        const p = (code: string) => this.input.isKeyDown(code);
+        let pitchInput: number;
+        let rollInput: number;
+        let yawInput: number;
 
-        if (p('KeyW')) this.thrust = Math.min(1, this.thrust + _dt * 0.55);
-        if (p('KeyS')) this.thrust = Math.max(0, this.thrust - _dt * 0.4);
+        if (this.isMobile) {
+            pitchInput = this.touchPitchInput;
+            rollInput = this.touchRollInput * 0.25;
+            yawInput = 0;
+            this.thrust = this.touchThrust;
+        } else {
+            const p = (code: string) => this.input.isKeyDown(code);
 
-        const pitchInput = p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0;
-        const rollInput  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.25;
-        const yawInput   = p('KeyE') ? 1 : p('KeyQ') ? -1 : 0;
+            if (p('KeyW')) this.thrust = Math.min(1, this.thrust + _dt * 0.55);
+            if (p('KeyS')) this.thrust = Math.max(0, this.thrust - _dt * 0.4);
+
+            pitchInput = p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0;
+            rollInput  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.25;
+            yawInput   = p('KeyE') ? 1 : p('KeyQ') ? -1 : 0;
+
+            if (p('Digit5') && !this.flapKeyLock5) {
+                this.flapKeyLock5 = true;
+                this.flapIndex = Math.max(0, this.flapIndex - 1);
+            }
+            if (!p('Digit5')) this.flapKeyLock5 = false;
+
+            if (p('Digit6') && !this.flapKeyLock6) {
+                this.flapKeyLock6 = true;
+                this.flapIndex = Math.min(this.FLAP_STEPS.length - 1, this.flapIndex + 1);
+            }
+            if (!p('Digit6')) this.flapKeyLock6 = false;
+
+            if (p('KeyR')) this._spawnPlane();
+        }
 
         this.surfaces[0].controlInput =  rollInput;
         this.surfaces[1].controlInput = -rollInput;
         this.surfaces[2].controlInput = -pitchInput;
         this.surfaces[3].controlInput = -yawInput;
 
-        if (p('Digit5') && !this.flapKeyLock5) {
-            this.flapKeyLock5 = true;
-            this.flapIndex = Math.max(0, this.flapIndex - 1);
-        }
-        if (!p('Digit5')) this.flapKeyLock5 = false;
-
-        if (p('Digit6') && !this.flapKeyLock6) {
-            this.flapKeyLock6 = true;
-            this.flapIndex = Math.min(this.FLAP_STEPS.length - 1, this.flapIndex + 1);
-        }
-        if (!p('Digit6')) this.flapKeyLock6 = false;
-
         this._applyFlaps();
+    }
 
-        if (p('KeyR')) this._spawnPlane();
+    private _setupTouchControls(): void {
+        const overlay = document.createElement('div');
+        overlay.id = 'touch-overlay';
+        overlay.innerHTML = `
+<style>
+#touch-overlay{position:fixed;inset:0;pointer-events:none;z-index:150}
+#touch-joy{position:absolute;bottom:60px;right:40px;width:140px;height:140px;border-radius:50%;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
+#touch-joy-knob{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(0,255,128,.3);border:2px solid rgba(0,255,128,.5)}
+#touch-throttle{position:absolute;bottom:60px;left:30px;width:44px;height:180px;border-radius:22px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
+#touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
+#touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:36px;height:12px;border-radius:6px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
+#touch-flap-btns{position:absolute;bottom:260px;left:24px;display:flex;flex-direction:column;gap:8px;pointer-events:auto}
+#touch-flap-btns button{width:56px;height:36px;border-radius:8px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;touch-action:manipulation}
+</style>
+<div id="touch-joy"><div id="touch-joy-knob"></div></div>
+<div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
+<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button></div>`;
+        document.body.appendChild(overlay);
+
+        const joy = document.getElementById('touch-joy')!;
+        const knob = document.getElementById('touch-joy-knob')!;
+        const throttleEl = document.getElementById('touch-throttle')!;
+        const thrFill = document.getElementById('touch-thr-fill')!;
+        const thrKnob = document.getElementById('touch-thr-knob')!;
+        const joyR = 70;
+
+        const updateThrVisual = () => {
+            const pct = this.touchThrust * 100;
+            thrFill.style.height = `${pct}%`;
+            thrKnob.style.bottom = `${pct}%`;
+        };
+        updateThrVisual();
+
+        joy.addEventListener('touchstart', (e: TouchEvent) => {
+            if (this.joystickTouchId !== null) return;
+            const t = e.changedTouches[0];
+            this.joystickTouchId = t.identifier;
+            const rect = joy.getBoundingClientRect();
+            this.joystickOrigin = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            e.preventDefault();
+        }, { passive: false });
+
+        joy.addEventListener('touchmove', (e: TouchEvent) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (t.identifier !== this.joystickTouchId) continue;
+                const dx = t.clientX - this.joystickOrigin.x;
+                const dy = t.clientY - this.joystickOrigin.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const clamped = Math.min(dist, joyR);
+                const angle = Math.atan2(dy, dx);
+                const nx = (clamped * Math.cos(angle)) / joyR;
+                const ny = (clamped * Math.sin(angle)) / joyR;
+                this.touchRollInput = -nx;
+                this.touchPitchInput = -ny;
+                knob.style.left = `${50 + nx * 35}%`;
+                knob.style.top = `${50 + ny * 35}%`;
+            }
+            e.preventDefault();
+        }, { passive: false });
+
+        const resetJoy = (e: TouchEvent) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === this.joystickTouchId) {
+                    this.joystickTouchId = null;
+                    this.touchPitchInput = 0;
+                    this.touchRollInput = 0;
+                    knob.style.left = '50%';
+                    knob.style.top = '50%';
+                }
+            }
+        };
+        joy.addEventListener('touchend', resetJoy);
+        joy.addEventListener('touchcancel', resetJoy);
+
+        throttleEl.addEventListener('touchstart', (e: TouchEvent) => {
+            if (this.throttleTouchId !== null) return;
+            this.throttleTouchId = e.changedTouches[0].identifier;
+            e.preventDefault();
+        }, { passive: false });
+
+        throttleEl.addEventListener('touchmove', (e: TouchEvent) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (t.identifier !== this.throttleTouchId) continue;
+                const rect = throttleEl.getBoundingClientRect();
+                const pct = 1 - Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height));
+                this.touchThrust = pct;
+                updateThrVisual();
+            }
+            e.preventDefault();
+        }, { passive: false });
+
+        const resetThr = (e: TouchEvent) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === this.throttleTouchId) {
+                    this.throttleTouchId = null;
+                }
+            }
+        };
+        throttleEl.addEventListener('touchend', resetThr);
+        throttleEl.addEventListener('touchcancel', resetThr);
+
+        document.getElementById('touch-flap-up')!.addEventListener('touchstart', () => {
+            this.flapIndex = Math.min(this.FLAP_STEPS.length - 1, this.flapIndex + 1);
+        });
+        document.getElementById('touch-flap-dn')!.addEventListener('touchstart', () => {
+            this.flapIndex = Math.max(0, this.flapIndex - 1);
+        });
     }
 
     private _spawnPlane(): void {
         if (!this.planeRoot) return;
-        this.planeRoot.position.set(0, GROUND_Y, 0);
+        this.planeRoot.position.set(0, GROUND_Y + 600, 0);
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.planeRoot.rotationQuaternion!);
-        this.velocity.set(0, 0, 0);
         this.angularVelocity.set(0, 0, 0);
-        this.thrust = 0;
-        this.flapIndex = 2;
-        this.currentFlapDeg = 15;
+        this.thrust = 0.7;
+        this.flapIndex = 0;
+        this.currentFlapDeg = 0;
+        const rotMat = new BABYLON.Matrix();
+        BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion!, rotMat);
+        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
+        this.velocity = fwd.scale(100);
     }
 
     private _initFlapBar(): void {
@@ -791,7 +935,7 @@ export class FlightSceneSimple extends Scene3D {
     position:absolute;
     background:linear-gradient(135deg,rgba(0,20,15,.72),rgba(0,30,20,.55));
     border:1px solid rgba(80,255,160,.25);
-    border-radius:10px;padding:14px 20px;
+    border-radius:10px;padding:10px 14px;
     backdrop-filter:blur(12px);
     box-shadow:0 0 24px rgba(0,255,128,.08),inset 0 0 12px rgba(0,255,128,.04);
 }
@@ -801,12 +945,22 @@ export class FlightSceneSimple extends Scene3D {
 #hfps{top:20px;right:20px;font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif;padding:5px 10px}
 #hw{top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border-color:rgba(255,60,0,.7);color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
 @keyframes blink{to{opacity:0}}
-.lbl{font-size:9px;letter-spacing:.2em;color:rgba(100,240,180,.55);margin-bottom:2px;font-family:'Inter',sans-serif;font-weight:300}
-.val{font-size:24px;font-weight:700;line-height:1;text-shadow:0 0 12px rgba(100,255,160,.6);letter-spacing:.05em}
+.lbl{font-size:8px;letter-spacing:.2em;color:rgba(100,240,180,.55);margin-bottom:2px;font-family:'Inter',sans-serif;font-weight:300}
+.val{font-size:20px;font-weight:700;line-height:1;text-shadow:0 0 12px rgba(100,255,160,.6);letter-spacing:.05em}
 .unit{font-size:11px;font-weight:400;opacity:.6}
 .sep{height:1px;background:rgba(80,255,160,.15);margin:10px 0}
 .tr{width:100%;height:5px;background:rgba(0,80,40,.5);border-radius:3px;margin-top:6px;overflow:hidden}
 .tf{height:100%;width:0%;background:linear-gradient(90deg,#00cc66,#00ffaa,#80ffdd);border-radius:3px;transition:width .08s linear;box-shadow:0 0 8px #00ffaa88}
+@media(max-width:768px){
+.hp{padding:6px 10px;border-radius:6px}
+.val{font-size:16px}
+.lbl{font-size:7px}
+#hl,#hr{min-width:120px}
+#hfps{display:none}
+#dbg-panel-toggle{display:none!important}
+#flight-pfd{width:280px;height:240px}
+#gps-map{width:120px!important;height:120px!important;top:8px!important;left:4px!important}
+}
 </style>
 <div class="hp" id="hl">
   <div class="lbl">AIRSPEED</div>
@@ -830,10 +984,10 @@ export class FlightSceneSimple extends Scene3D {
 </div>
 <div class="hp" id="hfps"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
-<canvas id="flight-pfd" width="400" height="360" style="position:absolute;top:50px;left:50%;transform:translateX(-50%);pointer-events:none"></canvas>
-<div id="gps-map" style="position:absolute;top:20px;left:8px;width:200px;height:200px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
+<canvas id="flight-pfd" width="350" height="300" style="position:absolute;top:50px;left:50%;transform:translateX(-50%);pointer-events:none"></canvas>
+<div id="gps-map" style="position:absolute;top:20px;left:8px;width:160px;height:160px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
   <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
-  <canvas id="gps-map-hdg" width="200" height="200" style="position:absolute;inset:0;pointer-events:none"></canvas>
+  <canvas id="gps-map-hdg" width="160" height="160" style="position:absolute;inset:0;pointer-events:none"></canvas>
   <div style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:8px;letter-spacing:.15em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8)">GPS</div>
   <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap"></div>
 </div>`;
