@@ -150,14 +150,12 @@ ctx2D.then(async (c2D) => {
             return _writeHead(status, merged);
         };
 
-        // CORS preflight
         if (req.method === 'OPTIONS') {
             res.writeHead(204);
             res.end();
             return;
         }
 
-        // API: register
         if (req.method === 'POST' && req.url.split('?')[0] === '/api/register') {
             try {
                 if (!dbPool) {

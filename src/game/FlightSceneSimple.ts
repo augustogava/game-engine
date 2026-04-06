@@ -379,7 +379,7 @@ export class FlightSceneSimple extends Scene3D {
             }
 
             const yawRad = (180 - ns.heading) * Math.PI / 180;
-            const pitchRad = ns.pitch * Math.PI / 180;
+            const pitchRad = -ns.pitch * Math.PI / 180;
             const rollRad = ns.roll * Math.PI / 180;
 
             const yawQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
