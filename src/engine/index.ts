@@ -81,3 +81,7 @@ export type { NavNode, NavEdge } from './pathfinding/NavigationGraph.js';
 export { TileMap } from './tilemap/TileMap.js';
 export type { TileType, TileData, TileMapLayer } from './tilemap/TileMap.js';
 
+// ── Network ───────────────────────────────────────────────────────────────
+export { RealtimeClient } from './network/RealtimeClient.js';
+export type { RealtimeClientConfig } from './network/RealtimeClient.js';
+

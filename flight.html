@@ -40,7 +40,7 @@
             background: radial-gradient(ellipse at 50% 60%, #081828 0%, #020810 70%);
             z-index: 9999;
             gap: 32px;
-            pointer-events: none;
+            pointer-events: auto;
         }
 
         .loading-logo {
@@ -123,6 +123,81 @@
             50%      { opacity: var(--max-op, 0.8); }
         }
 
+        /* ── Email Form ───────────────────────────────────── */
+        #email-form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            width: 320px;
+            max-width: 90vw;
+        }
+        #email-form input[type="email"] {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(64, 255, 170, 0.35);
+            border-radius: 6px;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            outline: none;
+            letter-spacing: 0.03em;
+            transition: border-color 0.2s;
+        }
+        #email-form input[type="email"]:focus {
+            border-color: #40ffaa;
+            box-shadow: 0 0 12px rgba(64, 255, 170, 0.15);
+        }
+        #email-form input[type="email"]::placeholder {
+            color: rgba(100, 220, 180, 0.35);
+        }
+        #email-form button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #40ffaa 0%, #00ccff 100%);
+            border: none;
+            border-radius: 6px;
+            color: #020810;
+            font-family: 'Orbitron', monospace;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        #email-form button:hover { opacity: 0.9; }
+        #email-form button:active { transform: scale(0.98); }
+        #email-form button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        #email-error {
+            font-size: 11px;
+            color: #ff5555;
+            min-height: 16px;
+            text-align: center;
+        }
+        #loading.registered .loading-ring,
+        #loading.registered #email-form {
+            display: none;
+        }
+        #loading.registered .loading-status {
+            display: block;
+        }
+        #loading-wait {
+            display: none;
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            color: rgba(80, 200, 150, 0.5);
+            text-transform: uppercase;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        #loading.registered #loading-wait {
+            display: block;
+        }
+
         /* ── Debug UI ─────────────────────────────────────── */
         #debug-ui {
             position: fixed;
@@ -199,8 +274,14 @@
         <div class="loading-logo">AntiGravity Engine · 3D</div>
         <div class="loading-title">SKY ASSAULT</div>
         <div class="loading-subtitle">Flight Simulator</div>
+        <form id="email-form">
+            <input type="email" id="email-input" placeholder="Enter your email to fly" required autocomplete="email">
+            <div id="email-error"></div>
+            <button type="submit" id="email-submit">Enter the Sky</button>
+        </form>
         <div class="loading-ring"></div>
         <div class="loading-status" id="loading-status">Initialising renderer…</div>
+        <div id="loading-wait">Preparing your aircraft…</div>
     </div>
 
     <!-- BabylonJS renders into this canvas -->
@@ -313,18 +394,7 @@
             idx = (idx + 1) % statuses.length;
             statusEl.textContent = statuses[idx];
         }, 900);
-
-        // The loading screen is hidden by flight-main.ts after init
-        // This is a safety fallback
-        setTimeout(() => {
-            clearInterval(statusInterval);
-            const el = document.getElementById('loading');
-            if (el) {
-                el.style.opacity = '0';
-                el.style.transition = 'opacity 1.2s ease';
-                setTimeout(() => el.remove(), 1300);
-            }
-        }, 5000);
+        window.__loadingStatusInterval = statusInterval;
     </script>
 </body>
 

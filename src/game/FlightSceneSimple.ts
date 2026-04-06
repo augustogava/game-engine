@@ -5,6 +5,15 @@ import { TilesRenderer } from '3d-tiles-renderer/babylonjs';
 import { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
 import * as BABYLON from '@babylonjs/core';
 import '@babylonjs/loaders';
+import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
+
+interface RemotePlayer {
+    root: BABYLON.TransformNode;
+    meshes: BABYLON.Mesh[];
+    prevState: PlayerState | null;
+    nextState: PlayerState | null;
+    lastUpdateTime: number;
+}
 
 const STALL_SPEED_HUD  = 25;
 const MASS             = 10000;
@@ -143,6 +152,14 @@ export class FlightSceneSimple extends Scene3D {
     private joystickOrigin = { x: 0, y: 0 };
     private throttleTouchId: number | null = null;
 
+    private mpClient: MultiplayerClient | null = null;
+    private remotePlayers = new Map<string, RemotePlayer>();
+    private hudOnline!: HTMLElement;
+    private dbgMpStatus!: HTMLElement;
+    private dbgMpCount!: HTMLElement;
+    private dbgMpUserId!: HTMLElement;
+    public onSpawned: (() => void) | null = null;
+
     private hudSpeed!:    HTMLElement;
     private hudAlt!:      HTMLElement;
     private hudThrottle!: HTMLElement;
@@ -198,6 +215,8 @@ export class FlightSceneSimple extends Scene3D {
         this._applyPhysics(dt);
         this._updateClouds();
         this._updateHUD();
+        this._sendOwnState();
+        this._updateRemotePlayers();
     }
 
     onDispose(): void {
@@ -206,6 +225,190 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('dbg-panel-toggle')?.remove();
         document.getElementById('touch-overlay')?.remove();
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
+        this.mpClient?.dispose();
+    }
+
+    initMultiplayer(userId: string): void {
+        this.mpClient = new MultiplayerClient(userId);
+
+        this.mpClient.onPlayersUpdate((players) => {
+            const now = performance.now();
+            const activeIds = new Set<string>();
+
+            for (const p of players) {
+                activeIds.add(p.userId);
+                let remote = this.remotePlayers.get(p.userId);
+                if (!remote) {
+                    remote = this._createRemotePlayer(p.userId);
+                    this.remotePlayers.set(p.userId, remote);
+                }
+                remote.prevState = remote.nextState;
+                remote.nextState = p;
+                remote.lastUpdateTime = now;
+            }
+
+            for (const [id, remote] of this.remotePlayers) {
+                if (!activeIds.has(id)) {
+                    remote.meshes.forEach(m => m.dispose());
+                    remote.root.dispose();
+                    this.remotePlayers.delete(id);
+                }
+            }
+        });
+
+        this.mpClient.onPlayerCountChange((count) => {
+            if (this.hudOnline) this.hudOnline.textContent = `${count} ONLINE`;
+            if (this.dbgMpCount) this.dbgMpCount.textContent = String(count);
+        });
+
+        this.mpClient.onConnectionChange((connected) => {
+            if (this.dbgMpStatus) {
+                this.dbgMpStatus.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
+                this.dbgMpStatus.style.color = connected ? '#40ffaa' : '#ff5555';
+            }
+        });
+
+        if (this.dbgMpUserId) this.dbgMpUserId.textContent = userId.substring(0, 8) + '…';
+        this.mpClient.connect();
+    }
+
+    private _createRemotePlayer(id: string): RemotePlayer {
+        const scene = this.scene;
+        const root = new BABYLON.TransformNode(`remote_${id}`, scene);
+        root.rotationQuaternion = BABYLON.Quaternion.Identity();
+
+        const remote: RemotePlayer = { root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0 };
+
+        BABYLON.SceneLoader.ImportMesh(
+            '', 'models/', 'DC8_AFRC_AIR_0824.glb', scene,
+            (meshes: BABYLON.AbstractMesh[]) => {
+                const glbRoot = meshes[0];
+                const bb = glbRoot.getHierarchyBoundingVectors(true);
+                const center = bb.min.add(bb.max).scale(0.5);
+                const size = bb.max.subtract(bb.min).length();
+
+                const pivot = new BABYLON.TransformNode(`remotePivot_${id}`, scene);
+                pivot.parent = root;
+
+                glbRoot.parent = pivot;
+                const offset = center.negate();
+                offset.y = -bb.min.y;
+                glbRoot.position = offset;
+                glbRoot.rotationQuaternion = null;
+                glbRoot.rotation = BABYLON.Vector3.Zero();
+
+                const targetSize = 40;
+                const scaleFactor = targetSize / Math.max(size, 0.1);
+                pivot.scaling.setAll(scaleFactor);
+                pivot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
+
+                meshes.forEach((m) => {
+                    m.isPickable = false;
+                    remote.meshes.push(m as BABYLON.Mesh);
+                });
+            },
+            null,
+            () => {
+                this._buildRemoteFallback(id, root, remote);
+            },
+        );
+
+        return remote;
+    }
+
+    private _buildRemoteFallback(id: string, root: BABYLON.TransformNode, remote: RemotePlayer): void {
+        const scene = this.scene;
+        const mat = new BABYLON.PBRMaterial(`remoteMat_${id}`, scene);
+        mat.albedoColor = new BABYLON.Color3(1.0, 0.45, 0.15);
+        mat.metallic = 0.6;
+        mat.roughness = 0.3;
+
+        const body = BABYLON.MeshBuilder.CreateBox(`rb_${id}`, { width: 2.2, height: 0.65, depth: 7 }, scene);
+        const wing = BABYLON.MeshBuilder.CreateBox(`rw_${id}`, { width: 16, height: 0.22, depth: 2.5 }, scene);
+        const tail = BABYLON.MeshBuilder.CreateBox(`rt_${id}`, { width: 6, height: 0.18, depth: 1.8 }, scene);
+        tail.position.set(0, 0.4, -3.0);
+        const finV = BABYLON.MeshBuilder.CreateBox(`rf_${id}`, { width: 0.18, height: 2.8, depth: 2.0 }, scene);
+        finV.position.set(0, 1.4, -3.0);
+        const nose = BABYLON.MeshBuilder.CreateCylinder(`rn_${id}`, {
+            height: 2.5, diameterTop: 0, diameterBottom: 1.5, tessellation: 8,
+        }, scene);
+        nose.rotation.x = Math.PI / 2;
+        nose.position.set(0, 0, 4.5);
+
+        [body, wing, tail, finV, nose].forEach((m) => {
+            m.material = mat;
+            m.parent = root;
+            m.isPickable = false;
+            remote.meshes.push(m);
+        });
+    }
+
+    private _latLonToLocal(lat: number, lon: number, alt: number): BABYLON.Vector3 {
+        const metersPerDegLat = 111320;
+        const metersPerDegLon = 111320 * Math.cos(this.originLat * Math.PI / 180);
+        const x = (lon - this.originLon) * metersPerDegLon;
+        const z = -(lat - this.originLat) * metersPerDegLat;
+        return new BABYLON.Vector3(x, alt, z);
+    }
+
+    private _updateRemotePlayers(): void {
+        const now = performance.now();
+
+        for (const [, remote] of this.remotePlayers) {
+            if (!remote.nextState) continue;
+
+            const ns = remote.nextState;
+            const targetPos = this._latLonToLocal(ns.lat, ns.lon, ns.alt);
+
+            if (remote.prevState) {
+                const elapsed = now - remote.lastUpdateTime;
+                const t = Math.min(1, elapsed / 60);
+                const ps = remote.prevState;
+                const prevPos = this._latLonToLocal(ps.lat, ps.lon, ps.alt);
+                remote.root.position = BABYLON.Vector3.Lerp(prevPos, targetPos, t);
+            } else {
+                remote.root.position.copyFrom(targetPos);
+            }
+
+            const yawRad = (180 - ns.heading) * Math.PI / 180;
+            const pitchRad = ns.pitch * Math.PI / 180;
+            const rollRad = ns.roll * Math.PI / 180;
+
+            const yawQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
+            const pitchQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Right(), pitchRad);
+            const rollQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Forward(), rollRad);
+            const targetQ = yawQ.multiply(pitchQ).multiply(rollQ);
+
+            BABYLON.Quaternion.SlerpToRef(
+                remote.root.rotationQuaternion!,
+                targetQ,
+                0.15,
+                remote.root.rotationQuaternion!,
+            );
+        }
+    }
+
+    private _sendOwnState(): void {
+        if (!this.mpClient || !this.spawned) return;
+        const { lat, lon, hdg } = this._getCurrentLatLon();
+        const pos = this.planeRoot.position;
+
+        const wm = this.planeRoot.getWorldMatrix();
+        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
+        const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
+        const surfaceUp = new BABYLON.Vector3(0, 1, 0);
+        const pitchDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(fwd, surfaceUp)))) * 180 / Math.PI;
+        const rollDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(right, surfaceUp)))) * 180 / Math.PI;
+
+        this.mpClient.sendUpdate({
+            lat, lon,
+            alt: pos.y,
+            airspeed: this.velocity.length() * 3.6,
+            throttle: this.thrust,
+            heading: hdg,
+            pitch: pitchDeg,
+            roll: rollDeg,
+        });
     }
 
     // ── 3D Tiles (Step 1: just load, no coord changes) ────────────────────────
@@ -456,6 +659,7 @@ export class FlightSceneSimple extends Scene3D {
                 });
 
                 this.spawned = true;
+                this.onSpawned?.();
                 console.log('[FlightSimple] Model loaded and centered. Scale factor:', scaleFactor);
             },
             null,
@@ -489,6 +693,7 @@ export class FlightSceneSimple extends Scene3D {
             m.parent = this.planeRoot;
         });
         this.spawned = true;
+        this.onSpawned?.();
     }
 
     // ── Camera ────────────────────────────────────────────────────────────────
@@ -951,7 +1156,7 @@ export class FlightSceneSimple extends Scene3D {
 #flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#7df9c8; }
 .hp{position:absolute}
 #hl,#hr{display:none}
-#hfps{position:absolute;top:20px;right:20px;font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif;padding:5px 10px}
+#hfps{font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif}
 #hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
 @keyframes blink{to{opacity:0}}
 #bottom-bar{
@@ -982,7 +1187,10 @@ font-family:'Orbitron',monospace;color:#7df9c8;
 </style>
 <div class="hp" id="hl"></div>
 <div class="hp" id="hr"></div>
-<div id="hfps" style="position:absolute;top:20px;right:20px;font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif;padding:5px 10px"></div>
+<div style="position:absolute;top:20px;right:20px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:10px;font-family:'Inter',sans-serif;padding:5px 10px">
+  <div id="hfps" style="color:rgba(100,240,180,.4)"></div>
+  <div id="h-online" style="color:rgba(100,240,180,.4)">0 ONLINE</div>
+</div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
 <div id="bottom-bar">
   <div class="bb-col">
@@ -1018,6 +1226,7 @@ font-family:'Orbitron',monospace;color:#7df9c8;
         this.hudAttitude = document.getElementById('bb-att')!;
         this.hudWarning  = document.getElementById('hw')!;
         this.hudFps      = document.getElementById('hfps')!;
+        this.hudOnline   = document.getElementById('h-online')!;
         this.hudFlapVal  = document.getElementById('bb-flp')!;
         this.hudFlapBar  = document.getElementById('bb-flp')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
@@ -1076,6 +1285,12 @@ font-family:'Orbitron',monospace;color:#7df9c8;
   <div class="dbg-slider-row"><label>Heading</label><input type="range" id="dbg-ph" min="0" max="360" value="0"><span class="dbg-sv" id="dbg-phv">0\u00B0</span></div>
   <div class="dbg-slider-row"><label>Pitch</label><input type="range" id="dbg-pp" min="-180" max="180" value="0"><span class="dbg-sv" id="dbg-ppv">0\u00B0</span></div>
   <div class="dbg-slider-row"><label>Roll</label><input type="range" id="dbg-pr" min="-180" max="180" value="0"><span class="dbg-sv" id="dbg-prv">0\u00B0</span></div>
+</div>
+<div class="dbg-section">
+  <div class="dbg-title">MULTIPLAYER</div>
+  <div class="dbg-row"><span class="dbg-lbl">Status</span><span class="dbg-val" id="dbg-mp-status">DISCONNECTED</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">Online</span><span class="dbg-val" id="dbg-mp-count">0</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">User ID</span><span class="dbg-val" id="dbg-mp-uid">\u2014</span></div>
 </div>`;
         document.body.appendChild(panel);
         this.dbgPanel    = panel;
@@ -1084,6 +1299,9 @@ font-family:'Orbitron',monospace;color:#7df9c8;
         this.dbgPlaneVel = document.getElementById('dbg-pvel')!;
         this.dbgCamPos   = document.getElementById('dbg-cpos')!;
         this.dbgCamOrbit = document.getElementById('dbg-corbit')!;
+        this.dbgMpStatus = document.getElementById('dbg-mp-status')!;
+        this.dbgMpCount  = document.getElementById('dbg-mp-count')!;
+        this.dbgMpUserId = document.getElementById('dbg-mp-uid')!;
 
         panel.classList.add('hidden');
 

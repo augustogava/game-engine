@@ -1,0 +1,110 @@
+export interface RealtimeClientConfig {
+    path?: string;
+    sendRateMs?: number;
+    reconnect?: boolean;
+    maxReconnectDelay?: number;
+}
+
+type MessageCallback = (msg: any) => void;
+type ConnectionCallback = (connected: boolean) => void;
+
+export class RealtimeClient {
+    private ws: WebSocket | null = null;
+    private disposed = false;
+    private lastSendTime = 0;
+    private reconnectDelay = 1000;
+
+    private readonly path: string;
+    private readonly sendRateMs: number;
+    private readonly shouldReconnect: boolean;
+    private readonly maxReconnectDelay: number;
+
+    private messageListeners: MessageCallback[] = [];
+    private connectionListeners: ConnectionCallback[] = [];
+    private _connected = false;
+
+    constructor(config: RealtimeClientConfig = {}) {
+        this.path = config.path ?? '/ws';
+        this.sendRateMs = config.sendRateMs ?? 50;
+        this.shouldReconnect = config.reconnect ?? true;
+        this.maxReconnectDelay = config.maxReconnectDelay ?? 15000;
+    }
+
+    get connected(): boolean { return this._connected; }
+
+    connect(): void {
+        if (this.disposed) return;
+
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const url = `${proto}//${location.host}${this.path}`;
+
+        try {
+            this.ws = new WebSocket(url);
+        } catch (e) {
+            this.scheduleReconnect();
+            return;
+        }
+
+        this.ws.onopen = () => {
+            this._connected = true;
+            this.reconnectDelay = 1000;
+            this.notifyConnection(true);
+        };
+
+        this.ws.onmessage = (ev) => {
+            try {
+                const msg = JSON.parse(ev.data);
+                for (const cb of this.messageListeners) cb(msg);
+            } catch (e) { /* ignore malformed */ }
+        };
+
+        this.ws.onclose = () => {
+            this._connected = false;
+            this.notifyConnection(false);
+            this.scheduleReconnect();
+        };
+
+        this.ws.onerror = () => {
+            this.ws?.close();
+        };
+    }
+
+    send(data: Record<string, any>): void {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        this.ws.send(JSON.stringify(data));
+    }
+
+    sendThrottled(data: Record<string, any>): void {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        const now = performance.now();
+        if (now - this.lastSendTime < this.sendRateMs) return;
+        this.lastSendTime = now;
+        this.ws.send(JSON.stringify(data));
+    }
+
+    onMessage(cb: MessageCallback): void {
+        this.messageListeners.push(cb);
+    }
+
+    onConnectionChange(cb: ConnectionCallback): void {
+        this.connectionListeners.push(cb);
+    }
+
+    dispose(): void {
+        this.disposed = true;
+        this.ws?.close();
+        this.ws = null;
+        this.messageListeners = [];
+        this.connectionListeners = [];
+    }
+
+    private notifyConnection(connected: boolean): void {
+        for (const cb of this.connectionListeners) cb(connected);
+    }
+
+    private scheduleReconnect(): void {
+        if (this.disposed || !this.shouldReconnect) return;
+        setTimeout(() => this.connect(), this.reconnectDelay);
+        this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, this.maxReconnectDelay);
+    }
+}
