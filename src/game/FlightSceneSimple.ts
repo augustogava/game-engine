@@ -160,8 +160,6 @@ export class FlightSceneSimple extends Scene3D {
     private dbgMpUserId!: HTMLElement;
     public onSpawned: (() => void) | null = null;
 
-    private hudSpeed!:    HTMLElement;
-    private hudAlt!:      HTMLElement;
     private hudThrottle!: HTMLElement;
     private hudAttitude!: HTMLElement;
     private hudWarning!:  HTMLElement;
@@ -177,6 +175,16 @@ export class FlightSceneSimple extends Scene3D {
     private hudCtx!:       CanvasRenderingContext2D;
     private hudFlapVal!:   HTMLElement;
     private hudFlapBar!:   HTMLElement;
+    private hudSpeedVal!:  HTMLElement;
+    private hudAltVal!:    HTMLElement;
+
+    private _tmpRotMatrix    = new BABYLON.Matrix();
+    private _tmpInvRotMatrix = new BABYLON.Matrix();
+    private _tmpFwd   = BABYLON.Vector3.Zero();
+    private _tmpRight = BABYLON.Vector3.Zero();
+    private _tmpUp    = new BABYLON.Vector3(0, 1, 0);
+    private _terrainRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), 1000);
+    private _mapHdgCtx: CanvasRenderingContext2D | null = null;
 
     onCreate(scene: any, _input: InputManager): void {
         this.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -394,11 +402,13 @@ export class FlightSceneSimple extends Scene3D {
         const pos = this.planeRoot.position;
 
         const wm = this.planeRoot.getWorldMatrix();
-        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
-        const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
-        const surfaceUp = new BABYLON.Vector3(0, 1, 0);
-        const pitchDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(fwd, surfaceUp)))) * 180 / Math.PI;
-        const rollDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(right, surfaceUp)))) * 180 / Math.PI;
+        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
+        this._tmpFwd.normalize();
+        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(1, 0, 0), wm, this._tmpRight);
+        this._tmpRight.normalize();
+        this._tmpUp.set(0, 1, 0);
+        const pitchDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this._tmpFwd, this._tmpUp)))) * 180 / Math.PI;
+        const rollDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this._tmpRight, this._tmpUp)))) * 180 / Math.PI;
 
         this.mpClient.sendUpdate({
             lat, lon,
@@ -435,6 +445,8 @@ export class FlightSceneSimple extends Scene3D {
         this.tiles.errorTarget = 6;
         (this.tiles as any).maxDepth = 100;
         (this.tiles as any).errorThreshold = 60;
+        this.tiles.lruCache.maxSize = 2000;
+        this.tiles.lruCache.minSize = 800;
         try {
             this.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
         } catch (e) { console.warn('[3DTiles] Auth plugin failed:', e); }
@@ -1028,24 +1040,24 @@ export class FlightSceneSimple extends Scene3D {
         const altitude = pos.y;
         const airDensity = getAirDensity(altitude);
 
-        const rotMatrix = new BABYLON.Matrix();
+        const rotMatrix = this._tmpRotMatrix;
         BABYLON.Matrix.FromQuaternionToRef(orientation, rotMatrix);
-        const invRotMatrix = new BABYLON.Matrix();
+        const invRotMatrix = this._tmpInvRotMatrix;
         rotMatrix.invertToRef(invRotMatrix);
 
         const toWorld = (v: BABYLON.Vector3) => BABYLON.Vector3.TransformNormal(v, rotMatrix);
         const toBody  = (v: BABYLON.Vector3) => BABYLON.Vector3.TransformNormal(v, invRotMatrix);
 
+        const thrustVec = this._tmpFwd;
+        thrustVec.set(0, 0, this.thrust * MAX_THRUST_N);
+
         const computeForces = (vel: BABYLON.Vector3, angVel: BABYLON.Vector3) => {
             const totalForce  = BABYLON.Vector3.Zero();
             const totalTorque = BABYLON.Vector3.Zero();
 
-            const gravDir = new BABYLON.Vector3(0, -1, 0);
-            totalForce.addInPlace(gravDir.scale(MASS * G_ACCEL));
+            totalForce.y -= MASS * G_ACCEL;
 
-            totalForce.addInPlace(
-                toWorld(new BABYLON.Vector3(0, 0, this.thrust * MAX_THRUST_N)),
-            );
+            totalForce.addInPlace(toWorld(thrustVec));
 
             const bodyVel = toBody(vel);
             for (const surface of this.surfaces) {
@@ -1104,12 +1116,8 @@ export class FlightSceneSimple extends Scene3D {
         orientation.normalize();
 
         if (this.tiles) {
-            const ray = new BABYLON.Ray(
-                new BABYLON.Vector3(pos.x, pos.y + 200, pos.z),
-                new BABYLON.Vector3(0, -1, 0),
-                1000,
-            );
-            const hit = this.scene.pickWithRay(ray, (mesh: BABYLON.AbstractMesh) =>
+            this._terrainRay.origin.set(pos.x, pos.y + 200, pos.z);
+            const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
                 mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
             );
             if (hit?.hit && hit.pickedPoint) {
@@ -1133,8 +1141,8 @@ export class FlightSceneSimple extends Scene3D {
         this.camera.target.copyFrom(pos);
 
         const wm = this.planeRoot.getWorldMatrix();
-        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
-        const targetAlpha = Math.atan2(-fwd.z, -fwd.x);
+        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
+        const targetAlpha = Math.atan2(-this._tmpFwd.z, -this._tmpFwd.x);
         let da = targetAlpha - this.camera.alpha;
         da = ((da + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
         this.camera.alpha += da * Math.min(1, 3 * dt);
@@ -1195,7 +1203,7 @@ font-family:'Orbitron',monospace;color:#7df9c8;
 <div id="bottom-bar">
   <div class="bb-col">
     <div class="bb-lbl">SPEED</div>
-    <div class="bb-val" id="bb-spd">0 <span class="bb-unit">km/h</span></div>
+    <div class="bb-val"><span id="bb-spd-v">0</span> <span class="bb-unit">km/h</span></div>
     <div class="bb-thr"><div class="bb-thr-f" id="bb-thr" style="width:0%"></div></div>
   </div>
   <div class="bb-col">
@@ -1207,10 +1215,10 @@ font-family:'Orbitron',monospace;color:#7df9c8;
   </div>
   <div class="bb-col">
     <div class="bb-lbl">ALT</div>
-    <div class="bb-val" id="bb-alt">0 <span class="bb-unit">m</span></div>
+    <div class="bb-val"><span id="bb-alt-v">0</span> <span class="bb-unit">m</span></div>
   </div>
 </div>
-<canvas id="flight-pfd" width="350" height="300" style="position:absolute;top:50px;left:50%;transform:translateX(-50%);pointer-events:none"></canvas>
+<canvas id="flight-pfd" width="350" height="300" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
 <div id="gps-map" style="position:absolute;top:20px;left:8px;width:160px;height:160px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
   <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
   <canvas id="gps-map-hdg" width="160" height="160" style="position:absolute;inset:0;pointer-events:none"></canvas>
@@ -1220,8 +1228,8 @@ font-family:'Orbitron',monospace;color:#7df9c8;
         document.body.appendChild(hud);
         this.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
         this.hudCtx    = this.hudCanvas.getContext('2d')!;
-        this.hudSpeed    = document.getElementById('bb-spd')!;
-        this.hudAlt      = document.getElementById('bb-alt')!;
+        this.hudSpeedVal = document.getElementById('bb-spd-v')!;
+        this.hudAltVal   = document.getElementById('bb-alt-v')!;
         this.hudThrottle = document.getElementById('bb-thr')!;
         this.hudAttitude = document.getElementById('bb-att')!;
         this.hudWarning  = document.getElementById('hw')!;
@@ -1231,6 +1239,7 @@ font-family:'Orbitron',monospace;color:#7df9c8;
         this.hudFlapBar  = document.getElementById('bb-flp')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
+        this._mapHdgCtx  = this.mapHeadingCanvas.getContext('2d');
 
         this._initFlapBar();
         this._buildDebugPanel();
@@ -1384,13 +1393,14 @@ font-family:'Orbitron',monospace;color:#7df9c8;
         const now = performance.now();
         const { lat, lon, hdg } = this._getCurrentLatLon();
 
-        if (this.mapApiKey && now - this.mapLastUpdate > 1000) {
+        if (this.mapApiKey && now - this.mapLastUpdate > 3000) {
             this.mapLastUpdate = now;
-            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(6)},${lon.toFixed(6)}&zoom=13&size=300x300&scale=2&maptype=satellite&key=${this.mapApiKey}`;
+            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(4)},${lon.toFixed(4)}&zoom=13&size=300x300&scale=2&maptype=satellite&key=${this.mapApiKey}`;
         }
 
         const cv = this.mapHeadingCanvas;
-        const ctx = cv.getContext('2d')!;
+        const ctx = this._mapHdgCtx || (this._mapHdgCtx = cv.getContext('2d')!);
+        if (!ctx) return;
         const cx = cv.width / 2;
         const cy = cv.height / 2;
         ctx.clearRect(0, 0, cv.width, cv.height);
@@ -1431,15 +1441,16 @@ font-family:'Orbitron',monospace;color:#7df9c8;
         const altitude = Math.round(Math.max(0, pos.y));
         const pct = Math.round(this.thrust * 100);
 
-        this.hudSpeed.innerHTML    = `${speed} <span class="bb-unit">km/h</span>`;
-        this.hudAlt.innerHTML      = `${altitude} <span class="bb-unit">m</span>`;
+        this.hudSpeedVal.textContent = String(speed);
+        this.hudAltVal.textContent   = String(altitude);
         this.hudThrottle.style.width = `${pct}%`;
-        this.hudFlapVal.innerHTML  = `${this.FLAP_STEPS[this.flapIndex]}&deg;`;
+        this.hudFlapVal.textContent  = `${this.FLAP_STEPS[this.flapIndex]}\u00B0`;
 
-        const wm      = this.planeRoot.getWorldMatrix();
-        const forward = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
-        const surfaceUp = new BABYLON.Vector3(0, 1, 0);
-        const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(forward, surfaceUp))));
+        const wm = this.planeRoot.getWorldMatrix();
+        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
+        this._tmpFwd.normalize();
+        this._tmpUp.set(0, 1, 0);
+        const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this._tmpFwd, this._tmpUp))));
 
         const isOnGround = altitude < 5;
 
