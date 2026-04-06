@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -139,7 +139,7 @@ const server = http.createServer(async (req, res) => {
                 jsonResponse(res, 400, { error: 'Email is required' });
                 return;
             }
-            const userId = uuidv4();
+            const userId = crypto.randomUUID();
             const ip = getClientIp(req);
             const loc = (location && typeof location === 'string') ? location : 'unknown';
             await dbPool.execute(
