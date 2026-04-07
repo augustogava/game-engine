@@ -137,6 +137,8 @@ export class FlightSceneSimple extends Scene3D {
     private flapKeyLock6 = false;
     private baseZeroLiftAoA = -0.035;
     private currentFlapDeg = 15;
+    private readonly FIXED_DT = 1 / 120;
+    private physicsAccumulator = 0;
     private originLat = -23.4354;
     private originLon = -46.4745;
     private mapApiKey = '';
@@ -236,8 +238,21 @@ export class FlightSceneSimple extends Scene3D {
     update(dt: number): void {
         if (!this.spawned) return;
         if (this.tiles) this.tiles.update();
+        
         this._handleInput(dt);
-        this._applyPhysics(dt);
+        
+        this.physicsAccumulator += dt;
+        const maxSteps = 8;
+        let steps = 0;
+        while (this.physicsAccumulator >= this.FIXED_DT && steps < maxSteps) {
+            this._applyPhysics(this.FIXED_DT);
+            this.physicsAccumulator -= this.FIXED_DT;
+            steps++;
+        }
+        if (this.physicsAccumulator > this.FIXED_DT * maxSteps) {
+            this.physicsAccumulator = 0;
+        }
+        
         this._updateClouds();
         this._updateHUD();
         this._sendOwnState();
@@ -1234,17 +1249,21 @@ export class FlightSceneSimple extends Scene3D {
             }
             
             const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
-            if (speed > 0.1) {
-                const rollingFriction = 0.015;
-                const brakeFriction = this.thrust < 0.05 ? 0.03 : 0;
-                const totalFriction = rollingFriction + brakeFriction;
-                const frictionForce = totalFriction * dt * 60;
-                const dampFactor = Math.max(0, 1 - frictionForce);
-                this.velocity.x *= dampFactor;
-                this.velocity.z *= dampFactor;
-            } else if (speed > 0 && speed <= 0.1 && this.thrust < 0.05) {
-                this.velocity.x = 0;
-                this.velocity.z = 0;
+            if (speed > 0.5) {
+                const rollingFriction = 0.3;
+                const brakeFriction = this.thrust < 0.05 ? 1.5 : 0;
+                const frictionDecel = (rollingFriction + brakeFriction) * dt;
+                const newSpeed = Math.max(0, speed - frictionDecel);
+                const scale = newSpeed / speed;
+                this.velocity.x *= scale;
+                this.velocity.z *= scale;
+            } else if (speed > 0 && speed <= 0.5 && this.thrust < 0.1) {
+                this.velocity.x *= 0.95;
+                this.velocity.z *= 0.95;
+                if (speed < 0.05) {
+                    this.velocity.x = 0;
+                    this.velocity.z = 0;
+                }
             }
         }
 
