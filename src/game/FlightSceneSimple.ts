@@ -177,6 +177,23 @@ export class FlightSceneSimple extends Scene3D {
     private hudFlapBar!:   HTMLElement;
     private hudSpeedVal!:  HTMLElement;
     private hudAltVal!:    HTMLElement;
+    private hudTasVal!:    HTMLElement;
+    private hudRpmVal!:    HTMLElement;
+    private hudRpmNeedle!: HTMLElement;
+    private hudFuelVal!:   HTMLElement;
+    private hudAoaVal!:    HTMLElement;
+    private hudVsVal!:     HTMLElement;
+    private hudTrimVal!:   HTMLElement;
+    private hudBaroVal!:   HTMLElement;
+    private hudAltTape!:   HTMLElement;
+    private hudSpdTape!:   HTMLElement;
+    private hudSpdMarks!:  HTMLElement;
+    private hudAltMarks!:  HTMLElement;
+    private hudVsBar!:     HTMLElement;
+    private spdMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
+    private altMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
+    private lastSpdCenter = -1;
+    private lastAltCenter = -1;
 
     private _tmpRotMatrix    = new BABYLON.Matrix();
     private _tmpInvRotMatrix = new BABYLON.Matrix();
@@ -843,10 +860,10 @@ export class FlightSceneSimple extends Scene3D {
 #touch-overlay{position:fixed;inset:0;pointer-events:none;z-index:150}
 #touch-joy{position:absolute;width:120px;height:120px;border-radius:50%;border:none;background:none;display:none;pointer-events:none}
 #touch-joy-knob{position:absolute;top:50%;left:50%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:rgba(0,255,128,.2);border:none}
-#touch-throttle{position:absolute;bottom:24px;left:16px;width:40px;height:160px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
+#touch-throttle{position:absolute;bottom:220px;left:10px;width:36px;height:140px;border-radius:18px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 18px 18px}
 #touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:32px;height:10px;border-radius:5px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:200px;left:12px;display:flex;flex-direction:column;gap:6px;pointer-events:auto}
+#touch-flap-btns{position:absolute;bottom:370px;left:8px;display:flex;flex-direction:column;gap:6px;pointer-events:auto}
 #touch-flap-btns button{width:48px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:10px;cursor:pointer;touch-action:manipulation}
 </style>
 <div id="touch-joy"><div id="touch-joy-knob"></div></div>
@@ -905,7 +922,7 @@ export class FlightSceneSimple extends Scene3D {
                 const nx = (clamped * Math.cos(angle)) / maxDrag;
                 const ny = (clamped * Math.sin(angle)) / maxDrag;
                 this.touchRollInput = -nx;
-                this.touchPitchInput = -ny;
+                this.touchPitchInput = ny;
                 knob.style.left = `${50 + nx * 35}%`;
                 knob.style.top = `${50 + ny * 35}%`;
             }
@@ -986,6 +1003,84 @@ export class FlightSceneSimple extends Scene3D {
         }
     }
 
+    private _initTapeMarks(): void {
+        if (this.hudSpdMarks && this.spdMarkEls.length === 0) {
+            for (let i = 0; i < 7; i++) {
+                const el = document.createElement('div');
+                el.className = 'hud-tape-mark';
+                const line = document.createElement('div');
+                line.className = 'hud-tape-mark-line';
+                const valEl = document.createElement('span');
+                valEl.className = 'hud-tape-mark-val';
+                el.appendChild(line);
+                el.appendChild(valEl);
+                this.hudSpdMarks.appendChild(el);
+                this.spdMarkEls.push({ el, valEl });
+            }
+        }
+        if (this.hudAltMarks && this.altMarkEls.length === 0) {
+            for (let i = 0; i < 7; i++) {
+                const el = document.createElement('div');
+                el.className = 'hud-tape-mark';
+                const valEl = document.createElement('span');
+                valEl.className = 'hud-tape-mark-val';
+                const line = document.createElement('div');
+                line.className = 'hud-tape-mark-line';
+                el.appendChild(valEl);
+                el.appendChild(line);
+                this.hudAltMarks.appendChild(el);
+                this.altMarkEls.push({ el, valEl });
+            }
+        }
+    }
+
+    private _updateTapeMarks(speedKts: number, altitudeFt: number): void {
+        const spdStep = 20;
+        const spdRange = 60;
+        const spdCenter = Math.round(speedKts / spdStep) * spdStep;
+        
+        if (this.spdMarkEls.length > 0) {
+            const centerChanged = spdCenter !== this.lastSpdCenter;
+            this.lastSpdCenter = spdCenter;
+            
+            for (let i = 0; i < 7; i++) {
+                const idx = 3 - i;
+                const val = Math.max(0, spdCenter + idx * spdStep);
+                const offset = ((speedKts - val) / spdRange) * 50;
+                const mark = this.spdMarkEls[i];
+                mark.el.style.transform = `translateY(${offset}px)`;
+                if (centerChanged) mark.valEl.textContent = String(val);
+            }
+            
+            if (this.hudSpdTape) {
+                const fillPct = 50 + ((speedKts % spdStep) / spdStep - 0.5) * 15;
+                this.hudSpdTape.style.height = `${Math.max(5, Math.min(95, fillPct))}%`;
+            }
+        }
+        
+        const altStep = 200;
+        const altRange = 600;
+        const altCenter = Math.round(altitudeFt / altStep) * altStep;
+        
+        if (this.altMarkEls.length > 0) {
+            const centerChanged = altCenter !== this.lastAltCenter;
+            this.lastAltCenter = altCenter;
+            
+            for (let i = 0; i < 7; i++) {
+                const idx = 3 - i;
+                const val = Math.max(0, altCenter + idx * altStep);
+                const offset = ((altitudeFt - val) / altRange) * 50;
+                const mark = this.altMarkEls[i];
+                mark.el.style.transform = `translateY(${offset}px)`;
+                if (centerChanged) mark.valEl.textContent = String(val);
+            }
+            
+            if (this.hudAltTape) {
+                const fillPct = Math.min(100, Math.max(5, (altitudeFt % 1000) / 1000 * 100));
+                this.hudAltTape.style.height = `${fillPct}%`;
+            }
+        }
+    }
     private _initFlapBar(): void {}
     private _updateFlapDisplay(): void {}
 
@@ -1161,35 +1256,96 @@ export class FlightSceneSimple extends Scene3D {
         hud.innerHTML = `
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400&display=swap');
-#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#7df9c8; }
+#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff; }
 .hp{position:absolute}
-#hl,#hr{display:none}
 #hfps{font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif}
 #hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
 @keyframes blink{to{opacity:0}}
-#bottom-bar{
-display:flex;position:absolute;bottom:0;left:0;right:0;z-index:101;
-padding:10px 24px 12px;
-background:linear-gradient(0deg,rgba(0,10,8,.85) 0%,rgba(0,10,8,0) 100%);
-justify-content:space-between;align-items:flex-end;pointer-events:none;
-font-family:'Orbitron',monospace;color:#7df9c8;
-}
-#bottom-bar .bb-col{display:flex;flex-direction:column;align-items:center;gap:2px}
-#bottom-bar .bb-val{font-size:26px;font-weight:700;text-shadow:0 0 10px rgba(0,255,128,.7),0 1px 3px rgba(0,0,0,.9);letter-spacing:.04em}
-#bottom-bar .bb-lbl{font-size:8px;letter-spacing:.2em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-transform:uppercase}
-#bottom-bar .bb-unit{font-size:11px;font-weight:400;opacity:.55}
-#bottom-bar .bb-att{font-size:13px;letter-spacing:.1em;text-shadow:0 0 8px rgba(0,255,128,.5),0 1px 3px rgba(0,0,0,.9)}
-#bottom-bar .bb-thr{width:70px;height:5px;background:rgba(0,80,40,.6);border-radius:3px;overflow:hidden;margin-top:3px}
-#bottom-bar .bb-thr-f{height:100%;background:linear-gradient(90deg,#00cc66,#00ffaa);border-radius:3px;transition:width .08s linear}
+
+/* Left Panel - Airspeed */
+.hud-panel-left{position:absolute;left:6px;bottom:8px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
+.hud-panel-right{position:absolute;right:6px;bottom:8px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
+
+.hud-tape-col{display:flex;flex-direction:column}
+.hud-header{font-size:8px;letter-spacing:.1em;color:#fff;margin-bottom:2px;font-weight:400;opacity:.8}
+.hud-header-sub{font-size:6px;color:rgba(255,255,255,.4);margin-left:2px}
+
+.hud-tape-section{display:flex;align-items:stretch;overflow:hidden}
+.hud-tape-wrapper{position:relative;display:flex;height:180px;overflow:hidden}
+.hud-tape{position:relative;width:8px;height:100%;background:linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,.5));overflow:hidden}
+.hud-tape-fill-spd{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#c8a030,#e8c860);transition:height .15s}
+.hud-tape-fill-alt{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#3090c8,#50b0e8);transition:height .15s}
+.hud-tape-marks{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:18px;pointer-events:none}
+.hud-tape-marks-left{left:12px;align-items:flex-start}
+.hud-tape-marks-right{right:12px;align-items:flex-end}
+.hud-tape-mark{display:flex;align-items:center;gap:2px}
+.hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.5)}
+.hud-tape-mark-val{font-size:9px;color:rgba(255,255,255,.85);font-family:'Inter',sans-serif;font-weight:500;min-width:24px}
+
+.hud-value-row{display:flex;align-items:baseline;gap:2px;margin-top:3px}
+.hud-value-main{font-size:24px;font-weight:700;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 4px rgba(0,0,0,.9)}
+.hud-value-unit{font-size:8px;color:rgba(255,255,255,.4)}
+
+.hud-sub-row{display:flex;align-items:center;gap:4px;margin-top:1px}
+.hud-sub-label{font-size:6px;color:rgba(255,255,255,.5)}
+.hud-sub-val{font-size:9px;color:#fff;font-family:'Orbitron',monospace}
+
+/* Engine Section - Side by side */
+.hud-engine-col{display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:4px}
+.hud-engine-title{font-size:6px;letter-spacing:.08em;color:rgba(255,255,255,.4);margin-bottom:2px}
+.hud-engine-content{display:flex;flex-direction:column;gap:4px}
+.hud-rpm-gauge{position:relative;width:48px;height:48px}
+.hud-rpm-bg{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle,rgba(20,20,20,.9),rgba(10,10,10,.95));border:1px solid rgba(80,255,160,.25)}
+.hud-rpm-needle{position:absolute;bottom:50%;left:50%;width:2px;height:18px;background:linear-gradient(to top,#50ff80,#80ffa0);transform-origin:bottom center;transform:rotate(-120deg);border-radius:1px;box-shadow:0 0 4px rgba(80,255,128,.5)}
+.hud-rpm-center{position:absolute;top:50%;left:50%;width:6px;height:6px;background:#222;border:1px solid rgba(80,255,160,.3);border-radius:50%;transform:translate(-50%,-50%)}
+.hud-rpm-label{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-size:5px;color:#50ff80;letter-spacing:.03em}
+.hud-engine-vals{display:flex;flex-direction:column;gap:0}
+.hud-engine-val{display:flex;align-items:baseline;gap:3px}
+.hud-engine-val-num{font-size:10px;font-weight:600;color:#fff;font-family:'Orbitron',monospace}
+.hud-engine-val-lbl{font-size:5px;color:rgba(255,255,255,.35)}
+
+/* Right Panel - Instruments side by side */
+.hud-instr-col{display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding-bottom:4px}
+.hud-vs-row{display:flex;align-items:center;gap:4px}
+.hud-vs-header{font-size:6px;color:rgba(255,255,255,.5)}
+.hud-vs-val{font-size:14px;font-weight:600;color:#fff;font-family:'Orbitron',monospace}
+.hud-vs-bar{width:16px;height:70px;background:rgba(0,0,0,.5);position:relative}
+.hud-vs-bar-fill{position:absolute;left:2px;right:2px;background:linear-gradient(to top,#50c878,#80ee90);transition:height .12s,bottom .12s}
+.hud-vs-bar-zero{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(255,255,255,.25)}
+.hud-vs-bar-marks{position:absolute;right:-10px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:space-between;font-size:5px;color:rgba(255,255,255,.4)}
+
+.hud-instr-group{display:flex;flex-direction:column;gap:2px}
+.hud-instr-item{display:flex;align-items:center;gap:4px}
+.hud-instr-val{font-size:10px;font-weight:600;color:#fff;font-family:'Orbitron',monospace;min-width:28px}
+.hud-instr-lbl{font-size:5px;color:rgba(255,255,255,.4);letter-spacing:.04em}
+.hud-instr-bar{width:20px;height:3px;background:rgba(0,0,0,.4);overflow:hidden}
+.hud-instr-bar-fill{height:100%;background:linear-gradient(90deg,#50c878,#80ee90)}
+
+.hud-bottom-row{display:flex;gap:6px;margin-top:3px;padding-top:2px;border-top:1px solid rgba(255,255,255,.08)}
+.hud-bottom-item{display:flex;flex-direction:column;align-items:center}
+.hud-bottom-val{font-size:8px;color:#fff;font-family:'Orbitron',monospace}
+.hud-bottom-lbl{font-size:4px;color:rgba(255,255,255,.25)}
+
 @media(max-width:768px){
 #hfps{display:none}
 #dbg-panel-toggle{display:none!important}
 #flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:220px}
-#gps-map{width:100px!important;height:100px!important;top:6px!important;left:4px!important}
-#bottom-bar .bb-val{font-size:20px}
-#bottom-bar .bb-lbl{font-size:7px}
-#bottom-bar .bb-att{font-size:11px}
-#bottom-bar{padding:8px 12px 10px}
+#gps-map{width:140px!important;height:140px!important;top:6px!important;left:4px!important}
+.hud-panel-left{left:70px!important;transform:scale(.8);transform-origin:bottom left}
+.hud-panel-right{transform:scale(.8);transform-origin:bottom right}
+.hud-tape{height:140px!important}
+.hud-value-main{font-size:18px!important}
+.hud-engine-col{display:none!important}
+}
+@media(max-width:480px){
+#flight-pfd{top:22%!important;width:180px!important;height:140px!important}
+#gps-map{width:100px!important;height:100px!important;top:4px!important;left:2px!important}
+.hud-panel-left{left:55px!important;transform:scale(.65);transform-origin:bottom left}
+.hud-panel-right{transform:scale(.65);transform-origin:bottom right}
+.hud-tape{height:110px!important}
+.hud-value-main{font-size:16px!important}
+.hud-engine-col{display:none!important}
+.hud-instr-col{display:none!important}
 }
 
 </style>
@@ -1200,28 +1356,88 @@ font-family:'Orbitron',monospace;color:#7df9c8;
   <div id="h-online" style="color:rgba(100,240,180,.4)">0 ONLINE</div>
 </div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
-<div id="bottom-bar">
-  <div class="bb-col">
-    <div class="bb-lbl">SPEED</div>
-    <div class="bb-val"><span id="bb-spd-v">0</span> <span class="bb-unit">km/h</span></div>
-    <div class="bb-thr"><div class="bb-thr-f" id="bb-thr" style="width:0%"></div></div>
+
+<!-- Left Panel - Airspeed & Engine side by side -->
+<div class="hud-panel-left">
+  <div class="hud-tape-col">
+    <div class="hud-header">AIRSPEED<span class="hud-header-sub">KTS</span></div>
+    <div class="hud-tape-section">
+      <div class="hud-tape-wrapper">
+        <div class="hud-tape">
+          <div class="hud-tape-fill-spd" id="hud-spd-tape" style="height:50%"></div>
+        </div>
+        <div class="hud-tape-marks hud-tape-marks-left" id="hud-spd-marks"></div>
+      </div>
+    </div>
+    <div class="hud-value-row">
+      <span class="hud-value-main" id="bb-spd-v">0</span>
+    </div>
+    <div class="hud-sub-row">
+      <span class="hud-sub-label">TAS</span>
+      <span class="hud-sub-val"><span id="hud-tas-v">0</span>KT</span>
+    </div>
   </div>
-  <div class="bb-col">
-    <div class="bb-lbl">FLAPS <span style="font-size:6px;opacity:.4">5↓ 6↑</span></div>
-    <div class="bb-val" style="font-size:18px" id="bb-flp">0&deg;</div>
-  </div>
-  <div class="bb-col">
-    <div class="bb-att" id="bb-att">&#9654; LEVEL</div>
-  </div>
-  <div class="bb-col">
-    <div class="bb-lbl">ALT</div>
-    <div class="bb-val"><span id="bb-alt-v">0</span> <span class="bb-unit">m</span></div>
+  <div class="hud-engine-col">
+    <div class="hud-engine-title">ENGINE #1</div>
+    <div class="hud-engine-content">
+      <div class="hud-rpm-gauge">
+        <div class="hud-rpm-bg"></div>
+        <div class="hud-rpm-needle" id="hud-rpm-needle"></div>
+        <div class="hud-rpm-center"></div>
+        <div class="hud-rpm-label">RPM</div>
+      </div>
+      <div class="hud-engine-vals">
+        <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-rpm-v">0</span><span class="hud-engine-val-lbl">RPM</span></div>
+        <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-fuel-v">100%</span><span class="hud-engine-val-lbl">FUEL</span></div>
+        <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-aoa-v">0&deg;</span><span class="hud-engine-val-lbl">AOA</span></div>
+      </div>
+    </div>
   </div>
 </div>
+
+<!-- Right Panel - Altitude & Instruments side by side -->
+<div class="hud-panel-right">
+  <div class="hud-instr-col">
+    <div class="hud-vs-row">
+      <div class="hud-vs-bar">
+        <div class="hud-vs-bar-zero"></div>
+        <div class="hud-vs-bar-fill" id="hud-vs-bar" style="height:0;bottom:50%"></div>
+      </div>
+      <div>
+        <div class="hud-vs-header">VS</div>
+        <div class="hud-vs-val" id="hud-vs-v">0</div>
+      </div>
+    </div>
+    <div class="hud-instr-group">
+      <div class="hud-instr-item"><span class="hud-instr-val" id="bb-flp">OFF</span><span class="hud-instr-lbl">FLAPS</span></div>
+      <div class="hud-instr-item"><span class="hud-instr-val" id="hud-trim-v">0</span><span class="hud-instr-lbl">TRIM</span></div>
+      <div class="hud-instr-item"><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span></div>
+    </div>
+    <div class="hud-bottom-row">
+      <div class="hud-bottom-item"><span class="hud-bottom-val" id="hud-baro-v">29.92</span><span class="hud-bottom-lbl">IN</span></div>
+      <div class="hud-bottom-item"><span class="hud-bottom-val" id="bb-att">LEVEL</span><span class="hud-bottom-lbl">ATT</span></div>
+    </div>
+  </div>
+  <div class="hud-tape-col">
+    <div class="hud-header" style="text-align:right">ALTITUDE</div>
+    <div class="hud-tape-section">
+      <div class="hud-tape-wrapper">
+        <div class="hud-tape-marks hud-tape-marks-right" id="hud-alt-marks" style="right:auto;left:-32px"></div>
+        <div class="hud-tape">
+          <div class="hud-tape-fill-alt" id="hud-alt-tape" style="height:50%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="hud-value-row" style="justify-content:flex-end">
+      <span class="hud-value-main" id="bb-alt-v">0</span>
+    </div>
+  </div>
+</div>
+
 <canvas id="flight-pfd" width="350" height="300" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
-<div id="gps-map" style="position:absolute;top:20px;left:8px;width:160px;height:160px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
+<div id="gps-map" style="position:absolute;top:20px;left:8px;width:180px;height:180px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
   <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
-  <canvas id="gps-map-hdg" width="160" height="160" style="position:absolute;inset:0;pointer-events:none"></canvas>
+  <canvas id="gps-map-hdg" width="180" height="180" style="position:absolute;inset:0;pointer-events:none"></canvas>
   <div style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:8px;letter-spacing:.15em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8)">GPS</div>
   <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap"></div>
 </div>`;
@@ -1237,10 +1453,24 @@ font-family:'Orbitron',monospace;color:#7df9c8;
         this.hudOnline   = document.getElementById('h-online')!;
         this.hudFlapVal  = document.getElementById('bb-flp')!;
         this.hudFlapBar  = document.getElementById('bb-flp')!;
+        this.hudTasVal   = document.getElementById('hud-tas-v')!;
+        this.hudRpmVal   = document.getElementById('hud-rpm-v')!;
+        this.hudRpmNeedle = document.getElementById('hud-rpm-needle')!;
+        this.hudFuelVal  = document.getElementById('hud-fuel-v')!;
+        this.hudAoaVal   = document.getElementById('hud-aoa-v')!;
+        this.hudVsVal    = document.getElementById('hud-vs-v')!;
+        this.hudTrimVal  = document.getElementById('hud-trim-v')!;
+        this.hudBaroVal  = document.getElementById('hud-baro-v')!;
+        this.hudAltTape  = document.getElementById('hud-alt-tape')!;
+        this.hudSpdTape  = document.getElementById('hud-spd-tape')!;
+        this.hudSpdMarks = document.getElementById('hud-spd-marks')!;
+        this.hudAltMarks = document.getElementById('hud-alt-marks')!;
+        this.hudVsBar    = document.getElementById('hud-vs-bar')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
         this._mapHdgCtx  = this.mapHeadingCanvas.getContext('2d');
 
+        this._initTapeMarks();
         this._initFlapBar();
         this._buildDebugPanel();
     }
@@ -1436,33 +1666,71 @@ font-family:'Orbitron',monospace;color:#7df9c8;
     // ── HUD Update ────────────────────────────────────────────────────────────
 
     private _updateHUD(): void {
-        const speed = Math.round(this.velocity.length() * 3.6);
+        const speedKmh = Math.round(this.velocity.length() * 3.6);
+        const speedKts = Math.round(speedKmh * 0.539957);
         const pos = this.planeRoot.position;
-        const altitude = Math.round(Math.max(0, pos.y));
+        const altitudeM = Math.round(Math.max(0, pos.y));
+        const altitudeFt = Math.round(altitudeM * 3.28084);
         const pct = Math.round(this.thrust * 100);
 
-        this.hudSpeedVal.textContent = String(speed);
-        this.hudAltVal.textContent   = String(altitude);
+        this.hudSpeedVal.textContent = String(speedKts);
+        this.hudAltVal.textContent   = String(altitudeFt);
         this.hudThrottle.style.width = `${pct}%`;
-        this.hudFlapVal.textContent  = `${this.FLAP_STEPS[this.flapIndex]}\u00B0`;
+
+        const flapDeg = this.FLAP_STEPS[this.flapIndex];
+        this.hudFlapVal.textContent = flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF';
 
         const wm = this.planeRoot.getWorldMatrix();
         BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
         this._tmpFwd.normalize();
         this._tmpUp.set(0, 1, 0);
         const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this._tmpFwd, this._tmpUp))));
+        const pitchDeg = Math.round(pitchAngle * 180 / Math.PI);
 
-        const isOnGround = altitude < 5;
+        const isOnGround = altitudeM < 5;
 
         this.hudAttitude.textContent =
-            isOnGround         ? '\u25B6 GROUND'   :
-            pitchAngle > 0.08  ? '\u25B2 CLIMBING' :
-            pitchAngle < -0.08 ? '\u25BC DIVING'   : '\u25B6 LEVEL';
+            isOnGround         ? 'GROUND'   :
+            pitchAngle > 0.08  ? 'CLIMB' :
+            pitchAngle < -0.08 ? 'DESC'   : 'LEVEL';
         this.hudWarning.style.display =
-            (speed < STALL_SPEED_HUD && altitude > 20) ? 'block' : 'none';
+            (speedKts < STALL_SPEED_HUD && altitudeM > 20) ? 'block' : 'none';
 
         this.hudFps.textContent =
             `${this.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;
+
+        if (this.hudTasVal) this.hudTasVal.textContent = String(speedKts);
+
+        const rpm = Math.round(1200 + this.thrust * 1500);
+        if (this.hudRpmVal) this.hudRpmVal.textContent = String(rpm);
+        if (this.hudRpmNeedle) {
+            const rpmAngle = -120 + (this.thrust * 240);
+            this.hudRpmNeedle.style.transform = `rotate(${rpmAngle}deg)`;
+        }
+
+        const fuelPct = 100 - Math.min(100, Math.round(performance.now() / 60000));
+        if (this.hudFuelVal) this.hudFuelVal.textContent = `${fuelPct}%`;
+
+        const aoaDeg = Math.round(pitchDeg);
+        if (this.hudAoaVal) this.hudAoaVal.textContent = `${aoaDeg}\u00B0`;
+
+        const vsFpm = Math.round(this.velocity.y * 196.85);
+        if (this.hudVsVal) this.hudVsVal.textContent = String(vsFpm);
+
+        if (this.hudVsBar) {
+            const vsClamp = Math.max(-1000, Math.min(1000, vsFpm));
+            const vsHeight = Math.abs(vsClamp) / 1000 * 50;
+            this.hudVsBar.style.height = `${vsHeight}%`;
+            this.hudVsBar.style.bottom = vsFpm >= 0 ? '50%' : `${50 - vsHeight}%`;
+            this.hudVsBar.style.background = vsFpm >= 0 
+                ? 'linear-gradient(to top,rgba(50,200,100,.8),rgba(100,255,150,.6))'
+                : 'linear-gradient(to bottom,rgba(200,100,50,.8),rgba(255,150,100,.6))';
+        }
+
+        if (this.hudTrimVal) this.hudTrimVal.textContent = String(Math.round(pitchDeg * 0.5));
+        if (this.hudBaroVal) this.hudBaroVal.textContent = '29.92';
+
+        this._updateTapeMarks(speedKts, altitudeFt);
 
         this._drawFlightHUD();
         this._updateMap();
