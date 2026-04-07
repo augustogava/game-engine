@@ -118,6 +118,34 @@ function computeSurfaceForces(
     return { force, torque };
 }
 
+// ── Solar position ───────────────────────────────────────────────────────────
+function getSunPosition(lat: number, lon: number, date: Date): { elevation: number; azimuth: number } {
+    const rad = Math.PI / 180;
+    const jd = Math.floor(365.25 * (date.getUTCFullYear() + 4716))
+             + Math.floor(30.6001 * ((date.getUTCMonth() + 1 < 3 ? date.getUTCMonth() + 13 : date.getUTCMonth() + 1 + 1)))
+             + date.getUTCDate() + (date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600) / 24
+             - 1524.5;
+    const n = jd - 2451545.0;
+    const L = (280.460 + 0.9856474 * n) % 360;
+    const g = ((357.528 + 0.9856003 * n) % 360) * rad;
+    const lambda = (L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * rad;
+    const eps = 23.439 * rad - 3.56e-7 * rad * n;
+    const sinDec = Math.sin(eps) * Math.sin(lambda);
+    const dec = Math.asin(sinDec);
+    const ra = Math.atan2(Math.cos(eps) * Math.sin(lambda), Math.cos(lambda));
+    const gmst = (280.46061837 + 360.98564736629 * n) % 360;
+    const lmst = (gmst + lon) * rad;
+    const ha = lmst - ra;
+    const latR = lat * rad;
+    const sinElev = Math.sin(latR) * Math.sin(dec) + Math.cos(latR) * Math.cos(dec) * Math.cos(ha);
+    const elevation = Math.asin(sinElev) / rad;
+    const cosAz = (Math.sin(dec) - Math.sin(elevation * rad) * Math.sin(latR))
+                / (Math.cos(elevation * rad) * Math.cos(latR));
+    let azimuth = Math.acos(Math.max(-1, Math.min(1, cosAz))) / rad;
+    if (Math.sin(ha) > 0) azimuth = 360 - azimuth;
+    return { elevation, azimuth };
+}
+
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 export class FlightSceneSimple extends Scene3D {
     private planeRoot!: BABYLON.TransformNode;
@@ -205,6 +233,21 @@ export class FlightSceneSimple extends Scene3D {
     private _terrainRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), 1000);
     private _mapHdgCtx: CanvasRenderingContext2D | null = null;
 
+    private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
+    private _navBlinkTimer = 0;
+    private _navStrobeTimer = 0;
+
+    private _hemiLight: BABYLON.HemisphericLight | null = null;
+    private _sunLight: BABYLON.DirectionalLight | null = null;
+    private _fillLight: BABYLON.DirectionalLight | null = null;
+    private _sunMesh: BABYLON.Mesh | null = null;
+    private _sunMeshMat: BABYLON.StandardMaterial | null = null;
+    private _skyboxMat: BABYLON.StandardMaterial | null = null;
+    private _starRoot: BABYLON.TransformNode | null = null;
+    private _sunUpdateTimer = 0;
+    private _sunElevation = 45;
+    private hudUtc!: HTMLElement;
+
     onCreate(scene: any, _input: InputManager): void {
         this.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         scene.useRightHandedSystem = true;
@@ -253,6 +296,13 @@ export class FlightSceneSimple extends Scene3D {
             this.physicsAccumulator = 0;
         }
         
+        this._sunUpdateTimer += dt;
+        if (this._sunUpdateTimer >= 2.0) {
+            this._sunUpdateTimer = 0;
+            const scene = this.planeRoot.getScene();
+            if (scene) this._applyDayNightCycle(scene);
+        }
+        this._updateNavLights(dt);
         this._updateClouds();
         this._updateHUD();
         this._sendOwnState();
@@ -521,23 +571,23 @@ export class FlightSceneSimple extends Scene3D {
     // ── Lighting ─────────────────────────────────────────────────────────────
 
     private _setupLighting(scene: BABYLON.Scene): void {
-        const hemi = new BABYLON.HemisphericLight('sky', new BABYLON.Vector3(0, 1, 0), scene);
-        hemi.intensity = 0.5;
-        hemi.diffuse = new BABYLON.Color3(0.6, 0.75, 1.0);
-        hemi.groundColor = new BABYLON.Color3(0.25, 0.35, 0.18);
+        this._hemiLight = new BABYLON.HemisphericLight('sky', new BABYLON.Vector3(0, 1, 0), scene);
+        this._hemiLight.intensity = 0.5;
+        this._hemiLight.diffuse = new BABYLON.Color3(0.6, 0.75, 1.0);
+        this._hemiLight.groundColor = new BABYLON.Color3(0.25, 0.35, 0.18);
 
-        const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.4, -0.9, -0.3).normalize(), scene);
-        sun.position = new BABYLON.Vector3(800, 1200, 800);
-        sun.intensity = 3.0;
-        sun.diffuse = new BABYLON.Color3(1.0, 0.92, 0.75);
-        sun.specular = new BABYLON.Color3(1.0, 0.9, 0.6);
+        this._sunLight = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.4, -0.9, -0.3).normalize(), scene);
+        this._sunLight.position = new BABYLON.Vector3(800, 1200, 800);
+        this._sunLight.intensity = 3.0;
+        this._sunLight.diffuse = new BABYLON.Color3(1.0, 0.92, 0.75);
+        this._sunLight.specular = new BABYLON.Color3(1.0, 0.9, 0.6);
 
-        const fill = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(0.4, -0.3, 0.3).normalize(), scene);
-        fill.intensity = 0.6;
-        fill.diffuse = new BABYLON.Color3(0.6, 0.7, 0.9);
-        fill.specular = BABYLON.Color3.Black();
+        this._fillLight = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(0.4, -0.3, 0.3).normalize(), scene);
+        this._fillLight.intensity = 0.6;
+        this._fillLight.diffuse = new BABYLON.Color3(0.6, 0.7, 0.9);
+        this._fillLight.specular = BABYLON.Color3.Black();
 
-        const shadow = new BABYLON.CascadedShadowGenerator(4096, sun);
+        const shadow = new BABYLON.CascadedShadowGenerator(4096, this._sunLight);
         shadow.lambda                 = 0.75;
         shadow.cascadeBlendPercentage = 0.1;
         shadow.depthClamp             = true;
@@ -550,6 +600,122 @@ export class FlightSceneSimple extends Scene3D {
         (this as any)._shadow = shadow;
 
         scene.environmentIntensity = 1.3;
+
+        this._buildSunMesh(scene);
+        this._buildStars(scene);
+        this._applyDayNightCycle(scene);
+    }
+
+    private _buildSunMesh(scene: BABYLON.Scene): void {
+        this._sunMesh = BABYLON.MeshBuilder.CreateSphere('sunMesh', { diameter: 800, segments: 16 }, scene);
+        this._sunMesh.isPickable = false;
+        this._sunMesh.infiniteDistance = true;
+
+        this._sunMeshMat = new BABYLON.StandardMaterial('sunMeshMat', scene);
+        this._sunMeshMat.emissiveColor = new BABYLON.Color3(1.0, 0.95, 0.7);
+        this._sunMeshMat.disableLighting = true;
+        this._sunMeshMat.backFaceCulling = false;
+        this._sunMesh.material = this._sunMeshMat;
+    }
+
+    private _buildStars(scene: BABYLON.Scene): void {
+        this._starRoot = new BABYLON.TransformNode('starRoot', scene);
+        const starMat = new BABYLON.StandardMaterial('starMat', scene);
+        starMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+        starMat.disableLighting = true;
+
+        const baseStar = BABYLON.MeshBuilder.CreatePlane('starBase', { size: 1 }, scene);
+        baseStar.material = starMat;
+        baseStar.isVisible = false;
+        baseStar.parent = this._starRoot;
+
+        const starDist = 50000;
+        for (let i = 0; i < 300; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const onlyUpper = Math.abs(Math.cos(phi));
+            if (onlyUpper < 0.05) continue;
+            const x = starDist * Math.sin(phi) * Math.cos(theta);
+            const y = starDist * Math.abs(Math.cos(phi));
+            const z = starDist * Math.sin(phi) * Math.sin(theta);
+            const inst = baseStar.createInstance('star_' + i);
+            inst.position.set(x, y, z);
+            const sz = 15 + Math.random() * 40;
+            inst.scaling.setAll(sz);
+            inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+        }
+        this._starRoot.setEnabled(false);
+    }
+
+    private _applyDayNightCycle(scene: BABYLON.Scene): void {
+        const { elevation, azimuth } = getSunPosition(this.originLat, this.originLon, new Date());
+        this._sunElevation = elevation;
+        const rad = Math.PI / 180;
+        const elevR = elevation * rad;
+        const azR = azimuth * rad;
+
+        const sunDirX = -Math.sin(azR) * Math.cos(elevR);
+        const sunDirY = -Math.sin(elevR);
+        const sunDirZ = -Math.cos(azR) * Math.cos(elevR);
+        const sunDir = new BABYLON.Vector3(sunDirX, sunDirY, sunDirZ).normalize();
+
+        if (this._sunLight) {
+            this._sunLight.direction = sunDir;
+            this._sunLight.position = sunDir.scale(-1200);
+        }
+
+        if (this._sunMesh) {
+            this._sunMesh.position = sunDir.scale(-10000);
+            this._sunMesh.isVisible = elevation > -2;
+        }
+
+        const t = Math.max(0, Math.min(1, (elevation + 6) / 30));
+        const nightT = Math.max(0, Math.min(1, (elevation + 2) / 8));
+
+        if (this._sunLight) {
+            this._sunLight.intensity = 0.1 + t * 2.9;
+            const r = 0.3 + t * 0.7;
+            const g = 0.25 + t * 0.67;
+            const b = 0.2 + t * 0.55;
+            this._sunLight.diffuse.set(r, g, b);
+            this._sunLight.specular.set(r, g * 0.98, b * 0.8);
+        }
+
+        if (this._hemiLight) {
+            this._hemiLight.intensity = 0.03 + t * 0.47;
+            this._hemiLight.diffuse.set(0.1 + t * 0.5, 0.12 + t * 0.63, 0.2 + t * 0.8);
+            this._hemiLight.groundColor.set(0.02 + t * 0.23, 0.03 + t * 0.32, 0.04 + t * 0.14);
+        }
+
+        if (this._fillLight) {
+            this._fillLight.intensity = 0.05 + t * 0.55;
+        }
+
+        if (this._sunMeshMat) {
+            const warmth = Math.max(0, Math.min(1, elevation / 15));
+            this._sunMeshMat.emissiveColor.set(1.0, 0.7 + warmth * 0.25, 0.3 + warmth * 0.4);
+        }
+
+        const fogR = 0.02 + t * 0.53;
+        const fogG = 0.02 + t * 0.68;
+        const fogB = 0.06 + t * 0.89;
+        scene.fogColor.set(fogR, fogG, fogB);
+
+        const clearR = 0.01 + t * 0.03;
+        const clearG = 0.01 + t * 0.09;
+        const clearB = 0.04 + t * 0.18;
+        scene.clearColor.set(clearR, clearG, clearB, 1);
+
+        scene.environmentIntensity = 0.15 + t * 1.15;
+
+        if (this._skyboxMat) {
+            const skyAlpha = t;
+            this._skyboxMat.alpha = skyAlpha;
+        }
+
+        if (this._starRoot) {
+            this._starRoot.setEnabled(nightT < 0.5);
+        }
     }
 
     // ── Skybox ────────────────────────────────────────────────────────────────
@@ -561,15 +727,15 @@ export class FlightSceneSimple extends Scene3D {
         scene.environmentTexture = envTex;
 
         const skybox = BABYLON.MeshBuilder.CreateBox('skyBox', { size: 10_000_000 }, scene);
-        const skyMat = new BABYLON.StandardMaterial('skyMat', scene);
-        skyMat.backFaceCulling = false;
-        skyMat.disableLighting = true;
+        this._skyboxMat = new BABYLON.StandardMaterial('skyMat', scene);
+        this._skyboxMat.backFaceCulling = false;
+        this._skyboxMat.disableLighting = true;
         const skyTex = new BABYLON.CubeTexture('https://assets.babylonjs.com/textures/TropicalSunnyDay', scene);
         skyTex.coordinatesMode   = BABYLON.Texture.SKYBOX_MODE;
-        skyMat.reflectionTexture = skyTex;
-        skyMat.diffuseColor      = BABYLON.Color3.Black();
-        skyMat.specularColor     = BABYLON.Color3.Black();
-        skybox.material          = skyMat;
+        this._skyboxMat.reflectionTexture = skyTex;
+        this._skyboxMat.diffuseColor      = BABYLON.Color3.Black();
+        this._skyboxMat.specularColor     = BABYLON.Color3.Black();
+        skybox.material          = this._skyboxMat;
         skybox.infiniteDistance   = true;
     }
 
@@ -702,9 +868,19 @@ export class FlightSceneSimple extends Scene3D {
                     if (shadow) shadow.addShadowCaster(m, true);
                 });
 
+                const bbW = (bb.max.x - bb.min.x) * scaleFactor;
+                const bbH = (bb.max.y - bb.min.y) * scaleFactor;
+                const bbD = (bb.max.z - bb.min.z) * scaleFactor;
+                console.log('[FlightSimple] Nav dims (W,H,D):', bbW.toFixed(1), bbH.toFixed(1), bbD.toFixed(1));
+                this._buildNavLights(scene, this.planeRoot, {
+                    halfSpan: bbW / 2,
+                    height: bbH,
+                    halfLen: bbD / 2,
+                });
+
                 this.spawned = true;
                 this.onSpawned?.();
-                console.log('[FlightSimple] Model loaded and centered. Scale factor:', scaleFactor);
+                console.log('[FlightSimple] Model loaded and centered. Scale factor:', scaleFactor, 'dims:', bbW.toFixed(1), bbH.toFixed(1), bbD.toFixed(1));
             },
             null,
             (_scene: BABYLON.Scene, _msg: string, ex?: any) => {
@@ -736,8 +912,99 @@ export class FlightSceneSimple extends Scene3D {
             m.material = mat;
             m.parent = this.planeRoot;
         });
+        this._buildNavLights(scene, this.planeRoot, {
+            halfSpan: 8,
+            height: 2.8,
+            halfLen: 5.5,
+        });
         this.spawned = true;
         this.onSpawned?.();
+    }
+
+    private _buildNavLights(
+        scene: BABYLON.Scene,
+        parent: BABYLON.TransformNode,
+        dims: { halfSpan: number; height: number; halfLen: number },
+    ): void {
+        const hs = dims.halfSpan * 0.97;
+        const wingY = dims.height * 0.25;
+        const wingZ = -dims.halfLen * 0.25;
+        const tailZ = -dims.halfLen * 0.92;
+        const tailY = dims.height * 0.85;
+
+        const defs: { name: string; color: BABYLON.Color3; pos: BABYLON.Vector3; strobe: boolean; intensity: number; range: number; glowSize: number }[] = [
+            { name: 'navPort',  color: new BABYLON.Color3(1, 0.05, 0.05), pos: new BABYLON.Vector3(-hs, wingY, wingZ),       strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
+            { name: 'navStbd',  color: new BABYLON.Color3(0.05, 1, 0.05), pos: new BABYLON.Vector3(hs, wingY, wingZ),        strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
+            { name: 'navTail',  color: new BABYLON.Color3(1, 1, 1),       pos: new BABYLON.Vector3(0, tailY, tailZ),          strobe: false, intensity: 30, range: 120, glowSize: 2.5 },
+            { name: 'navBelly', color: new BABYLON.Color3(1, 0.1, 0.05),  pos: new BABYLON.Vector3(0, -0.3, 0),              strobe: true,  intensity: 50, range: 250, glowSize: 4.0 },
+        ];
+
+        const glowTex = new BABYLON.DynamicTexture('navGlowTex', 128, scene, false);
+        const ctx = glowTex.getContext();
+        const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(255,255,255,1)');
+        grad.addColorStop(0.08, 'rgba(255,255,255,0.9)');
+        grad.addColorStop(0.2, 'rgba(255,255,255,0.4)');
+        grad.addColorStop(0.5, 'rgba(255,255,255,0.08)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 128, 128);
+        glowTex.update();
+        glowTex.hasAlpha = true;
+
+        for (const def of defs) {
+            const light = new BABYLON.PointLight(def.name, def.pos.clone(), scene);
+            light.parent = parent;
+            light.intensity = def.intensity;
+            light.range = def.range;
+            light.diffuse = def.color.clone();
+            light.specular = def.color.clone();
+
+            const core = BABYLON.MeshBuilder.CreateSphere(def.name + 'Core', { diameter: 0.4 }, scene);
+            core.parent = parent;
+            core.position = def.pos.clone();
+            core.isPickable = false;
+            const coreMat = new BABYLON.StandardMaterial(def.name + 'CoreMat', scene);
+            coreMat.emissiveColor = def.color.scale(3);
+            coreMat.disableLighting = true;
+            core.material = coreMat;
+
+            const halo = BABYLON.MeshBuilder.CreatePlane(def.name + 'Halo', { size: def.glowSize }, scene);
+            halo.parent = parent;
+            halo.position = def.pos.clone();
+            halo.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+            halo.isPickable = false;
+            const haloMat = new BABYLON.StandardMaterial(def.name + 'HaloMat', scene);
+            haloMat.emissiveColor = def.color.clone();
+            haloMat.opacityTexture = glowTex;
+            haloMat.disableLighting = true;
+            haloMat.backFaceCulling = false;
+            haloMat.alphaMode = BABYLON.Constants.ALPHA_ADD;
+            halo.material = haloMat;
+
+            this._navLights.push({ light, mesh: halo, core, strobe: def.strobe, maxIntensity: def.intensity });
+        }
+
+        const gl = new BABYLON.GlowLayer('navGlow', scene, { blurKernelSize: 128 });
+        gl.intensity = 2.0;
+        for (const nav of this._navLights) {
+            gl.addIncludedOnlyMesh(nav.core as BABYLON.Mesh);
+            gl.addIncludedOnlyMesh(nav.mesh as BABYLON.Mesh);
+        }
+    }
+
+    private _updateNavLights(dt: number): void {
+        if (this._navLights.length === 0) return;
+        this._navBlinkTimer += dt;
+        this._navStrobeTimer += dt;
+        const blinkOn  = (this._navBlinkTimer % 1.0) < 0.5;
+        const strobeOn = (this._navStrobeTimer % 0.3) < 0.1;
+        for (const nav of this._navLights) {
+            const on = nav.strobe ? strobeOn : blinkOn;
+            nav.light.intensity = on ? nav.maxIntensity : 0;
+            nav.mesh.isVisible = on;
+            nav.core.isVisible = on;
+        }
     }
 
     // ── Camera ────────────────────────────────────────────────────────────────
@@ -811,9 +1078,9 @@ export class FlightSceneSimple extends Scene3D {
         ssao.minZAspect = 0.5;
         if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
 
-        const sun = scene.getLightByName('sun');
-        if (sun) {
-            const lfs = new BABYLON.LensFlareSystem('sunFlare', sun, scene);
+        const sunEmitter = scene.getMeshByName('sunMesh') || scene.getLightByName('sun');
+        if (sunEmitter) {
+            const lfs = new BABYLON.LensFlareSystem('sunFlare', sunEmitter, scene);
             lfs.borderLimit = 600;
             ([[0.6, 0], [0.2, 0.4], [0.12, 0.7], [0.3, -0.2]] as [number, number][]).forEach(([size, pos]) => {
                 new BABYLON.LensFlare(size, pos, new BABYLON.Color3(1, 0.95, 0.6),
@@ -1389,6 +1656,7 @@ export class FlightSceneSimple extends Scene3D {
   <div id="hfps" style="color:rgba(100,240,180,.4)"></div>
   <div id="h-online" style="color:rgba(100,240,180,.4)">0 ONLINE</div>
 </div>
+<div id="hud-utc" style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
 
 <!-- Left Panel - Airspeed & Engine side by side -->
@@ -1500,6 +1768,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudSpdMarks = document.getElementById('hud-spd-marks')!;
         this.hudAltMarks = document.getElementById('hud-alt-marks')!;
         this.hudVsBar    = document.getElementById('hud-vs-bar')!;
+        this.hudUtc      = document.getElementById('hud-utc')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
         this._mapHdgCtx  = this.mapHeadingCanvas.getContext('2d');
@@ -1700,6 +1969,14 @@ export class FlightSceneSimple extends Scene3D {
     // ── HUD Update ────────────────────────────────────────────────────────────
 
     private _updateHUD(): void {
+        const now = new Date();
+        const hh = String(now.getUTCHours()).padStart(2, '0');
+        const mm = String(now.getUTCMinutes()).padStart(2, '0');
+        const ss = String(now.getUTCSeconds()).padStart(2, '0');
+        const dd = String(now.getUTCDate()).padStart(2, '0');
+        const mo = String(now.getUTCMonth() + 1).padStart(2, '0');
+        this.hudUtc.textContent = `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC`;
+
         const speedKmh = Math.round(this.velocity.length() * 3.6);
         const speedKts = Math.round(speedKmh * 0.539957);
         const pos = this.planeRoot.position;
