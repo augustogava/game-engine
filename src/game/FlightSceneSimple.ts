@@ -1221,7 +1221,8 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
-        if (pos.y <= groundLevel) {
+        const isOnGround = pos.y <= groundLevel;
+        if (isOnGround) {
             pos.y = groundLevel;
             const downSpeed = this.velocity.y;
             if (downSpeed < 0) {
@@ -1230,6 +1231,20 @@ export class FlightSceneSimple extends Scene3D {
                     this.velocity.scaleInPlace(0.97);
                     this.angularVelocity.scaleInPlace(0.5);
                 }
+            }
+            
+            const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+            if (speed > 0.1) {
+                const rollingFriction = 0.015;
+                const brakeFriction = this.thrust < 0.05 ? 0.03 : 0;
+                const totalFriction = rollingFriction + brakeFriction;
+                const frictionForce = totalFriction * dt * 60;
+                const dampFactor = Math.max(0, 1 - frictionForce);
+                this.velocity.x *= dampFactor;
+                this.velocity.z *= dampFactor;
+            } else if (speed > 0 && speed <= 0.1 && this.thrust < 0.05) {
+                this.velocity.x = 0;
+                this.velocity.z = 0;
             }
         }
 
