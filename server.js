@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
-const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 
 const PORT = process.env.PORT || 3000;
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -22,13 +22,14 @@ function loadEnv() {
 }
 const env = loadEnv();
 const DATABASE_URL = process.env.DATABASE_URL || env.DATABASE_URL || '';
+const SECRET_KEY = process.env.SECRET_KEY || env.SECRET_KEY || '';
 
 // ── MySQL pool ───────────────────────────────────────────────────────────────
 let dbPool = null;
 
 async function initDatabase() {
     if (!DATABASE_URL) {
-        console.warn('[DB] No DATABASE_URL configured — registration disabled.');
+        console.warn('[DB] No DATABASE_URL — registration and stats disabled.');
         return;
     }
     try {
@@ -40,15 +41,17 @@ async function initDatabase() {
         await dbPool.execute(`
             CREATE TABLE IF NOT EXISTS game_sessions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                user_id VARCHAR(36) NOT NULL,
-                email VARCHAR(255) NOT NULL,
+                user_id INT NOT NULL,
+                username VARCHAR(100) NOT NULL,
                 ip VARCHAR(45) NOT NULL,
-                location VARCHAR(255) DEFAULT 'unknown',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE KEY idx_user_id (user_id)
+                connected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                disconnected_at DATETIME DEFAULT NULL,
+                flight_duration_min DECIMAL(10,2) DEFAULT NULL,
+                INDEX idx_game_sessions_user (user_id),
+                INDEX idx_game_sessions_connected (connected_at)
             )
         `);
-        console.log('[DB] Connected and game_sessions table ready.');
+        console.log('[DB] Connected and tables ready.');
     } catch (err) {
         console.error('[DB] Init failed:', err.message);
         dbPool = null;
@@ -56,24 +59,12 @@ async function initDatabase() {
 }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
-function readJsonBody(req) {
-    return new Promise((resolve, reject) => {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            try { resolve(JSON.parse(body)); }
-            catch (e) { reject(e); }
-        });
-        req.on('error', reject);
-    });
-}
-
 function jsonResponse(res, status, data) {
     const payload = JSON.stringify(data);
     res.writeHead(status, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
     });
     res.end(payload);
@@ -105,10 +96,21 @@ const MIME_TYPES = {
     '.glb': 'model/gltf-binary',
 };
 
+// ── Haversine (nautical miles) ────────────────────────────────────────────────
+function haversineNm(lat1, lon1, lat2, lon2) {
+    const R = 3440.065;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2
+            + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+            * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 // ── HTTP server ──────────────────────────────────────────────────────────────
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -127,31 +129,79 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // API: register
-    if (req.method === 'POST' && req.url.split('?')[0] === '/api/register') {
-        try {
-            if (!dbPool) {
-                jsonResponse(res, 503, { error: 'Database not available' });
-                return;
+    // API: online player count
+    if (req.method === 'GET' && req.url.split('?')[0] === '/api/online-count') {
+        jsonResponse(res, 200, { count: players.size });
+        return;
+    }
+
+    // API: online player positions (for map)
+    if (req.method === 'GET' && req.url.split('?')[0] === '/api/players') {
+        const list = [];
+        for (const [id, entry] of players) {
+            if (entry.state) {
+                list.push({
+                    userId: id,
+                    username: entry.username,
+                    lat: entry.state.lat,
+                    lon: entry.state.lon,
+                    alt: entry.state.alt,
+                    heading: entry.state.heading,
+                    airspeed: entry.state.airspeed,
+                    aircraft: entry.state.aircraft || null,
+                });
             }
-            const { email, location } = await readJsonBody(req);
-            if (!email || typeof email !== 'string') {
-                jsonResponse(res, 400, { error: 'Email is required' });
-                return;
-            }
-            const userId = crypto.randomUUID();
-            const ip = getClientIp(req);
-            const loc = (location && typeof location === 'string') ? location : 'unknown';
-            await dbPool.execute(
-                'INSERT INTO game_sessions (user_id, email, ip, location) VALUES (?, ?, ?, ?)',
-                [userId, email.trim(), ip, loc],
-            );
-            console.log(`[API] Registered: ${email.trim()} -> ${userId}`);
-            jsonResponse(res, 200, { userId });
-        } catch (err) {
-            console.error('[API] Register error:', err.message);
-            jsonResponse(res, 500, { error: 'Registration failed' });
         }
+        jsonResponse(res, 200, { data: list });
+        return;
+    }
+
+    // API: platform statistics
+    if (req.method === 'GET' && req.url.split('?')[0] === '/api/stats') {
+        const statsStart = Date.now();
+        if (!dbPool) {
+            jsonResponse(res, 200, {
+                airports: 0, missions: 0, registeredPilots: 0,
+                totalFlightHours: 0, onlineNow: players.size
+            });
+            return;
+        }
+        try {
+            const [[airports]] = await dbPool.execute(
+                "SELECT COUNT(*) AS cnt FROM airports WHERE is_active = 1"
+            );
+            const [[missions]] = await dbPool.execute(
+                "SELECT COUNT(*) AS cnt FROM missions WHERE is_active = 1"
+            );
+            const [[pilots]] = await dbPool.execute(
+                "SELECT COUNT(*) AS cnt FROM users WHERE is_enabled = 1"
+            );
+            const [[hours]] = await dbPool.execute(
+                "SELECT COALESCE(SUM(total_flight_hours), 0) AS total FROM user_flight_stats"
+            );
+
+            jsonResponse(res, 200, {
+                airports: airports.cnt || 0,
+                missions: missions.cnt || 0,
+                registeredPilots: pilots.cnt || 0,
+                totalFlightHours: Math.round(hours.total || 0),
+                onlineNow: players.size,
+            });
+            console.log(`[API] /api/stats responded in ${Date.now() - statsStart}ms`);
+        } catch (err) {
+            console.error('[API] Stats error:', err.message);
+            jsonResponse(res, 200, {
+                airports: 0, missions: 0, registeredPilots: 0,
+                totalFlightHours: 0, onlineNow: players.size
+            });
+        }
+        return;
+    }
+
+    // Health check (Railway)
+    if (req.method === 'GET' && req.url.split('?')[0] === '/health') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
         return;
     }
 
@@ -199,6 +249,14 @@ const server = http.createServer(async (req, res) => {
 
 // ── WebSocket multiplayer ────────────────────────────────────────────────────
 const players = new Map();
+const joinAttempts = new Map();
+
+setInterval(() => {
+    const cutoff = Date.now() - 60000;
+    for (const [ip, a] of joinAttempts) {
+        if (a.firstAttempt < cutoff) joinAttempts.delete(ip);
+    }
+}, 300000);
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -215,18 +273,100 @@ server.on('upgrade', (req, socket, head) => {
 
 wss.on('connection', (ws) => {
     let playerId = null;
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+
+    const clientIp = (ws._socket?.remoteAddress || '').replace('::ffff:', '');
 
     ws.on('message', (raw) => {
         try {
             const msg = JSON.parse(raw);
 
-            if (msg.type === 'join' && msg.userId) {
-                playerId = msg.userId;
-                players.set(playerId, { ws, state: null });
+            if (msg.type === 'join') {
+                const attempts = joinAttempts.get(clientIp) || { count: 0, firstAttempt: Date.now() };
+                if (attempts.count >= 5 && (Date.now() - attempts.firstAttempt) < 60000) {
+                    ws.close(4003, 'Too many attempts');
+                    return;
+                }
+
+                if (!msg.token || !SECRET_KEY) {
+                    attempts.count++;
+                    joinAttempts.set(clientIp, attempts);
+                    ws.close(4001, 'Authentication required');
+                    return;
+                }
+
+                let decoded;
+                try {
+                    decoded = jwt.verify(msg.token, SECRET_KEY);
+                } catch (err) {
+                    attempts.count++;
+                    joinAttempts.set(clientIp, attempts);
+                    console.log(`[WS] Invalid token: ${err.message}`);
+                    ws.close(4001, 'Invalid or expired token');
+                    return;
+                }
+
+                joinAttempts.delete(clientIp);
+
+                playerId = decoded.id;
+                const username = decoded.username;
+
+                const existing = players.get(playerId);
+                if (existing) {
+                    if (dbPool) {
+                        const sm = (Date.now() - existing.lastPersist) / 60000;
+                        const hi = sm / 60;
+                        const dk = existing.distanceNm * 1.852;
+                        dbPool.execute(
+                            `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
+                             VALUES (?, 1, ?, ?, ?, NOW())
+                             ON DUPLICATE KEY UPDATE
+                               total_flights      = total_flights + 1,
+                               total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                               total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                               total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                               last_flight_at = NOW()`,
+                            [playerId, hi, existing.distanceNm, dk]
+                        ).catch(() => {});
+
+                        if (existing.sessionDbId) {
+                            const dur = (Date.now() - existing.sessionStart) / 60000;
+                            dbPool.execute(
+                                `UPDATE game_sessions SET disconnected_at = NOW(), flight_duration_min = ? WHERE id = ?`,
+                                [dur, existing.sessionDbId]
+                            ).catch(() => {});
+                        }
+                    }
+                    try { existing.ws.close(4000, 'Replaced by new session'); } catch (_) {}
+                }
+
+                players.set(playerId, {
+                    ws,
+                    state: null,
+                    username,
+                    sessionStart: Date.now(),
+                    lastPersist: Date.now(),
+                    distanceNm: 0,
+                    prevLat: null,
+                    prevLon: null,
+                });
+
+                if (dbPool) {
+                    const ip = (ws._socket?.remoteAddress || '').replace('::ffff:', '');
+                    dbPool.execute(
+                        `INSERT INTO game_sessions (user_id, username, ip) VALUES (?, ?, ?)`,
+                        [playerId, username, ip]
+                    ).then(([result]) => {
+                        const entry = players.get(playerId);
+                        if (entry) entry.sessionDbId = result.insertId;
+                    }).catch(err => console.error('[DB] Session insert error:', err.message));
+                }
+
                 const onlineCount = players.size;
-                ws.send(JSON.stringify({ type: 'welcome', onlineCount }));
-                broadcast({ type: 'playerJoined', onlineCount });
-                console.log(`[WS] Player joined: ${playerId} (online: ${onlineCount})`);
+                ws.send(JSON.stringify({ type: 'welcome', userId: playerId, username, onlineCount }));
+                broadcast({ type: 'playerJoined', userId: playerId, username, onlineCount });
+                console.log(`[WS] Player joined: ${username} (id: ${playerId}, online: ${onlineCount})`);
             }
 
             if (msg.type === 'update' && playerId) {
@@ -242,14 +382,52 @@ wss.on('connection', (ws) => {
                         heading: msg.heading,
                         pitch: msg.pitch,
                         roll: msg.roll,
+                        aircraft: msg.aircraft || null,
                     };
+
+                    if (entry.prevLat !== null && entry.prevLon !== null) {
+                        const dNm = haversineNm(entry.prevLat, entry.prevLon, msg.lat, msg.lon);
+                        if (dNm < 50) entry.distanceNm += dNm;
+                    }
+                    entry.prevLat = msg.lat;
+                    entry.prevLon = msg.lon;
                 }
             }
         } catch (e) { /* ignore malformed */ }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
         if (playerId) {
+            const entry = players.get(playerId);
+            if (entry && dbPool) {
+                const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
+                const hoursIncrement = sessionMinutes / 60;
+                const distKm = entry.distanceNm * 1.852;
+                try {
+                    await dbPool.execute(
+                        `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
+                         VALUES (?, 1, ?, ?, ?, NOW())
+                         ON DUPLICATE KEY UPDATE
+                           total_flights      = total_flights + 1,
+                           total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                           total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                           total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                           last_flight_at = NOW()`,
+                        [playerId, hoursIncrement, entry.distanceNm, distKm]
+                    );
+                } catch (err) {
+                    console.error(`[DB] Final persist error for user ${playerId}:`, err.message);
+                }
+
+                if (entry.sessionDbId) {
+                    const durationMin = (Date.now() - entry.sessionStart) / 60000;
+                    dbPool.execute(
+                        `UPDATE game_sessions SET disconnected_at = NOW(), flight_duration_min = ? WHERE id = ?`,
+                        [durationMin, entry.sessionDbId]
+                    ).catch(err => console.error('[DB] Session update error:', err.message));
+                }
+            }
+
             players.delete(playerId);
             const onlineCount = players.size;
             broadcast({ type: 'playerLeft', userId: playerId, onlineCount });
@@ -257,8 +435,8 @@ wss.on('connection', (ws) => {
         }
     });
 
-    ws.on('error', () => {
-        if (playerId) players.delete(playerId);
+    ws.on('error', (err) => {
+        console.error(`[WS] Error for player ${playerId}:`, err.message);
     });
 });
 
@@ -288,6 +466,101 @@ setInterval(() => {
         } catch (e) { /* ignore */ }
     }
 }, 50);
+
+// Periodic stats flush every 30 seconds
+setInterval(async () => {
+    if (!dbPool || players.size === 0) return;
+
+    for (const [userId, entry] of players) {
+        const now = Date.now();
+        const sessionMinutes = (now - entry.lastPersist) / 60000;
+        if (sessionMinutes < 0.5) continue;
+
+        const hoursIncrement = sessionMinutes / 60;
+        const distKm = entry.distanceNm * 1.852;
+
+        try {
+            await dbPool.execute(
+                `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
+                 VALUES (?, 0, ?, ?, ?, NOW())
+                 ON DUPLICATE KEY UPDATE
+                   total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                   total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                   total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                   last_flight_at = NOW()`,
+                [userId, hoursIncrement, entry.distanceNm, distKm]
+            );
+        } catch (err) {
+            console.error(`[DB] Stats persist error for user ${userId}:`, err.message);
+        }
+
+        entry.distanceNm = 0;
+        entry.lastPersist = now;
+    }
+}, 30000);
+
+// Ping/pong heartbeat + stale connection cleanup
+setInterval(() => {
+    for (const [userId, entry] of players) {
+        if (entry.ws.isAlive === false) {
+            console.log(`[WS] Stale connection detected for user ${userId}, cleaning up`);
+            entry.ws.terminate();
+            continue;
+        }
+        entry.ws.isAlive = false;
+        entry.ws.ping();
+    }
+}, 30000);
+
+// ── Graceful shutdown ────────────────────────────────────────────────────────
+async function gracefulShutdown() {
+    console.log('[Server] Shutting down...');
+    server.close();
+
+    for (const [userId, entry] of players) {
+        if (dbPool) {
+            const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
+            const hoursIncrement = sessionMinutes / 60;
+            const distKm = entry.distanceNm * 1.852;
+            try {
+                await dbPool.execute(
+                    `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
+                     VALUES (?, 1, ?, ?, ?, NOW())
+                     ON DUPLICATE KEY UPDATE
+                       total_flights      = total_flights + 1,
+                       total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                       total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                       total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                       last_flight_at = NOW()`,
+                    [userId, hoursIncrement, entry.distanceNm, distKm]
+                );
+            } catch (_) {}
+
+            if (entry.sessionDbId) {
+                const dur = (Date.now() - entry.sessionStart) / 60000;
+                try {
+                    await dbPool.execute(
+                        `UPDATE game_sessions SET disconnected_at = NOW(), flight_duration_min = ? WHERE id = ?`,
+                        [dur, entry.sessionDbId]
+                    );
+                } catch (_) {}
+            }
+        }
+        try { entry.ws.close(1001, 'Server shutting down'); } catch (_) {}
+    }
+
+    players.clear();
+
+    if (dbPool) {
+        try { await dbPool.end(); } catch (_) {}
+    }
+
+    console.log('[Server] Shutdown complete.');
+    process.exit(0);
+}
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
 
 // ── Start ────────────────────────────────────────────────────────────────────
 initDatabase().then(() => {

@@ -1,0 +1,5 @@
+# API Guard Rules
+
+
+## User-facing responses
+- API error messages and user-facing strings must be in Portuguese; keep server logs in English.

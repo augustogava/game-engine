@@ -1,0 +1,8 @@
+---
+description: Always use shared UI components from src/components/ui/ instead of raw HTML elements
+globs: src/**/*.tsx
+alwaysApply: false
+---
+
+# Always Use UI Components
+
