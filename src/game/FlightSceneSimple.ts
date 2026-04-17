@@ -244,6 +244,7 @@ export class FlightSceneSimple extends Scene3D {
     private _sunMeshMat: BABYLON.StandardMaterial | null = null;
     private _skyboxMat: BABYLON.StandardMaterial | null = null;
     private _starRoot: BABYLON.TransformNode | null = null;
+    private _lensFlareSystem: BABYLON.LensFlareSystem | null = null;
     private _sunUpdateTimer = 0;
     private _sunElevation = 45;
     private hudUtc!: HTMLElement;
@@ -671,7 +672,11 @@ export class FlightSceneSimple extends Scene3D {
 
         if (this._sunMesh) {
             this._sunMesh.position = sunDir.scale(-10000);
-            this._sunMesh.isVisible = elevation > -2;
+            this._sunMesh.isVisible = elevation > 0;
+        }
+
+        if (this._lensFlareSystem) {
+            this._lensFlareSystem.isEnabled = elevation > 1;
         }
 
         const t = Math.max(0, Math.min(1, (elevation + 6) / 30));
@@ -1091,6 +1096,7 @@ export class FlightSceneSimple extends Scene3D {
                 new BABYLON.LensFlare(size, pos, new BABYLON.Color3(1, 0.95, 0.6),
                     'https://assets.babylonjs.com/textures/flare.png', lfs);
             });
+            this._lensFlareSystem = lfs;
         }
     }
 
