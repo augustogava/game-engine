@@ -7,6 +7,7 @@ export interface RealtimeClientConfig {
 
 type MessageCallback = (msg: any) => void;
 type ConnectionCallback = (connected: boolean) => void;
+type CloseCallback = (code: number, reason: string) => void;
 
 export class RealtimeClient {
     private ws: WebSocket | null = null;
@@ -21,6 +22,7 @@ export class RealtimeClient {
 
     private messageListeners: MessageCallback[] = [];
     private connectionListeners: ConnectionCallback[] = [];
+    private closeListeners: CloseCallback[] = [];
     private _connected = false;
 
     constructor(config: RealtimeClientConfig = {}) {
@@ -58,9 +60,11 @@ export class RealtimeClient {
             } catch (e) { /* ignore malformed */ }
         };
 
-        this.ws.onclose = () => {
+        this.ws.onclose = (ev) => {
             this._connected = false;
             this.notifyConnection(false);
+            for (const cb of this.closeListeners) cb(ev.code, ev.reason);
+            if (ev.code >= 4000) return;
             this.scheduleReconnect();
         };
 
@@ -90,12 +94,17 @@ export class RealtimeClient {
         this.connectionListeners.push(cb);
     }
 
+    onClose(cb: CloseCallback): void {
+        this.closeListeners.push(cb);
+    }
+
     dispose(): void {
         this.disposed = true;
         this.ws?.close();
         this.ws = null;
         this.messageListeners = [];
         this.connectionListeners = [];
+        this.closeListeners = [];
     }
 
     private notifyConnection(connected: boolean): void {

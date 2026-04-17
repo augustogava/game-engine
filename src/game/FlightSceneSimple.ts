@@ -318,8 +318,8 @@ export class FlightSceneSimple extends Scene3D {
         this.mpClient?.dispose();
     }
 
-    initMultiplayer(userId: string): void {
-        this.mpClient = new MultiplayerClient(userId);
+    initMultiplayer(token: string, onAuthFailure?: () => void): void {
+        this.mpClient = new MultiplayerClient(token);
 
         this.mpClient.onPlayersUpdate((players) => {
             const now = performance.now();
@@ -349,6 +349,9 @@ export class FlightSceneSimple extends Scene3D {
         this.mpClient.onPlayerCountChange((count) => {
             if (this.hudOnline) this.hudOnline.textContent = `${count} ONLINE`;
             if (this.dbgMpCount) this.dbgMpCount.textContent = String(count);
+            if (this.dbgMpUserId && this.mpClient) {
+                this.dbgMpUserId.textContent = String(this.mpClient.userId);
+            }
         });
 
         this.mpClient.onConnectionChange((connected) => {
@@ -358,7 +361,9 @@ export class FlightSceneSimple extends Scene3D {
             }
         });
 
-        if (this.dbgMpUserId) this.dbgMpUserId.textContent = userId.substring(0, 8) + '…';
+        if (onAuthFailure) this.mpClient.onAuthFailure(onAuthFailure);
+
+        if (this.dbgMpUserId) this.dbgMpUserId.textContent = '…';
         this.mpClient.connect();
     }
 

@@ -70,12 +70,6 @@ function jsonResponse(res, status, data) {
     res.end(payload);
 }
 
-function getClientIp(req) {
-    const forwarded = req.headers['x-forwarded-for'];
-    if (forwarded) return forwarded.split(',')[0].trim();
-    return req.socket.remoteAddress || 'unknown';
-}
-
 // ── Static file MIME types ───────────────────────────────────────────────────
 const MIME_TYPES = {
     '.html': 'text/html',
@@ -104,7 +98,100 @@ function haversineNm(lat1, lon1, lat2, lon2) {
     const a = Math.sin(dLat / 2) ** 2
             + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
             * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+// ── Unit conversions (game sends metric, DB stores aviation) ─────────────────
+const METERS_TO_FEET = 3.28084;
+const KMH_TO_KNOTS = 1 / 1.852;
+
+// ── Find nearest airport ─────────────────────────────────────────────────────
+async function findNearestAirport(lat, lon, radiusNm) {
+    if (!dbPool) return null;
+    try {
+        const [rows] = await dbPool.execute(
+            `SELECT id, icao_code, name, latitude, longitude,
+                    (3440.065 * ACOS(
+                        LEAST(1, GREATEST(-1,
+                            COS(RADIANS(?)) * COS(RADIANS(latitude)) *
+                            COS(RADIANS(longitude) - RADIANS(?)) +
+                            SIN(RADIANS(?)) * SIN(RADIANS(latitude))
+                        ))
+                    )) AS dist_nm
+             FROM airports
+             WHERE is_active = 1
+             HAVING dist_nm < ?
+             ORDER BY dist_nm ASC
+             LIMIT 1`,
+            [lat, lon, lat, radiusNm]
+        );
+        return rows.length ? rows[0] : null;
+    } catch (err) {
+        console.error('[DB] Nearest airport query error:', err.message);
+        return null;
+    }
+}
+
+// ── Finalize flight log ──────────────────────────────────────────────────────
+async function finalizeFlight(userId, entry, status, lastMsg) {
+    if (!entry.flightLogId || !dbPool) return;
+
+    const durationMin = (Date.now() - entry.flightStartTime) / 60000;
+    const distKm = entry.flightDistanceNm * 1.852;
+    const avgSpeed = entry.speedSamples.length
+        ? entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length
+        : null;
+
+    let arrivalAirportId = null;
+    if (status === 'landed' && lastMsg) {
+        const airport = await findNearestAirport(lastMsg.lat, lastMsg.lon, 5);
+        if (airport) arrivalAirportId = airport.id;
+    }
+
+    const maxAltFt = Math.round(entry.maxAltitudeFt * METERS_TO_FEET);
+    const avgSpeedKnots = avgSpeed ? Math.round(avgSpeed * KMH_TO_KNOTS * 100) / 100 : null;
+    const landingFpm = status === 'landed' ? Math.round(entry.lastVerticalFpm * METERS_TO_FEET) : null;
+
+    try {
+        await dbPool.execute(
+            `UPDATE flight_logs SET
+                status = ?,
+                arrival_airport_id = ?,
+                arrival_time = NOW(),
+                flight_duration_min = ?,
+                distance_km = ?,
+                distance_nm = ?,
+                max_altitude_ft = ?,
+                avg_speed_knots = ?,
+                landing_rate_fpm = ?,
+                route_data = ?
+             WHERE id = ?`,
+            [
+                status,
+                arrivalAirportId,
+                Math.round(durationMin),
+                Math.round(distKm * 100) / 100,
+                Math.round(entry.flightDistanceNm * 100) / 100,
+                maxAltFt,
+                avgSpeedKnots,
+                landingFpm,
+                JSON.stringify(entry.routePoints),
+                entry.flightLogId,
+            ]
+        );
+        console.log(`[Flight] ${status}: user ${userId}, log ${entry.flightLogId}, ${Math.round(durationMin)}min, ${Math.round(entry.flightDistanceNm)}nm`);
+    } catch (err) {
+        console.error(`[DB] Flight log finalize error:`, err.message);
+    }
+
+    entry.flightLogId = null;
+    entry.departureAirportId = null;
+    entry.isAirborne = false;
+    entry.maxAltitudeFt = 0;
+    entry.speedSamples = [];
+    entry.routePoints = [];
+    entry.flightDistanceNm = 0;
+    entry.flightStartTime = null;
 }
 
 // ── HTTP server ──────────────────────────────────────────────────────────────
@@ -278,7 +365,7 @@ wss.on('connection', (ws) => {
 
     const clientIp = (ws._socket?.remoteAddress || '').replace('::ffff:', '');
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
         try {
             const msg = JSON.parse(raw);
 
@@ -309,12 +396,22 @@ wss.on('connection', (ws) => {
 
                 joinAttempts.delete(clientIp);
 
+                if (!decoded.id || !decoded.username) {
+                    console.log('[WS] Token missing id or username');
+                    ws.close(4001, 'Invalid token payload');
+                    return;
+                }
+
                 playerId = decoded.id;
                 const username = decoded.username;
 
                 const existing = players.get(playerId);
                 if (existing) {
                     if (dbPool) {
+                        if (existing.flightLogId) {
+                            await finalizeFlight(playerId, existing, 'cancelled', existing.state);
+                        }
+
                         const sm = (Date.now() - existing.lastPersist) / 60000;
                         const hi = sm / 60;
                         const dk = existing.distanceNm * 1.852;
@@ -350,6 +447,17 @@ wss.on('connection', (ws) => {
                     distanceNm: 0,
                     prevLat: null,
                     prevLon: null,
+                    flightLogId: null,
+                    departureAirportId: null,
+                    isAirborne: false,
+                    maxAltitudeFt: 0,
+                    speedSamples: [],
+                    routePoints: [],
+                    lastRouteSample: 0,
+                    flightStartTime: null,
+                    flightDistanceNm: 0,
+                    prevAlt: undefined,
+                    lastVerticalFpm: 0,
                 });
 
                 if (dbPool) {
@@ -370,27 +478,97 @@ wss.on('connection', (ws) => {
             }
 
             if (msg.type === 'update' && playerId) {
+                const lat = Number(msg.lat);
+                const lon = Number(msg.lon);
+                const alt = Number(msg.alt);
+                const airspeed = Number(msg.airspeed);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(alt) || !Number.isFinite(airspeed)) return;
+
                 const entry = players.get(playerId);
                 if (entry) {
                     entry.state = {
                         userId: playerId,
-                        lat: msg.lat,
-                        lon: msg.lon,
-                        alt: msg.alt,
-                        airspeed: msg.airspeed,
-                        throttle: msg.throttle,
-                        heading: msg.heading,
-                        pitch: msg.pitch,
-                        roll: msg.roll,
+                        lat,
+                        lon,
+                        alt,
+                        airspeed,
+                        throttle: Number(msg.throttle) || 0,
+                        heading: Number(msg.heading) || 0,
+                        pitch: Number(msg.pitch) || 0,
+                        roll: Number(msg.roll) || 0,
                         aircraft: msg.aircraft || null,
                     };
 
+                    let stepNm = 0;
                     if (entry.prevLat !== null && entry.prevLon !== null) {
-                        const dNm = haversineNm(entry.prevLat, entry.prevLon, msg.lat, msg.lon);
-                        if (dNm < 50) entry.distanceNm += dNm;
+                        stepNm = haversineNm(entry.prevLat, entry.prevLon, lat, lon);
+                        if (stepNm < 50) {
+                            entry.distanceNm += stepNm;
+                        } else {
+                            stepNm = 0;
+                        }
                     }
-                    entry.prevLat = msg.lat;
-                    entry.prevLon = msg.lon;
+                    entry.prevLat = lat;
+                    entry.prevLon = lon;
+
+                    if (entry.prevAlt !== undefined) {
+                        const dtSeconds = 0.05;
+                        entry.lastVerticalFpm = ((alt - entry.prevAlt) / dtSeconds) * 60;
+                    }
+                    entry.prevAlt = alt;
+
+                    if (!entry.flightLogId && dbPool) {
+                        const airport = await findNearestAirport(lat, lon, 5);
+                        if (airport) entry.departureAirportId = airport.id;
+
+                        try {
+                            const [result] = await dbPool.execute(
+                                `INSERT INTO flight_logs
+                                 (user_id, departure_airport_id, aircraft_type, departure_time, status)
+                                 VALUES (?, ?, ?, NOW(), 'departed')`,
+                                [playerId, entry.departureAirportId, msg.aircraft || null]
+                            );
+                            entry.flightLogId = result.insertId;
+                            entry.flightStartTime = Date.now();
+                            entry.maxAltitudeFt = alt || 0;
+                            entry.speedSamples = [];
+                            entry.routePoints = [];
+                            entry.flightDistanceNm = 0;
+                            entry.isAirborne = false;
+                            entry.lastRouteSample = Date.now();
+                            console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}`);
+                        } catch (err) {
+                            console.error(`[DB] Flight log insert error:`, err.message);
+                        }
+                    }
+
+                    if (entry.flightLogId) {
+                        if (alt > entry.maxAltitudeFt) entry.maxAltitudeFt = alt;
+                        if (airspeed > 0) entry.speedSamples.push(airspeed);
+                        entry.flightDistanceNm += stepNm;
+
+                        const now = Date.now();
+                        if (now - entry.lastRouteSample > 10000) {
+                            entry.routePoints.push([
+                                Math.round(lat * 10000) / 10000,
+                                Math.round(lon * 10000) / 10000,
+                                Math.round(alt)
+                            ]);
+                            entry.lastRouteSample = now;
+                        }
+
+                        if (!entry.isAirborne && alt > 200 && airspeed > 30) {
+                            entry.isAirborne = true;
+                            dbPool.execute(
+                                `UPDATE flight_logs SET status = 'in_flight' WHERE id = ?`,
+                                [entry.flightLogId]
+                            ).catch(() => {});
+                        }
+
+                        if (entry.isAirborne && alt < 200 && airspeed < 30) {
+                            await finalizeFlight(playerId, entry, 'landed', entry.state);
+                        }
+                    }
                 }
             }
         } catch (e) { /* ignore malformed */ }
@@ -400,6 +578,10 @@ wss.on('connection', (ws) => {
         if (playerId) {
             const entry = players.get(playerId);
             if (entry && dbPool) {
+                if (entry.flightLogId) {
+                    await finalizeFlight(playerId, entry, 'cancelled', entry.state);
+                }
+
                 const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
                 const hoursIncrement = sessionMinutes / 60;
                 const distKm = entry.distanceNm * 1.852;
@@ -519,6 +701,10 @@ async function gracefulShutdown() {
 
     for (const [userId, entry] of players) {
         if (dbPool) {
+            if (entry.flightLogId) {
+                await finalizeFlight(userId, entry, 'cancelled', entry.state);
+            }
+
             const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
             const hoursIncrement = sessionMinutes / 60;
             const distKm = entry.distanceNm * 1.852;

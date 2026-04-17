@@ -624,7 +624,337 @@ This is fire-and-forget — if the DB is unavailable, multiplayer still works.
 
 ---
 
-## 7. Health Check Endpoint
+## 7. Flight Log Recording
+
+**Why:** The `flight_logs` table stores individual flight records (departure, arrival, route, stats). Currently the Express API has CRUD routes for it (`api/routes/flight-logs.js`) but **nothing creates entries** — the game client never calls them. The game server is the only place that knows when a player departs, flies, and lands.
+
+### `flight_logs` table (created by Express API migrations)
+
+```sql
+CREATE TABLE IF NOT EXISTS flight_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    mission_id INT DEFAULT NULL,
+    departure_airport_id INT NOT NULL,
+    arrival_airport_id INT DEFAULT NULL,
+    departure_time DATETIME NOT NULL,
+    arrival_time DATETIME DEFAULT NULL,
+    flight_duration_min INT DEFAULT NULL,
+    distance_km DECIMAL(10,2) DEFAULT NULL,
+    distance_nm DECIMAL(10,2) DEFAULT NULL,
+    max_altitude_ft INT DEFAULT NULL,
+    avg_speed_knots DECIMAL(8,2) DEFAULT NULL,
+    aircraft_type VARCHAR(100) DEFAULT NULL,
+    aircraft_registration VARCHAR(20) DEFAULT NULL,
+    status ENUM('departed','in_flight','landed','cancelled','crashed') DEFAULT 'departed',
+    landing_rate_fpm DECIMAL(8,2) DEFAULT NULL,
+    route_data JSON DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE SET NULL,
+    FOREIGN KEY (departure_airport_id) REFERENCES airports(id) ON DELETE CASCADE,
+    FOREIGN KEY (arrival_airport_id) REFERENCES airports(id) ON DELETE SET NULL,
+    INDEX idx_flight_user (user_id),
+    INDEX idx_flight_status (status),
+    INDEX idx_flight_departure_time (departure_time)
+);
+```
+
+### Flight lifecycle inside the game server
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. JOIN                                                             │
+│    Player enters game. No flight_log yet.                           │
+│                                                                     │
+│ 2. FIRST UPDATE (player has a position, on or near ground)          │
+│    → Find nearest airport within 5 NM                               │
+│    → INSERT flight_logs (status='departed', departure_airport_id)   │
+│    → Store flightLogId in player Map entry                          │
+│                                                                     │
+│ 3. AIRBORNE DETECTION (alt > prev_ground + 100ft & speed > 30kts)  │
+│    → UPDATE flight_logs SET status = 'in_flight'                    │
+│    → Track max_altitude, speed samples, route points                │
+│                                                                     │
+│ 4. LANDING DETECTED (was airborne, now alt near ground & speed <30) │
+│    → Find nearest airport within 5 NM for arrival                   │
+│    → UPDATE flight_logs:                                            │
+│        arrival_airport_id, arrival_time = NOW(),                    │
+│        status = 'landed', flight_duration_min, distance_km/nm,      │
+│        max_altitude_ft, avg_speed_knots, landing_rate_fpm,          │
+│        route_data (JSON array of sampled waypoints)                 │
+│    → Reset tracking → ready for next flight (back to step 2)       │
+│                                                                     │
+│ 5. DISCONNECT WITHOUT LANDING                                       │
+│    → UPDATE flight_logs SET status = 'cancelled',                   │
+│        fill partial stats (duration, distance, max alt, avg speed)  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Additional fields in the players Map entry
+
+```javascript
+players.set(playerId, {
+    // ... existing fields (ws, state, username, sessionStart, etc.) ...
+
+    // Flight log tracking
+    flightLogId: null,           // flight_logs.id (set after INSERT)
+    departureAirportId: null,    // airports.id
+    isAirborne: false,           // true once airborne detection fires
+    maxAltitudeFt: 0,            // track max altitude during flight
+    speedSamples: [],            // airspeed readings for avg calculation
+    routePoints: [],             // [[lat, lon, alt], ...] sampled every 10s
+    lastRouteSample: 0,          // Date.now() of last route sample
+    flightStartTime: null,       // Date.now() when flight_log was created
+    flightDistanceNm: 0,         // per-flight distance (reset on landing)
+    prevVerticalSpeed: 0,        // for landing rate (fpm) calculation
+});
+```
+
+### 7a. Helper — Find nearest airport
+
+```javascript
+async function findNearestAirport(lat, lon, radiusNm) {
+    if (!dbPool) return null;
+    try {
+        const [rows] = await dbPool.execute(
+            `SELECT id, icao_code, name, latitude, longitude,
+                    (3440.065 * ACOS(
+                        LEAST(1, GREATEST(-1,
+                            COS(RADIANS(?)) * COS(RADIANS(latitude)) *
+                            COS(RADIANS(longitude) - RADIANS(?)) +
+                            SIN(RADIANS(?)) * SIN(RADIANS(latitude))
+                        ))
+                    )) AS dist_nm
+             FROM airports
+             WHERE is_active = 1
+             HAVING dist_nm < ?
+             ORDER BY dist_nm ASC
+             LIMIT 1`,
+            [lat, lon, lat, radiusNm]
+        );
+        return rows.length ? rows[0] : null;
+    } catch (err) {
+        console.error('[DB] Nearest airport query error:', err.message);
+        return null;
+    }
+}
+```
+
+`LEAST/GREATEST` clamps the ACOS argument to [-1, 1] to avoid NaN from floating point rounding.
+
+### 7b. Departure — on first `update` (no active flight)
+
+Inside the `msg.type === 'update'` handler, after storing state and accumulating distance:
+
+```javascript
+if (!entry.flightLogId && dbPool) {
+    const airport = await findNearestAirport(msg.lat, msg.lon, 5);
+    if (airport) {
+        entry.departureAirportId = airport.id;
+    }
+
+    try {
+        const [result] = await dbPool.execute(
+            `INSERT INTO flight_logs
+             (user_id, departure_airport_id, aircraft_type, departure_time, status)
+             VALUES (?, ?, ?, NOW(), 'departed')`,
+            [playerId, entry.departureAirportId, msg.aircraft || null]
+        );
+        entry.flightLogId = result.insertId;
+        entry.flightStartTime = Date.now();
+        entry.maxAltitudeFt = msg.alt || 0;
+        entry.speedSamples = [];
+        entry.routePoints = [];
+        entry.flightDistanceNm = 0;
+        entry.isAirborne = false;
+        console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}`);
+    } catch (err) {
+        console.error(`[DB] Flight log insert error:`, err.message);
+    }
+}
+```
+
+If no airport is found within 5 NM (e.g. player spawned mid-air), `departure_airport_id` will be null. Since the FK is `NOT NULL` in the original schema, either:
+- Allow null: `ALTER TABLE flight_logs MODIFY departure_airport_id INT DEFAULT NULL`
+- Or use a fallback "Unknown" airport row
+
+**Recommendation:** change the column to allow NULL — add this to the migration or to `initDatabase()`.
+
+### 7c. In-flight tracking — on every `update` (while flight is active)
+
+```javascript
+if (entry.flightLogId) {
+    // Max altitude
+    if (msg.alt > entry.maxAltitudeFt) entry.maxAltitudeFt = msg.alt;
+
+    // Speed samples (for average)
+    if (msg.airspeed > 0) entry.speedSamples.push(msg.airspeed);
+
+    // Per-flight distance
+    if (entry.prevLat !== null && entry.prevLon !== null) {
+        const dNm = haversineNm(entry.prevLat, entry.prevLon, msg.lat, msg.lon);
+        if (dNm < 50) entry.flightDistanceNm += dNm;
+    }
+
+    // Route sampling (every 10 seconds)
+    const now = Date.now();
+    if (now - entry.lastRouteSample > 10000) {
+        entry.routePoints.push([
+            Math.round(msg.lat * 10000) / 10000,
+            Math.round(msg.lon * 10000) / 10000,
+            Math.round(msg.alt)
+        ]);
+        entry.lastRouteSample = now;
+    }
+
+    // Airborne detection
+    if (!entry.isAirborne && msg.alt > 200 && msg.airspeed > 30) {
+        entry.isAirborne = true;
+        dbPool.execute(
+            `UPDATE flight_logs SET status = 'in_flight' WHERE id = ?`,
+            [entry.flightLogId]
+        ).catch(() => {});
+    }
+
+    // Landing detection (was airborne, now slow & low)
+    if (entry.isAirborne && msg.alt < 200 && msg.airspeed < 30) {
+        await finalizeFlight(playerId, entry, 'landed', msg);
+    }
+}
+```
+
+### 7d. Finalize flight — on landing or disconnect
+
+```javascript
+async function finalizeFlight(userId, entry, status, lastMsg) {
+    if (!entry.flightLogId || !dbPool) return;
+
+    const durationMin = (Date.now() - entry.flightStartTime) / 60000;
+    const distKm = entry.flightDistanceNm * 1.852;
+    const avgSpeed = entry.speedSamples.length
+        ? entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length
+        : null;
+
+    let arrivalAirportId = null;
+    if (status === 'landed' && lastMsg) {
+        const airport = await findNearestAirport(lastMsg.lat, lastMsg.lon, 5);
+        if (airport) arrivalAirportId = airport.id;
+    }
+
+    try {
+        await dbPool.execute(
+            `UPDATE flight_logs SET
+                status = ?,
+                arrival_airport_id = ?,
+                arrival_time = NOW(),
+                flight_duration_min = ?,
+                distance_km = ?,
+                distance_nm = ?,
+                max_altitude_ft = ?,
+                avg_speed_knots = ?,
+                route_data = ?
+             WHERE id = ?`,
+            [
+                status,
+                arrivalAirportId,
+                Math.round(durationMin),
+                Math.round(distKm * 100) / 100,
+                Math.round(entry.flightDistanceNm * 100) / 100,
+                entry.maxAltitudeFt,
+                avgSpeed ? Math.round(avgSpeed * 100) / 100 : null,
+                JSON.stringify(entry.routePoints),
+                entry.flightLogId,
+            ]
+        );
+        console.log(`[Flight] ${status}: user ${userId}, log ${entry.flightLogId}, ${Math.round(durationMin)}min, ${Math.round(entry.flightDistanceNm)}nm`);
+    } catch (err) {
+        console.error(`[DB] Flight log finalize error:`, err.message);
+    }
+
+    // Reset for next flight
+    entry.flightLogId = null;
+    entry.departureAirportId = null;
+    entry.isAirborne = false;
+    entry.maxAltitudeFt = 0;
+    entry.speedSamples = [];
+    entry.routePoints = [];
+    entry.flightDistanceNm = 0;
+    entry.flightStartTime = null;
+}
+```
+
+### 7e. Disconnect without landing
+
+In the `ws.on('close')` handler, **before** the existing stats flush, add:
+
+```javascript
+if (entry.flightLogId) {
+    await finalizeFlight(playerId, entry, 'cancelled', entry.state);
+}
+```
+
+This ensures open flights are marked as `cancelled` with whatever stats were accumulated.
+
+### 7f. Multiple flights per session
+
+After landing, the tracking fields are reset (`flightLogId = null`). The next `update` triggers step 7b again — creating a new `flight_logs` row for the new flight. A single WebSocket session can produce multiple `flight_logs` entries.
+
+### 7g. Landing rate (vertical speed at touchdown)
+
+To calculate `landing_rate_fpm`, track vertical speed between consecutive updates:
+
+```javascript
+// Inside the update handler, after storing state:
+if (entry.prevAlt !== undefined) {
+    const dtSeconds = 0.05; // ~50ms between updates
+    entry.lastVerticalFpm = ((msg.alt - entry.prevAlt) / dtSeconds) * 60;
+}
+entry.prevAlt = msg.alt;
+```
+
+On landing detection, `entry.lastVerticalFpm` is the approximate landing rate. Add it to the `finalizeFlight` UPDATE:
+
+```sql
+landing_rate_fpm = ?
+```
+
+```javascript
+// In finalizeFlight, add to params:
+status === 'landed' ? Math.round(entry.lastVerticalFpm) : null
+```
+
+### 7h. Schema changes — handled by Express API migration
+
+All schema changes are applied by the Express API migration `api/migrations/flight_sim_schema_updates.js`, which runs automatically on API startup. **Do not add ALTER TABLE logic to `server.js`.**
+
+The migration handles:
+
+| Table | Change | Why |
+|-------|--------|-----|
+| `game_sessions` | `user_id` VARCHAR(36) → INT | JWT auth uses `users.id` (INT) |
+| `game_sessions` | Drop `email`, `location` columns | No longer needed (username from JWT) |
+| `game_sessions` | Add `username`, `disconnected_at`, `flight_duration_min` | Session tracking |
+| `game_sessions` | Drop `UNIQUE idx_user_id` | Users can have multiple sessions |
+| `game_sessions` | Rename `created_at` → `connected_at` | Clarity |
+| `flight_logs` | `departure_airport_id` NOT NULL → NULL allowed | Mid-air spawn (no airport nearby) |
+| `flight_logs` | Add `route_data` JSON column if missing | Store sampled waypoints |
+| `user_flight_stats` | Add `best_landing_rate_fpm`, `avg_landing_rate_fpm`, `most_used_aircraft`, `favorite_airport_id` if missing | Extended stats tracking |
+
+All operations are idempotent (checks `information_schema` before altering).
+
+### Summary: flight_logs vs other tables
+
+| What | Table | When written | By whom |
+|------|-------|-------------|---------|
+| WebSocket connection | `game_sessions` | Join + disconnect | server.js |
+| Lifetime totals | `user_flight_stats` | Every 30s + disconnect | server.js |
+| Individual flight record | `flight_logs` | Departure + in-flight + landing/disconnect | server.js |
+
+---
+
+## 8. Health Check Endpoint (already implemented)
 
 **Why:** Railway uses `/health` for deployment health checks. The `railway.json` references `healthcheckPath: "/health"`.
 
@@ -642,7 +972,7 @@ Add this **before** the static file handler. It must respond with `200` for Rail
 
 ---
 
-## 8. Auto-Create Missing Tables on Startup
+## 9. Auto-Create Missing Tables on Startup
 
 **Why:** The game server shares the same MySQL database as the Express API, but may start before the API runs migrations. It should ensure the tables it reads exist.
 
@@ -714,10 +1044,15 @@ REMOVED: POST /api/register          ← no longer needed (auth via website JWT)
 |--------|-------|
 | Capture `msg.aircraft` in `update` handler | `wss.on('connection')` → `msg.type === 'update'` |
 | Accumulate haversine distance on each `update` | `wss.on('connection')` → `msg.type === 'update'` |
+| Create flight_log on first update (departure) | `wss.on('connection')` → `msg.type === 'update'` |
+| Track max alt, avg speed, route points on each update | `wss.on('connection')` → `msg.type === 'update'` |
+| Detect airborne → `status = 'in_flight'` | `wss.on('connection')` → `msg.type === 'update'` |
+| Detect landing → finalize flight_log with stats | `wss.on('connection')` → `msg.type === 'update'` |
 | Verify JWT and extract `users.id` as `playerId` on `join` | `wss.on('connection')` → `msg.type === 'join'` |
 | Reject connection if token invalid/missing (`ws.close(4001)`) | `wss.on('connection')` → `msg.type === 'join'` |
 | Insert row into `game_sessions` on `join` | `wss.on('connection')` → `msg.type === 'join'` |
 | Update `game_sessions` with duration on disconnect | `ws.on('close')` |
+| Finalize open flight_log as `cancelled` on disconnect | `ws.on('close')` |
 | Final stats flush + `total_flights +1` on disconnect | `ws.on('close')` |
 | Periodic stats flush every 30 s (`setInterval`) | Top-level, after server starts |
 
@@ -740,3 +1075,262 @@ The server uses (existing + new):
 | `VITE_GAME_URL` | `https://game.simflightpro.com` | Base URL of the game server. The "Play" button appends `?token=...` and redirects here. Falls back to `http://localhost:3000` in dev. |
 
 The WebSocket URL is derived on the game side from `window.location.host` — no extra env var needed for the game client.
+
+---
+
+## Appendix: Complete Database Schema Reference
+
+All tables created by the Express API migration `api/migrations/create_flight_sim_tables.js`, with updates applied by `api/migrations/flight_sim_schema_updates.js`.
+
+---
+
+### `airports`
+
+Queried by `GET /api/stats` (count) and `findNearestAirport()` (departure/arrival detection for flight logs).
+
+```sql
+CREATE TABLE IF NOT EXISTS airports (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    icao_code     VARCHAR(10) UNIQUE NOT NULL,
+    iata_code     VARCHAR(10) DEFAULT NULL,
+    name          VARCHAR(255) NOT NULL,
+    city          VARCHAR(255) DEFAULT NULL,
+    country       VARCHAR(100) DEFAULT NULL,
+    country_code  VARCHAR(5) DEFAULT NULL,
+    latitude      DECIMAL(10,7) NOT NULL,
+    longitude     DECIMAL(10,7) NOT NULL,
+    elevation_ft  INT DEFAULT NULL,
+    type          ENUM('large_airport','medium_airport','small_airport',
+                       'heliport','seaplane_base','closed') DEFAULT 'small_airport',
+    continent     VARCHAR(5) DEFAULT NULL,
+    region        VARCHAR(10) DEFAULT NULL,
+    municipality  VARCHAR(255) DEFAULT NULL,
+    is_active     BOOLEAN DEFAULT TRUE,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_airport_iata (iata_code),
+    INDEX idx_airport_country (country_code),
+    INDEX idx_airport_type (type),
+    INDEX idx_airport_coords (latitude, longitude),
+    INDEX idx_airport_active (is_active)
+);
+```
+
+---
+
+### `missions`
+
+Queried by `GET /api/stats` (count). Referenced by `flight_logs.mission_id`.
+
+```sql
+CREATE TABLE IF NOT EXISTS missions (
+    id                      INT AUTO_INCREMENT PRIMARY KEY,
+    title                   VARCHAR(255) NOT NULL,
+    description             TEXT DEFAULT NULL,
+    type                    ENUM('free_flight','scheduled','challenge','milestone') NOT NULL,
+    difficulty              ENUM('beginner','intermediate','advanced','expert') NOT NULL,
+    departure_airport_id    INT DEFAULT NULL,
+    arrival_airport_id      INT DEFAULT NULL,
+    min_altitude_ft         INT DEFAULT NULL,
+    max_altitude_ft         INT DEFAULT NULL,
+    required_aircraft_type  VARCHAR(100) DEFAULT NULL,
+    reward_points           INT DEFAULT 0,
+    distance_nm             DECIMAL(10,2) DEFAULT NULL,
+    estimated_duration_min  INT DEFAULT NULL,
+    is_active               BOOLEAN DEFAULT TRUE,
+    sort_order              INT DEFAULT 0,
+    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (departure_airport_id) REFERENCES airports(id) ON DELETE SET NULL,
+    FOREIGN KEY (arrival_airport_id) REFERENCES airports(id) ON DELETE SET NULL,
+    INDEX idx_mission_type (type),
+    INDEX idx_mission_difficulty (difficulty),
+    INDEX idx_mission_active (is_active)
+);
+```
+
+---
+
+### `user_missions`
+
+Not used by `server.js` yet. For future mission completion detection.
+
+```sql
+CREATE TABLE IF NOT EXISTS user_missions (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    user_id      INT NOT NULL,
+    mission_id   INT NOT NULL,
+    status       ENUM('started','in_progress','completed','failed','cancelled') DEFAULT 'started',
+    started_at   DATETIME NOT NULL,
+    completed_at DATETIME DEFAULT NULL,
+    score        INT DEFAULT NULL,
+    notes        TEXT DEFAULT NULL,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+    INDEX idx_user_mission_user (user_id),
+    INDEX idx_user_mission_status (status)
+);
+```
+
+---
+
+### `flight_logs`
+
+Written by `server.js` — INSERT on departure, UPDATE on in-flight/landing/disconnect.
+
+```sql
+CREATE TABLE IF NOT EXISTS flight_logs (
+    id                    INT AUTO_INCREMENT PRIMARY KEY,
+    user_id               INT NOT NULL,
+    mission_id            INT DEFAULT NULL,
+    departure_airport_id  INT DEFAULT NULL,          -- nullable (mid-air spawn)
+    arrival_airport_id    INT DEFAULT NULL,
+    departure_time        DATETIME NOT NULL,
+    arrival_time          DATETIME DEFAULT NULL,
+    flight_duration_min   INT DEFAULT NULL,
+    distance_km           DECIMAL(10,2) DEFAULT NULL,
+    distance_nm           DECIMAL(10,2) DEFAULT NULL,
+    max_altitude_ft       INT DEFAULT NULL,
+    avg_speed_knots       DECIMAL(8,2) DEFAULT NULL,
+    aircraft_type         VARCHAR(100) DEFAULT NULL,
+    aircraft_registration VARCHAR(20) DEFAULT NULL,
+    status                ENUM('departed','in_flight','landed','cancelled','crashed') DEFAULT 'departed',
+    landing_rate_fpm      DECIMAL(8,2) DEFAULT NULL,
+    route_data            JSON DEFAULT NULL,
+    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE SET NULL,
+    FOREIGN KEY (departure_airport_id) REFERENCES airports(id) ON DELETE CASCADE,
+    FOREIGN KEY (arrival_airport_id) REFERENCES airports(id) ON DELETE SET NULL,
+    INDEX idx_flight_user (user_id),
+    INDEX idx_flight_status (status),
+    INDEX idx_flight_departure_time (departure_time)
+);
+```
+
+---
+
+### `user_flight_stats`
+
+Written by `server.js` — UPSERT every 30s and on disconnect.
+
+```sql
+CREATE TABLE IF NOT EXISTS user_flight_stats (
+    id                       INT AUTO_INCREMENT PRIMARY KEY,
+    user_id                  INT UNIQUE NOT NULL,
+    total_flights            INT DEFAULT 0,
+    total_distance_km        DECIMAL(12,2) DEFAULT 0,
+    total_distance_nm        DECIMAL(12,2) DEFAULT 0,
+    total_flight_hours       DECIMAL(10,2) DEFAULT 0,
+    total_missions_completed INT DEFAULT 0,
+    total_missions_failed    INT DEFAULT 0,
+    total_reward_points      INT DEFAULT 0,
+    favorite_airport_id      INT DEFAULT NULL,
+    most_used_aircraft       VARCHAR(100) DEFAULT NULL,
+    best_landing_rate_fpm    DECIMAL(8,2) DEFAULT NULL,
+    avg_landing_rate_fpm     DECIMAL(8,2) DEFAULT NULL,
+    pilot_rank               ENUM('student','private_pilot','commercial_pilot',
+                                  'airline_pilot','captain','senior_captain') DEFAULT 'student',
+    last_flight_at           DATETIME DEFAULT NULL,
+    updated_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (favorite_airport_id) REFERENCES airports(id) ON DELETE SET NULL
+);
+```
+
+---
+
+### `game_sessions`
+
+Written by `server.js` — INSERT on WS join, UPDATE on WS close. Auto-created by `server.js` `initDatabase()`.
+
+```sql
+CREATE TABLE IF NOT EXISTS game_sessions (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT NOT NULL,
+    username            VARCHAR(100) NOT NULL,
+    ip                  VARCHAR(45) NOT NULL,
+    connected_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    disconnected_at     DATETIME DEFAULT NULL,
+    flight_duration_min DECIMAL(10,2) DEFAULT NULL,
+    INDEX idx_game_sessions_user (user_id),
+    INDEX idx_game_sessions_connected (connected_at)
+);
+```
+
+---
+
+### `marketplace_listings`
+
+Not used by `server.js`.
+
+```sql
+CREATE TABLE IF NOT EXISTS marketplace_listings (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    seller_id     INT NOT NULL,
+    airport_id    INT DEFAULT NULL,
+    listing_type  ENUM('airport','aircraft','license','other') NOT NULL,
+    title         VARCHAR(255) NOT NULL,
+    description   TEXT DEFAULT NULL,
+    price         DECIMAL(10,2) DEFAULT 0,
+    currency      VARCHAR(10) DEFAULT 'USD',
+    status        ENUM('active','sold','cancelled','expired') DEFAULT 'active',
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (airport_id) REFERENCES airports(id) ON DELETE SET NULL,
+    INDEX idx_listing_seller (seller_id),
+    INDEX idx_listing_type (listing_type),
+    INDEX idx_listing_status (status)
+);
+```
+
+---
+
+### `user_airports`
+
+Not used by `server.js`.
+
+```sql
+CREATE TABLE IF NOT EXISTS user_airports (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    user_id      INT NOT NULL,
+    airport_id   INT NOT NULL,
+    is_owned     BOOLEAN DEFAULT FALSE,
+    is_favorite  BOOLEAN DEFAULT FALSE,
+    is_home_base BOOLEAN DEFAULT FALSE,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_user_airport (user_id, airport_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (airport_id) REFERENCES airports(id) ON DELETE CASCADE,
+    INDEX idx_user_airport_user (user_id)
+);
+```
+
+---
+
+### `online_sessions` (may be deprecated)
+
+Used by Express API `map.js` for heartbeat-based presence. May become redundant with game server in-memory tracking.
+
+```sql
+CREATE TABLE IF NOT EXISTS online_sessions (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT NOT NULL,
+    username        VARCHAR(100) NOT NULL,
+    latitude        DECIMAL(10,7) DEFAULT NULL,
+    longitude       DECIMAL(10,7) DEFAULT NULL,
+    altitude_ft     INT DEFAULT NULL,
+    heading         DECIMAL(6,2) DEFAULT NULL,
+    airspeed_knots  DECIMAL(8,2) DEFAULT NULL,
+    aircraft_type   VARCHAR(100) DEFAULT NULL,
+    last_heartbeat  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    connected_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_online_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_online_heartbeat (last_heartbeat)
+);
+```
