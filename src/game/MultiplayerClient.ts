@@ -10,6 +10,7 @@ export interface PlayerState {
     heading: number;
     pitch: number;
     roll: number;
+    onGround?: boolean;
 }
 
 type PlayersUpdateCallback = (players: PlayerState[]) => void;

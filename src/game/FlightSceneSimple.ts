@@ -30,6 +30,8 @@ const LIFT_SLOPE      = 5.5;
 const SKIN_FRICTION   = 0.02;
 const STALL_ALPHA_RAD = 0.26;
 const OSWALD_E        = 0.8;
+const FUSELAGE_CD0      = 0.04;
+const FUSELAGE_REF_AREA = 45;
 
 // ── ISA atmosphere ────────────────────────────────────────────────────────────
 function getAirDensity(altitudeM: number): number {
@@ -159,6 +161,7 @@ export class FlightSceneSimple extends Scene3D {
     private tiles: TilesRenderer | null = null;
     private initialHeading = 0;
     private terrainY = GROUND_Y;
+    private isOnGround = false;
     private readonly FLAP_STEPS = [0, 5, 15, 25, 30, 40];
     private flapIndex = 2;
     private flapKeyLock5 = false;
@@ -506,6 +509,7 @@ export class FlightSceneSimple extends Scene3D {
             heading: hdg,
             pitch: pitchDeg,
             roll: rollDeg,
+            onGround: this.isOnGround,
         });
     }
 
@@ -1278,6 +1282,7 @@ export class FlightSceneSimple extends Scene3D {
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.planeRoot.rotationQuaternion!);
         this.angularVelocity.set(0, 0, 0);
+        this.terrainY = GROUND_Y;
         if (this.spawnAirborne) {
             this.planeRoot.position.set(0, GROUND_Y + 600, 0);
             this.thrust = 0.7;
@@ -1455,6 +1460,12 @@ export class FlightSceneSimple extends Scene3D {
                 totalTorque.addInPlace(torque);
             }
 
+            const spd = vel.length();
+            if (spd >= 1.0) {
+                const qBody = 0.5 * airDensity * spd * spd * FUSELAGE_CD0 * FUSELAGE_REF_AREA;
+                totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
+            }
+
             return { force: totalForce, torque: totalTorque };
         };
 
@@ -1508,13 +1519,14 @@ export class FlightSceneSimple extends Scene3D {
             const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
                 mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
             );
-            if (hit?.hit && hit.pickedPoint) {
+            if (hit?.hit && hit.pickedPoint && hit.pickedPoint.y <= pos.y + 10) {
                 this.terrainY = hit.pickedPoint.y + 3;
             }
         }
 
         const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
         const isOnGround = pos.y <= groundLevel;
+        this.isOnGround = isOnGround;
         if (isOnGround) {
             pos.y = groundLevel;
             const downSpeed = this.velocity.y;
@@ -1750,7 +1762,7 @@ export class FlightSceneSimple extends Scene3D {
 <canvas id="flight-pfd" width="350" height="300" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
 <div id="gps-map" style="position:absolute;top:20px;left:8px;width:180px;height:180px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
   <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
-  <canvas id="gps-map-hdg" width="180" height="180" style="position:absolute;inset:0;pointer-events:none"></canvas>
+  <canvas id="gps-map-hdg" width="180" height="180" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
   <div style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:8px;letter-spacing:.15em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8)">GPS</div>
   <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap"></div>
 </div>`;

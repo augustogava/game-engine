@@ -565,7 +565,8 @@ wss.on('connection', (ws) => {
                             ).catch(() => {});
                         }
 
-                        if (entry.isAirborne && alt < 200 && airspeed < 30) {
+                        const onGround = msg.onGround === true;
+                        if (entry.isAirborne && onGround) {
                             await finalizeFlight(playerId, entry, 'landed', entry.state);
                         }
                     }
