@@ -289,6 +289,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     entry.aircraftRegistration = null;
     entry.prevAlt = undefined;
     entry.lastVerticalFpm = 0;
+    entry.onGroundCount = 0;
 }
 
 // ── Pilot rank calculation ───────────────────────────────────────────────────
@@ -362,13 +363,13 @@ async function recalculateStats(userId) {
                  favorite_airport_id, most_used_aircraft, pilot_rank, last_flight_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE
-                total_flights            = VALUES(total_flights),
-                total_flight_hours       = VALUES(total_flight_hours),
-                total_distance_km        = VALUES(total_distance_km),
-                total_distance_nm        = VALUES(total_distance_nm),
+                total_flights            = GREATEST(total_flights, VALUES(total_flights)),
+                total_flight_hours       = GREATEST(total_flight_hours, VALUES(total_flight_hours)),
+                total_distance_km        = GREATEST(total_distance_km, VALUES(total_distance_km)),
+                total_distance_nm        = GREATEST(total_distance_nm, VALUES(total_distance_nm)),
                 total_missions_completed = VALUES(total_missions_completed),
                 total_missions_failed    = VALUES(total_missions_failed),
-                total_reward_points      = VALUES(total_reward_points),
+                total_reward_points      = GREATEST(total_reward_points, VALUES(total_reward_points)),
                 best_landing_rate_fpm    = VALUES(best_landing_rate_fpm),
                 avg_landing_rate_fpm     = VALUES(avg_landing_rate_fpm),
                 favorite_airport_id      = VALUES(favorite_airport_id),
@@ -981,15 +982,16 @@ wss.on('connection', (ws) => {
                             const hi = sm / 60;
                             const dk = existing.distanceNm * 1.852;
                             dbPool.execute(
-                                `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
-                                 VALUES (?, 1, ?, ?, ?, NOW())
+                                `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
+                                 VALUES (?, 1, ?, ?, ?, FLOOR(? * ?), NOW())
                                  ON DUPLICATE KEY UPDATE
                                    total_flights      = total_flights + 1,
                                    total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                                    total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                                    total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                                   total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
                                    last_flight_at = NOW()`,
-                                [playerId, hi, existing.distanceNm, dk]
+                                [playerId, hi, existing.distanceNm, dk, dk, POINTS_PER_KM, POINTS_PER_KM]
                             ).catch(() => {});
                         }
 
@@ -1028,6 +1030,7 @@ wss.on('connection', (ws) => {
                     userMissionId: null,
                     aircraftRegistration: null,
                     statsRecalculated: false,
+                    onGroundCount: 0,
                 });
 
                 if (dbPool) {
@@ -1153,7 +1156,12 @@ wss.on('connection', (ws) => {
 
                         const onGround = msg.onGround === true;
                         if (entry.isAirborne && onGround) {
-                            await finalizeFlight(playerId, entry, 'landed', entry.state);
+                            entry.onGroundCount = (entry.onGroundCount || 0) + 1;
+                            if (entry.onGroundCount >= 20) {
+                                await finalizeFlight(playerId, entry, 'landed', entry.state);
+                            }
+                        } else if (entry.isAirborne) {
+                            entry.onGroundCount = 0;
                         }
                     }
                 }
@@ -1175,15 +1183,16 @@ wss.on('connection', (ws) => {
                     const distKm = entry.distanceNm * 1.852;
                     try {
                         await dbPool.execute(
-                            `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
-                             VALUES (?, 1, ?, ?, ?, NOW())
+                            `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
+                             VALUES (?, 1, ?, ?, ?, FLOOR(? * ?), NOW())
                              ON DUPLICATE KEY UPDATE
                                total_flights      = total_flights + 1,
                                total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                                total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                                total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                               total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
                                last_flight_at = NOW()`,
-                            [playerId, hoursIncrement, entry.distanceNm, distKm]
+                            [playerId, hoursIncrement, entry.distanceNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
                         );
                     } catch (err) {
                         console.error(`[DB] Final persist error for user ${playerId}:`, err.message);
@@ -1252,14 +1261,15 @@ setInterval(async () => {
 
         try {
             await dbPool.execute(
-                `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
-                 VALUES (?, 0, ?, ?, ?, NOW())
+                `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
+                 VALUES (?, 0, ?, ?, ?, FLOOR(? * ?), NOW())
                  ON DUPLICATE KEY UPDATE
                    total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                    total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                    total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                   total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
                    last_flight_at = NOW()`,
-                [userId, hoursIncrement, entry.distanceNm, distKm]
+                [userId, hoursIncrement, entry.distanceNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
             );
         } catch (err) {
             console.error(`[DB] Stats persist error for user ${userId}:`, err.message);
@@ -1300,15 +1310,16 @@ async function gracefulShutdown() {
                 const distKm = entry.distanceNm * 1.852;
                 try {
                     await dbPool.execute(
-                        `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
-                         VALUES (?, 1, ?, ?, ?, NOW())
+                        `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
+                         VALUES (?, 1, ?, ?, ?, FLOOR(? * ?), NOW())
                          ON DUPLICATE KEY UPDATE
                            total_flights      = total_flights + 1,
                            total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                            total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                            total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                           total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
                            last_flight_at = NOW()`,
-                        [userId, hoursIncrement, entry.distanceNm, distKm]
+                        [userId, hoursIncrement, entry.distanceNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
                     );
                 } catch (_) {}
             }

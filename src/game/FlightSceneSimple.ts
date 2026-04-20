@@ -185,6 +185,10 @@ export class FlightSceneSimple extends Scene3D {
     private joystickOrigin = { x: 0, y: 0 };
     private throttleTouchId: number | null = null;
 
+    private smoothedPitch = 0;
+    private smoothedRoll = 0;
+    private smoothedYaw = 0;
+
     private mpClient: MultiplayerClient | null = null;
     private remotePlayers = new Map<string, RemotePlayer>();
     private hudOnline!: HTMLElement;
@@ -204,6 +208,13 @@ export class FlightSceneSimple extends Scene3D {
     private dbgCamPos!:    HTMLElement;
     private dbgCamOrbit!:  HTMLElement;
     private dbgPanel!:     HTMLElement;
+    private dbgTerrainY!:  HTMLElement;
+    private dbgGroundLvl!: HTMLElement;
+    private dbgOnGround!:  HTMLElement;
+    private dbgVertRate!:  HTMLElement;
+    private dbgLatLon!:    HTMLElement;
+    private dbgTilesInfo!: HTMLElement;
+    private dbgKeyLock = false;
     private hudCanvas!:    HTMLCanvasElement;
     private hudCtx!:       CanvasRenderingContext2D;
     private hudFlapVal!:   HTMLElement;
@@ -1107,14 +1118,17 @@ export class FlightSceneSimple extends Scene3D {
     // ── Input ─────────────────────────────────────────────────────────────────
 
     private _handleInput(_dt: number): void {
-        let pitchInput: number;
-        let rollInput: number;
-        let yawInput: number;
+        let targetPitch: number;
+        let targetRoll: number;
+        let targetYaw: number;
+
+        const SMOOTHING_RATE = this.isMobile ? 3.0 : 4.5;
+        const RETURN_RATE    = this.isMobile ? 2.5 : 5.0;
 
         if (this.isMobile) {
-            pitchInput = this.touchPitchInput;
-            rollInput = this.touchRollInput * 0.25;
-            yawInput = 0;
+            targetPitch = this.touchPitchInput;
+            targetRoll = this.touchRollInput * 0.25;
+            targetYaw = 0;
             this.thrust = this.touchThrust;
         } else {
             const p = (code: string) => this.input.isKeyDown(code);
@@ -1122,9 +1136,9 @@ export class FlightSceneSimple extends Scene3D {
             if (p('KeyW')) this.thrust = Math.min(1, this.thrust + _dt * 0.55);
             if (p('KeyS')) this.thrust = Math.max(0, this.thrust - _dt * 0.4);
 
-            pitchInput = p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0;
-            rollInput  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.25;
-            yawInput   = p('KeyE') ? 1 : p('KeyQ') ? -1 : 0;
+            targetPitch = p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0;
+            targetRoll  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.25;
+            targetYaw   = p('KeyE') ? 1 : p('KeyQ') ? -1 : 0;
 
             if (p('Digit5') && !this.flapKeyLock5) {
                 this.flapKeyLock5 = true;
@@ -1139,12 +1153,32 @@ export class FlightSceneSimple extends Scene3D {
             if (!p('Digit6')) this.flapKeyLock6 = false;
 
             if (p('KeyR')) this._spawnPlane();
+
+            if (p('Backquote') && !this.dbgKeyLock) {
+                this.dbgKeyLock = true;
+                if (this.dbgPanel) {
+                    this.dbgPanel.classList.toggle('hidden');
+                    const btn = document.getElementById('dbg-panel-toggle');
+                    if (btn) btn.textContent = this.dbgPanel.classList.contains('hidden') ? 'SHOW DEBUG' : 'HIDE DEBUG';
+                }
+            }
+            if (!p('Backquote')) this.dbgKeyLock = false;
         }
 
-        this.surfaces[0].controlInput =  rollInput;
-        this.surfaces[1].controlInput = -rollInput;
-        this.surfaces[2].controlInput = -pitchInput;
-        this.surfaces[3].controlInput = -yawInput;
+        const lerpAxis = (current: number, target: number): number => {
+            const rate = (Math.abs(target) < Math.abs(current)) ? RETURN_RATE : SMOOTHING_RATE;
+            const t = 1 - Math.exp(-rate * _dt);
+            return current + (target - current) * t;
+        };
+
+        this.smoothedPitch = lerpAxis(this.smoothedPitch, targetPitch);
+        this.smoothedRoll  = lerpAxis(this.smoothedRoll, targetRoll);
+        this.smoothedYaw   = lerpAxis(this.smoothedYaw, targetYaw);
+
+        this.surfaces[0].controlInput =  this.smoothedRoll;
+        this.surfaces[1].controlInput = -this.smoothedRoll;
+        this.surfaces[2].controlInput = -this.smoothedPitch;
+        this.surfaces[3].controlInput = -this.smoothedYaw;
 
         this._applyFlaps();
     }
@@ -1856,6 +1890,15 @@ export class FlightSceneSimple extends Scene3D {
   <div class="dbg-row"><span class="dbg-lbl">Status</span><span class="dbg-val" id="dbg-mp-status">DISCONNECTED</span></div>
   <div class="dbg-row"><span class="dbg-lbl">Online</span><span class="dbg-val" id="dbg-mp-count">0</span></div>
   <div class="dbg-row"><span class="dbg-lbl">User ID</span><span class="dbg-val" id="dbg-mp-uid">\u2014</span></div>
+</div>
+<div class="dbg-section">
+  <div class="dbg-title">FLIGHT STATE</div>
+  <div class="dbg-row"><span class="dbg-lbl">terrainY</span><span class="dbg-val" id="dbg-terrainY">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">groundLevel</span><span class="dbg-val" id="dbg-groundlvl">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">isOnGround</span><span class="dbg-val" id="dbg-onground">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">vert rate (m/s)</span><span class="dbg-val" id="dbg-vertrate">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">lat / lon</span><span class="dbg-val" id="dbg-latlon">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">tiles</span><span class="dbg-val" id="dbg-tilesinfo">\u2014</span></div>
 </div>`;
         document.body.appendChild(panel);
         this.dbgPanel    = panel;
@@ -1867,6 +1910,12 @@ export class FlightSceneSimple extends Scene3D {
         this.dbgMpStatus = document.getElementById('dbg-mp-status')!;
         this.dbgMpCount  = document.getElementById('dbg-mp-count')!;
         this.dbgMpUserId = document.getElementById('dbg-mp-uid')!;
+        this.dbgTerrainY  = document.getElementById('dbg-terrainY')!;
+        this.dbgGroundLvl = document.getElementById('dbg-groundlvl')!;
+        this.dbgOnGround  = document.getElementById('dbg-onground')!;
+        this.dbgVertRate  = document.getElementById('dbg-vertrate')!;
+        this.dbgLatLon    = document.getElementById('dbg-latlon')!;
+        this.dbgTilesInfo = document.getElementById('dbg-tilesinfo')!;
 
         panel.classList.add('hidden');
 
@@ -2347,5 +2396,17 @@ export class FlightSceneSimple extends Scene3D {
             this.dbgCamPos.textContent = `${cp.x.toFixed(0)}, ${cp.y.toFixed(0)}, ${cp.z.toFixed(0)}`;
             this.dbgCamOrbit.textContent = `${(this.camera.alpha * 180 / Math.PI).toFixed(1)}\u00B0 / ${(this.camera.beta * 180 / Math.PI).toFixed(1)}\u00B0 / ${this.camera.radius.toFixed(1)}`;
         }
+
+        const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
+        this.dbgTerrainY.textContent = this.terrainY.toFixed(2);
+        this.dbgGroundLvl.textContent = groundLevel.toFixed(2);
+        this.dbgOnGround.textContent = this.isOnGround ? 'YES' : 'NO';
+        this.dbgOnGround.style.color = this.isOnGround ? '#ff6060' : '#40ffaa';
+        this.dbgVertRate.textContent = vel.y.toFixed(2);
+
+        const { lat, lon } = this._getCurrentLatLon();
+        this.dbgLatLon.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+
+        this.dbgTilesInfo.textContent = this.tiles ? 'loaded' : 'none';
     }
 }
