@@ -1617,7 +1617,7 @@ export class FlightSceneSimple extends Scene3D {
         hud.innerHTML = `
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400&display=swap');
-#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;transform:scale(0.9);transform-origin:center center;opacity:0.9; }
+#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;transform:scale(0.9);transform-origin:center center;opacity:0.7; }
 .hp{position:absolute}
 #hfps{font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif}
 #hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
@@ -1690,7 +1690,7 @@ export class FlightSceneSimple extends Scene3D {
 @media(max-width:768px){
 #hfps{display:none}
 #dbg-panel-toggle{display:none!important}
-#flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:220px}
+#flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
 #gps-map{width:140px!important;height:140px!important;top:6px!important;left:4px!important}
 .hud-panel-left{left:70px!important;transform:scale(.8);transform-origin:bottom left}
 .hud-panel-right{transform:scale(.8);transform-origin:bottom right}
@@ -1699,7 +1699,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-engine-col{display:none!important}
 }
 @media(max-width:480px){
-#flight-pfd{top:22%!important;width:180px!important;height:140px!important}
+#flight-pfd{top:22%!important;width:180px!important;height:120px!important}
 #gps-map{width:100px!important;height:100px!important;top:4px!important;left:2px!important}
 .hud-panel-left{left:55px!important;transform:scale(.65);transform-origin:bottom left}
 .hud-panel-right{transform:scale(.65);transform-origin:bottom right}
@@ -1796,7 +1796,7 @@ export class FlightSceneSimple extends Scene3D {
   </div>
 </div>
 
-<canvas id="flight-pfd" width="350" height="300" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
+<canvas id="flight-pfd" width="350" height="250" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
 <div id="gps-map" style="position:absolute;top:20px;left:8px;width:180px;height:180px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
   <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
   <canvas id="gps-map-hdg" width="180" height="180" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
@@ -2192,7 +2192,7 @@ export class FlightSceneSimple extends Scene3D {
         ctx.fillStyle = 'rgba(0,255,100,0.7)';
         ctx.textAlign = 'center';
 
-        for (let deg = -90; deg <= 90; deg += 5) {
+        for (let deg = -45; deg <= 90; deg += 5) {
             if (deg === 0) continue;
             const yOff = (pitchDeg - deg) * ppd;
             if (Math.abs(yOff) > cy - 20) continue;
