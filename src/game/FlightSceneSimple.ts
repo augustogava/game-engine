@@ -1617,7 +1617,7 @@ export class FlightSceneSimple extends Scene3D {
         hud.innerHTML = `
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400&display=swap');
-#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff; }
+#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;transform:scale(0.9);transform-origin:center center;opacity:0.9; }
 .hp{position:absolute}
 #hfps{font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif}
 #hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
