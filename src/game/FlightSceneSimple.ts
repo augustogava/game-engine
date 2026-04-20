@@ -162,6 +162,8 @@ export class FlightSceneSimple extends Scene3D {
     private initialHeading = 0;
     private terrainY = GROUND_Y;
     private isOnGround = false;
+    private brakesOn = false;
+    private brakeKeyLock = false;
     private readonly FLAP_STEPS = [0, 5, 15, 25, 30, 40];
     private flapIndex = 2;
     private flapKeyLock5 = false;
@@ -221,6 +223,7 @@ export class FlightSceneSimple extends Scene3D {
     private hudCtx!:       CanvasRenderingContext2D;
     private hudFlapVal!:   HTMLElement;
     private hudFlapBar!:   HTMLElement;
+    private hudBrakeVal!:  HTMLElement;
     private hudSpeedVal!:  HTMLElement;
     private hudAltVal!:    HTMLElement;
     private hudTasVal!:    HTMLElement;
@@ -1157,6 +1160,12 @@ export class FlightSceneSimple extends Scene3D {
 
             if (p('KeyR')) this._spawnPlane();
 
+            if (p('KeyB') && !this.brakeKeyLock) {
+                this.brakeKeyLock = true;
+                if (this.isOnGround) this.brakesOn = !this.brakesOn;
+            }
+            if (!p('KeyB')) this.brakeKeyLock = false;
+
             if (p('Backquote') && !this.dbgKeyLock) {
                 this.dbgKeyLock = true;
                 if (this.dbgPanel) {
@@ -1197,12 +1206,13 @@ export class FlightSceneSimple extends Scene3D {
 #touch-throttle{position:absolute;bottom:220px;left:10px;width:36px;height:140px;border-radius:18px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 18px 18px}
 #touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:32px;height:10px;border-radius:5px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:370px;left:8px;display:flex;flex-direction:column;gap:6px;pointer-events:auto}
-#touch-flap-btns button{width:48px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:10px;cursor:pointer;touch-action:manipulation}
+#touch-flap-btns{position:absolute;bottom:370px;left:8px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
+#touch-flap-btns button{width:48px;height:28px;border-radius:6px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:10px;cursor:pointer;touch-action:manipulation}
+#touch-brk.active{background:rgba(255,40,40,.4);border-color:rgba(255,80,80,.6);color:#ff6060}
 </style>
 <div id="touch-joy"><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
-<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button></div>`;
+<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-brk">BRK</button></div>`;
         document.body.appendChild(overlay);
 
         const joyEl = document.getElementById('touch-joy')!;
@@ -1311,6 +1321,13 @@ export class FlightSceneSimple extends Scene3D {
         });
         document.getElementById('touch-flap-dn')!.addEventListener('touchstart', () => {
             this.flapIndex = Math.max(0, this.flapIndex - 1);
+        });
+        const brkBtn = document.getElementById('touch-brk')!;
+        brkBtn.addEventListener('touchstart', () => {
+            if (this.isOnGround) {
+                this.brakesOn = !this.brakesOn;
+                brkBtn.classList.toggle('active', this.brakesOn);
+            }
         });
     }
 
@@ -1564,6 +1581,7 @@ export class FlightSceneSimple extends Scene3D {
         const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
         const isOnGround = pos.y <= groundLevel;
         this.isOnGround = isOnGround;
+        if (!isOnGround) this.brakesOn = false;
         if (isOnGround) {
             pos.y = groundLevel;
             const downSpeed = this.velocity.y;
@@ -1578,7 +1596,7 @@ export class FlightSceneSimple extends Scene3D {
             const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
             if (speed > 0.5) {
                 const rollingFriction = 0.3;
-                const brakeFriction = this.thrust < 0.05 ? 1.5 : 0;
+                const brakeFriction = this.brakesOn ? 8.0 : (this.thrust < 0.05 ? 1.5 : 0);
                 const frictionDecel = (rollingFriction + brakeFriction) * dt;
                 const newSpeed = Math.max(0, speed - frictionDecel);
                 const scale = newSpeed / speed;
@@ -1772,6 +1790,7 @@ export class FlightSceneSimple extends Scene3D {
     </div>
     <div class="hud-instr-group">
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-flp">OFF</span><span class="hud-instr-lbl">FLAPS</span></div>
+      <div class="hud-instr-item"><span class="hud-instr-val" id="bb-brk">OFF</span><span class="hud-instr-lbl">BRK</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="hud-trim-v">0</span><span class="hud-instr-lbl">TRIM</span></div>
       <div class="hud-instr-item"><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span></div>
     </div>
@@ -1815,6 +1834,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudOnline   = document.getElementById('h-online')!;
         this.hudFlapVal  = document.getElementById('bb-flp')!;
         this.hudFlapBar  = document.getElementById('bb-flp')!;
+        this.hudBrakeVal = document.getElementById('bb-brk')!;
         this.hudTasVal   = document.getElementById('hud-tas-v')!;
         this.hudRpmVal   = document.getElementById('hud-rpm-v')!;
         this.hudRpmNeedle = document.getElementById('hud-rpm-needle')!;
@@ -2061,12 +2081,15 @@ export class FlightSceneSimple extends Scene3D {
         const altitudeFt = Math.round(altitudeM * 3.28084);
         const pct = Math.round(this.thrust * 100);
 
+        const altitudeMsl = Math.round(Math.max(0, this.refAlt + pos.y));
         this.hudSpeedVal.textContent = String(speedKts);
-        this.hudAltVal.textContent   = String(altitudeFt);
+        this.hudAltVal.textContent   = String(altitudeMsl);
         this.hudThrottle.style.width = `${pct}%`;
 
         const flapDeg = this.FLAP_STEPS[this.flapIndex];
         this.hudFlapVal.textContent = flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF';
+        this.hudBrakeVal.textContent = this.brakesOn ? 'ON' : 'OFF';
+        this.hudBrakeVal.style.color = this.brakesOn ? '#ff4040' : '';
 
         const wm = this.planeRoot.getWorldMatrix();
         BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
@@ -2152,9 +2175,9 @@ export class FlightSceneSimple extends Scene3D {
         );
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
-        const speed    = Math.round(this.velocity.length() * 3.6);
+        const speed    = Math.round(this.velocity.length() * 3.6 * 0.539957);
         const pPos = this.planeRoot.position;
-        const altitude = Math.round(Math.max(0, pPos.y));
+        const altitude = Math.round(Math.max(0, this.refAlt + pPos.y));
         const ppd = 4;
 
         ctx.save();
@@ -2174,12 +2197,12 @@ export class FlightSceneSimple extends Scene3D {
         ctx.restore();
 
         ctx.strokeStyle = 'rgba(0,255,100,0.9)';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(-160, horizonY);
-        ctx.lineTo(-30, horizonY);
-        ctx.moveTo(30, horizonY);
-        ctx.lineTo(160, horizonY);
+        ctx.moveTo(-120, horizonY);
+        ctx.lineTo(-20, horizonY);
+        ctx.moveTo(20, horizonY);
+        ctx.lineTo(120, horizonY);
         ctx.stroke();
 
         ctx.restore();
@@ -2229,20 +2252,20 @@ export class FlightSceneSimple extends Scene3D {
         ctx.restore();
 
         ctx.strokeStyle = 'rgba(0,255,100,0.9)';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(cx - 120, cy);
-        ctx.lineTo(cx - 20, cy);
-        ctx.lineTo(cx - 20, cy + 8);
-        ctx.moveTo(cx + 20, cy);
-        ctx.lineTo(cx + 120, cy);
-        ctx.moveTo(cx + 20, cy);
-        ctx.lineTo(cx + 20, cy + 8);
+        ctx.moveTo(cx - 80, cy);
+        ctx.lineTo(cx - 15, cy);
+        ctx.lineTo(cx - 15, cy + 6);
+        ctx.moveTo(cx + 15, cy);
+        ctx.lineTo(cx + 80, cy);
+        ctx.moveTo(cx + 15, cy);
+        ctx.lineTo(cx + 15, cy + 6);
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-        ctx.moveTo(cx, cy - 6);
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.moveTo(cx, cy - 5);
         ctx.lineTo(cx, cy - 2);
         ctx.stroke();
 
@@ -2326,7 +2349,7 @@ export class FlightSceneSimple extends Scene3D {
         ctx.fillStyle = 'rgba(0,255,100,0.4)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('km/h', 54, cy - 2);
+        ctx.fillText('kts', 54, cy - 2);
         ctx.textAlign = 'left';
         ctx.fillText('m', W - 54, cy - 2);
 
