@@ -7,7 +7,7 @@ import * as BABYLON from '@babylonjs/core';
 import '@babylonjs/loaders';
 import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
 
-const BUILD_VERSION = 7;
+const BUILD_VERSION = 8;
 
 interface RemotePlayer {
     root: BABYLON.TransformNode;
@@ -1130,8 +1130,8 @@ export class FlightSceneSimple extends Scene3D {
         let targetRoll: number;
         let targetYaw: number;
 
-        const SMOOTHING_RATE = this.isMobile ? 3.0 : 4.5;
-        const RETURN_RATE    = this.isMobile ? 2.5 : 5.0;
+        const SMOOTHING_RATE = this.isMobile ? 1.5 : 2.5;
+        const RETURN_RATE    = this.isMobile ? 1.2 : 2.0;
 
         if (this.isMobile) {
             targetPitch = this.touchPitchInput;
@@ -1208,7 +1208,7 @@ export class FlightSceneSimple extends Scene3D {
 #touch-throttle{position:absolute;bottom:220px;left:10px;width:36px;height:140px;border-radius:18px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 18px 18px}
 #touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:32px;height:10px;border-radius:5px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:370px;left:8px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
+#touch-flap-btns{position:absolute;bottom:390px;left:8px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
 #touch-flap-btns button{width:48px;height:28px;border-radius:6px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:10px;cursor:pointer;touch-action:manipulation}
 #touch-brk.active{background:rgba(255,40,40,.4);border-color:rgba(255,80,80,.6);color:#ff6060}
 </style>
@@ -1707,19 +1707,21 @@ export class FlightSceneSimple extends Scene3D {
 @media(max-width:768px){
 #hfps{display:none}
 #dbg-panel-toggle{display:none!important}
+#hud-utc{font-size:8px!important;letter-spacing:.08em!important}
 #flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
 #gps-map{width:140px!important;height:140px!important;top:2px!important;left:2px!important}
-.hud-panel-left{left:70px!important;bottom:2px!important;transform:scale(.8);transform-origin:bottom left}
+.hud-panel-left{left:2px!important;bottom:2px!important;transform:scale(.8);transform-origin:bottom left}
 .hud-panel-right{right:2px!important;bottom:2px!important;transform:scale(.8);transform-origin:bottom right}
 .hud-tape{height:140px!important}
 .hud-value-main{font-size:18px!important}
 .hud-engine-col{display:none!important}
 }
 @media(max-width:480px){
+#hud-utc{font-size:7px!important;letter-spacing:.06em!important}
 #flight-pfd{top:22%!important;width:180px!important;height:120px!important}
 #gps-map{width:100px!important;height:100px!important;top:4px!important;left:2px!important}
-.hud-panel-left{left:55px!important;transform:scale(.65);transform-origin:bottom left}
-.hud-panel-right{transform:scale(.65);transform-origin:bottom right}
+.hud-panel-left{left:2px!important;bottom:2px!important;transform:scale(.65);transform-origin:bottom left}
+.hud-panel-right{right:2px!important;bottom:2px!important;transform:scale(.65);transform-origin:bottom right}
 .hud-tape{height:110px!important}
 .hud-value-main{font-size:16px!important}
 .hud-engine-col{display:none!important}
