@@ -7,6 +7,8 @@ import * as BABYLON from '@babylonjs/core';
 import '@babylonjs/loaders';
 import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
 
+const BUILD_VERSION = 7;
+
 interface RemotePlayer {
     root: BABYLON.TransformNode;
     meshes: BABYLON.Mesh[];
@@ -1892,6 +1894,7 @@ export class FlightSceneSimple extends Scene3D {
   <div class="dbg-row"><span class="dbg-lbl">alt MSL (m)</span><span class="dbg-val" id="dbg-altmsl">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">lat / lon</span><span class="dbg-val" id="dbg-latlon">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">tiles</span><span class="dbg-val" id="dbg-tilesinfo">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">build</span><span class="dbg-val" id="dbg-buildver" style="color:#ffcc00">\u2014</span></div>
 </div>
 <div class="dbg-section">
   <div class="dbg-title">AIRPLANE</div>
@@ -1938,6 +1941,9 @@ export class FlightSceneSimple extends Scene3D {
         this.dbgAltMsl    = document.getElementById('dbg-altmsl')!;
         this.dbgLatLon    = document.getElementById('dbg-latlon')!;
         this.dbgTilesInfo = document.getElementById('dbg-tilesinfo')!;
+
+        const buildVerEl = document.getElementById('dbg-buildver');
+        if (buildVerEl) buildVerEl.textContent = `v${BUILD_VERSION}`;
 
         panel.classList.add('hidden');
 
