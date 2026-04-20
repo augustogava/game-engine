@@ -1162,7 +1162,7 @@ export class FlightSceneSimple extends Scene3D {
 
             if (p('KeyB') && !this.brakeKeyLock) {
                 this.brakeKeyLock = true;
-                if (this.isOnGround) this.brakesOn = !this.brakesOn;
+                this.brakesOn = !this.brakesOn;
             }
             if (!p('KeyB')) this.brakeKeyLock = false;
 
@@ -1324,10 +1324,8 @@ export class FlightSceneSimple extends Scene3D {
         });
         const brkBtn = document.getElementById('touch-brk')!;
         brkBtn.addEventListener('touchstart', () => {
-            if (this.isOnGround) {
-                this.brakesOn = !this.brakesOn;
-                brkBtn.classList.toggle('active', this.brakesOn);
-            }
+            this.brakesOn = !this.brakesOn;
+            brkBtn.classList.toggle('active', this.brakesOn);
         });
     }
 
@@ -1581,7 +1579,6 @@ export class FlightSceneSimple extends Scene3D {
         const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
         const isOnGround = pos.y <= groundLevel;
         this.isOnGround = isOnGround;
-        if (!isOnGround) this.brakesOn = false;
         if (isOnGround) {
             pos.y = groundLevel;
             const downSpeed = this.velocity.y;
