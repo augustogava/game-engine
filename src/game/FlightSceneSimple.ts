@@ -1577,9 +1577,9 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
-        const isOnGround = pos.y <= groundLevel;
+        const isOnGround = pos.y <= groundLevel + 0.5;
         this.isOnGround = isOnGround;
-        if (isOnGround) {
+        if (pos.y <= groundLevel) {
             pos.y = groundLevel;
             const downSpeed = this.velocity.y;
             if (downSpeed < 0) {
@@ -1632,15 +1632,15 @@ export class FlightSceneSimple extends Scene3D {
         hud.innerHTML = `
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400&display=swap');
-#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;transform:scale(0.9);transform-origin:center center;opacity:0.7; }
+#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;opacity:0.7; }
 .hp{position:absolute}
 #hfps{font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif}
 #hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
 @keyframes blink{to{opacity:0}}
 
 /* Left Panel - Airspeed */
-.hud-panel-left{position:absolute;left:6px;bottom:8px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
-.hud-panel-right{position:absolute;right:6px;bottom:8px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
+.hud-panel-left{position:absolute;left:2px;bottom:2px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
+.hud-panel-right{position:absolute;right:2px;bottom:2px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
 
 .hud-tape-col{display:flex;flex-direction:column}
 .hud-header{font-size:8px;letter-spacing:.1em;color:#fff;margin-bottom:2px;font-weight:400;opacity:.8}
@@ -1706,9 +1706,9 @@ export class FlightSceneSimple extends Scene3D {
 #hfps{display:none}
 #dbg-panel-toggle{display:none!important}
 #flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
-#gps-map{width:140px!important;height:140px!important;top:6px!important;left:4px!important}
-.hud-panel-left{left:70px!important;transform:scale(.8);transform-origin:bottom left}
-.hud-panel-right{transform:scale(.8);transform-origin:bottom right}
+#gps-map{width:140px!important;height:140px!important;top:2px!important;left:2px!important}
+.hud-panel-left{left:70px!important;bottom:2px!important;transform:scale(.8);transform-origin:bottom left}
+.hud-panel-right{right:2px!important;bottom:2px!important;transform:scale(.8);transform-origin:bottom right}
 .hud-tape{height:140px!important}
 .hud-value-main{font-size:18px!important}
 .hud-engine-col{display:none!important}
@@ -1727,11 +1727,11 @@ export class FlightSceneSimple extends Scene3D {
 </style>
 <div class="hp" id="hl"></div>
 <div class="hp" id="hr"></div>
-<div style="position:absolute;top:20px;right:20px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:10px;font-family:'Inter',sans-serif;padding:5px 10px">
+<div style="position:absolute;top:4px;right:6px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:10px;font-family:'Inter',sans-serif;padding:4px 6px">
   <div id="hfps" style="color:rgba(100,240,180,.4)"></div>
   <div id="h-online" style="color:rgba(100,240,180,.4)">0 ONLINE</div>
 </div>
-<div id="hud-utc" style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
+<div id="hud-utc" style="position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
 
 <!-- Left Panel - Airspeed & Engine side by side -->
@@ -1813,7 +1813,7 @@ export class FlightSceneSimple extends Scene3D {
 </div>
 
 <canvas id="flight-pfd" width="350" height="250" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
-<div id="gps-map" style="position:absolute;top:20px;left:8px;width:180px;height:180px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
+<div id="gps-map" style="position:absolute;top:4px;left:4px;width:180px;height:180px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
   <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
   <canvas id="gps-map-hdg" width="180" height="180" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
   <div style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:8px;letter-spacing:.15em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8)">GPS</div>
