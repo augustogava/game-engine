@@ -1307,6 +1307,32 @@ setInterval(async () => {
 
         entry.distanceNm = 0;
         entry.lastPersist = now;
+
+        if (entry.flightLogId && entry.flightStartTime) {
+            const elapsed = now - entry.flightStartTime;
+            const durMin = Math.round((elapsed / 60000) * 100) / 100;
+            const fDistKm = Math.round(entry.flightDistanceNm * 1.852 * 100) / 100;
+            const fDistNm = Math.round(entry.flightDistanceNm * 100) / 100;
+            const maxAltFt = Math.round(entry.maxAltitudeFt * METERS_TO_FEET);
+            const avgSpd = entry.speedSamples.length
+                ? Math.round((entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length) * KMH_TO_KNOTS * 100) / 100
+                : null;
+            try {
+                await dbPool.execute(
+                    `UPDATE flight_logs SET
+                        flight_duration_min = ?,
+                        distance_km = ?,
+                        distance_nm = ?,
+                        max_altitude_ft = ?,
+                        avg_speed_knots = ?,
+                        route_data = ?
+                     WHERE id = ?`,
+                    [durMin, fDistKm, fDistNm, maxAltFt, avgSpd, JSON.stringify(entry.routePoints), entry.flightLogId]
+                );
+            } catch (err) {
+                console.error(`[DB] Flight log periodic update error for user ${userId}:`, err.message);
+            }
+        }
     }
 }, 30000);
 
