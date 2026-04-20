@@ -172,6 +172,7 @@ export class FlightSceneSimple extends Scene3D {
     private physicsAccumulator = 0;
     private originLat = -23.4354;
     private originLon = -46.4745;
+    private refAlt = 0;
     private mapApiKey = '';
     private mapImg!: HTMLImageElement;
     private mapHeadingCanvas!: HTMLCanvasElement;
@@ -212,6 +213,7 @@ export class FlightSceneSimple extends Scene3D {
     private dbgGroundLvl!: HTMLElement;
     private dbgOnGround!:  HTMLElement;
     private dbgVertRate!:  HTMLElement;
+    private dbgAltMsl!:    HTMLElement;
     private dbgLatLon!:    HTMLElement;
     private dbgTilesInfo!: HTMLElement;
     private dbgKeyLock = false;
@@ -458,7 +460,7 @@ export class FlightSceneSimple extends Scene3D {
         const metersPerDegLon = 111320 * Math.cos(this.originLat * Math.PI / 180);
         const x = (lon - this.originLon) * metersPerDegLon;
         const z = -(lat - this.originLat) * metersPerDegLat;
-        return new BABYLON.Vector3(x, alt, z);
+        return new BABYLON.Vector3(x, alt - this.refAlt, z);
     }
 
     private _updateRemotePlayers(): void {
@@ -514,7 +516,7 @@ export class FlightSceneSimple extends Scene3D {
 
         this.mpClient.sendUpdate({
             lat, lon,
-            alt: pos.y,
+            alt: this.refAlt + pos.y,
             airspeed: this.velocity.length() * 3.6,
             throttle: this.thrust,
             heading: hdg,
@@ -564,6 +566,7 @@ export class FlightSceneSimple extends Scene3D {
         const WGS84_A  = 6378137.0;
         const WGS84_E2 = 0.00669437999014;
         const refAlt = alt - GROUND_Y;
+        this.refAlt = refAlt;
         const N = WGS84_A / Math.sqrt(1 - WGS84_E2 * sinLat * sinLat);
         const px = (N + refAlt) * cosLat * cosLon;
         const py = (N + refAlt) * cosLat * sinLon;
@@ -1869,6 +1872,7 @@ export class FlightSceneSimple extends Scene3D {
   <div class="dbg-row"><span class="dbg-lbl">groundLevel</span><span class="dbg-val" id="dbg-groundlvl">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">isOnGround</span><span class="dbg-val" id="dbg-onground">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">vert rate (m/s)</span><span class="dbg-val" id="dbg-vertrate">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">alt MSL (m)</span><span class="dbg-val" id="dbg-altmsl">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">lat / lon</span><span class="dbg-val" id="dbg-latlon">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">tiles</span><span class="dbg-val" id="dbg-tilesinfo">\u2014</span></div>
 </div>
@@ -1914,6 +1918,7 @@ export class FlightSceneSimple extends Scene3D {
         this.dbgGroundLvl = document.getElementById('dbg-groundlvl')!;
         this.dbgOnGround  = document.getElementById('dbg-onground')!;
         this.dbgVertRate  = document.getElementById('dbg-vertrate')!;
+        this.dbgAltMsl    = document.getElementById('dbg-altmsl')!;
         this.dbgLatLon    = document.getElementById('dbg-latlon')!;
         this.dbgTilesInfo = document.getElementById('dbg-tilesinfo')!;
 
@@ -2403,6 +2408,7 @@ export class FlightSceneSimple extends Scene3D {
         this.dbgOnGround.textContent = this.isOnGround ? 'YES' : 'NO';
         this.dbgOnGround.style.color = this.isOnGround ? '#ff6060' : '#40ffaa';
         this.dbgVertRate.textContent = vel.y.toFixed(2);
+        this.dbgAltMsl.textContent = (this.refAlt + pos.y).toFixed(1);
 
         const { lat, lon } = this._getCurrentLatLon();
         this.dbgLatLon.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;

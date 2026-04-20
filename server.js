@@ -190,7 +190,8 @@ async function findNearestAirport(lat, lon, radiusNm) {
 async function finalizeFlight(userId, entry, status, lastMsg) {
     if (!entry.flightLogId || !dbPool) return;
 
-    const durationMin = (Date.now() - entry.flightStartTime) / 60000;
+    const elapsed = entry.flightStartTime ? (Date.now() - entry.flightStartTime) : 0;
+    const durationMin = elapsed > 0 ? elapsed / 60000 : 0;
     const distKm = entry.flightDistanceNm * 1.852;
     const avgSpeed = entry.speedSamples.length
         ? entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length
@@ -202,9 +203,22 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
         if (airport) arrivalAirportId = airport.id;
     }
 
+    if (lastMsg) {
+        entry.routePoints.push([
+            Math.round(lastMsg.lat * 10000) / 10000,
+            Math.round(lastMsg.lon * 10000) / 10000,
+            Math.round(lastMsg.alt || 0)
+        ]);
+    }
+
     const maxAltFt = Math.round(entry.maxAltitudeFt * METERS_TO_FEET);
     const avgSpeedKnots = avgSpeed ? Math.round(avgSpeed * KMH_TO_KNOTS * 100) / 100 : null;
     const landingFpm = status === 'landed' ? Math.round(entry.lastVerticalFpm * METERS_TO_FEET) : null;
+    const finalDuration = Math.round(durationMin * 100) / 100;
+    const finalDistKm = Math.round(distKm * 100) / 100;
+    const finalDistNm = Math.round(entry.flightDistanceNm * 100) / 100;
+
+    console.log(`[Flight] Finalizing: user=${userId}, log=${entry.flightLogId}, status=${status}, elapsed=${elapsed}ms, duration=${finalDuration}min, dist=${finalDistKm}km, maxAlt=${maxAltFt}ft, avgSpd=${avgSpeedKnots}kts, routePts=${entry.routePoints.length}, startTime=${entry.flightStartTime}`);
 
     try {
         await dbPool.execute(
@@ -223,9 +237,9 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
             [
                 status,
                 arrivalAirportId,
-                Math.round(durationMin * 100) / 100,
-                Math.round(distKm * 100) / 100,
-                Math.round(entry.flightDistanceNm * 100) / 100,
+                finalDuration,
+                finalDistKm,
+                finalDistNm,
                 maxAltFt,
                 avgSpeedKnots,
                 landingFpm,
@@ -233,7 +247,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
                 entry.flightLogId,
             ]
         );
-        console.log(`[Flight] ${status}: user ${userId}, log ${entry.flightLogId}, ${Math.round(durationMin)}min, ${Math.round(entry.flightDistanceNm)}nm`);
+        console.log(`[Flight] ${status}: user ${userId}, log ${entry.flightLogId}, ${finalDuration}min, ${finalDistNm}nm`);
     } catch (err) {
         console.error(`[DB] Flight log finalize error:`, err.message);
     }
@@ -277,7 +291,9 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     }
 
     entry.flightLogId = null;
+    entry.creatingFlightLog = false;
     entry.departureAirportId = null;
+    entry.departureAlt = 0;
     entry.isAirborne = false;
     entry.maxAltitudeFt = 0;
     entry.speedSamples = [];
@@ -288,6 +304,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     entry.userMissionId = null;
     entry.aircraftRegistration = null;
     entry.prevAlt = undefined;
+    entry.lastUpdateTime = 0;
     entry.lastVerticalFpm = 0;
     entry.onGroundCount = 0;
 }
@@ -1016,7 +1033,9 @@ wss.on('connection', (ws) => {
                     prevLat: null,
                     prevLon: null,
                     flightLogId: null,
+                    creatingFlightLog: false,
                     departureAirportId: null,
+                    departureAlt: 0,
                     isAirborne: false,
                     maxAltitudeFt: 0,
                     speedSamples: [],
@@ -1025,6 +1044,7 @@ wss.on('connection', (ws) => {
                     flightStartTime: null,
                     flightDistanceNm: 0,
                     prevAlt: undefined,
+                    lastUpdateTime: 0,
                     lastVerticalFpm: 0,
                     missionId: null,
                     userMissionId: null,
@@ -1084,13 +1104,16 @@ wss.on('connection', (ws) => {
                     entry.prevLat = lat;
                     entry.prevLon = lon;
 
-                    if (entry.prevAlt !== undefined) {
-                        const dtSeconds = 0.05;
+                    const nowMs = Date.now();
+                    if (entry.prevAlt !== undefined && entry.lastUpdateTime) {
+                        const dtSeconds = Math.max(0.01, (nowMs - entry.lastUpdateTime) / 1000);
                         entry.lastVerticalFpm = ((alt - entry.prevAlt) / dtSeconds) * 60;
                     }
                     entry.prevAlt = alt;
+                    entry.lastUpdateTime = nowMs;
 
-                    if (!entry.flightLogId && dbPool) {
+                    if (!entry.flightLogId && !entry.creatingFlightLog && dbPool) {
+                        entry.creatingFlightLog = true;
                         const airport = await findNearestAirport(lat, lon, 5);
                         if (airport) entry.departureAirportId = airport.id;
 
@@ -1120,15 +1143,21 @@ wss.on('connection', (ws) => {
                             entry.flightStartTime = Date.now();
                             entry.maxAltitudeFt = alt || 0;
                             entry.speedSamples = [];
-                            entry.routePoints = [];
+                            entry.routePoints = [[
+                                Math.round(lat * 10000) / 10000,
+                                Math.round(lon * 10000) / 10000,
+                                Math.round(alt)
+                            ]];
                             entry.flightDistanceNm = 0;
                             entry.isAirborne = false;
+                            entry.departureAlt = alt;
                             entry.lastRouteSample = Date.now();
                             entry.statsRecalculated = false;
                             console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, mission: ${entry.missionId || 'none'}`);
                         } catch (err) {
                             console.error(`[DB] Flight log insert error:`, err.message);
                         }
+                        entry.creatingFlightLog = false;
                     }
 
                     if (entry.flightLogId) {
@@ -1137,7 +1166,7 @@ wss.on('connection', (ws) => {
                         entry.flightDistanceNm += stepNm;
 
                         const now = Date.now();
-                        if (now - entry.lastRouteSample > 10000) {
+                        if (now - entry.lastRouteSample > 5000) {
                             entry.routePoints.push([
                                 Math.round(lat * 10000) / 10000,
                                 Math.round(lon * 10000) / 10000,
@@ -1146,7 +1175,8 @@ wss.on('connection', (ws) => {
                             entry.lastRouteSample = now;
                         }
 
-                        if (!entry.isAirborne && alt > 200 && airspeed > 30) {
+                        const altAboveDepart = alt - (entry.departureAlt || 0);
+                        if (!entry.isAirborne && altAboveDepart > 30 && airspeed > 30) {
                             entry.isAirborne = true;
                             dbPool.execute(
                                 `UPDATE flight_logs SET status = 'in_flight' WHERE id = ?`,
