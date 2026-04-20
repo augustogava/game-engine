@@ -64,11 +64,12 @@ function jsonResponse(res, status, data) {
     res.writeHead(status, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
     res.end(payload);
 }
+
 
 // ── Static file MIME types ───────────────────────────────────────────────────
 const MIME_TYPES = {
@@ -104,6 +105,59 @@ function haversineNm(lat1, lon1, lat2, lon2) {
 // ── Unit conversions (game sends metric, DB stores aviation) ─────────────────
 const METERS_TO_FEET = 3.28084;
 const KMH_TO_KNOTS = 1 / 1.852;
+
+// ── Configurable game constants ──────────────────────────────────────────────
+const POINTS_PER_KM      = 0.1;
+const POINTS_PER_LANDING = 0;
+
+// ── HTTP infrastructure helpers ──────────────────────────────────────────────
+function parseBody(req) {
+    return new Promise((resolve) => {
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', () => {
+            try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
+            catch (_) { resolve(null); }
+        });
+        req.on('error', () => resolve(null));
+    });
+}
+
+function authenticateRequest(req) {
+    const auth = req.headers['authorization'] || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    if (!token || !SECRET_KEY) return null;
+    try {
+        const decoded = jwt.verify(token, SECRET_KEY);
+        if (!decoded.id || !decoded.username) return null;
+        return { id: decoded.id, username: decoded.username };
+    } catch (_) {
+        return null;
+    }
+}
+
+function matchRoute(method, urlPath, pattern) {
+    const parts = urlPath.split('/');
+    const patParts = pattern.split('/');
+    if (parts.length !== patParts.length) return null;
+    const params = {};
+    for (let i = 0; i < patParts.length; i++) {
+        if (patParts[i].startsWith(':')) {
+            params[patParts[i].slice(1)] = parts[i];
+        } else if (patParts[i] !== parts[i]) {
+            return null;
+        }
+    }
+    return params;
+}
+
+function getQueryParams(url) {
+    const idx = url.indexOf('?');
+    if (idx === -1) return {};
+    const params = {};
+    new URLSearchParams(url.slice(idx)).forEach((v, k) => { params[k] = v; });
+    return params;
+}
 
 // ── Find nearest airport ─────────────────────────────────────────────────────
 async function findNearestAirport(lat, lon, radiusNm) {
@@ -169,7 +223,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
             [
                 status,
                 arrivalAirportId,
-                Math.round(durationMin),
+                Math.round(durationMin * 100) / 100,
                 Math.round(distKm * 100) / 100,
                 Math.round(entry.flightDistanceNm * 100) / 100,
                 maxAltFt,
@@ -184,6 +238,44 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
         console.error(`[DB] Flight log finalize error:`, err.message);
     }
 
+    if (entry.userMissionId && entry.missionId) {
+        try {
+            if (status === 'landed') {
+                const [mRows] = await dbPool.execute(
+                    `SELECT arrival_airport_id FROM missions WHERE id = ?`, [entry.missionId]);
+                const mission = mRows.length ? mRows[0] : null;
+                const missionArrival = mission ? mission.arrival_airport_id : null;
+                if (!missionArrival || (arrivalAirportId && arrivalAirportId === missionArrival)) {
+                    await dbPool.execute(
+                        `UPDATE user_missions SET status = 'completed', completed_at = NOW() WHERE id = ?`,
+                        [entry.userMissionId]);
+                    console.log(`[Mission] Completed: user ${userId}, userMission ${entry.userMissionId}`);
+                } else {
+                    await dbPool.execute(
+                        `UPDATE user_missions SET status = 'failed' WHERE id = ?`,
+                        [entry.userMissionId]);
+                    console.log(`[Mission] Failed (wrong airport): user ${userId}, userMission ${entry.userMissionId}`);
+                }
+            } else {
+                await dbPool.execute(
+                    `UPDATE user_missions SET status = 'failed' WHERE id = ?`,
+                    [entry.userMissionId]);
+                console.log(`[Mission] Failed (${status}): user ${userId}, userMission ${entry.userMissionId}`);
+            }
+        } catch (err) {
+            console.error(`[DB] Mission auto-update error:`, err.message);
+        }
+    }
+
+    if (status === 'landed') {
+        const ok = await recalculateStats(userId);
+        if (ok) {
+            entry.distanceNm = 0;
+            entry.lastPersist = Date.now();
+            entry.statsRecalculated = true;
+        }
+    }
+
     entry.flightLogId = null;
     entry.departureAirportId = null;
     entry.isAirborne = false;
@@ -192,13 +284,126 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     entry.routePoints = [];
     entry.flightDistanceNm = 0;
     entry.flightStartTime = null;
+    entry.missionId = null;
+    entry.userMissionId = null;
+    entry.aircraftRegistration = null;
+    entry.prevAlt = undefined;
+    entry.lastVerticalFpm = 0;
+}
+
+// ── Pilot rank calculation ───────────────────────────────────────────────────
+function computePilotRank(hours, missionsCompleted) {
+    if (hours >= 1000 && missionsCompleted >= 100) return 'senior_captain';
+    if (hours >= 500  && missionsCompleted >= 50)  return 'captain';
+    if (hours >= 200  && missionsCompleted >= 25)  return 'airline_pilot';
+    if (hours >= 50   && missionsCompleted >= 10)  return 'commercial_pilot';
+    if (hours >= 10   && missionsCompleted >= 2)   return 'private_pilot';
+    return 'student';
+}
+
+// ── Recalculate full stats for a user ────────────────────────────────────────
+async function recalculateStats(userId) {
+    if (!dbPool) return false;
+    try {
+        const [[flightAgg]] = await dbPool.execute(
+            `SELECT COUNT(*) AS cnt,
+                    COALESCE(SUM(flight_duration_min), 0) / 60 AS hours,
+                    COALESCE(SUM(distance_km), 0) AS dist_km,
+                    COALESCE(SUM(distance_nm), 0) AS dist_nm,
+                    MAX(landing_rate_fpm) AS best_lr,
+                    AVG(landing_rate_fpm) AS avg_lr
+             FROM flight_logs WHERE user_id = ? AND status = 'landed'`,
+            [userId]
+        );
+
+        const [[missionAgg]] = await dbPool.execute(
+            `SELECT COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END), 0) AS completed,
+                    COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0) AS failed
+             FROM user_missions WHERE user_id = ?`,
+            [userId]
+        );
+
+        const [[missionPts]] = await dbPool.execute(
+            `SELECT COALESCE(SUM(m.reward_points), 0) AS pts
+             FROM user_missions um JOIN missions m ON um.mission_id = m.id
+             WHERE um.user_id = ? AND um.status = 'completed'`,
+            [userId]
+        );
+
+        const distancePoints = Math.floor((flightAgg.dist_km || 0) * POINTS_PER_KM);
+        const landingPoints = (flightAgg.cnt || 0) * POINTS_PER_LANDING;
+        const totalPoints = (missionPts.pts || 0) + distancePoints + landingPoints;
+
+        let favAirportId = null;
+        const [favRows] = await dbPool.execute(
+            `SELECT departure_airport_id AS aid, COUNT(*) AS cnt
+             FROM flight_logs WHERE user_id = ? AND departure_airport_id IS NOT NULL AND status = 'landed'
+             GROUP BY departure_airport_id ORDER BY cnt DESC LIMIT 1`,
+            [userId]
+        );
+        if (favRows.length) favAirportId = favRows[0].aid;
+
+        let mostAircraft = null;
+        const [acRows] = await dbPool.execute(
+            `SELECT aircraft_type, COUNT(*) AS cnt
+             FROM flight_logs WHERE user_id = ? AND aircraft_type IS NOT NULL AND status = 'landed'
+             GROUP BY aircraft_type ORDER BY cnt DESC LIMIT 1`,
+            [userId]
+        );
+        if (acRows.length) mostAircraft = acRows[0].aircraft_type;
+
+        const rank = computePilotRank(flightAgg.hours || 0, missionAgg.completed || 0);
+
+        await dbPool.execute(
+            `INSERT INTO user_flight_stats
+                (user_id, total_flights, total_flight_hours, total_distance_km, total_distance_nm,
+                 total_missions_completed, total_missions_failed, total_reward_points,
+                 best_landing_rate_fpm, avg_landing_rate_fpm,
+                 favorite_airport_id, most_used_aircraft, pilot_rank, last_flight_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+                total_flights            = VALUES(total_flights),
+                total_flight_hours       = VALUES(total_flight_hours),
+                total_distance_km        = VALUES(total_distance_km),
+                total_distance_nm        = VALUES(total_distance_nm),
+                total_missions_completed = VALUES(total_missions_completed),
+                total_missions_failed    = VALUES(total_missions_failed),
+                total_reward_points      = VALUES(total_reward_points),
+                best_landing_rate_fpm    = VALUES(best_landing_rate_fpm),
+                avg_landing_rate_fpm     = VALUES(avg_landing_rate_fpm),
+                favorite_airport_id      = VALUES(favorite_airport_id),
+                most_used_aircraft       = VALUES(most_used_aircraft),
+                pilot_rank               = VALUES(pilot_rank),
+                last_flight_at           = NOW()`,
+            [
+                userId,
+                flightAgg.cnt || 0,
+                Math.round((flightAgg.hours || 0) * 100) / 100,
+                Math.round((flightAgg.dist_km || 0) * 100) / 100,
+                Math.round((flightAgg.dist_nm || 0) * 100) / 100,
+                missionAgg.completed || 0,
+                missionAgg.failed || 0,
+                totalPoints,
+                flightAgg.best_lr != null ? Math.round(flightAgg.best_lr * 100) / 100 : null,
+                flightAgg.avg_lr != null ? Math.round(flightAgg.avg_lr * 100) / 100 : null,
+                favAirportId,
+                mostAircraft,
+                rank,
+            ]
+        );
+        console.log(`[Stats] Recalculated for user ${userId}: ${flightAgg.cnt} flights, rank=${rank}, pts=${totalPoints}`);
+        return true;
+    } catch (err) {
+        console.error(`[DB] recalculateStats error for user ${userId}:`, err.message);
+        return false;
+    }
 }
 
 // ── HTTP server ──────────────────────────────────────────────────────────────
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 const server = http.createServer(async (req, res) => {
@@ -292,11 +497,370 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Static files from dist/
-    let urlPath = decodeURIComponent(req.url.split('?')[0]);
-    if (urlPath === '/') urlPath = '/index.html';
+    const urlPath = req.url.split('?')[0];
+    const query = getQueryParams(req.url);
 
-    const filePath = path.join(DIST_DIR, urlPath);
+    // ── Missions API ─────────────────────────────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/missions') {
+        if (!dbPool) return jsonResponse(res, 200, { data: [], total: 0, page: 1, limit: 20 });
+        const page = Math.max(1, parseInt(query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 20));
+        const offset = (page - 1) * limit;
+        let where = 'WHERE m.is_active = 1';
+        const params = [];
+        if (query.type) { where += ' AND m.type = ?'; params.push(query.type); }
+        if (query.difficulty) { where += ' AND m.difficulty = ?'; params.push(query.difficulty); }
+        try {
+            const [[{ total }]] = await dbPool.execute(`SELECT COUNT(*) AS total FROM missions m ${where}`, params);
+            const [rows] = await dbPool.execute(
+                `SELECT m.*, da.name AS departure_airport_name, aa.name AS arrival_airport_name
+                 FROM missions m
+                 LEFT JOIN airports da ON m.departure_airport_id = da.id
+                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+                 ${where} ORDER BY m.sort_order, m.id LIMIT ${limit} OFFSET ${offset}`, params);
+            return jsonResponse(res, 200, { data: rows, total, page, limit });
+        } catch (err) {
+            console.error('[API] GET /api/missions error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    let routeParams;
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/missions/:id'))) {
+        if (!dbPool) return jsonResponse(res, 404, { error: 'Not found' });
+        const { id } = routeParams;
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT m.*, da.name AS departure_airport_name, da.icao_code AS departure_icao,
+                        aa.name AS arrival_airport_name, aa.icao_code AS arrival_icao
+                 FROM missions m
+                 LEFT JOIN airports da ON m.departure_airport_id = da.id
+                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+                 WHERE m.id = ?`, [id]);
+            if (!rows.length) return jsonResponse(res, 404, { error: 'Mission not found' });
+            return jsonResponse(res, 200, rows[0]);
+        } catch (err) {
+            console.error('[API] GET /api/missions/:id error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'POST' && urlPath === '/api/user-missions') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        const body = await parseBody(req);
+        if (!body || !body.mission_id) return jsonResponse(res, 400, { error: 'mission_id is required' });
+        try {
+            const [existing] = await dbPool.execute(
+                `SELECT id FROM user_missions WHERE user_id = ? AND mission_id = ? AND status IN ('started','in_progress')`,
+                [user.id, body.mission_id]);
+            if (existing.length) return jsonResponse(res, 409, { error: 'Mission already in progress' });
+            const [result] = await dbPool.execute(
+                `INSERT INTO user_missions (user_id, mission_id, status, started_at) VALUES (?, ?, 'started', NOW())`,
+                [user.id, body.mission_id]);
+            return jsonResponse(res, 201, { id: result.insertId, message: 'Mission started' });
+        } catch (err) {
+            console.error('[API] POST /api/user-missions error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/user-missions') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: [] });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT um.*, m.title AS mission_title, m.type AS mission_type,
+                        m.difficulty AS mission_difficulty,
+                        da.name AS departure_airport_name, aa.name AS arrival_airport_name
+                 FROM user_missions um
+                 JOIN missions m ON um.mission_id = m.id
+                 LEFT JOIN airports da ON m.departure_airport_id = da.id
+                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+                 WHERE um.user_id = ? ORDER BY um.created_at DESC`, [user.id]);
+            return jsonResponse(res, 200, { data: rows });
+        } catch (err) {
+            console.error('[API] GET /api/user-missions error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/complete'))) {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        const { id } = routeParams;
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT id FROM user_missions WHERE id = ? AND user_id = ?`, [id, user.id]);
+            if (!rows.length) return jsonResponse(res, 404, { error: 'User mission not found' });
+            await dbPool.execute(
+                `UPDATE user_missions SET status = 'completed', completed_at = NOW() WHERE id = ?`, [id]);
+            await recalculateStats(user.id);
+            return jsonResponse(res, 200, { message: 'Mission completed' });
+        } catch (err) {
+            console.error('[API] PUT /api/user-missions/:id/complete error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id'))) {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        const { id } = routeParams;
+        const body = await parseBody(req);
+        if (!body) return jsonResponse(res, 400, { error: 'Request body required' });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT id FROM user_missions WHERE id = ? AND user_id = ?`, [id, user.id]);
+            if (!rows.length) return jsonResponse(res, 404, { error: 'User mission not found' });
+            const sets = []; const vals = [];
+            if (body.status) { sets.push('status = ?'); vals.push(body.status); }
+            if (body.score !== undefined) { sets.push('score = ?'); vals.push(body.score); }
+            if (body.notes !== undefined) { sets.push('notes = ?'); vals.push(body.notes); }
+            if (body.status === 'completed') { sets.push('completed_at = NOW()'); }
+            if (!sets.length) return jsonResponse(res, 400, { error: 'No fields to update' });
+            vals.push(id);
+            await dbPool.execute(`UPDATE user_missions SET ${sets.join(', ')} WHERE id = ?`, vals);
+            if (body.status === 'completed' || body.status === 'failed') await recalculateStats(user.id);
+            return jsonResponse(res, 200, { message: 'Mission updated' });
+        } catch (err) {
+            console.error('[API] PUT /api/user-missions/:id error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    // ── Flight Logs API ──────────────────────────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/flight-logs/recent') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: [] });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT fl.*, da.name AS departure_name, da.icao_code AS departure_icao,
+                        aa.name AS arrival_name, aa.icao_code AS arrival_icao
+                 FROM flight_logs fl
+                 LEFT JOIN airports da ON fl.departure_airport_id = da.id
+                 LEFT JOIN airports aa ON fl.arrival_airport_id = aa.id
+                 WHERE fl.user_id = ? ORDER BY fl.departure_time DESC LIMIT 10`, [user.id]);
+            return jsonResponse(res, 200, { data: rows });
+        } catch (err) {
+            console.error('[API] GET /api/flight-logs/recent error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/flight-logs') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: [], total: 0, page: 1, limit: 20 });
+        const page = Math.max(1, parseInt(query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 20));
+        const offset = (page - 1) * limit;
+        try {
+            const [[{ total }]] = await dbPool.execute(
+                `SELECT COUNT(*) AS total FROM flight_logs WHERE user_id = ?`, [user.id]);
+            const [rows] = await dbPool.execute(
+                `SELECT fl.*, da.name AS departure_name, da.icao_code AS departure_icao,
+                        aa.name AS arrival_name, aa.icao_code AS arrival_icao
+                 FROM flight_logs fl
+                 LEFT JOIN airports da ON fl.departure_airport_id = da.id
+                 LEFT JOIN airports aa ON fl.arrival_airport_id = aa.id
+                 WHERE fl.user_id = ? ORDER BY fl.departure_time DESC LIMIT ${limit} OFFSET ${offset}`, [user.id]);
+            return jsonResponse(res, 200, { data: rows, total, page, limit });
+        } catch (err) {
+            console.error('[API] GET /api/flight-logs error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    // ── Flight Stats API ─────────────────────────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/flight-stats/leaderboard') {
+        if (!dbPool) return jsonResponse(res, 200, { data: [] });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT ufs.*, u.username
+                 FROM user_flight_stats ufs
+                 JOIN users u ON ufs.user_id = u.id
+                 ORDER BY ufs.total_flight_hours DESC LIMIT 20`);
+            return jsonResponse(res, 200, { data: rows });
+        } catch (err) {
+            console.error('[API] GET /api/flight-stats/leaderboard error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/flight-stats/platform') {
+        if (!dbPool) return jsonResponse(res, 200, { airports: 0, missions: 0, activePilots: 0, totalFlightHours: 0, onlineNow: players.size });
+        try {
+            const [[a]] = await dbPool.execute("SELECT COUNT(*) AS cnt FROM airports WHERE is_active = 1");
+            const [[m]] = await dbPool.execute("SELECT COUNT(*) AS cnt FROM missions WHERE is_active = 1");
+            const [[p]] = await dbPool.execute("SELECT COUNT(*) AS cnt FROM users WHERE is_enabled = 1");
+            const [[h]] = await dbPool.execute("SELECT COALESCE(SUM(total_flight_hours), 0) AS total FROM user_flight_stats");
+            return jsonResponse(res, 200, {
+                airports: a.cnt || 0, missions: m.cnt || 0,
+                activePilots: p.cnt || 0,
+                totalFlightHours: Math.round(h.total || 0),
+                onlineNow: players.size,
+            });
+        } catch (err) {
+            console.error('[API] GET /api/flight-stats/platform error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'PUT' && urlPath === '/api/flight-stats/recalculate') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        await recalculateStats(user.id);
+        return jsonResponse(res, 200, { message: 'Stats recalculated' });
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/flight-stats') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, {
+            user_id: user.id, total_flights: 0, total_flight_hours: 0,
+            total_distance_km: 0, total_distance_nm: 0,
+            total_missions_completed: 0, total_missions_failed: 0, total_reward_points: 0,
+            most_used_aircraft: null, pilot_rank: 'student',
+            best_landing_rate_fpm: null, avg_landing_rate_fpm: null,
+        });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT * FROM user_flight_stats WHERE user_id = ?`, [user.id]);
+            if (rows.length) return jsonResponse(res, 200, rows[0]);
+            return jsonResponse(res, 200, {
+                user_id: user.id, total_flights: 0, total_flight_hours: 0,
+                total_distance_km: 0, total_distance_nm: 0,
+                total_missions_completed: 0, total_missions_failed: 0, total_reward_points: 0,
+                most_used_aircraft: null, pilot_rank: 'student',
+                best_landing_rate_fpm: null, avg_landing_rate_fpm: null,
+            });
+        } catch (err) {
+            console.error('[API] GET /api/flight-stats error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    // ── Marketplace API ──────────────────────────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/marketplace/purchases') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: [] });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT ph.*, ml.description AS listing_description
+                 FROM purchase_history ph
+                 LEFT JOIN marketplace_listings ml ON ph.listing_id = ml.id
+                 WHERE ph.user_id = ? ORDER BY ph.created_at DESC`, [user.id]);
+            return jsonResponse(res, 200, { data: rows });
+        } catch (err) {
+            console.error('[API] GET /api/marketplace/purchases error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/marketplace') {
+        if (!dbPool) return jsonResponse(res, 200, { data: [], total: 0, page: 1, limit: 20 });
+        const page = Math.max(1, parseInt(query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 20));
+        const offset = (page - 1) * limit;
+        let where = "WHERE ml.status = 'active'";
+        const params = [];
+        if (query.listing_type) { where += ' AND ml.listing_type = ?'; params.push(query.listing_type); }
+        try {
+            const [[{ total }]] = await dbPool.execute(`SELECT COUNT(*) AS total FROM marketplace_listings ml ${where}`, params);
+            const [rows] = await dbPool.execute(
+                `SELECT ml.*, u.username AS seller_name
+                 FROM marketplace_listings ml
+                 LEFT JOIN users u ON ml.seller_id = u.id
+                 ${where} ORDER BY ml.created_at DESC LIMIT ${limit} OFFSET ${offset}`, params);
+            return jsonResponse(res, 200, { data: rows, total, page, limit });
+        } catch (err) {
+            console.error('[API] GET /api/marketplace error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'POST' && (routeParams = matchRoute(req.method, urlPath, '/api/marketplace/:id/acquire'))) {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        const { id } = routeParams;
+        try {
+            const [listings] = await dbPool.execute(
+                `SELECT * FROM marketplace_listings WHERE id = ? AND status = 'active'`, [id]);
+            if (!listings.length) return jsonResponse(res, 404, { error: 'Listing not found or inactive' });
+            const listing = listings[0];
+            const [dup] = await dbPool.execute(
+                `SELECT id FROM purchase_history WHERE user_id = ? AND listing_id = ? AND status = 'completed'`,
+                [user.id, id]);
+            if (dup.length) return jsonResponse(res, 409, { error: 'Already acquired' });
+            const [result] = await dbPool.execute(
+                `INSERT INTO purchase_history (user_id, listing_id, listing_type, title, price, currency, status, payment_method)
+                 VALUES (?, ?, ?, ?, ?, ?, 'completed', 'free')`,
+                [user.id, id, listing.listing_type, listing.title, listing.price, listing.currency]);
+            if (listing.listing_type === 'airport' && listing.airport_id) {
+                await dbPool.execute(
+                    `INSERT IGNORE INTO user_airports (user_id, airport_id, is_owned) VALUES (?, ?, 1)`,
+                    [user.id, listing.airport_id]);
+            }
+            return jsonResponse(res, 201, { id: result.insertId, message: 'Item acquired successfully' });
+        } catch (err) {
+            console.error('[API] POST /api/marketplace/:id/acquire error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    // ── Airports API ─────────────────────────────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/airports/acquired') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: [] });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT ua.*, a.name, a.icao_code, a.iata_code, a.type, a.country_code, a.municipality
+                 FROM user_airports ua JOIN airports a ON ua.airport_id = a.id
+                 WHERE ua.user_id = ?`, [user.id]);
+            return jsonResponse(res, 200, { data: rows });
+        } catch (err) {
+            console.error('[API] GET /api/airports/acquired error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'POST' && (routeParams = matchRoute(req.method, urlPath, '/api/airports/:id/acquire'))) {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        const { id } = routeParams;
+        try {
+            const [airports] = await dbPool.execute(`SELECT id FROM airports WHERE id = ? AND is_active = 1`, [id]);
+            if (!airports.length) return jsonResponse(res, 404, { error: 'Airport not found' });
+            await dbPool.execute(
+                `INSERT IGNORE INTO user_airports (user_id, airport_id, is_owned) VALUES (?, ?, 1)`,
+                [user.id, id]);
+            return jsonResponse(res, 201, { message: 'Airport acquired' });
+        } catch (err) {
+            console.error('[API] POST /api/airports/:id/acquire error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    // Static files from dist/
+    let staticPath = decodeURIComponent(urlPath);
+    if (staticPath === '/') staticPath = '/index.html';
+
+    const filePath = path.join(DIST_DIR, staticPath);
     const ext = path.extname(filePath).toLowerCase();
 
     if (!filePath.startsWith(DIST_DIR)) {
@@ -412,20 +976,22 @@ wss.on('connection', (ws) => {
                             await finalizeFlight(playerId, existing, 'cancelled', existing.state);
                         }
 
-                        const sm = (Date.now() - existing.lastPersist) / 60000;
-                        const hi = sm / 60;
-                        const dk = existing.distanceNm * 1.852;
-                        dbPool.execute(
-                            `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
-                             VALUES (?, 1, ?, ?, ?, NOW())
-                             ON DUPLICATE KEY UPDATE
-                               total_flights      = total_flights + 1,
-                               total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
-                               total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
-                               total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                               last_flight_at = NOW()`,
-                            [playerId, hi, existing.distanceNm, dk]
-                        ).catch(() => {});
+                        if (!existing.statsRecalculated) {
+                            const sm = (Date.now() - existing.lastPersist) / 60000;
+                            const hi = sm / 60;
+                            const dk = existing.distanceNm * 1.852;
+                            dbPool.execute(
+                                `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
+                                 VALUES (?, 1, ?, ?, ?, NOW())
+                                 ON DUPLICATE KEY UPDATE
+                                   total_flights      = total_flights + 1,
+                                   total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                                   total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                                   total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                                   last_flight_at = NOW()`,
+                                [playerId, hi, existing.distanceNm, dk]
+                            ).catch(() => {});
+                        }
 
                         if (existing.sessionDbId) {
                             const dur = (Date.now() - existing.sessionStart) / 60000;
@@ -458,6 +1024,10 @@ wss.on('connection', (ws) => {
                     flightDistanceNm: 0,
                     prevAlt: undefined,
                     lastVerticalFpm: 0,
+                    missionId: null,
+                    userMissionId: null,
+                    aircraftRegistration: null,
+                    statsRecalculated: false,
                 });
 
                 if (dbPool) {
@@ -521,12 +1091,27 @@ wss.on('connection', (ws) => {
                         const airport = await findNearestAirport(lat, lon, 5);
                         if (airport) entry.departureAirportId = airport.id;
 
+                        if (msg.missionId) entry.missionId = Number(msg.missionId) || null;
+                        if (msg.aircraftRegistration) entry.aircraftRegistration = String(msg.aircraftRegistration);
+
+                        if (entry.missionId) {
+                            try {
+                                const [umRows] = await dbPool.execute(
+                                    `SELECT id FROM user_missions WHERE user_id = ? AND mission_id = ? AND status IN ('started','in_progress') LIMIT 1`,
+                                    [playerId, entry.missionId]);
+                                if (umRows.length) {
+                                    entry.userMissionId = umRows[0].id;
+                                    await dbPool.execute(`UPDATE user_missions SET status = 'in_progress' WHERE id = ?`, [entry.userMissionId]);
+                                }
+                            } catch (_) {}
+                        }
+
                         try {
                             const [result] = await dbPool.execute(
                                 `INSERT INTO flight_logs
-                                 (user_id, departure_airport_id, aircraft_type, departure_time, status)
-                                 VALUES (?, ?, ?, NOW(), 'departed')`,
-                                [playerId, entry.departureAirportId, msg.aircraft || null]
+                                 (user_id, departure_airport_id, aircraft_type, aircraft_registration, mission_id, departure_time, status)
+                                 VALUES (?, ?, ?, ?, ?, NOW(), 'departed')`,
+                                [playerId, entry.departureAirportId, msg.aircraft || null, entry.aircraftRegistration, entry.missionId]
                             );
                             entry.flightLogId = result.insertId;
                             entry.flightStartTime = Date.now();
@@ -536,7 +1121,8 @@ wss.on('connection', (ws) => {
                             entry.flightDistanceNm = 0;
                             entry.isAirborne = false;
                             entry.lastRouteSample = Date.now();
-                            console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}`);
+                            entry.statsRecalculated = false;
+                            console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, mission: ${entry.missionId || 'none'}`);
                         } catch (err) {
                             console.error(`[DB] Flight log insert error:`, err.message);
                         }
@@ -583,23 +1169,25 @@ wss.on('connection', (ws) => {
                     await finalizeFlight(playerId, entry, 'cancelled', entry.state);
                 }
 
-                const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
-                const hoursIncrement = sessionMinutes / 60;
-                const distKm = entry.distanceNm * 1.852;
-                try {
-                    await dbPool.execute(
-                        `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
-                         VALUES (?, 1, ?, ?, ?, NOW())
-                         ON DUPLICATE KEY UPDATE
-                           total_flights      = total_flights + 1,
-                           total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
-                           total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
-                           total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                           last_flight_at = NOW()`,
-                        [playerId, hoursIncrement, entry.distanceNm, distKm]
-                    );
-                } catch (err) {
-                    console.error(`[DB] Final persist error for user ${playerId}:`, err.message);
+                if (!entry.statsRecalculated) {
+                    const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
+                    const hoursIncrement = sessionMinutes / 60;
+                    const distKm = entry.distanceNm * 1.852;
+                    try {
+                        await dbPool.execute(
+                            `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
+                             VALUES (?, 1, ?, ?, ?, NOW())
+                             ON DUPLICATE KEY UPDATE
+                               total_flights      = total_flights + 1,
+                               total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                               total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                               total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                               last_flight_at = NOW()`,
+                            [playerId, hoursIncrement, entry.distanceNm, distKm]
+                        );
+                    } catch (err) {
+                        console.error(`[DB] Final persist error for user ${playerId}:`, err.message);
+                    }
                 }
 
                 if (entry.sessionDbId) {
@@ -706,22 +1294,24 @@ async function gracefulShutdown() {
                 await finalizeFlight(userId, entry, 'cancelled', entry.state);
             }
 
-            const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
-            const hoursIncrement = sessionMinutes / 60;
-            const distKm = entry.distanceNm * 1.852;
-            try {
-                await dbPool.execute(
-                    `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
-                     VALUES (?, 1, ?, ?, ?, NOW())
-                     ON DUPLICATE KEY UPDATE
-                       total_flights      = total_flights + 1,
-                       total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
-                       total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
-                       total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                       last_flight_at = NOW()`,
-                    [userId, hoursIncrement, entry.distanceNm, distKm]
-                );
-            } catch (_) {}
+            if (!entry.statsRecalculated) {
+                const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
+                const hoursIncrement = sessionMinutes / 60;
+                const distKm = entry.distanceNm * 1.852;
+                try {
+                    await dbPool.execute(
+                        `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, last_flight_at)
+                         VALUES (?, 1, ?, ?, ?, NOW())
+                         ON DUPLICATE KEY UPDATE
+                           total_flights      = total_flights + 1,
+                           total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                           total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                           total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                           last_flight_at = NOW()`,
+                        [userId, hoursIncrement, entry.distanceNm, distKm]
+                    );
+                } catch (_) {}
+            }
 
             if (entry.sessionDbId) {
                 const dur = (Date.now() - entry.sessionStart) / 60000;
