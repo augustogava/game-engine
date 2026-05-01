@@ -2,7 +2,7 @@ import { GameCore3D } from './engine/3d/GameCore3D.js';
 import { FlightSceneSimple } from './game/FlightSceneSimple.js';
 
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
-const FLIGHT_HOURS_URL = 'https://simflightpro.com/fligh-time';
+const FLIGHT_HOURS_URL = 'https://simflightpro.com/flight-time';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const loadingEl = document.getElementById('loading')!;
