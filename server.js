@@ -110,6 +110,8 @@ const KMH_TO_KNOTS = 1 / 1.852;
 // ── Configurable game constants ──────────────────────────────────────────────
 const POINTS_PER_KM      = 0.1;
 const POINTS_PER_LANDING = 0;
+const FLIGHT_LOG_COOLDOWN_MS = 15000;
+const MIN_AIRSPEED_TO_START_LOG = 5;
 
 // ── HTTP infrastructure helpers ──────────────────────────────────────────────
 function parseBody(req) {
@@ -315,6 +317,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
 
     entry.flightLogId = null;
     entry.creatingFlightLog = false;
+    entry.lastFlightEndTime = Date.now();
     entry.departureAirportId = null;
     entry.departureAlt = 0;
     entry.isAirborne = false;
@@ -1134,6 +1137,7 @@ wss.on('connection', (ws) => {
                     aircraftRegistration: null,
                     statsRecalculated: false,
                     onGroundCount: 0,
+                    lastFlightEndTime: 0,
                 });
 
                 if (dbPool) {
@@ -1197,7 +1201,8 @@ wss.on('connection', (ws) => {
                     entry.prevAlt = alt;
                     entry.lastUpdateTime = nowMs;
 
-                    if (!entry.flightLogId && !entry.creatingFlightLog && dbPool) {
+                    const cooldownExpired = !entry.lastFlightEndTime || (Date.now() - entry.lastFlightEndTime) >= FLIGHT_LOG_COOLDOWN_MS;
+                    if (!entry.flightLogId && !entry.creatingFlightLog && dbPool && cooldownExpired && airspeed >= MIN_AIRSPEED_TO_START_LOG) {
                         entry.creatingFlightLog = true;
                         const airport = await findNearestAirport(lat, lon, 5);
                         if (airport) entry.departureAirportId = airport.id;
