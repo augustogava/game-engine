@@ -9,31 +9,130 @@ import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
 
 const BUILD_VERSION = 8;
 
+interface AircraftSurfaceConfig {
+    surface_index: number;
+    label: string;
+    pos_x: number; pos_y: number; pos_z: number;
+    normal_x: number; normal_y: number; normal_z: number;
+    area: number;
+    chord: number;
+    aspect_ratio: number;
+    zero_lift_aoa: number;
+    flap_fraction: number;
+}
+
+interface AircraftConfig {
+    id: number;
+    code: string;
+    name: string;
+    category: number;
+    model_file: string;
+    model_target_size: number;
+    model_rotation_y: number;
+    mass_kg: number;
+    max_thrust_n: number;
+    inertia_xx: number;
+    inertia_yy: number;
+    inertia_zz: number;
+    lift_slope: number;
+    skin_friction: number;
+    stall_alpha_rad: number;
+    oswald_efficiency: number;
+    fuselage_cd0: number;
+    fuselage_ref_area: number;
+    stall_speed_kts: number;
+    base_zero_lift_aoa: number;
+    flap_steps_json: number[];
+    default_flap_index_ground: number;
+    default_flap_index_air: number;
+    throttle_up_rate: number;
+    throttle_down_rate: number;
+    rolling_friction: number;
+    brake_friction: number;
+    idle_friction: number;
+    spawn_alt_offset_m: number;
+    spawn_airborne_thrust: number;
+    spawn_airborne_speed_ms: number;
+    surfaces: AircraftSurfaceConfig[];
+}
+
+const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
+    id: 0, code: 'dc8', name: 'Douglas DC-8', category: 2,
+    model_file: 'models/DC8_AFRC_AIR_0824.glb',
+    model_target_size: 40, model_rotation_y: Math.PI,
+    mass_kg: 10000, max_thrust_n: 50000,
+    inertia_xx: 211333, inertia_yy: 256608, inertia_zz: 48531,
+    lift_slope: 5.5, skin_friction: 0.02, stall_alpha_rad: 0.26,
+    oswald_efficiency: 0.8, fuselage_cd0: 0.04, fuselage_ref_area: 45,
+    stall_speed_kts: 25, base_zero_lift_aoa: -0.035,
+    flap_steps_json: [0, 5, 15, 25, 30, 40],
+    default_flap_index_ground: 2, default_flap_index_air: 0,
+    throttle_up_rate: 0.55, throttle_down_rate: 0.4,
+    rolling_friction: 0.3, brake_friction: 8.0, idle_friction: 1.5,
+    spawn_alt_offset_m: 600, spawn_airborne_thrust: 0.7, spawn_airborne_speed_ms: 100,
+    surfaces: [
+        { surface_index: 0, label: 'left_wing',  pos_x: -3, pos_y: 0, pos_z: -0.5, normal_x: 0, normal_y: 1, normal_z: 0, area: 38, chord: 2.5, aspect_ratio: 7.5, zero_lift_aoa: -0.035, flap_fraction: 0.15 },
+        { surface_index: 1, label: 'right_wing', pos_x:  3, pos_y: 0, pos_z: -0.5, normal_x: 0, normal_y: 1, normal_z: 0, area: 38, chord: 2.5, aspect_ratio: 7.5, zero_lift_aoa: -0.035, flap_fraction: 0.15 },
+        { surface_index: 2, label: 'h_stab',     pos_x:  0, pos_y: 0, pos_z: -7,   normal_x: 0, normal_y: 1, normal_z: 0, area: 7.2, chord: 1.8, aspect_ratio: 2.2, zero_lift_aoa: 0, flap_fraction: 0.35 },
+        { surface_index: 3, label: 'v_stab',     pos_x:  0, pos_y: 1.5, pos_z: -7, normal_x: 1, normal_y: 0, normal_z: 0, area: 7.0, chord: 2.0, aspect_ratio: 1.75, zero_lift_aoa: 0, flap_fraction: 0.35 },
+    ],
+};
+
+async function fetchAircraftConfig(aircraftId: number): Promise<AircraftConfig> {
+    try {
+        const token = localStorage.getItem('auth_token') || '';
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch(`/api/aircrafts/${aircraftId}`, { headers });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (typeof data.flap_steps_json === 'string') {
+            data.flap_steps_json = JSON.parse(data.flap_steps_json);
+        }
+        if (!Array.isArray(data.surfaces)) data.surfaces = [];
+        return data as AircraftConfig;
+    } catch (err) {
+        console.error('[Aircraft] Failed to fetch config, using default:', err);
+        return DEFAULT_AIRCRAFT_CONFIG;
+    }
+}
+
+async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
+    try {
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) return DEFAULT_AIRCRAFT_CONFIG;
+        const headers: Record<string, string> = { 'Authorization': `Bearer ${token}` };
+        const resp = await fetch('/api/user-aircrafts', { headers });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const selected = data.data?.find((ua: any) => ua.is_selected === 1);
+        if (selected?.aircraft) {
+            const cfg = selected.aircraft as AircraftConfig;
+            if (typeof cfg.flap_steps_json === 'string') {
+                cfg.flap_steps_json = JSON.parse(cfg.flap_steps_json as unknown as string);
+            }
+            if (!Array.isArray(cfg.surfaces)) cfg.surfaces = [];
+            return cfg;
+        }
+        return DEFAULT_AIRCRAFT_CONFIG;
+    } catch (err) {
+        console.error('[Aircraft] Failed to fetch selected aircraft, using default:', err);
+        return DEFAULT_AIRCRAFT_CONFIG;
+    }
+}
+
 interface RemotePlayer {
     root: BABYLON.TransformNode;
     meshes: BABYLON.Mesh[];
     prevState: PlayerState | null;
     nextState: PlayerState | null;
     lastUpdateTime: number;
+    aircraftCode: string | null;
 }
 
-const STALL_SPEED_HUD  = 25;
-const MASS             = 10000;
-const MAX_THRUST_N     = 50000;
 const G_ACCEL          = 9.81;
 const ANGULAR_DAMPING  = 0.5;
 const GROUND_Y         = 6;
-
-const Ixx = 211333;
-const Iyy = 256608;
-const Izz = 48531;
-
-const LIFT_SLOPE      = 5.5;
-const SKIN_FRICTION   = 0.02;
-const STALL_ALPHA_RAD = 0.26;
-const OSWALD_E        = 0.8;
-const FUSELAGE_CD0      = 0.04;
-const FUSELAGE_REF_AREA = 45;
 
 // ── ISA atmosphere ────────────────────────────────────────────────────────────
 function getAirDensity(altitudeM: number): number {
@@ -166,7 +265,8 @@ export class FlightSceneSimple extends Scene3D {
     private isOnGround = false;
     private brakesOn = false;
     private brakeKeyLock = false;
-    private readonly FLAP_STEPS = [0, 5, 15, 25, 30, 40];
+    private aircraftConfig: AircraftConfig = DEFAULT_AIRCRAFT_CONFIG;
+    private FLAP_STEPS: number[] = DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
     private flapIndex = 2;
     private flapKeyLock5 = false;
     private flapKeyLock6 = false;
@@ -253,6 +353,11 @@ export class FlightSceneSimple extends Scene3D {
     private _tmpUp    = new BABYLON.Vector3(0, 1, 0);
     private _terrainRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), 1000);
     private _mapHdgCtx: CanvasRenderingContext2D | null = null;
+    private _missionPanelEl: HTMLElement | null = null;
+    private _missionBtnEl: HTMLElement | null = null;
+    private _aircraftPanelEl: HTMLElement | null = null;
+    private _aircraftBtnEl: HTMLElement | null = null;
+    private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string } | null = null;
 
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
     private _navBlinkTimer = 0;
@@ -270,6 +375,12 @@ export class FlightSceneSimple extends Scene3D {
     private _sunElevation = 45;
     private hudUtc!: HTMLElement;
 
+    private _applyAircraftConfig(cfg: AircraftConfig): void {
+        this.aircraftConfig = cfg;
+        this.FLAP_STEPS = cfg.flap_steps_json;
+        this.baseZeroLiftAoA = cfg.base_zero_lift_aoa;
+    }
+
     onCreate(scene: any, _input: InputManager): void {
         this.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         scene.useRightHandedSystem = true;
@@ -280,6 +391,14 @@ export class FlightSceneSimple extends Scene3D {
 
         this.velocity        = BABYLON.Vector3.Zero();
         this.angularVelocity = BABYLON.Vector3.Zero();
+
+        this._applyAircraftConfig(DEFAULT_AIRCRAFT_CONFIG);
+
+        fetchSelectedAircraftConfig().then((cfg) => {
+            this._applyAircraftConfig(cfg);
+            this._initSurfaces();
+            console.log(`[Aircraft] Loaded: ${cfg.name} (${cfg.code})`);
+        });
 
         this._initSurfaces();
         this._init3DTiles(scene);
@@ -336,6 +455,8 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('dbg-panel')?.remove();
         document.getElementById('dbg-panel-toggle')?.remove();
         document.getElementById('touch-overlay')?.remove();
+        document.getElementById('aircraft-btn')?.remove();
+        document.getElementById('aircraft-panel')?.remove();
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         this.mpClient?.dispose();
     }
@@ -350,9 +471,17 @@ export class FlightSceneSimple extends Scene3D {
             for (const p of players) {
                 activeIds.add(p.userId);
                 let remote = this.remotePlayers.get(p.userId);
+                const remoteModelFile = p.aircraftModelFile || null;
                 if (!remote) {
-                    remote = this._createRemotePlayer(p.userId);
+                    remote = this._createRemotePlayer(p.userId, remoteModelFile || undefined);
                     this.remotePlayers.set(p.userId, remote);
+                } else if (remoteModelFile && remote.aircraftCode !== remoteModelFile) {
+                    remote.meshes.forEach((m) => m.dispose());
+                    remote.meshes = [];
+                    const pivot = remote.root.getChildTransformNodes(true).find((n) => n.name.startsWith('remotePivot_'));
+                    if (pivot) pivot.dispose();
+                    remote.aircraftCode = remoteModelFile;
+                    this._loadRemoteModel(p.userId, remote.root, remote, remoteModelFile);
                 }
                 remote.prevState = remote.nextState;
                 remote.nextState = p;
@@ -389,15 +518,27 @@ export class FlightSceneSimple extends Scene3D {
         this.mpClient.connect();
     }
 
-    private _createRemotePlayer(id: string): RemotePlayer {
+    private _createRemotePlayer(id: string, modelFile?: string): RemotePlayer {
         const scene = this.scene;
         const root = new BABYLON.TransformNode(`remote_${id}`, scene);
         root.rotationQuaternion = BABYLON.Quaternion.Identity();
 
-        const remote: RemotePlayer = { root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0 };
+        const aircraftCode = modelFile || null;
+        const remote: RemotePlayer = { root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0, aircraftCode };
+
+        this._loadRemoteModel(id, root, remote, modelFile || DEFAULT_AIRCRAFT_CONFIG.model_file);
+
+        return remote;
+    }
+
+    private _loadRemoteModel(id: string, root: BABYLON.TransformNode, remote: RemotePlayer, modelFile: string): void {
+        const scene = this.scene;
+        const lastSlash = modelFile.lastIndexOf('/');
+        const folder = lastSlash >= 0 ? modelFile.substring(0, lastSlash + 1) : '';
+        const file = lastSlash >= 0 ? modelFile.substring(lastSlash + 1) : modelFile;
 
         BABYLON.SceneLoader.ImportMesh(
-            '', 'models/', 'DC8_AFRC_AIR_0824.glb', scene,
+            '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[]) => {
                 const glbRoot = meshes[0];
                 const bb = glbRoot.getHierarchyBoundingVectors(true);
@@ -429,8 +570,6 @@ export class FlightSceneSimple extends Scene3D {
                 this._buildRemoteFallback(id, root, remote);
             },
         );
-
-        return remote;
     }
 
     private _buildRemoteFallback(id: string, root: BABYLON.TransformNode, remote: RemotePlayer): void {
@@ -528,6 +667,9 @@ export class FlightSceneSimple extends Scene3D {
             pitch: pitchDeg,
             roll: rollDeg,
             onGround: this.isOnGround,
+            aircraftId: this.aircraftConfig.id || undefined,
+            aircraftCode: this.aircraftConfig.code || undefined,
+            aircraftModelFile: this.aircraftConfig.model_file || undefined,
         });
     }
 
@@ -848,37 +990,46 @@ export class FlightSceneSimple extends Scene3D {
     // ── Airplane ──────────────────────────────────────────────────────────────
 
     private _buildPlane(scene: BABYLON.Scene): void {
+        const cfg = this.aircraftConfig;
         this.planeRoot = new BABYLON.TransformNode('planeRoot', scene);
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         this.planeRoot.rotationQuaternion = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
         if (this.spawnAirborne) {
-            this.planeRoot.position.set(0, GROUND_Y + 600, 0);
-            this.thrust = 0.7;
-            this.flapIndex = 0;
-            this.currentFlapDeg = 0;
+            this.planeRoot.position.set(0, GROUND_Y + cfg.spawn_alt_offset_m, 0);
+            this.thrust = cfg.spawn_airborne_thrust;
+            this.flapIndex = cfg.default_flap_index_air;
+            this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 0;
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, new BABYLON.Matrix()));
-            this.velocity = fwd.scale(100);
+            this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms);
         } else {
             this.planeRoot.position.set(0, GROUND_Y, 0);
             this.thrust = 0;
-            this.flapIndex = 2;
-            this.currentFlapDeg = 15;
+            this.flapIndex = cfg.default_flap_index_ground;
+            this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 15;
             this.velocity = BABYLON.Vector3.Zero();
         }
 
+        this._loadAircraftModel(scene);
+    }
+
+    private _loadedModelMeshes: BABYLON.AbstractMesh[] = [];
+
+    private _loadAircraftModel(scene: BABYLON.Scene): void {
+        const cfg = this.aircraftConfig;
+        const modelPath = cfg.model_file;
+        const lastSlash = modelPath.lastIndexOf('/');
+        const folder = lastSlash >= 0 ? modelPath.substring(0, lastSlash + 1) : '';
+        const file = lastSlash >= 0 ? modelPath.substring(lastSlash + 1) : modelPath;
+
         BABYLON.SceneLoader.ImportMesh(
-            '', 'models/', 'DC8_AFRC_AIR_0824.glb', scene,
+            '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[]) => {
+                this._loadedModelMeshes = meshes;
                 const root = meshes[0];
 
                 const bb = root.getHierarchyBoundingVectors(true);
                 const center = bb.min.add(bb.max).scale(0.5);
                 const size = bb.max.subtract(bb.min).length();
-
-                console.log('[FlightSimple] BB min:', bb.min.toString());
-                console.log('[FlightSimple] BB max:', bb.max.toString());
-                console.log('[FlightSimple] BB center:', center.toString());
-                console.log('[FlightSimple] BB size:', size);
 
                 const modelPivot = new BABYLON.TransformNode('modelPivot', scene);
                 modelPivot.parent = this.planeRoot;
@@ -890,11 +1041,9 @@ export class FlightSceneSimple extends Scene3D {
                 root.rotationQuaternion = null;
                 root.rotation = BABYLON.Vector3.Zero();
 
-                const targetSize = 40;
-                const scaleFactor = targetSize / Math.max(size, 0.1);
+                const scaleFactor = cfg.model_target_size / Math.max(size, 0.1);
                 modelPivot.scaling.setAll(scaleFactor);
-
-                modelPivot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
+                modelPivot.rotation = new BABYLON.Vector3(0, cfg.model_rotation_y, 0);
 
                 const shadow = (this as any)._shadow;
                 meshes.forEach((m: BABYLON.AbstractMesh) => {
@@ -904,7 +1053,6 @@ export class FlightSceneSimple extends Scene3D {
                 const bbW = (bb.max.x - bb.min.x) * scaleFactor;
                 const bbH = (bb.max.y - bb.min.y) * scaleFactor;
                 const bbD = (bb.max.z - bb.min.z) * scaleFactor;
-                console.log('[FlightSimple] Nav dims (W,H,D):', bbW.toFixed(1), bbH.toFixed(1), bbD.toFixed(1));
                 this._buildNavLights(scene, this.planeRoot, {
                     halfSpan: bbW / 2,
                     height: bbH,
@@ -913,7 +1061,7 @@ export class FlightSceneSimple extends Scene3D {
 
                 this.spawned = true;
                 this.onSpawned?.();
-                console.log('[FlightSimple] Model loaded and centered. Scale factor:', scaleFactor, 'dims:', bbW.toFixed(1), bbH.toFixed(1), bbD.toFixed(1));
+                console.log(`[FlightSimple] Model loaded: ${cfg.code}, scale: ${scaleFactor.toFixed(2)}, dims: ${bbW.toFixed(1)},${bbH.toFixed(1)},${bbD.toFixed(1)}`);
             },
             null,
             (_scene: BABYLON.Scene, _msg: string, ex?: any) => {
@@ -1141,12 +1289,12 @@ export class FlightSceneSimple extends Scene3D {
         } else {
             const p = (code: string) => this.input.isKeyDown(code);
 
-            if (p('KeyW')) this.thrust = Math.min(1, this.thrust + _dt * 0.55);
-            if (p('KeyS')) this.thrust = Math.max(0, this.thrust - _dt * 0.4);
+            if (p('KeyW')) this.thrust = Math.min(1, this.thrust + _dt * this.aircraftConfig.throttle_up_rate);
+            if (p('KeyS')) this.thrust = Math.max(0, this.thrust - _dt * this.aircraftConfig.throttle_down_rate);
 
             targetPitch = p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0;
             targetRoll  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.25;
-            targetYaw   = p('KeyE') ? 1 : p('KeyQ') ? -1 : 0;
+            targetYaw   = (p('KeyE') || p('KeyD')) ? 1 : (p('KeyQ') || p('KeyA')) ? -1 : 0;
 
             if (p('Digit5') && !this.flapKeyLock5) {
                 this.flapKeyLock5 = true;
@@ -1184,6 +1332,10 @@ export class FlightSceneSimple extends Scene3D {
             const t = 1 - Math.exp(-rate * _dt);
             return current + (target - current) * t;
         };
+
+        if (this.isOnGround) {
+            targetRoll = 0;
+        }
 
         this.smoothedPitch = lerpAxis(this.smoothedPitch, targetPitch);
         this.smoothedRoll  = lerpAxis(this.smoothedRoll, targetRoll);
@@ -1333,25 +1485,26 @@ export class FlightSceneSimple extends Scene3D {
 
     private _spawnPlane(): void {
         if (!this.planeRoot) return;
+        const cfg = this.aircraftConfig;
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.planeRoot.rotationQuaternion!);
         this.angularVelocity.set(0, 0, 0);
         this.terrainY = GROUND_Y;
         if (this.spawnAirborne) {
-            this.planeRoot.position.set(0, GROUND_Y + 600, 0);
-            this.thrust = 0.7;
-            this.flapIndex = 0;
-            this.currentFlapDeg = 0;
+            this.planeRoot.position.set(0, GROUND_Y + cfg.spawn_alt_offset_m, 0);
+            this.thrust = cfg.spawn_airborne_thrust;
+            this.flapIndex = cfg.default_flap_index_air;
+            this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 0;
             const rotMat = new BABYLON.Matrix();
             BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion!, rotMat);
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
-            this.velocity = fwd.scale(100);
+            this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms);
         } else {
             this.planeRoot.position.set(0, GROUND_Y, 0);
             this.velocity.set(0, 0, 0);
             this.thrust = 0;
-            this.flapIndex = 2;
-            this.currentFlapDeg = 15;
+            this.flapIndex = cfg.default_flap_index_ground;
+            this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 15;
         }
     }
 
@@ -1449,33 +1602,23 @@ export class FlightSceneSimple extends Scene3D {
 
         for (let i = 0; i < 2; i++) {
             this.surfaces[i].zeroLiftAoA  = this.baseZeroLiftAoA + zeroLiftShift;
-            this.surfaces[i].skinFriction = SKIN_FRICTION + extraFriction;
-            this.surfaces[i].stallAlpha   = STALL_ALPHA_RAD + stallBoost;
+            this.surfaces[i].skinFriction = this.aircraftConfig.skin_friction + extraFriction;
+            this.surfaces[i].stallAlpha   = this.aircraftConfig.stall_alpha_rad + stallBoost;
         }
     }
 
     // ── Aerodynamic surfaces ────────────────────────────────────────────────────
 
     private _initSurfaces(): void {
-        const mk = (
-            pos: [number, number, number], normal: [number, number, number],
-            area: number, chord: number, ar: number,
-            zeroLiftAoA: number, flapFrac: number,
-        ): AeroSurface => ({
-            position:     new BABYLON.Vector3(pos[0], pos[1], pos[2]),
-            normal:       new BABYLON.Vector3(normal[0], normal[1], normal[2]),
-            area, chord, aspectRatio: ar,
-            liftSlope: LIFT_SLOPE, skinFriction: SKIN_FRICTION,
-            stallAlpha: STALL_ALPHA_RAD, zeroLiftAoA,
-            oswaldE: OSWALD_E, flapFraction: flapFrac, controlInput: 0,
-        });
-
-        this.surfaces = [
-            mk([-3, 0, -0.5], [0, 1, 0], 38, 2.5, 7.5, -0.035, 0.15),
-            mk([ 3, 0, -0.5], [0, 1, 0], 38, 2.5, 7.5, -0.035, 0.15),
-            mk([ 0, 0, -7],   [0, 1, 0], 7.2,   1.8, 2.2,  0,     0.35),
-            mk([ 0, 1.5, -7], [1, 0, 0], 7.0,   2.0, 1.75, 0,     0.35),
-        ];
+        const cfg = this.aircraftConfig;
+        this.surfaces = cfg.surfaces.map((s) => ({
+            position:     new BABYLON.Vector3(s.pos_x, s.pos_y, s.pos_z),
+            normal:       new BABYLON.Vector3(s.normal_x, s.normal_y, s.normal_z),
+            area: s.area, chord: s.chord, aspectRatio: s.aspect_ratio,
+            liftSlope: cfg.lift_slope, skinFriction: cfg.skin_friction,
+            stallAlpha: cfg.stall_alpha_rad, zeroLiftAoA: s.zero_lift_aoa,
+            oswaldE: cfg.oswald_efficiency, flapFraction: s.flap_fraction, controlInput: 0,
+        }));
     }
 
     // ── Physics (component-based aero with substep) ───────────────────────────
@@ -1495,8 +1638,14 @@ export class FlightSceneSimple extends Scene3D {
         const toWorld = (v: BABYLON.Vector3) => BABYLON.Vector3.TransformNormal(v, rotMatrix);
         const toBody  = (v: BABYLON.Vector3) => BABYLON.Vector3.TransformNormal(v, invRotMatrix);
 
+        const cfg = this.aircraftConfig;
+        const MASS = cfg.mass_kg;
+        const cIxx = cfg.inertia_xx;
+        const cIyy = cfg.inertia_yy;
+        const cIzz = cfg.inertia_zz;
+
         const thrustVec = this._tmpFwd;
-        thrustVec.set(0, 0, this.thrust * MAX_THRUST_N);
+        thrustVec.set(0, 0, this.thrust * cfg.max_thrust_n);
 
         const computeForces = (vel: BABYLON.Vector3, angVel: BABYLON.Vector3) => {
             const totalForce  = BABYLON.Vector3.Zero();
@@ -1516,7 +1665,7 @@ export class FlightSceneSimple extends Scene3D {
 
             const spd = vel.length();
             if (spd >= 1.0) {
-                const qBody = 0.5 * airDensity * spd * spd * FUSELAGE_CD0 * FUSELAGE_REF_AREA;
+                const qBody = 0.5 * airDensity * spd * spd * cfg.fuselage_cd0 * cfg.fuselage_ref_area;
                 totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
             }
 
@@ -1528,12 +1677,12 @@ export class FlightSceneSimple extends Scene3D {
         const halfDt  = dt * 0.5;
         const predVel = this.velocity.add(f1.force.scale(halfDt / MASS));
 
-        const Iw1   = new BABYLON.Vector3(Ixx * this.angularVelocity.x, Iyy * this.angularVelocity.y, Izz * this.angularVelocity.z);
+        const Iw1   = new BABYLON.Vector3(cIxx * this.angularVelocity.x, cIyy * this.angularVelocity.y, cIzz * this.angularVelocity.z);
         const gyro1 = BABYLON.Vector3.Cross(this.angularVelocity, Iw1);
         const angAcc1 = new BABYLON.Vector3(
-            (f1.torque.x - gyro1.x) / Ixx,
-            (f1.torque.y - gyro1.y) / Iyy,
-            (f1.torque.z - gyro1.z) / Izz,
+            (f1.torque.x - gyro1.x) / cIxx,
+            (f1.torque.y - gyro1.y) / cIyy,
+            (f1.torque.z - gyro1.z) / cIzz,
         );
         const predAngVel = this.angularVelocity.add(angAcc1.scale(halfDt));
 
@@ -1545,12 +1694,12 @@ export class FlightSceneSimple extends Scene3D {
         this.velocity.addInPlace(avgForce.scale(dt / MASS));
         pos.addInPlace(this.velocity.scale(dt));
 
-        const Iw2   = new BABYLON.Vector3(Ixx * this.angularVelocity.x, Iyy * this.angularVelocity.y, Izz * this.angularVelocity.z);
+        const Iw2   = new BABYLON.Vector3(cIxx * this.angularVelocity.x, cIyy * this.angularVelocity.y, cIzz * this.angularVelocity.z);
         const gyro2 = BABYLON.Vector3.Cross(this.angularVelocity, Iw2);
         const angAcc = new BABYLON.Vector3(
-            (avgTorque.x - gyro2.x) / Ixx,
-            (avgTorque.y - gyro2.y) / Iyy,
-            (avgTorque.z - gyro2.z) / Izz,
+            (avgTorque.x - gyro2.x) / cIxx,
+            (avgTorque.y - gyro2.y) / cIyy,
+            (avgTorque.z - gyro2.z) / cIzz,
         );
         this.angularVelocity.addInPlace(angAcc.scale(dt));
         this.angularVelocity.scaleInPlace(Math.max(0, 1 - ANGULAR_DAMPING * dt));
@@ -1594,8 +1743,8 @@ export class FlightSceneSimple extends Scene3D {
             
             const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
             if (speed > 0.5) {
-                const rollingFriction = 0.3;
-                const brakeFriction = this.brakesOn ? 8.0 : (this.thrust < 0.05 ? 1.5 : 0);
+                const rollingFriction = cfg.rolling_friction;
+                const brakeFriction = this.brakesOn ? cfg.brake_friction : (this.thrust < 0.05 ? cfg.idle_friction : 0);
                 const frictionDecel = (rollingFriction + brakeFriction) * dt;
                 const newSpeed = Math.max(0, speed - frictionDecel);
                 const scale = newSpeed / speed;
@@ -1607,6 +1756,37 @@ export class FlightSceneSimple extends Scene3D {
                 if (speed < 0.05) {
                     this.velocity.x = 0;
                     this.velocity.z = 0;
+                }
+            }
+
+            const wm = this.planeRoot.getWorldMatrix();
+            const bodyRight = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
+            const worldUp = new BABYLON.Vector3(0, 1, 0);
+            const rollAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(bodyRight, worldUp))));
+            const GROUND_ROLL_CORRECTION_RATE = 8.0;
+            const correction = BABYLON.Quaternion.RotationAxis(
+                BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize(),
+                -rollAngle * Math.min(1, GROUND_ROLL_CORRECTION_RATE * dt),
+            );
+            orientation.copyFrom(correction.multiply(orientation));
+            orientation.normalize();
+
+            this.angularVelocity.z *= 0.05;
+
+            const GROUND_YAW_RATE = 1.2;
+            const yawInput = this.smoothedYaw;
+            if (Math.abs(yawInput) > 0.01) {
+                const steerAngle = yawInput * GROUND_YAW_RATE * dt;
+                const yawCorrection = BABYLON.Quaternion.RotationAxis(worldUp, steerAngle);
+                orientation.copyFrom(yawCorrection.multiply(orientation));
+                orientation.normalize();
+
+                const groundSpeed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+                if (groundSpeed > 0.5) {
+                    const wm2 = this.planeRoot.getWorldMatrix();
+                    const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm2).normalize();
+                    this.velocity.x = fwd.x * groundSpeed;
+                    this.velocity.z = fwd.z * groundSpeed;
                 }
             }
         }
@@ -1822,6 +2002,24 @@ export class FlightSceneSimple extends Scene3D {
   <canvas id="gps-map-hdg" width="180" height="180" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
   <div style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:8px;letter-spacing:.15em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8)">GPS</div>
   <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap"></div>
+</div>
+
+<div id="missions-btn" style="position:absolute;top:80px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Missions">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="12,2 15,10 12,8 9,10"/><circle cx="12" cy="12" r="3"/></svg>
+</div>
+
+<div id="missions-panel" style="display:none;position:absolute;top:70px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">MISSIONS</div>
+  <div id="missions-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+</div>
+
+<div id="aircraft-btn" style="position:absolute;top:118px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Aircraft">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12l5-3v2h4l1-5h2l1 5h4v-2l5 3-5 3v-2h-4l-1 5h-2l-1-5H7v2z"/></svg>
+</div>
+
+<div id="aircraft-panel" style="display:none;position:absolute;top:108px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">AIRCRAFT</div>
+  <div id="aircraft-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
 </div>`;
         document.body.appendChild(hud);
         this.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
@@ -1854,9 +2052,243 @@ export class FlightSceneSimple extends Scene3D {
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
         this._mapHdgCtx  = this.mapHeadingCanvas.getContext('2d');
 
+        this._missionBtnEl = document.getElementById('missions-btn');
+        this._missionPanelEl = document.getElementById('missions-panel');
+        this._setupMissionsBtn();
+
+        this._aircraftBtnEl = document.getElementById('aircraft-btn');
+        this._aircraftPanelEl = document.getElementById('aircraft-panel');
+        this._setupAircraftBtn();
+
         this._initTapeMarks();
         this._initFlapBar();
         this._buildDebugPanel();
+    }
+
+    // ── Missions Button ─────────────────────────────────────────────────────────
+
+    private _setupMissionsBtn(): void {
+        if (!this._missionBtnEl || !this._missionPanelEl) return;
+        const btn = this._missionBtnEl;
+        const panel = this._missionPanelEl;
+
+        btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; });
+        btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; });
+
+        btn.addEventListener('click', () => {
+            const visible = panel.style.display !== 'none';
+            if (visible) {
+                panel.style.display = 'none';
+            } else {
+                panel.style.display = 'block';
+                this._loadMissions();
+            }
+        });
+    }
+
+    private async _loadMissions(): Promise<void> {
+        const listEl = document.getElementById('missions-list');
+        if (!listEl) return;
+        listEl.textContent = 'Loading...';
+
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+        if (!token) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login required</div>';
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/user-missions/active', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Failed to load missions</div>';
+                return;
+            }
+            const json = await res.json();
+            const missions = json.data || [];
+
+            if (!missions.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No active missions</div>';
+                this._activeMission = null;
+                return;
+            }
+
+            let html = '';
+            for (const m of missions) {
+                const isActive = m.status === 'in_progress';
+                const borderColor = isActive ? 'rgba(80,255,160,.5)' : 'rgba(255,255,255,.15)';
+                const statusLabel = m.status === 'in_progress' ? 'IN PROGRESS' : 'STARTED';
+                const statusColor = isActive ? '#40ffaa' : '#ffcc00';
+                html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
+                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${m.mission_title || 'Mission'}</div>
+                    <div style="font-size:9px;color:${statusColor};letter-spacing:.08em;margin-bottom:4px">${statusLabel}</div>
+                    <div style="font-size:10px;color:rgba(255,255,255,.5)">
+                        ${m.departure_icao || '???'} <span style="color:#40ffaa">\u2708</span> ${m.arrival_icao || '???'}
+                    </div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${m.departure_airport_name || ''} → ${m.arrival_airport_name || ''}</div>
+                </div>`;
+            }
+            listEl.innerHTML = html;
+
+            const active = missions.find((m: any) => m.status === 'in_progress') || missions[0];
+            if (active && active.departure_lat != null && active.arrival_lat != null) {
+                this._activeMission = {
+                    departure_lat: Number(active.departure_lat),
+                    departure_lon: Number(active.departure_lon),
+                    arrival_lat: Number(active.arrival_lat),
+                    arrival_lon: Number(active.arrival_lon),
+                    departure_icao: active.departure_icao || '',
+                    arrival_icao: active.arrival_icao || '',
+                    mission_title: active.mission_title || '',
+                };
+            } else {
+                this._activeMission = null;
+            }
+        } catch (err) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+        }
+    }
+
+    // ── Aircraft Button ──────────────────────────────────────────────────────────
+
+    private _setupAircraftBtn(): void {
+        if (!this._aircraftBtnEl || !this._aircraftPanelEl) return;
+        const btn = this._aircraftBtnEl;
+        const panel = this._aircraftPanelEl;
+
+        btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; });
+        btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; });
+
+        btn.addEventListener('click', () => {
+            const visible = panel.style.display !== 'none';
+            if (visible) {
+                panel.style.display = 'none';
+            } else {
+                panel.style.display = 'block';
+                this._loadAircraftList();
+            }
+        });
+    }
+
+    private async _loadAircraftList(): Promise<void> {
+        const listEl = document.getElementById('aircraft-list');
+        if (!listEl) return;
+        listEl.textContent = 'Loading...';
+
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login required</div>';
+            return;
+        }
+
+        try {
+            const [ownedRes, allRes] = await Promise.all([
+                fetch('/api/user-aircrafts', { headers: { 'Authorization': `Bearer ${token}` } }),
+                fetch('/api/aircrafts'),
+            ]);
+
+            const ownedData = ownedRes.ok ? await ownedRes.json() : { data: [] };
+            const allData = allRes.ok ? await allRes.json() : { data: [] };
+
+            const ownedIds = new Set((ownedData.data || []).map((ua: any) => ua.aircraft_id));
+            const selectedId = (ownedData.data || []).find((ua: any) => ua.is_selected === 1)?.aircraft_id;
+            const aircrafts: any[] = allData.data || [];
+
+            if (!aircrafts.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No aircraft available</div>';
+                return;
+            }
+
+            const categories = ['LIGHT', 'TURBOPROP', 'JET', 'HEAVY JET', 'MILITARY'];
+            let html = '';
+            for (const ac of aircrafts) {
+                const owned = ownedIds.has(ac.id);
+                const selected = ac.id === selectedId;
+                const borderColor = selected ? 'rgba(80,255,160,.6)' : owned ? 'rgba(80,255,160,.25)' : 'rgba(255,255,255,.1)';
+                const bg = selected ? 'rgba(0,40,30,.6)' : 'rgba(0,20,15,.4)';
+                const catLabel = categories[ac.category] || 'UNKNOWN';
+                const priceLabel = ac.price > 0 ? `${ac.price} pts` : 'FREE';
+                const actionBtn = selected
+                    ? '<span style="color:#40ffaa;font-size:9px;letter-spacing:.1em">SELECTED</span>'
+                    : owned
+                        ? `<button data-select-aircraft="${ac.id}" style="background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit">SELECT</button>`
+                        : `<button data-acquire-aircraft="${ac.id}" style="background:rgba(255,200,0,.15);border:1px solid rgba(255,200,0,.4);color:#ffcc00;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit">${priceLabel}</button>`;
+
+                html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:${bg};display:flex;justify-content:space-between;align-items:center">
+                    <div>
+                        <div style="font-weight:600;color:#fff;margin-bottom:2px">${ac.name}</div>
+                        <div style="font-size:9px;color:rgba(100,240,180,.5);letter-spacing:.08em">${catLabel}</div>
+                    </div>
+                    <div>${actionBtn}</div>
+                </div>`;
+            }
+            listEl.innerHTML = html;
+
+            listEl.querySelectorAll('[data-select-aircraft]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    const aircraftId = Number((e.currentTarget as HTMLElement).getAttribute('data-select-aircraft'));
+                    this._switchAircraft(aircraftId);
+                });
+            });
+
+            listEl.querySelectorAll('[data-acquire-aircraft]').forEach((el) => {
+                el.addEventListener('click', async (e) => {
+                    const aircraftId = Number((e.currentTarget as HTMLElement).getAttribute('data-acquire-aircraft'));
+                    try {
+                        const resp = await fetch(`/api/user-aircrafts/${aircraftId}/acquire`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ payment_method: 'points' }),
+                        });
+                        if (resp.ok) {
+                            this._loadAircraftList();
+                        } else {
+                            const err = await resp.json();
+                            console.error('[Aircraft] Acquire failed:', err.error);
+                        }
+                    } catch (err) {
+                        console.error('[Aircraft] Acquire error:', err);
+                    }
+                });
+            });
+        } catch (err) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+        }
+    }
+
+    private async _switchAircraft(aircraftId: number): Promise<void> {
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) return;
+
+        try {
+            const selectResp = await fetch(`/api/user-aircrafts/${aircraftId}/select`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            });
+            if (!selectResp.ok) {
+                console.error('[Aircraft] Select failed');
+                return;
+            }
+
+            const cfg = await fetchAircraftConfig(aircraftId);
+            this._applyAircraftConfig(cfg);
+            this._initSurfaces();
+
+            this._loadedModelMeshes.forEach((m) => m.dispose());
+            this._loadedModelMeshes = [];
+            const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
+            if (pivot) pivot.dispose();
+
+            this._loadAircraftModel(this.scene);
+            this._spawnPlane();
+
+            if (this._aircraftPanelEl) this._aircraftPanelEl.style.display = 'none';
+            console.log(`[Aircraft] Switched to: ${cfg.name} (${cfg.code})`);
+            this._loadAircraftList();
+        } catch (err) {
+            console.error('[Aircraft] Switch error:', err);
+        }
     }
 
     // ── Debug Panel ───────────────────────────────────────────────────────────
@@ -2046,23 +2478,77 @@ export class FlightSceneSimple extends Scene3D {
 
         ctx.fillStyle = 'rgba(0,255,128,0.9)';
         ctx.beginPath();
-        ctx.moveTo(0, -14);
-        ctx.lineTo(-7, 10);
-        ctx.lineTo(0, 5);
-        ctx.lineTo(7, 10);
+        ctx.moveTo(0, -12);
+        ctx.lineTo(-2, -4);
+        ctx.lineTo(-9, 2);
+        ctx.lineTo(-9, 4);
+        ctx.lineTo(-2, 1);
+        ctx.lineTo(-2, 7);
+        ctx.lineTo(-4, 9);
+        ctx.lineTo(-4, 10);
+        ctx.lineTo(0, 8.5);
+        ctx.lineTo(4, 10);
+        ctx.lineTo(4, 9);
+        ctx.lineTo(2, 7);
+        ctx.lineTo(2, 1);
+        ctx.lineTo(9, 4);
+        ctx.lineTo(9, 2);
+        ctx.lineTo(2, -4);
         ctx.closePath();
         ctx.fill();
 
-        ctx.strokeStyle = 'rgba(0,255,128,0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(-10, 2);
-        ctx.lineTo(-5, 2);
-        ctx.moveTo(5, 2);
-        ctx.lineTo(10, 2);
+        ctx.strokeStyle = 'rgba(0,255,128,0.6)';
+        ctx.lineWidth = 0.5;
         ctx.stroke();
 
         ctx.restore();
+
+        if (this._activeMission) {
+            const m = this._activeMission;
+            const MAP_ZOOM = 13;
+            const scale = 256 * Math.pow(2, MAP_ZOOM) / 360;
+            const pixPerDegLat = scale * Math.cos(lat * Math.PI / 180);
+            const pixPerDegLon = scale;
+
+            const mapPxSize = cv.width;
+            const pxPerDeg = mapPxSize / (360 / Math.pow(2, MAP_ZOOM));
+
+            const depDx = (m.departure_lon - lon) * pxPerDeg;
+            const depDy = -(m.departure_lat - lat) * pixPerDegLat / pixPerDegLon * pxPerDeg;
+            const arrDx = (m.arrival_lon - lon) * pxPerDeg;
+            const arrDy = -(m.arrival_lat - lat) * pixPerDegLat / pixPerDegLon * pxPerDeg;
+
+            const depX = cx + depDx;
+            const depY = cy + depDy;
+            const arrX = cx + arrDx;
+            const arrY = cy + arrDy;
+
+            ctx.save();
+            ctx.setLineDash([4, 3]);
+            ctx.strokeStyle = 'rgba(255,200,0,0.7)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(depX, depY);
+            ctx.lineTo(arrX, arrY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.fillStyle = 'rgba(0,200,255,0.9)';
+            ctx.beginPath();
+            ctx.arc(depX, depY, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(255,80,80,0.9)';
+            ctx.beginPath();
+            ctx.arc(arrX, arrY, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.font = '7px Inter, sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            ctx.fillText(m.departure_icao, depX + 6, depY - 2);
+            ctx.fillText(m.arrival_icao, arrX + 6, arrY - 2);
+            ctx.restore();
+        }
 
         const coordsEl = document.getElementById('gps-coords');
         if (coordsEl) coordsEl.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
@@ -2110,7 +2596,7 @@ export class FlightSceneSimple extends Scene3D {
             pitchAngle > 0.08  ? 'CLIMB' :
             pitchAngle < -0.08 ? 'DESC'   : 'LEVEL';
         this.hudWarning.style.display =
-            (speedKts < STALL_SPEED_HUD && altitudeM > 20) ? 'block' : 'none';
+            (speedKts < this.aircraftConfig.stall_speed_kts && altitudeM > 20) ? 'block' : 'none';
 
         this.hudFps.textContent =
             `${this.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;

@@ -13,6 +13,9 @@ export interface PlayerState {
     onGround?: boolean;
     missionId?: number;
     aircraftRegistration?: string;
+    aircraftId?: number;
+    aircraftCode?: string;
+    aircraftModelFile?: string;
 }
 
 type PlayersUpdateCallback = (players: PlayerState[]) => void;

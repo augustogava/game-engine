@@ -23,6 +23,7 @@ function loadEnv() {
 const env = loadEnv();
 const DATABASE_URL = process.env.DATABASE_URL || env.DATABASE_URL || '';
 const SECRET_KEY = process.env.SECRET_KEY || env.SECRET_KEY || '';
+const MAIN_API_URL = process.env.MAIN_API_URL || env.MAIN_API_URL || '';
 
 // ── MySQL pool ───────────────────────────────────────────────────────────────
 let dbPool = null;
@@ -133,6 +134,28 @@ function authenticateRequest(req) {
         return { id: decoded.id, username: decoded.username };
     } catch (_) {
         return null;
+    }
+}
+
+// ── Proxy to main API ────────────────────────────────────────────────────────
+async function proxyToMainApi(apiPath, req, res, body) {
+    if (!MAIN_API_URL) {
+        return jsonResponse(res, 503, { error: 'Main API not configured' });
+    }
+    const targetUrl = `${MAIN_API_URL}${apiPath}`;
+    const headers = { 'Content-Type': 'application/json' };
+    const auth = req.headers['authorization'];
+    if (auth) headers['Authorization'] = auth;
+
+    try {
+        const options = { method: req.method, headers };
+        if (body) options.body = JSON.stringify(body);
+        const resp = await fetch(targetUrl, options);
+        const data = await resp.json();
+        return jsonResponse(res, resp.status, data);
+    } catch (err) {
+        console.error(`[Proxy] ${req.method} ${apiPath} error:`, err.message);
+        return jsonResponse(res, 502, { error: 'Main API unreachable' });
     }
 }
 
@@ -361,14 +384,14 @@ async function recalculateStats(userId) {
         );
         if (favRows.length) favAirportId = favRows[0].aid;
 
-        let mostAircraft = null;
+        let mostAircraftId = null;
         const [acRows] = await dbPool.execute(
-            `SELECT aircraft_type, COUNT(*) AS cnt
-             FROM flight_logs WHERE user_id = ? AND aircraft_type IS NOT NULL AND status = 'landed'
-             GROUP BY aircraft_type ORDER BY cnt DESC LIMIT 1`,
+            `SELECT aircraft_id, COUNT(*) AS cnt
+             FROM flight_logs WHERE user_id = ? AND aircraft_id IS NOT NULL AND status = 'landed'
+             GROUP BY aircraft_id ORDER BY cnt DESC LIMIT 1`,
             [userId]
         );
-        if (acRows.length) mostAircraft = acRows[0].aircraft_type;
+        if (acRows.length) mostAircraftId = acRows[0].aircraft_id;
 
         const rank = computePilotRank(flightAgg.hours || 0, missionAgg.completed || 0);
 
@@ -377,7 +400,7 @@ async function recalculateStats(userId) {
                 (user_id, total_flights, total_flight_hours, total_distance_km, total_distance_nm,
                  total_missions_completed, total_missions_failed, total_reward_points,
                  best_landing_rate_fpm, avg_landing_rate_fpm,
-                 favorite_airport_id, most_used_aircraft, pilot_rank, last_flight_at)
+                 favorite_airport_id, most_used_aircraft_id, pilot_rank, last_flight_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE
                 total_flights            = GREATEST(total_flights, VALUES(total_flights)),
@@ -390,7 +413,7 @@ async function recalculateStats(userId) {
                 best_landing_rate_fpm    = VALUES(best_landing_rate_fpm),
                 avg_landing_rate_fpm     = VALUES(avg_landing_rate_fpm),
                 favorite_airport_id      = VALUES(favorite_airport_id),
-                most_used_aircraft       = VALUES(most_used_aircraft),
+                most_used_aircraft_id    = VALUES(most_used_aircraft_id),
                 pilot_rank               = VALUES(pilot_rank),
                 last_flight_at           = NOW()`,
             [
@@ -405,7 +428,7 @@ async function recalculateStats(userId) {
                 flightAgg.best_lr != null ? Math.round(flightAgg.best_lr * 100) / 100 : null,
                 flightAgg.avg_lr != null ? Math.round(flightAgg.avg_lr * 100) / 100 : null,
                 favAirportId,
-                mostAircraft,
+                mostAircraftId,
                 rank,
             ]
         );
@@ -459,6 +482,8 @@ const server = http.createServer(async (req, res) => {
                     heading: entry.state.heading,
                     airspeed: entry.state.airspeed,
                     aircraft: entry.state.aircraft || null,
+                    aircraftId: entry.state.aircraftId || null,
+                    aircraftCode: entry.state.aircraftCode || null,
                 });
             }
         }
@@ -532,7 +557,8 @@ const server = http.createServer(async (req, res) => {
         try {
             const [[{ total }]] = await dbPool.execute(`SELECT COUNT(*) AS total FROM missions m ${where}`, params);
             const [rows] = await dbPool.execute(
-                `SELECT m.*, da.name AS departure_airport_name, aa.name AS arrival_airport_name
+                `SELECT m.*, da.name AS departure_airport_name, da.latitude AS departure_lat, da.longitude AS departure_lon, da.icao_code AS departure_icao,
+                        aa.name AS arrival_airport_name, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon, aa.icao_code AS arrival_icao
                  FROM missions m
                  LEFT JOIN airports da ON m.departure_airport_id = da.id
                  LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
@@ -550,8 +576,8 @@ const server = http.createServer(async (req, res) => {
         const { id } = routeParams;
         try {
             const [rows] = await dbPool.execute(
-                `SELECT m.*, da.name AS departure_airport_name, da.icao_code AS departure_icao,
-                        aa.name AS arrival_airport_name, aa.icao_code AS arrival_icao
+                `SELECT m.*, da.name AS departure_airport_name, da.icao_code AS departure_icao, da.latitude AS departure_lat, da.longitude AS departure_lon,
+                        aa.name AS arrival_airport_name, aa.icao_code AS arrival_icao, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon
                  FROM missions m
                  LEFT JOIN airports da ON m.departure_airport_id = da.id
                  LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
@@ -585,6 +611,29 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    if (req.method === 'GET' && urlPath === '/api/user-missions/active') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: [] });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT um.*, m.title AS mission_title, m.type AS mission_type,
+                        m.difficulty AS mission_difficulty,
+                        da.name AS departure_airport_name, da.latitude AS departure_lat, da.longitude AS departure_lon, da.icao_code AS departure_icao,
+                        aa.name AS arrival_airport_name, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon, aa.icao_code AS arrival_icao
+                 FROM user_missions um
+                 JOIN missions m ON um.mission_id = m.id
+                 LEFT JOIN airports da ON m.departure_airport_id = da.id
+                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+                 WHERE um.user_id = ? AND um.status IN ('started','in_progress')
+                 ORDER BY um.created_at DESC`, [user.id]);
+            return jsonResponse(res, 200, { data: rows });
+        } catch (err) {
+            console.error('[API] GET /api/user-missions/active error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
     if (req.method === 'GET' && urlPath === '/api/user-missions') {
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
@@ -593,7 +642,8 @@ const server = http.createServer(async (req, res) => {
             const [rows] = await dbPool.execute(
                 `SELECT um.*, m.title AS mission_title, m.type AS mission_type,
                         m.difficulty AS mission_difficulty,
-                        da.name AS departure_airport_name, aa.name AS arrival_airport_name
+                        da.name AS departure_airport_name, da.latitude AS departure_lat, da.longitude AS departure_lon, da.icao_code AS departure_icao,
+                        aa.name AS arrival_airport_name, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon, aa.icao_code AS arrival_icao
                  FROM user_missions um
                  JOIN missions m ON um.mission_id = m.id
                  LEFT JOIN airports da ON m.departure_airport_id = da.id
@@ -747,7 +797,7 @@ const server = http.createServer(async (req, res) => {
             user_id: user.id, total_flights: 0, total_flight_hours: 0,
             total_distance_km: 0, total_distance_nm: 0,
             total_missions_completed: 0, total_missions_failed: 0, total_reward_points: 0,
-            most_used_aircraft: null, pilot_rank: 'student',
+            most_used_aircraft_id: null, pilot_rank: 'student',
             best_landing_rate_fpm: null, avg_landing_rate_fpm: null,
         });
         try {
@@ -758,7 +808,7 @@ const server = http.createServer(async (req, res) => {
                 user_id: user.id, total_flights: 0, total_flight_hours: 0,
                 total_distance_km: 0, total_distance_nm: 0,
                 total_missions_completed: 0, total_missions_failed: 0, total_reward_points: 0,
-                most_used_aircraft: null, pilot_rank: 'student',
+                most_used_aircraft_id: null, pilot_rank: 'student',
                 best_landing_rate_fpm: null, avg_landing_rate_fpm: null,
             });
         } catch (err) {
@@ -872,6 +922,29 @@ const server = http.createServer(async (req, res) => {
             console.error('[API] POST /api/airports/:id/acquire error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
         }
+    }
+
+    // ── Aircrafts API (proxy to main API) ─────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/aircrafts') {
+        const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+        return proxyToMainApi(`/api/aircrafts${qs}`, req, res);
+    }
+
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/aircrafts/:id'))) {
+        return proxyToMainApi(`/api/aircrafts/${routeParams.id}`, req, res);
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/user-aircrafts') {
+        return proxyToMainApi('/api/user-aircrafts', req, res);
+    }
+
+    if (req.method === 'POST' && (routeParams = matchRoute(req.method, urlPath, '/api/user-aircrafts/:id/select'))) {
+        return proxyToMainApi(`/api/user-aircrafts/${routeParams.id}/select`, req, res, await parseBody(req));
+    }
+
+    if (req.method === 'POST' && (routeParams = matchRoute(req.method, urlPath, '/api/user-aircrafts/:id/acquire'))) {
+        return proxyToMainApi(`/api/user-aircrafts/${routeParams.id}/acquire`, req, res, await parseBody(req));
     }
 
     // Static files from dist/
@@ -1090,6 +1163,8 @@ wss.on('connection', (ws) => {
                         pitch: Number(msg.pitch) || 0,
                         roll: Number(msg.roll) || 0,
                         aircraft: msg.aircraft || null,
+                        aircraftId: msg.aircraftId ? Number(msg.aircraftId) : null,
+                        aircraftCode: msg.aircraftCode || null,
                     };
 
                     let stepNm = 0;
@@ -1135,9 +1210,9 @@ wss.on('connection', (ws) => {
                         try {
                             const [result] = await dbPool.execute(
                                 `INSERT INTO flight_logs
-                                 (user_id, departure_airport_id, aircraft_type, aircraft_registration, mission_id, departure_time, status)
+                                 (user_id, departure_airport_id, aircraft_id, aircraft_registration, mission_id, departure_time, status)
                                  VALUES (?, ?, ?, ?, ?, NOW(), 'departed')`,
-                                [playerId, entry.departureAirportId, msg.aircraft || null, entry.aircraftRegistration, entry.missionId]
+                                [playerId, entry.departureAirportId, msg.aircraftId ? Number(msg.aircraftId) : null, entry.aircraftRegistration, entry.missionId]
                             );
                             entry.flightLogId = result.insertId;
                             entry.flightStartTime = Date.now();
