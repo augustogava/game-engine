@@ -29,6 +29,7 @@ export class MultiplayerClient {
     private onPlayersUpdateCb: PlayersUpdateCallback | null = null;
     private onCountChangeCb: CountChangeCallback | null = null;
     private onAuthFailureCb: (() => void) | null = null;
+    private onNoFlightHoursCb: (() => void) | null = null;
     private _onlineCount = 0;
 
     constructor(token: string) {
@@ -50,10 +51,14 @@ export class MultiplayerClient {
                 this._onlineCount = msg.onlineCount;
                 this.onCountChangeCb?.(this._onlineCount);
             }
+            if (msg.type === 'noFlightHours') {
+                this.onNoFlightHoursCb?.();
+            }
         });
 
         this.rt.onClose((code) => {
             if (code === 4001) this.onAuthFailureCb?.();
+            if (code === 4002) this.onNoFlightHoursCb?.();
         });
     }
 
@@ -92,6 +97,10 @@ export class MultiplayerClient {
 
     onAuthFailure(cb: () => void): void {
         this.onAuthFailureCb = cb;
+    }
+
+    onNoFlightHours(cb: () => void): void {
+        this.onNoFlightHoursCb = cb;
     }
 
     dispose(): void {

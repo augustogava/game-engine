@@ -2,6 +2,7 @@ import { GameCore3D } from './engine/3d/GameCore3D.js';
 import { FlightSceneSimple } from './game/FlightSceneSimple.js';
 
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
+const FLIGHT_HOURS_URL = 'https://simflightpro.com/fligh-time';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const loadingEl = document.getElementById('loading')!;
@@ -54,6 +55,9 @@ if (token) {
     scene.initMultiplayer(token, () => {
         console.warn('[flight-main] Auth failure — redirecting to login');
         window.location.href = WEBSITE_LOGIN_URL;
+    }, () => {
+        console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
+        window.location.href = FLIGHT_HOURS_URL;
     });
 }
 

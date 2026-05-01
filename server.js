@@ -799,17 +799,27 @@ const server = http.createServer(async (req, res) => {
             total_missions_completed: 0, total_missions_failed: 0, total_reward_points: 0,
             most_used_aircraft_id: null, pilot_rank: 'student',
             best_landing_rate_fpm: null, avg_landing_rate_fpm: null,
+            purchased_flight_hours: 1.00,
+            available_flight_hours: 1.00,
         });
         try {
             const [rows] = await dbPool.execute(
                 `SELECT * FROM user_flight_stats WHERE user_id = ?`, [user.id]);
-            if (rows.length) return jsonResponse(res, 200, rows[0]);
+            if (rows.length) {
+                const data = rows[0];
+                const purchased = parseFloat(data.purchased_flight_hours) || 1.00;
+                const flown = parseFloat(data.total_flight_hours) || 0;
+                data.available_flight_hours = Math.max(0, parseFloat((purchased - flown).toFixed(2)));
+                return jsonResponse(res, 200, data);
+            }
             return jsonResponse(res, 200, {
                 user_id: user.id, total_flights: 0, total_flight_hours: 0,
                 total_distance_km: 0, total_distance_nm: 0,
                 total_missions_completed: 0, total_missions_failed: 0, total_reward_points: 0,
                 most_used_aircraft_id: null, pilot_rank: 'student',
                 best_landing_rate_fpm: null, avg_landing_rate_fpm: null,
+                purchased_flight_hours: 1.00,
+                available_flight_hours: 1.00,
             });
         } catch (err) {
             console.error('[API] GET /api/flight-stats error:', err.message);
@@ -1378,6 +1388,27 @@ setInterval(async () => {
             );
         } catch (err) {
             console.error(`[DB] Stats persist error for user ${userId}:`, err.message);
+        }
+
+        try {
+            const [[flightBalance]] = await dbPool.execute(
+                `SELECT purchased_flight_hours, total_flight_hours FROM user_flight_stats WHERE user_id = ?`,
+                [userId]
+            );
+            if (flightBalance) {
+                const purchased = parseFloat(flightBalance.purchased_flight_hours) || 1.00;
+                const flown = parseFloat(flightBalance.total_flight_hours) || 0;
+                if (purchased - flown <= 0) {
+                    console.log(`[WS] No flight hours remaining for user ${userId}, disconnecting`);
+                    try {
+                        entry.ws.send(JSON.stringify({ type: 'noFlightHours' }));
+                        entry.ws.close(4002, 'No flight hours remaining');
+                    } catch (_) {}
+                    continue;
+                }
+            }
+        } catch (err) {
+            console.error(`[DB] Flight balance check error for user ${userId}:`, err.message);
         }
 
         entry.distanceNm = 0;

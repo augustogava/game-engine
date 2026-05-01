@@ -461,7 +461,7 @@ export class FlightSceneSimple extends Scene3D {
         this.mpClient?.dispose();
     }
 
-    initMultiplayer(token: string, onAuthFailure?: () => void): void {
+    initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
         this.mpClient = new MultiplayerClient(token);
 
         this.mpClient.onPlayersUpdate((players) => {
@@ -513,6 +513,7 @@ export class FlightSceneSimple extends Scene3D {
         });
 
         if (onAuthFailure) this.mpClient.onAuthFailure(onAuthFailure);
+        if (onNoFlightHours) this.mpClient.onNoFlightHours(onNoFlightHours);
 
         if (this.dbgMpUserId) this.dbgMpUserId.textContent = '…';
         this.mpClient.connect();
