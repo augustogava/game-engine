@@ -10,7 +10,7 @@ const loadingStatus = document.getElementById('loading-status')!;
 const authError = document.getElementById('auth-error')!;
 
 const params = new URLSearchParams(window.location.search);
-const token = params.get('token');
+const token = params.get('token') || localStorage.getItem('auth_token');
 
 if (!token) {
     if (window.location.hostname.includes('simflightpro.com')) {
@@ -18,6 +18,11 @@ if (!token) {
     } else {
         authError.textContent = 'No token. Add ?token=<jwt> to the URL.';
     }
+}
+
+if (token) {
+    localStorage.setItem('auth_token', token);
+    localStorage.setItem('token', token);
 }
 
 params.delete('token');

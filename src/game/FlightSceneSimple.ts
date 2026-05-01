@@ -2092,7 +2092,7 @@ export class FlightSceneSimple extends Scene3D {
         if (!listEl) return;
         listEl.textContent = 'Loading...';
 
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+        const token = localStorage.getItem('auth_token') || '';
         if (!token) {
             listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login required</div>';
             return;
