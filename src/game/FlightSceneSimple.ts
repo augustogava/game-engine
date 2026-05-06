@@ -999,12 +999,13 @@ export class FlightSceneSimple extends Scene3D {
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         this.planeRoot.rotationQuaternion = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
         if (this.spawnAirborne) {
-            this.planeRoot.position.set(0, GROUND_Y + cfg.spawn_alt_offset_m, 0);
-            this.thrust = cfg.spawn_airborne_thrust;
+            const altOffset = Math.max(100, cfg.spawn_alt_offset_m);
+            this.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
+            this.thrust = cfg.spawn_airborne_thrust || 0.7;
             this.flapIndex = cfg.default_flap_index_air;
             this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 0;
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, new BABYLON.Matrix()));
-            this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms);
+            this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
         } else {
             this.planeRoot.position.set(0, GROUND_Y, 0);
             this.thrust = 0;
@@ -1298,7 +1299,7 @@ export class FlightSceneSimple extends Scene3D {
 
             targetPitch = p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0;
             targetRoll  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.25;
-            targetYaw   = (p('KeyE') || p('KeyD')) ? 1 : (p('KeyQ') || p('KeyA')) ? -1 : 0;
+            targetYaw   = (p('KeyQ') || p('KeyA')) ? 1 : (p('KeyE') || p('KeyD')) ? -1 : 0;
 
             if (p('Digit5') && !this.flapKeyLock5) {
                 this.flapKeyLock5 = true;
@@ -1495,14 +1496,15 @@ export class FlightSceneSimple extends Scene3D {
         this.angularVelocity.set(0, 0, 0);
         this.terrainY = GROUND_Y;
         if (this.spawnAirborne) {
-            this.planeRoot.position.set(0, GROUND_Y + cfg.spawn_alt_offset_m, 0);
-            this.thrust = cfg.spawn_airborne_thrust;
+            const altOffset = Math.max(100, cfg.spawn_alt_offset_m);
+            this.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
+            this.thrust = cfg.spawn_airborne_thrust || 0.7;
             this.flapIndex = cfg.default_flap_index_air;
             this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 0;
             const rotMat = new BABYLON.Matrix();
             BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion!, rotMat);
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
-            this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms);
+            this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
         } else {
             this.planeRoot.position.set(0, GROUND_Y, 0);
             this.velocity.set(0, 0, 0);
