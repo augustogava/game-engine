@@ -86,6 +86,7 @@ async function fetchAircraftConfig(aircraftId: number): Promise<AircraftConfig> 
         const resp = await fetch(`/api/aircrafts/${aircraftId}`, { headers });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
+        console.debug('[Aircraft] fetchAircraftConfig raw response:', JSON.stringify(data));
         if (typeof data.flap_steps_json === 'string') {
             data.flap_steps_json = JSON.parse(data.flap_steps_json);
         }
@@ -105,9 +106,11 @@ async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
         const resp = await fetch('/api/user-aircrafts', { headers });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
+        console.debug('[Aircraft] fetchSelectedAircraftConfig raw response:', JSON.stringify(data));
         const selected = data.data?.find((ua: any) => ua.is_selected === 1);
         if (selected?.aircraft) {
             const cfg = selected.aircraft as AircraftConfig;
+            console.debug('[Aircraft] selected aircraft config:', JSON.stringify(cfg));
             if (typeof cfg.flap_steps_json === 'string') {
                 cfg.flap_steps_json = JSON.parse(cfg.flap_steps_json as unknown as string);
             }
@@ -377,7 +380,7 @@ export class FlightSceneSimple extends Scene3D {
 
     private _applyAircraftConfig(cfg: AircraftConfig): void {
         this.aircraftConfig = cfg;
-        this.FLAP_STEPS = cfg.flap_steps_json;
+        this.FLAP_STEPS = cfg.flap_steps_json || DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
         this.baseZeroLiftAoA = cfg.base_zero_lift_aoa;
     }
 
@@ -1591,6 +1594,8 @@ export class FlightSceneSimple extends Scene3D {
     private _updateFlapDisplay(): void {}
 
     private _applyFlaps(): void {
+        if (!this.FLAP_STEPS || !this.FLAP_STEPS.length) return;
+        if (this.flapIndex >= this.FLAP_STEPS.length) this.flapIndex = this.FLAP_STEPS.length - 1;
         const targetDeg = this.FLAP_STEPS[this.flapIndex];
         const rate = 5;
         if (this.currentFlapDeg < targetDeg) this.currentFlapDeg = Math.min(targetDeg, this.currentFlapDeg + rate * 0.016);
