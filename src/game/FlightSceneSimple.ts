@@ -943,11 +943,11 @@ export class FlightSceneSimple extends Scene3D {
         if (this._skyMaterial) {
             this._skyMaterial.sunPosition = new BABYLON.Vector3(sunPosX * 1000, sunPosY * 1000, sunPosZ * 1000);
             const lumT = Math.max(0, Math.min(1, (elevation + 5) / 20));
-            this._skyMaterial.luminance = 0.005 + lumT * 0.995;
+            this._skyMaterial.luminance = 0.01 + lumT * 1.19;
             const sunsetT = 1.0 - Math.max(0, Math.min(1, Math.abs(elevation) / 10));
-            this._skyMaterial.turbidity = 2 + sunsetT * 12;
-            this._skyMaterial.rayleigh = 1 + lumT * 2;
-            this._skyMaterial.mieCoefficient = 0.003 + sunsetT * 0.015;
+            this._skyMaterial.turbidity = 8 + sunsetT * 6;
+            this._skyMaterial.rayleigh = 1.5 + lumT * 1.5;
+            this._skyMaterial.mieCoefficient = 0.005 + sunsetT * 0.015;
             this._skyMaterial.mieDirectionalG = 0.8;
         }
 
