@@ -162,8 +162,8 @@
             margin: 0;
         }
         #debug-toggle {
-            position: absolute;
-            left: -40px; top: 30px;
+            position: fixed;
+            top: 36px; right: 14px;
             width: 32px; height: 32px;
             background: rgba(2, 10, 20, 0.85);
             border: 1px solid rgba(64, 255, 170, 0.3);
@@ -172,6 +172,8 @@
             cursor: pointer;
             display: flex; align-items: center; justify-content: center;
             font-family: monospace;
+            z-index: 10001;
+            transition: border-color .2s, box-shadow .2s;
         }
         .debug-form {
             display: flex; flex-direction: column; gap: 8px;
@@ -194,6 +196,11 @@
             margin-top: 4px; transition: background 0.2s;
         }
         .debug-btn:hover { background: #00ccff; }
+
+        @media(max-width:768px){
+            #debug-toggle{display:none!important}
+            #debug-ui{display:none!important}
+        }
         
     </style>
 </head>
@@ -216,8 +223,8 @@
     <canvas id="game-canvas"></canvas>
 
     <!-- Debug UI Panel -->
+    <div id="debug-toggle">⚙</div>
     <div id="debug-ui" class="minimized">
-        <div id="debug-toggle">⚙</div>
         <header>
             <h3>LOCATION</h3>
         </header>

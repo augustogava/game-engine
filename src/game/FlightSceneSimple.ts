@@ -307,6 +307,7 @@ export class FlightSceneSimple extends Scene3D {
     public onSpawned: (() => void) | null = null;
 
     private hudThrottle!: HTMLElement;
+    private hudThrPct!: HTMLElement;
     private hudAttitude!: HTMLElement;
     private hudWarning!:  HTMLElement;
     private hudFps!:      HTMLElement;
@@ -340,6 +341,7 @@ export class FlightSceneSimple extends Scene3D {
     private hudVsVal!:     HTMLElement;
     private hudTrimVal!:   HTMLElement;
     private hudBaroVal!:   HTMLElement;
+    private hudHdgVal!:    HTMLElement;
     private hudAltTape!:   HTMLElement;
     private hudSpdTape!:   HTMLElement;
     private hudSpdMarks!:  HTMLElement;
@@ -1601,12 +1603,13 @@ export class FlightSceneSimple extends Scene3D {
 <style>
 #touch-overlay{position:fixed;inset:0;pointer-events:none;z-index:150}
 #touch-joy{position:absolute;width:120px;height:120px;border-radius:50%;border:none;background:none;display:none;pointer-events:none}
-#touch-joy-knob{position:absolute;top:50%;left:50%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:rgba(0,255,128,.2);border:none}
-#touch-throttle{position:absolute;bottom:220px;left:10px;width:36px;height:140px;border-radius:18px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
-#touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 18px 18px}
-#touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:32px;height:10px;border-radius:5px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:390px;left:8px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
-#touch-flap-btns button{width:48px;height:28px;border-radius:6px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:10px;cursor:pointer;touch-action:manipulation}
+#touch-joy-knob{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(0,255,128,.25);border:1px solid rgba(0,255,128,.15)}
+#touch-throttle{position:absolute;bottom:160px;left:10px;width:40px;height:150px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
+#touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
+#touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:36px;height:12px;border-radius:6px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
+#touch-flap-btns{position:absolute;bottom:340px;left:8px;display:flex;flex-direction:column;gap:6px;pointer-events:auto}
+#touch-flap-btns button{width:52px;height:34px;border-radius:8px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;touch-action:manipulation;transition:transform .1s,background .1s}
+#touch-flap-btns button:active{transform:scale(.92);background:rgba(0,40,25,.7)}
 #touch-brk.active{background:rgba(255,40,40,.4);border-color:rgba(255,80,80,.6);color:#ff6060}
 </style>
 <div id="touch-joy"><div id="touch-joy-knob"></div></div>
@@ -1637,10 +1640,25 @@ export class FlightSceneSimple extends Scene3D {
         const canvas = this.scene!.getEngine().getRenderingCanvas()!;
         canvas.style.touchAction = 'none';
 
+        const isInDeadZone = (x: number, y: number): boolean => {
+            const gps = document.getElementById('gps-map');
+            if (gps) {
+                const r = gps.getBoundingClientRect();
+                if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+            }
+            const pfd = document.getElementById('flight-pfd');
+            if (pfd) {
+                const r = pfd.getBoundingClientRect();
+                if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+            }
+            return false;
+        };
+
         canvas.addEventListener('touchstart', (e: TouchEvent) => {
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const t = e.changedTouches[i];
                 if (isOnWidget(t)) continue;
+                if (isInDeadZone(t.clientX, t.clientY)) continue;
                 if (this.joystickTouchId !== null) continue;
                 this.joystickTouchId = t.identifier;
                 this.joystickOrigin = { x: t.clientX, y: t.clientY };
@@ -2062,19 +2080,19 @@ export class FlightSceneSimple extends Scene3D {
         hud.innerHTML = `
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400&display=swap');
-#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;opacity:0.7; }
+#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;opacity:0.85; }
 .hp{position:absolute}
 #hfps{font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif}
-#hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:blink .7s steps(2) infinite}
-@keyframes blink{to{opacity:0}}
+#hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:stallPulse 1s ease-in-out infinite}
+@keyframes stallPulse{0%,100%{opacity:1}50%{opacity:.3}}
 
 /* Left Panel - Airspeed */
-.hud-panel-left{position:absolute;left:2px;bottom:2px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
-.hud-panel-right{position:absolute;right:2px;bottom:2px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
+.hud-panel-left{position:absolute;left:12px;bottom:12px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
+.hud-panel-right{position:absolute;right:12px;bottom:12px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
 
 .hud-tape-col{display:flex;flex-direction:column}
-.hud-header{font-size:8px;letter-spacing:.1em;color:#fff;margin-bottom:2px;font-weight:400;opacity:.8}
-.hud-header-sub{font-size:6px;color:rgba(255,255,255,.4);margin-left:2px}
+.hud-header{font-size:9px;letter-spacing:.1em;color:#fff;margin-bottom:2px;font-weight:400;opacity:.8}
+.hud-header-sub{font-size:7px;color:rgba(255,255,255,.4);margin-left:2px}
 
 .hud-tape-section{display:flex;align-items:stretch;overflow:hidden}
 .hud-tape-wrapper{position:relative;display:flex;height:180px;overflow:hidden}
@@ -2086,51 +2104,51 @@ export class FlightSceneSimple extends Scene3D {
 .hud-tape-marks-right{right:12px;align-items:flex-end}
 .hud-tape-mark{display:flex;align-items:center;gap:2px}
 .hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.5)}
-.hud-tape-mark-val{font-size:9px;color:rgba(255,255,255,.85);font-family:'Inter',sans-serif;font-weight:500;min-width:24px}
+.hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.85);font-family:'Inter',sans-serif;font-weight:500;min-width:24px}
 
 .hud-value-row{display:flex;align-items:baseline;gap:2px;margin-top:3px}
 .hud-value-main{font-size:24px;font-weight:700;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 4px rgba(0,0,0,.9)}
-.hud-value-unit{font-size:8px;color:rgba(255,255,255,.4)}
+.hud-value-unit{font-size:9px;color:rgba(255,255,255,.4)}
 
 .hud-sub-row{display:flex;align-items:center;gap:4px;margin-top:1px}
-.hud-sub-label{font-size:6px;color:rgba(255,255,255,.5)}
-.hud-sub-val{font-size:9px;color:#fff;font-family:'Orbitron',monospace}
+.hud-sub-label{font-size:8px;color:rgba(255,255,255,.5)}
+.hud-sub-val{font-size:11px;color:#fff;font-family:'Orbitron',monospace}
 
 /* Engine Section - Side by side */
 .hud-engine-col{display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:4px}
-.hud-engine-title{font-size:6px;letter-spacing:.08em;color:rgba(255,255,255,.4);margin-bottom:2px}
+.hud-engine-title{font-size:8px;letter-spacing:.08em;color:rgba(255,255,255,.4);margin-bottom:2px}
 .hud-engine-content{display:flex;flex-direction:column;gap:4px}
-.hud-rpm-gauge{position:relative;width:48px;height:48px}
+.hud-rpm-gauge{position:relative;width:56px;height:56px}
 .hud-rpm-bg{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle,rgba(20,20,20,.9),rgba(10,10,10,.95));border:1px solid rgba(80,255,160,.25)}
-.hud-rpm-needle{position:absolute;bottom:50%;left:50%;width:2px;height:18px;background:linear-gradient(to top,#50ff80,#80ffa0);transform-origin:bottom center;transform:rotate(-120deg);border-radius:1px;box-shadow:0 0 4px rgba(80,255,128,.5)}
+.hud-rpm-needle{position:absolute;bottom:50%;left:50%;width:2px;height:22px;background:linear-gradient(to top,#50ff80,#80ffa0);transform-origin:bottom center;transform:rotate(-120deg);border-radius:1px;box-shadow:0 0 4px rgba(80,255,128,.5)}
 .hud-rpm-center{position:absolute;top:50%;left:50%;width:6px;height:6px;background:#222;border:1px solid rgba(80,255,160,.3);border-radius:50%;transform:translate(-50%,-50%)}
-.hud-rpm-label{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-size:5px;color:#50ff80;letter-spacing:.03em}
+.hud-rpm-label{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-size:7px;color:#50ff80;letter-spacing:.03em}
 .hud-engine-vals{display:flex;flex-direction:column;gap:0}
 .hud-engine-val{display:flex;align-items:baseline;gap:3px}
-.hud-engine-val-num{font-size:10px;font-weight:600;color:#fff;font-family:'Orbitron',monospace}
-.hud-engine-val-lbl{font-size:5px;color:rgba(255,255,255,.35)}
+.hud-engine-val-num{font-size:11px;font-weight:600;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.hud-engine-val-lbl{font-size:7px;color:rgba(255,255,255,.35)}
 
 /* Right Panel - Instruments side by side */
 .hud-instr-col{display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding-bottom:4px}
 .hud-vs-row{display:flex;align-items:center;gap:4px}
-.hud-vs-header{font-size:6px;color:rgba(255,255,255,.5)}
-.hud-vs-val{font-size:14px;font-weight:600;color:#fff;font-family:'Orbitron',monospace}
-.hud-vs-bar{width:16px;height:70px;background:rgba(0,0,0,.5);position:relative}
-.hud-vs-bar-fill{position:absolute;left:2px;right:2px;background:linear-gradient(to top,#50c878,#80ee90);transition:height .12s,bottom .12s}
+.hud-vs-header{font-size:8px;color:rgba(255,255,255,.5)}
+.hud-vs-val{font-size:14px;font-weight:600;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.hud-vs-bar{width:20px;height:80px;background:rgba(0,0,0,.5);position:relative}
+.hud-vs-bar-fill{position:absolute;left:2px;right:2px;background:linear-gradient(to top,#50c878,#80ee90);transition:height .12s,bottom .12s,background .3s}
 .hud-vs-bar-zero{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(255,255,255,.25)}
-.hud-vs-bar-marks{position:absolute;right:-10px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:space-between;font-size:5px;color:rgba(255,255,255,.4)}
+.hud-vs-bar-marks{position:absolute;right:-10px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:space-between;font-size:7px;color:rgba(255,255,255,.4)}
 
 .hud-instr-group{display:flex;flex-direction:column;gap:2px}
 .hud-instr-item{display:flex;align-items:center;gap:4px}
-.hud-instr-val{font-size:10px;font-weight:600;color:#fff;font-family:'Orbitron',monospace;min-width:28px}
-.hud-instr-lbl{font-size:5px;color:rgba(255,255,255,.4);letter-spacing:.04em}
-.hud-instr-bar{width:20px;height:3px;background:rgba(0,0,0,.4);overflow:hidden}
-.hud-instr-bar-fill{height:100%;background:linear-gradient(90deg,#50c878,#80ee90)}
+.hud-instr-val{font-size:11px;font-weight:600;color:#fff;font-family:'Orbitron',monospace;min-width:28px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.hud-instr-lbl{font-size:8px;color:rgba(255,255,255,.4);letter-spacing:.04em}
+.hud-instr-bar{width:28px;height:4px;background:rgba(0,0,0,.4);overflow:hidden;border-radius:2px}
+.hud-instr-bar-fill{height:100%;background:linear-gradient(90deg,#50c878,#80ee90);border-radius:2px}
 
 .hud-bottom-row{display:flex;gap:6px;margin-top:3px;padding-top:2px;border-top:1px solid rgba(255,255,255,.08)}
 .hud-bottom-item{display:flex;flex-direction:column;align-items:center}
-.hud-bottom-val{font-size:8px;color:#fff;font-family:'Orbitron',monospace}
-.hud-bottom-lbl{font-size:4px;color:rgba(255,255,255,.25)}
+.hud-bottom-val{font-size:9px;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.hud-bottom-lbl{font-size:7px;color:rgba(255,255,255,.25)}
 
 @media(max-width:768px){
 #hfps{display:none}
@@ -2138,22 +2156,38 @@ export class FlightSceneSimple extends Scene3D {
 #hud-utc{font-size:8px!important;letter-spacing:.08em!important}
 #flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
 #gps-map{width:140px!important;height:140px!important;top:2px!important;left:2px!important}
-.hud-panel-left{left:2px!important;bottom:2px!important;transform:scale(.8);transform-origin:bottom left}
-.hud-panel-right{right:2px!important;bottom:2px!important;transform:scale(.8);transform-origin:bottom right}
+.hud-panel-left{left:6px!important;bottom:6px!important;transform:scale(.8);transform-origin:bottom left}
+.hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.8);transform-origin:bottom right}
 .hud-tape{height:140px!important}
 .hud-value-main{font-size:18px!important}
 .hud-engine-col{display:none!important}
+#missions-btn{top:22px!important;right:10px!important}
+#aircraft-btn{top:60px!important;right:10px!important}
+#missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
+#aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
-#flight-pfd{top:22%!important;width:180px!important;height:120px!important}
-#gps-map{width:100px!important;height:100px!important;top:4px!important;left:2px!important}
-.hud-panel-left{left:2px!important;bottom:2px!important;transform:scale(.65);transform-origin:bottom left}
-.hud-panel-right{right:2px!important;bottom:2px!important;transform:scale(.65);transform-origin:bottom right}
+#flight-pfd{top:22%!important;width:200px!important;height:140px!important}
+#gps-map{width:110px!important;height:110px!important;top:4px!important;left:2px!important}
+.hud-panel-left{left:4px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom left}
+.hud-panel-right{right:4px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom right}
 .hud-tape{height:110px!important}
 .hud-value-main{font-size:16px!important}
 .hud-engine-col{display:none!important}
 .hud-instr-col{display:none!important}
+#h-online{display:none!important}
+#missions-btn{top:6px!important;right:6px!important;width:28px!important;height:28px!important}
+#aircraft-btn{top:40px!important;right:6px!important;width:28px!important;height:28px!important}
+#missions-panel{top:4px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+#aircraft-panel{top:38px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+}
+@media(max-height:440px){
+#flight-pfd{top:30%!important;width:220px!important;height:150px!important}
+#gps-map{width:100px!important;height:100px!important;top:2px!important;left:2px!important}
+#hud-utc{font-size:7px!important}
+.hud-panel-left{bottom:4px!important;transform:scale(.7);transform-origin:bottom left}
+.hud-panel-right{bottom:4px!important;transform:scale(.7);transform-origin:bottom right}
 }
 
 </style>
@@ -2221,9 +2255,10 @@ export class FlightSceneSimple extends Scene3D {
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-flp">OFF</span><span class="hud-instr-lbl">FLAPS</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-brk">OFF</span><span class="hud-instr-lbl">BRK</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="hud-trim-v">0</span><span class="hud-instr-lbl">TRIM</span></div>
-      <div class="hud-instr-item"><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span></div>
+      <div class="hud-instr-item"><span class="hud-instr-val" id="hud-thr-pct" style="min-width:22px">0%</span><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span></div>
     </div>
     <div class="hud-bottom-row">
+      <div class="hud-bottom-item"><span class="hud-bottom-val" id="hud-hdg-v">0&deg;</span><span class="hud-bottom-lbl">HDG</span></div>
       <div class="hud-bottom-item"><span class="hud-bottom-val" id="hud-baro-v">29.92</span><span class="hud-bottom-lbl">IN</span></div>
       <div class="hud-bottom-item"><span class="hud-bottom-val" id="bb-att">LEVEL</span><span class="hud-bottom-lbl">ATT</span></div>
     </div>
@@ -2252,20 +2287,20 @@ export class FlightSceneSimple extends Scene3D {
   <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap"></div>
 </div>
 
-<div id="missions-btn" style="position:absolute;top:80px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Missions">
+<div id="missions-btn" style="position:absolute;top:74px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Missions">
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="12,2 15,10 12,8 9,10"/><circle cx="12" cy="12" r="3"/></svg>
 </div>
 
-<div id="missions-panel" style="display:none;position:absolute;top:70px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+<div id="missions-panel" style="display:none;position:absolute;top:64px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
   <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">MISSIONS</div>
   <div id="missions-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
 </div>
 
-<div id="aircraft-btn" style="position:absolute;top:118px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Aircraft">
+<div id="aircraft-btn" style="position:absolute;top:112px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Aircraft">
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12l5-3v2h4l1-5h2l1 5h4v-2l5 3-5 3v-2h-4l-1 5h-2l-1-5H7v2z"/></svg>
 </div>
 
-<div id="aircraft-panel" style="display:none;position:absolute;top:108px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+<div id="aircraft-panel" style="display:none;position:absolute;top:102px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
   <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">AIRCRAFT</div>
   <div id="aircraft-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
 </div>`;
@@ -2275,6 +2310,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudSpeedVal = document.getElementById('bb-spd-v')!;
         this.hudAltVal   = document.getElementById('bb-alt-v')!;
         this.hudThrottle = document.getElementById('bb-thr')!;
+        this.hudThrPct   = document.getElementById('hud-thr-pct')!;
         this.hudAttitude = document.getElementById('bb-att')!;
         this.hudWarning  = document.getElementById('hw')!;
         this.hudFps      = document.getElementById('hfps')!;
@@ -2290,6 +2326,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudVsVal    = document.getElementById('hud-vs-v')!;
         this.hudTrimVal  = document.getElementById('hud-trim-v')!;
         this.hudBaroVal  = document.getElementById('hud-baro-v')!;
+        this.hudHdgVal   = document.getElementById('hud-hdg-v')!;
         this.hudAltTape  = document.getElementById('hud-alt-tape')!;
         this.hudSpdTape  = document.getElementById('hud-spd-tape')!;
         this.hudSpdMarks = document.getElementById('hud-spd-marks')!;
@@ -2844,6 +2881,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudSpeedVal.textContent = String(speedKts);
         this.hudAltVal.textContent   = String(altitudeMsl);
         this.hudThrottle.style.width = `${pct}%`;
+        if (this.hudThrPct) this.hudThrPct.textContent = `${pct}%`;
 
         const flapDeg = this.FLAP_STEPS[this.flapIndex];
         this.hudFlapVal.textContent = flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF';
@@ -2899,6 +2937,17 @@ export class FlightSceneSimple extends Scene3D {
 
         if (this.hudTrimVal) this.hudTrimVal.textContent = String(Math.round(pitchDeg * 0.5));
         if (this.hudBaroVal) this.hudBaroVal.textContent = '29.92';
+
+        if (this.hudHdgVal) {
+            const fwdFlat = this._tmpFwd.subtract(this._tmpUp.scale(BABYLON.Vector3.Dot(this._tmpFwd, this._tmpUp)));
+            if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
+            const hdgRad = Math.atan2(
+                BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
+                BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, 1)),
+            );
+            const hdgDeg = Math.round(((hdgRad * 180 / Math.PI) + 360) % 360);
+            this.hudHdgVal.textContent = `${hdgDeg}\u00B0`;
+        }
 
         this._updateTapeMarks(speedKts, altitudeFt);
 
