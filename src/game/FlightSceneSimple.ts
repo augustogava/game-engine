@@ -5,6 +5,7 @@ import { TilesRenderer } from '3d-tiles-renderer/babylonjs';
 import { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
 import * as BABYLON from '@babylonjs/core';
 import '@babylonjs/loaders';
+import { SkyMaterial } from '@babylonjs/materials/sky';
 import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
 
 const BUILD_VERSION = 8;
@@ -371,11 +372,21 @@ export class FlightSceneSimple extends Scene3D {
     private _fillLight: BABYLON.DirectionalLight | null = null;
     private _sunMesh: BABYLON.Mesh | null = null;
     private _sunMeshMat: BABYLON.StandardMaterial | null = null;
-    private _skyboxMat: BABYLON.StandardMaterial | null = null;
+    private _skyMaterial: SkyMaterial | null = null;
+    private _skyboxMesh: BABYLON.Mesh | null = null;
     private _starRoot: BABYLON.TransformNode | null = null;
+    private _starInstances: BABYLON.InstancedMesh[] = [];
+    private _starPhases: number[] = [];
+    private _starBaseScales: number[] = [];
+    private _starTime = 0;
+    private _moonMesh: BABYLON.Mesh | null = null;
+    private _moonMat: BABYLON.StandardMaterial | null = null;
     private _lensFlareSystem: BABYLON.LensFlareSystem | null = null;
     private _sunUpdateTimer = 0;
     private _sunElevation = 45;
+    private _pipeline: BABYLON.DefaultRenderingPipeline | null = null;
+    private _ssao: BABYLON.SSAO2RenderingPipeline | null = null;
+    private _shadowGen: BABYLON.CascadedShadowGenerator | null = null;
     private hudUtc!: HTMLElement;
 
     private _applyAircraftConfig(cfg: AircraftConfig): void {
@@ -387,7 +398,9 @@ export class FlightSceneSimple extends Scene3D {
     onCreate(scene: any, _input: InputManager): void {
         this.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         scene.useRightHandedSystem = true;
-        scene.clearColor = new BABYLON.Color4(0.04, 0.1, 0.22, 1);
+        scene.clearColor = new BABYLON.Color4(0.0, 0.0, 0.02, 1);
+        scene.autoClear = true;
+        scene.skipPointerMovePicking = true;
         scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
         scene.fogColor   = new BABYLON.Color3(0.55, 0.7, 0.95);
         scene.fogDensity = 0.000008;
@@ -446,6 +459,10 @@ export class FlightSceneSimple extends Scene3D {
             const scene = this.planeRoot.getScene();
             if (scene) this._applyDayNightCycle(scene);
         }
+        if (this._skyMaterial && this.camera) {
+            this._skyMaterial.cameraOffset.y = this.camera.position.y;
+        }
+        this._updateStarTwinkle(dt);
         this._updateNavLights(dt);
         this._updateClouds();
         this._updateHUD();
@@ -762,22 +779,23 @@ export class FlightSceneSimple extends Scene3D {
         this._fillLight.diffuse = new BABYLON.Color3(0.6, 0.7, 0.9);
         this._fillLight.specular = BABYLON.Color3.Black();
 
-        const shadow = new BABYLON.CascadedShadowGenerator(4096, this._sunLight);
-        shadow.lambda                 = 0.75;
-        shadow.cascadeBlendPercentage = 0.1;
-        shadow.depthClamp             = true;
-        shadow.autoCalcDepthBounds    = true;
-        shadow.stabilizeCascades      = true;
-        shadow.numCascades            = 4;
-        shadow.penumbraDarkness       = 0.6;
-        shadow.usePercentageCloserFiltering = true;
-        (shadow as any).filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
-        (this as any)._shadow = shadow;
+        this._shadowGen = new BABYLON.CascadedShadowGenerator(4096, this._sunLight);
+        this._shadowGen.lambda                 = 0.75;
+        this._shadowGen.cascadeBlendPercentage = 0.1;
+        this._shadowGen.depthClamp             = true;
+        this._shadowGen.autoCalcDepthBounds    = true;
+        this._shadowGen.stabilizeCascades      = true;
+        this._shadowGen.numCascades            = 4;
+        this._shadowGen.penumbraDarkness       = 0.6;
+        this._shadowGen.usePercentageCloserFiltering = true;
+        (this._shadowGen as any).filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
+        (this as any)._shadow = this._shadowGen;
 
         scene.environmentIntensity = 1.3;
 
         this._buildSunMesh(scene);
         this._buildStars(scene);
+        this._buildMoon(scene);
         this._applyDayNightCycle(scene);
     }
 
@@ -795,31 +813,90 @@ export class FlightSceneSimple extends Scene3D {
 
     private _buildStars(scene: BABYLON.Scene): void {
         this._starRoot = new BABYLON.TransformNode('starRoot', scene);
-        const starMat = new BABYLON.StandardMaterial('starMat', scene);
-        starMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
-        starMat.disableLighting = true;
+        this._starInstances = [];
+        this._starPhases = [];
+        this._starBaseScales = [];
+
+        const starColors = [
+            new BABYLON.Color3(1.0, 0.85, 0.7),
+            new BABYLON.Color3(1.0, 0.95, 0.9),
+            new BABYLON.Color3(1.0, 1.0, 1.0),
+            new BABYLON.Color3(0.85, 0.9, 1.0),
+            new BABYLON.Color3(0.7, 0.8, 1.0),
+        ];
+
+        const starMats = starColors.map((c, i) => {
+            const mat = new BABYLON.StandardMaterial(`starMat${i}`, scene);
+            mat.emissiveColor = c;
+            mat.disableLighting = true;
+            return mat;
+        });
 
         const baseStar = BABYLON.MeshBuilder.CreatePlane('starBase', { size: 1 }, scene);
-        baseStar.material = starMat;
+        baseStar.material = starMats[2];
         baseStar.isVisible = false;
         baseStar.parent = this._starRoot;
 
         const starDist = 50000;
-        for (let i = 0; i < 300; i++) {
+        const STAR_COUNT = 800;
+        const baseStars: BABYLON.Mesh[] = [baseStar];
+        for (let m = 0; m < starMats.length; m++) {
+            if (m === 2) continue;
+            const bs = BABYLON.MeshBuilder.CreatePlane(`starBase${m}`, { size: 1 }, scene);
+            bs.material = starMats[m];
+            bs.isVisible = false;
+            bs.parent = this._starRoot;
+            baseStars[m] = bs;
+        }
+        baseStars[2] = baseStar;
+
+        for (let i = 0; i < STAR_COUNT; i++) {
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.acos(2 * Math.random() - 1);
-            const onlyUpper = Math.abs(Math.cos(phi));
-            if (onlyUpper < 0.05) continue;
+            const cosP = Math.abs(Math.cos(phi));
+            if (cosP < 0.03) continue;
             const x = starDist * Math.sin(phi) * Math.cos(theta);
-            const y = starDist * Math.abs(Math.cos(phi));
+            const y = starDist * cosP;
             const z = starDist * Math.sin(phi) * Math.sin(theta);
-            const inst = baseStar.createInstance('star_' + i);
+            const matIdx = Math.floor(Math.random() * starMats.length);
+            const inst = baseStars[matIdx].createInstance('star_' + i);
             inst.position.set(x, y, z);
-            const sz = 15 + Math.random() * 40;
+            const magnitude = Math.random();
+            const sz = 8 + magnitude * 50;
             inst.scaling.setAll(sz);
             inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+            inst.isPickable = false;
+
+            this._starInstances.push(inst);
+            this._starPhases.push(Math.random() * Math.PI * 2);
+            this._starBaseScales.push(sz);
         }
         this._starRoot.setEnabled(false);
+    }
+
+    private _buildMoon(scene: BABYLON.Scene): void {
+        this._moonMesh = BABYLON.MeshBuilder.CreateSphere('moonMesh', { diameter: 300, segments: 16 }, scene);
+        this._moonMesh.isPickable = false;
+        this._moonMesh.infiniteDistance = true;
+        this._moonMat = new BABYLON.StandardMaterial('moonMat', scene);
+        this._moonMat.emissiveColor = new BABYLON.Color3(0.75, 0.78, 0.85);
+        this._moonMat.diffuseColor = new BABYLON.Color3(0.2, 0.22, 0.28);
+        this._moonMat.disableLighting = true;
+        this._moonMat.backFaceCulling = false;
+        this._moonMesh.material = this._moonMat;
+        this._moonMesh.isVisible = false;
+    }
+
+    private _updateStarTwinkle(dt: number): void {
+        if (!this._starRoot || !this._starRoot.isEnabled()) return;
+        this._starTime += dt;
+        if (this._starTime > 10000) this._starTime -= 10000;
+        for (let i = 0; i < this._starInstances.length; i++) {
+            const phase = this._starPhases[i];
+            const base = this._starBaseScales[i];
+            const flicker = 0.7 + 0.3 * Math.sin(this._starTime * (1.5 + phase) + phase * 6.28);
+            this._starInstances[i].scaling.setAll(base * flicker);
+        }
     }
 
     private _applyDayNightCycle(scene: BABYLON.Scene): void {
@@ -834,6 +911,10 @@ export class FlightSceneSimple extends Scene3D {
         const sunDirZ = -Math.cos(azR) * Math.cos(elevR);
         const sunDir = new BABYLON.Vector3(sunDirX, sunDirY, sunDirZ).normalize();
 
+        const sunPosX = Math.sin(azR) * Math.cos(elevR);
+        const sunPosY = Math.sin(elevR);
+        const sunPosZ = Math.cos(azR) * Math.cos(elevR);
+
         if (this._sunLight) {
             this._sunLight.direction = sunDir;
             this._sunLight.position = sunDir.scale(-1200);
@@ -841,15 +922,25 @@ export class FlightSceneSimple extends Scene3D {
 
         if (this._sunMesh) {
             this._sunMesh.position = sunDir.scale(-10000);
-            this._sunMesh.isVisible = elevation > 0;
+            this._sunMesh.isVisible = elevation > -2;
         }
 
         if (this._lensFlareSystem) {
             this._lensFlareSystem.isEnabled = elevation > 1;
         }
 
+        if (this._skyMaterial) {
+            this._skyMaterial.sunPosition = new BABYLON.Vector3(sunPosX * 1000, sunPosY * 1000, sunPosZ * 1000);
+            const lumT = Math.max(0, Math.min(1, (elevation + 5) / 20));
+            this._skyMaterial.luminance = 0.005 + lumT * 0.995;
+            const sunsetT = 1.0 - Math.max(0, Math.min(1, Math.abs(elevation) / 10));
+            this._skyMaterial.turbidity = 2 + sunsetT * 12;
+            this._skyMaterial.rayleigh = 1 + lumT * 2;
+            this._skyMaterial.mieCoefficient = 0.003 + sunsetT * 0.015;
+            this._skyMaterial.mieDirectionalG = 0.8;
+        }
+
         const t = Math.max(0, Math.min(1, (elevation + 6) / 30));
-        const nightT = Math.max(0, Math.min(1, (elevation + 2) / 8));
 
         if (this._sunLight) {
             this._sunLight.intensity = 0.1 + t * 2.9;
@@ -880,20 +971,23 @@ export class FlightSceneSimple extends Scene3D {
         const fogB = 0.06 + t * 0.89;
         scene.fogColor.set(fogR, fogG, fogB);
 
-        const clearR = 0.01 + t * 0.03;
-        const clearG = 0.01 + t * 0.09;
-        const clearB = 0.04 + t * 0.18;
-        scene.clearColor.set(clearR, clearG, clearB, 1);
+        scene.clearColor.set(0.0, 0.0, 0.02, 1);
 
         scene.environmentIntensity = 0.15 + t * 1.15;
 
-        if (this._skyboxMat) {
-            const skyAlpha = t;
-            this._skyboxMat.alpha = skyAlpha;
+        if (this._moonMesh) {
+            const moonY = -sunPosY;
+            this._moonMesh.position.set(-sunPosX * 10000, Math.max(moonY * 10000, 500), -sunPosZ * 10000);
+            this._moonMesh.isVisible = elevation < 8 && moonY > -0.05;
+            if (this._moonMat) {
+                const moonBright = Math.max(0, Math.min(1, (8 - elevation) / 15));
+                this._moonMat.emissiveColor.set(0.75 * moonBright, 0.78 * moonBright, 0.85 * moonBright);
+            }
         }
 
         if (this._starRoot) {
-            this._starRoot.setEnabled(nightT < 0.5);
+            const starFade = Math.max(0, Math.min(1, (-elevation + 5) / 12));
+            this._starRoot.setEnabled(starFade > 0.05);
         }
     }
 
@@ -905,17 +999,21 @@ export class FlightSceneSimple extends Scene3D {
         );
         scene.environmentTexture = envTex;
 
-        const skybox = BABYLON.MeshBuilder.CreateBox('skyBox', { size: 10_000_000 }, scene);
-        this._skyboxMat = new BABYLON.StandardMaterial('skyMat', scene);
-        this._skyboxMat.backFaceCulling = false;
-        this._skyboxMat.disableLighting = true;
-        const skyTex = new BABYLON.CubeTexture('https://assets.babylonjs.com/textures/TropicalSunnyDay', scene);
-        skyTex.coordinatesMode   = BABYLON.Texture.SKYBOX_MODE;
-        this._skyboxMat.reflectionTexture = skyTex;
-        this._skyboxMat.diffuseColor      = BABYLON.Color3.Black();
-        this._skyboxMat.specularColor     = BABYLON.Color3.Black();
-        skybox.material          = this._skyboxMat;
-        skybox.infiniteDistance   = true;
+        this._skyMaterial = new SkyMaterial('skyMat', scene);
+        this._skyMaterial.backFaceCulling = false;
+        this._skyMaterial.useSunPosition = true;
+        this._skyMaterial.sunPosition = new BABYLON.Vector3(0, 100, 0);
+        this._skyMaterial.turbidity = 10;
+        this._skyMaterial.rayleigh = 2;
+        this._skyMaterial.mieCoefficient = 0.005;
+        this._skyMaterial.mieDirectionalG = 0.8;
+        this._skyMaterial.luminance = 1.0;
+
+        this._skyboxMesh = BABYLON.MeshBuilder.CreateBox('skyBox', { size: 10_000_000 }, scene);
+        this._skyboxMesh.material = this._skyMaterial;
+        this._skyboxMesh.infiniteDistance = true;
+        this._skyboxMesh.isPickable = false;
+        this._skyboxMesh.freezeWorldMatrix();
     }
 
     // ── Clouds ─────────────────────────────────────────────────────────────────
@@ -989,6 +1087,7 @@ export class FlightSceneSimple extends Scene3D {
         mat.roughness = 0.95;
         this.ground.material = mat;
         this.ground.receiveShadows = true;
+        this.ground.freezeWorldMatrix();
     }
 
     // ── Airplane ──────────────────────────────────────────────────────────────
@@ -1208,7 +1307,7 @@ export class FlightSceneSimple extends Scene3D {
         );
 
         this.camera.minZ = 0.5;
-        this.camera.maxZ = this.tiles ? 100000 : 5000;
+        this.camera.maxZ = this.tiles ? 100000 : 60000;
         this.camera.lowerRadiusLimit = 10;
         this.camera.upperRadiusLimit = 500;
         this.camera.inertia = 0.8;
@@ -1229,39 +1328,39 @@ export class FlightSceneSimple extends Scene3D {
     // ── Post-Processing ───────────────────────────────────────────────────────
 
     private _setupPostProcessing(scene: BABYLON.Scene): void {
-        const cam      = scene.activeCamera;
-        const pipeline = new BABYLON.DefaultRenderingPipeline('pp', true, scene, cam ? [cam] : []);
-        pipeline.samples        = 8;
-        pipeline.bloomEnabled   = true;
-        pipeline.bloomWeight    = 0.4;
-        pipeline.bloomKernel    = 128;
-        pipeline.bloomScale     = 0.5;
-        pipeline.bloomThreshold = 0.8;
-        pipeline.chromaticAberrationEnabled            = true;
-        pipeline.chromaticAberration.aberrationAmount   = 0.8;
-        pipeline.chromaticAberration.radialIntensity    = 1.0;
-        pipeline.sharpenEnabled        = true;
-        pipeline.sharpen.edgeAmount    = 0.2;
-        pipeline.imageProcessingEnabled                 = true;
-        pipeline.imageProcessing.toneMappingEnabled     = true;
-        pipeline.imageProcessing.toneMappingType        = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
-        pipeline.imageProcessing.exposure               = 1.0;
-        pipeline.imageProcessing.contrast               = 1.08;
-        pipeline.imageProcessing.vignetteEnabled        = true;
-        pipeline.imageProcessing.vignetteWeight         = 2.2;
-        pipeline.imageProcessing.vignetteColor          = new BABYLON.Color4(0, 0, 0, 0);
-        pipeline.imageProcessing.vignetteBlendMode      = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
+        const cam = scene.activeCamera;
+        this._pipeline = new BABYLON.DefaultRenderingPipeline('pp', true, scene, cam ? [cam] : []);
+        this._pipeline.samples        = 4;
+        this._pipeline.bloomEnabled   = true;
+        this._pipeline.bloomWeight    = 0.4;
+        this._pipeline.bloomKernel    = 128;
+        this._pipeline.bloomScale     = 0.5;
+        this._pipeline.bloomThreshold = 0.8;
+        this._pipeline.chromaticAberrationEnabled            = true;
+        this._pipeline.chromaticAberration.aberrationAmount   = 0.8;
+        this._pipeline.chromaticAberration.radialIntensity    = 1.0;
+        this._pipeline.sharpenEnabled        = true;
+        this._pipeline.sharpen.edgeAmount    = 0.2;
+        this._pipeline.imageProcessingEnabled                 = true;
+        this._pipeline.imageProcessing.toneMappingEnabled     = true;
+        this._pipeline.imageProcessing.toneMappingType        = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+        this._pipeline.imageProcessing.exposure               = 1.0;
+        this._pipeline.imageProcessing.contrast               = 1.08;
+        this._pipeline.imageProcessing.vignetteEnabled        = true;
+        this._pipeline.imageProcessing.vignetteWeight         = 2.2;
+        this._pipeline.imageProcessing.vignetteColor          = new BABYLON.Color4(0, 0, 0, 0);
+        this._pipeline.imageProcessing.vignetteBlendMode      = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
 
-        const ssao = new BABYLON.SSAO2RenderingPipeline('ssao', scene, {
+        this._ssao = new BABYLON.SSAO2RenderingPipeline('ssao', scene, {
             ssaoRatio: 0.5,
             blurRatio: 0.5,
         });
-        ssao.radius = 3.0;
-        ssao.totalStrength = 1.2;
-        ssao.base = 0.1;
-        ssao.samples = 16;
-        ssao.maxZ = 250;
-        ssao.minZAspect = 0.5;
+        this._ssao.radius = 3.0;
+        this._ssao.totalStrength = 1.2;
+        this._ssao.base = 0.1;
+        this._ssao.samples = 16;
+        this._ssao.maxZ = 250;
+        this._ssao.minZAspect = 0.5;
         if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
 
         const sunEmitter = scene.getMeshByName('sunMesh') || scene.getLightByName('sun');
@@ -1273,6 +1372,147 @@ export class FlightSceneSimple extends Scene3D {
                     'https://assets.babylonjs.com/textures/flare.png', lfs);
             });
             this._lensFlareSystem = lfs;
+        }
+
+        this._initGraphicsSettings(scene);
+    }
+
+    private _initGraphicsSettings(scene: BABYLON.Scene): void {
+        const saved = localStorage.getItem('gfx_settings');
+        let cfg: Record<string, any> = {};
+        if (saved) { try { cfg = JSON.parse(saved); } catch (_) { /* ignore */ } }
+
+        const saveSettings = () => {
+            const s: Record<string, any> = {};
+            s.bloom = (document.getElementById('gfx-bloom') as HTMLInputElement)?.checked ?? true;
+            s.bloomWeight = parseInt((document.getElementById('gfx-bloom-weight') as HTMLInputElement)?.value || '40') / 100;
+            s.ssao = (document.getElementById('gfx-ssao') as HTMLInputElement)?.checked ?? true;
+            s.shadows = (document.getElementById('gfx-shadows') as HTMLInputElement)?.checked ?? true;
+            s.shadowQuality = parseInt((document.getElementById('gfx-shadow-quality') as HTMLSelectElement)?.value || '4096');
+            s.fog = (document.getElementById('gfx-fog') as HTMLInputElement)?.checked ?? true;
+            s.fogDensity = parseInt((document.getElementById('gfx-fog-density') as HTMLInputElement)?.value || '30') / 100;
+            s.aa = parseInt((document.getElementById('gfx-aa') as HTMLSelectElement)?.value || '8');
+            s.vignette = (document.getElementById('gfx-vignette') as HTMLInputElement)?.checked ?? true;
+            s.chromatic = (document.getElementById('gfx-chromatic') as HTMLInputElement)?.checked ?? true;
+            s.renderScale = parseInt((document.getElementById('gfx-render-scale') as HTMLInputElement)?.value || '100') / 100;
+            s.fpsLimit = parseInt((document.getElementById('gfx-fps-limit') as HTMLSelectElement)?.value || '0');
+            s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
+            localStorage.setItem('gfx_settings', JSON.stringify(s));
+        };
+
+        const applySettings = () => {
+            const p = this._pipeline;
+            const ssao = this._ssao;
+            const engine = this.scene?.getEngine();
+            if (!p || !engine) return;
+
+            const bloomEl = document.getElementById('gfx-bloom') as HTMLInputElement | null;
+            const bloomWEl = document.getElementById('gfx-bloom-weight') as HTMLInputElement | null;
+            const ssaoEl = document.getElementById('gfx-ssao') as HTMLInputElement | null;
+            const shadowsEl = document.getElementById('gfx-shadows') as HTMLInputElement | null;
+            const shadowQEl = document.getElementById('gfx-shadow-quality') as HTMLSelectElement | null;
+            const fogEl = document.getElementById('gfx-fog') as HTMLInputElement | null;
+            const fogDEl = document.getElementById('gfx-fog-density') as HTMLInputElement | null;
+            const aaEl = document.getElementById('gfx-aa') as HTMLSelectElement | null;
+            const vigEl = document.getElementById('gfx-vignette') as HTMLInputElement | null;
+            const chrEl = document.getElementById('gfx-chromatic') as HTMLInputElement | null;
+            const scaleEl = document.getElementById('gfx-render-scale') as HTMLInputElement | null;
+            const scaleLbl = document.getElementById('gfx-render-scale-val');
+            const fpsEl = document.getElementById('gfx-fps-limit') as HTMLSelectElement | null;
+
+            if (bloomEl) p.bloomEnabled = bloomEl.checked;
+            if (bloomWEl) p.bloomWeight = parseInt(bloomWEl.value) / 100;
+            if (ssaoEl && ssao) {
+                const cam = scene.activeCamera;
+                if (ssaoEl.checked) {
+                    if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
+                } else {
+                    if (cam) scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('ssao', cam);
+                }
+            }
+            if (shadowsEl && this._shadowGen) {
+                if (!shadowsEl.checked) {
+                    this._shadowGen.setDarkness(1);
+                } else {
+                    this._shadowGen.setDarkness(0);
+                    if (shadowQEl) {
+                        const sz = parseInt(shadowQEl.value);
+                        if (sz !== this._shadowGen.mapSize) {
+                            this._shadowGen.mapSize = sz;
+                        }
+                    }
+                }
+            }
+            if (fogEl) {
+                scene.fogMode = fogEl.checked ? BABYLON.Scene.FOGMODE_EXP2 : BABYLON.Scene.FOGMODE_NONE;
+            }
+            if (fogDEl) {
+                scene.fogDensity = 0.000002 + (parseInt(fogDEl.value) / 100) * 0.000025;
+            }
+            if (aaEl) p.samples = parseInt(aaEl.value);
+            if (vigEl) p.imageProcessing.vignetteEnabled = vigEl.checked;
+            if (chrEl) p.chromaticAberrationEnabled = chrEl.checked;
+            if (scaleEl) {
+                const scale = parseInt(scaleEl.value) / 100;
+                engine.setHardwareScalingLevel(1 / scale);
+                if (scaleLbl) scaleLbl.textContent = scale.toFixed(1) + 'x';
+            }
+            if (fpsEl) {
+                const limit = parseInt(fpsEl.value);
+                (engine as any).maxFPS = limit > 0 ? limit : 0;
+            }
+
+            saveSettings();
+        };
+
+        const presets: Record<string, Record<string, any>> = {
+            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0' },
+            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0' },
+            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0' },
+            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0' },
+        };
+
+        const applyPreset = (name: string) => {
+            const p = presets[name];
+            if (!p) return;
+            const setCheck = (id: string, val: boolean) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.checked = val; };
+            const setVal = (id: string, val: any) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(val); };
+            setCheck('gfx-bloom', p.bloom); setVal('gfx-bloom-weight', p.bloomWeight);
+            setCheck('gfx-ssao', p.ssao); setCheck('gfx-shadows', p.shadows);
+            setVal('gfx-shadow-quality', p.shadowQuality); setCheck('gfx-fog', p.fog);
+            setVal('gfx-fog-density', p.fogDensity); setVal('gfx-aa', p.aa);
+            setCheck('gfx-vignette', p.vignette); setCheck('gfx-chromatic', p.chromatic);
+            setVal('gfx-render-scale', p.renderScale); setVal('gfx-fps-limit', p.fpsLimit);
+            applySettings();
+        };
+
+        if (Object.keys(cfg).length > 0) {
+            const setCheck = (id: string, val: boolean | undefined) => { if (val !== undefined) { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.checked = val; } };
+            const setVal = (id: string, val: any) => { if (val !== undefined) { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(val); } };
+            setCheck('gfx-bloom', cfg.bloom);
+            if (cfg.bloomWeight !== undefined) setVal('gfx-bloom-weight', Math.round(cfg.bloomWeight * 100));
+            setCheck('gfx-ssao', cfg.ssao); setCheck('gfx-shadows', cfg.shadows);
+            setVal('gfx-shadow-quality', cfg.shadowQuality); setCheck('gfx-fog', cfg.fog);
+            if (cfg.fogDensity !== undefined) setVal('gfx-fog-density', Math.round(cfg.fogDensity * 100));
+            setVal('gfx-aa', cfg.aa);
+            setCheck('gfx-vignette', cfg.vignette); setCheck('gfx-chromatic', cfg.chromatic);
+            if (cfg.renderScale !== undefined) setVal('gfx-render-scale', Math.round(cfg.renderScale * 100));
+            setVal('gfx-fps-limit', cfg.fpsLimit);
+            if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
+            setTimeout(() => applySettings(), 100);
+        }
+
+        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit'];
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', () => applySettings());
+        }
+
+        const presetEl = document.getElementById('gfx-preset');
+        if (presetEl) {
+            presetEl.addEventListener('change', () => {
+                applyPreset((presetEl as HTMLSelectElement).value);
+            });
         }
     }
 
@@ -2073,6 +2313,20 @@ export class FlightSceneSimple extends Scene3D {
         this._buildDebugPanel();
     }
 
+    // ── Panel Management ────────────────────────────────────────────────────────
+
+    private _closeAllPanels(except?: HTMLElement | null): void {
+        const panels = [this._missionPanelEl, this._aircraftPanelEl];
+        const btns = [this._missionBtnEl, this._aircraftBtnEl];
+        for (let i = 0; i < panels.length; i++) {
+            const p = panels[i];
+            if (p && p !== except) {
+                p.style.display = 'none';
+                if (btns[i]) { btns[i]!.style.borderColor = 'rgba(80,255,160,.3)'; btns[i]!.style.boxShadow = 'none'; }
+            }
+        }
+    }
+
     // ── Missions Button ─────────────────────────────────────────────────────────
 
     private _setupMissionsBtn(): void {
@@ -2080,15 +2334,18 @@ export class FlightSceneSimple extends Scene3D {
         const btn = this._missionBtnEl;
         const panel = this._missionPanelEl;
 
-        btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; });
-        btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; });
+        btn.addEventListener('mouseenter', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; } });
+        btn.addEventListener('mouseleave', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; } });
 
         btn.addEventListener('click', () => {
             const visible = panel.style.display !== 'none';
+            this._closeAllPanels(visible ? null : panel);
             if (visible) {
                 panel.style.display = 'none';
+                btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none';
             } else {
                 panel.style.display = 'block';
+                btn.style.borderColor = 'rgba(80,255,160,.9)'; btn.style.boxShadow = '0 0 12px rgba(0,255,128,.35)';
                 this._loadMissions();
             }
         });
@@ -2165,15 +2422,18 @@ export class FlightSceneSimple extends Scene3D {
         const btn = this._aircraftBtnEl;
         const panel = this._aircraftPanelEl;
 
-        btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; });
-        btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; });
+        btn.addEventListener('mouseenter', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; } });
+        btn.addEventListener('mouseleave', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; } });
 
         btn.addEventListener('click', () => {
             const visible = panel.style.display !== 'none';
+            this._closeAllPanels(visible ? null : panel);
             if (visible) {
                 panel.style.display = 'none';
+                btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none';
             } else {
                 panel.style.display = 'block';
+                btn.style.borderColor = 'rgba(80,255,160,.9)'; btn.style.boxShadow = '0 0 12px rgba(0,255,128,.35)';
                 this._loadAircraftList();
             }
         });

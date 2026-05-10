@@ -238,6 +238,93 @@
             
             <button class="debug-btn" id="dbg-reload">Apply & Reload World</button>
         </div>
+
+        <div style="border-top:1px solid rgba(64,255,170,.15);margin-top:12px;padding-top:12px">
+            <header style="cursor:pointer;user-select:none" id="gfx-header">
+                <h3 style="font-family:'Orbitron',monospace;font-size:12px;color:#40ffaa;margin:0">GRAPHICS ▾</h3>
+            </header>
+            <div id="gfx-settings" class="debug-form" style="margin-top:8px">
+                <label>Quality Preset</label>
+                <select id="gfx-preset" style="background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);color:#fff;padding:6px 8px;border-radius:4px;font-family:monospace;font-size:12px;width:100%;outline:none">
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high" selected>High</option>
+                    <option value="ultra">Ultra</option>
+                </select>
+
+                <div class="row" style="align-items:center;gap:8px;margin-top:4px">
+                    <label style="flex:1;margin:0">Bloom</label>
+                    <input type="checkbox" id="gfx-bloom" checked>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:9px;color:rgba(255,255,255,.4)">Weight</label>
+                    <input type="range" id="gfx-bloom-weight" min="0" max="100" value="40" style="width:100px">
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">SSAO</label>
+                    <input type="checkbox" id="gfx-ssao" checked>
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Shadows</label>
+                    <input type="checkbox" id="gfx-shadows" checked>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:9px;color:rgba(255,255,255,.4)">Quality</label>
+                    <select id="gfx-shadow-quality" style="background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);color:#fff;padding:4px 6px;border-radius:4px;font-family:monospace;font-size:10px;outline:none">
+                        <option value="1024">Low</option>
+                        <option value="2048">Medium</option>
+                        <option value="4096" selected>High</option>
+                    </select>
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Fog</label>
+                    <input type="checkbox" id="gfx-fog" checked>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:9px;color:rgba(255,255,255,.4)">Density</label>
+                    <input type="range" id="gfx-fog-density" min="0" max="100" value="30" style="width:100px">
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Anti-Aliasing</label>
+                    <select id="gfx-aa" style="background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);color:#fff;padding:4px 6px;border-radius:4px;font-family:monospace;font-size:10px;outline:none">
+                        <option value="1">Off</option>
+                        <option value="2">2x</option>
+                        <option value="4" selected>4x</option>
+                        <option value="8">8x</option>
+                    </select>
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Vignette</label>
+                    <input type="checkbox" id="gfx-vignette" checked>
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Chromatic Aberration</label>
+                    <input type="checkbox" id="gfx-chromatic" checked>
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Render Scale</label>
+                    <input type="range" id="gfx-render-scale" min="50" max="200" value="100" style="width:80px">
+                    <span id="gfx-render-scale-val" style="font-size:10px;color:#40ffaa;min-width:30px">1.0x</span>
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">FPS Limit</label>
+                    <select id="gfx-fps-limit" style="background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);color:#fff;padding:4px 6px;border-radius:4px;font-family:monospace;font-size:10px;outline:none">
+                        <option value="30">30</option>
+                        <option value="60">60</option>
+                        <option value="120">120</option>
+                        <option value="0" selected>Unlimited</option>
+                    </select>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Our bundled flight game -->
@@ -294,6 +381,17 @@
             dest.searchParams.set('lng', lngInput.value.trim());
             window.location.href = dest.toString();
         });
+
+        // --- Graphics settings collapse toggle ---
+        const gfxHeader = document.getElementById('gfx-header');
+        const gfxSettings = document.getElementById('gfx-settings');
+        if (gfxHeader && gfxSettings) {
+            gfxHeader.addEventListener('click', () => {
+                const hidden = gfxSettings.style.display === 'none';
+                gfxSettings.style.display = hidden ? '' : 'none';
+                gfxHeader.querySelector('h3').textContent = hidden ? 'GRAPHICS ▾' : 'GRAPHICS ▸';
+            });
+        }
 
         // --- Animated starfield for loading screen ---
         const stars = document.getElementById('stars-bg');
