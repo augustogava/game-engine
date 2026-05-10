@@ -987,7 +987,7 @@ export class FlightSceneSimple extends Scene3D {
         scene.environmentIntensity = 0.15 + t * 1.15;
 
         if (this._pipeline) {
-            this._pipeline.imageProcessing.exposure = 0.6 + t * 0.8;
+            this._pipeline.imageProcessing.exposure = 0.7 + t * 1.1;
         }
 
         if (this._moonMesh) {
@@ -1434,63 +1434,69 @@ export class FlightSceneSimple extends Scene3D {
         };
 
         const applySettings = () => {
-            const p = this._pipeline;
-            const ssao = this._ssao;
-            const engine = this.scene?.getEngine();
-            if (!p || !engine) return;
+            saveSettings();
+            requestAnimationFrame(() => {
+                try {
+                    const p = this._pipeline;
+                    const ssao = this._ssao;
+                    const engine = this.scene?.getEngine();
+                    if (!p || !engine) return;
 
-            const bloomEl = document.getElementById('gfx-bloom') as HTMLInputElement | null;
-            const bloomWEl = document.getElementById('gfx-bloom-weight') as HTMLInputElement | null;
-            const ssaoEl = document.getElementById('gfx-ssao') as HTMLInputElement | null;
-            const shadowsEl = document.getElementById('gfx-shadows') as HTMLInputElement | null;
-            const shadowQEl = document.getElementById('gfx-shadow-quality') as HTMLSelectElement | null;
-            const fogEl = document.getElementById('gfx-fog') as HTMLInputElement | null;
-            const fogDEl = document.getElementById('gfx-fog-density') as HTMLInputElement | null;
-            const aaEl = document.getElementById('gfx-aa') as HTMLSelectElement | null;
-            const vigEl = document.getElementById('gfx-vignette') as HTMLInputElement | null;
-            const chrEl = document.getElementById('gfx-chromatic') as HTMLInputElement | null;
-            const scaleEl = document.getElementById('gfx-render-scale') as HTMLInputElement | null;
-            const scaleLbl = document.getElementById('gfx-render-scale-val');
-            const fpsEl = document.getElementById('gfx-fps-limit') as HTMLSelectElement | null;
+                    const bloomEl = document.getElementById('gfx-bloom') as HTMLInputElement | null;
+                    const bloomWEl = document.getElementById('gfx-bloom-weight') as HTMLInputElement | null;
+                    const ssaoEl = document.getElementById('gfx-ssao') as HTMLInputElement | null;
+                    const shadowsEl = document.getElementById('gfx-shadows') as HTMLInputElement | null;
+                    const shadowQEl = document.getElementById('gfx-shadow-quality') as HTMLSelectElement | null;
+                    const fogEl = document.getElementById('gfx-fog') as HTMLInputElement | null;
+                    const fogDEl = document.getElementById('gfx-fog-density') as HTMLInputElement | null;
+                    const aaEl = document.getElementById('gfx-aa') as HTMLSelectElement | null;
+                    const vigEl = document.getElementById('gfx-vignette') as HTMLInputElement | null;
+                    const chrEl = document.getElementById('gfx-chromatic') as HTMLInputElement | null;
+                    const scaleEl = document.getElementById('gfx-render-scale') as HTMLInputElement | null;
+                    const scaleLbl = document.getElementById('gfx-render-scale-val');
+                    const fpsEl = document.getElementById('gfx-fps-limit') as HTMLSelectElement | null;
 
-            if (bloomEl) p.bloomEnabled = bloomEl.checked;
-            if (bloomWEl) p.bloomWeight = parseInt(bloomWEl.value) / 100;
-            if (ssaoEl && ssao) {
-                ssao.totalStrength = ssaoEl.checked ? 1.2 : 0;
-            }
-            if (shadowsEl && this._shadowGen) {
-                if (!shadowsEl.checked) {
-                    this._shadowGen.setDarkness(1);
-                } else {
-                    this._shadowGen.setDarkness(0);
-                    if (shadowQEl) {
-                        const sz = parseInt(shadowQEl.value);
-                        if (sz !== this._shadowGen.mapSize) {
-                            this._shadowGen.mapSize = sz;
+                    if (bloomEl) p.bloomEnabled = bloomEl.checked;
+                    if (bloomWEl) p.bloomWeight = parseInt(bloomWEl.value) / 100;
+                    if (ssaoEl && ssao) {
+                        ssao.totalStrength = ssaoEl.checked ? 1.2 : 0;
+                    }
+                    if (shadowsEl && this._shadowGen) {
+                        if (!shadowsEl.checked) {
+                            this._shadowGen.setDarkness(1);
+                        } else {
+                            this._shadowGen.setDarkness(0);
+                            if (shadowQEl) {
+                                const sz = parseInt(shadowQEl.value);
+                                if (sz !== this._shadowGen.mapSize) {
+                                    this._shadowGen.mapSize = sz;
+                                }
+                            }
                         }
                     }
+                    if (fogEl) {
+                        scene.fogMode = fogEl.checked ? BABYLON.Scene.FOGMODE_EXP2 : BABYLON.Scene.FOGMODE_NONE;
+                    }
+                    if (fogDEl) {
+                        scene.fogDensity = 0.000002 + (parseInt(fogDEl.value) / 100) * 0.000025;
+                    }
+                    if (aaEl) p.samples = parseInt(aaEl.value);
+                    if (vigEl) p.imageProcessing.vignetteEnabled = vigEl.checked;
+                    if (chrEl) p.chromaticAberrationEnabled = chrEl.checked;
+                    if (scaleEl) {
+                        const scale = parseInt(scaleEl.value) / 100;
+                        engine.setHardwareScalingLevel(1 / scale);
+                        if (scaleLbl) scaleLbl.textContent = scale.toFixed(1) + 'x';
+                    }
+                    if (fpsEl) {
+                        const limit = parseInt(fpsEl.value);
+                        const MAX_FPS_CAP = 144;
+                        (engine as any).maxFPS = limit > 0 ? limit : MAX_FPS_CAP;
+                    }
+                } catch (e) {
+                    console.error('[GFX] applySettings error:', e);
                 }
-            }
-            if (fogEl) {
-                scene.fogMode = fogEl.checked ? BABYLON.Scene.FOGMODE_EXP2 : BABYLON.Scene.FOGMODE_NONE;
-            }
-            if (fogDEl) {
-                scene.fogDensity = 0.000002 + (parseInt(fogDEl.value) / 100) * 0.000025;
-            }
-            if (aaEl) p.samples = parseInt(aaEl.value);
-            if (vigEl) p.imageProcessing.vignetteEnabled = vigEl.checked;
-            if (chrEl) p.chromaticAberrationEnabled = chrEl.checked;
-            if (scaleEl) {
-                const scale = parseInt(scaleEl.value) / 100;
-                engine.setHardwareScalingLevel(1 / scale);
-                if (scaleLbl) scaleLbl.textContent = scale.toFixed(1) + 'x';
-            }
-            if (fpsEl) {
-                const limit = parseInt(fpsEl.value);
-                (engine as any).maxFPS = limit > 0 ? limit : 0;
-            }
-
-            saveSettings();
+            });
         };
 
         const presets: Record<string, Record<string, any>> = {
