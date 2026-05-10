@@ -1356,6 +1356,7 @@ export class FlightSceneSimple extends Scene3D {
         this._ssao = new BABYLON.SSAO2RenderingPipeline('ssao', scene, {
             ssaoRatio: 0.5,
             blurRatio: 0.5,
+            forceGeometryBuffer: true,
         });
         this._ssao.radius = 3.0;
         this._ssao.totalStrength = 1.2;
