@@ -1427,10 +1427,11 @@ export class FlightSceneSimple extends Scene3D {
             if (bloomWEl) p.bloomWeight = parseInt(bloomWEl.value) / 100;
             if (ssaoEl && ssao) {
                 const cam = scene.activeCamera;
-                if (ssaoEl.checked) {
-                    if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
-                } else {
-                    if (cam) scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('ssao', cam);
+                if (cam) {
+                    try { scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('ssao', cam); } catch (_) {}
+                    if (ssaoEl.checked) {
+                        scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
+                    }
                 }
             }
             if (shadowsEl && this._shadowGen) {
