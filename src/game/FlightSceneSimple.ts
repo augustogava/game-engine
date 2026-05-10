@@ -982,7 +982,7 @@ export class FlightSceneSimple extends Scene3D {
         const fogB = 0.06 + t * 0.89;
         scene.fogColor.set(fogR, fogG, fogB);
 
-        scene.clearColor.set(0.0, 0.0, 0.02, 1);
+        scene.clearColor.set(fogR * 0.5, fogG * 0.5, fogB * 0.6, 1);
 
         scene.environmentIntensity = 0.15 + t * 1.15;
 
@@ -1028,6 +1028,8 @@ export class FlightSceneSimple extends Scene3D {
         this._skyboxMesh.material = this._skyMaterial;
         this._skyboxMesh.infiniteDistance = true;
         this._skyboxMesh.isPickable = false;
+        this._skyboxMesh.applyFog = false;
+        this._skyboxMesh.renderingGroupId = 0;
         this._skyboxMesh.freezeWorldMatrix();
     }
 
