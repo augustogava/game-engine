@@ -912,7 +912,6 @@ export class FlightSceneSimple extends Scene3D {
 
     private _applyDayNightCycle(scene: BABYLON.Scene): void {
         const { elevation, azimuth } = getSunPosition(this.originLat, this.originLon, new Date());
-        console.log(`[DayNight] lat=${this.originLat} lon=${this.originLon} elevation=${elevation.toFixed(2)} azimuth=${azimuth.toFixed(2)} t=${Math.max(0, Math.min(1, (elevation + 6) / 30)).toFixed(3)}`);
         this._sunElevation = elevation;
         const rad = Math.PI / 180;
         const elevR = elevation * rad;
@@ -986,6 +985,10 @@ export class FlightSceneSimple extends Scene3D {
         scene.clearColor.set(0.0, 0.0, 0.02, 1);
 
         scene.environmentIntensity = 0.15 + t * 1.15;
+
+        if (this._pipeline) {
+            this._pipeline.imageProcessing.exposure = 0.6 + t * 0.8;
+        }
 
         if (this._moonMesh) {
             const moonY = -sunPosY;
@@ -1391,6 +1394,7 @@ export class FlightSceneSimple extends Scene3D {
         this._ssao.samples = 16;
         this._ssao.maxZ = 250;
         this._ssao.minZAspect = 0.5;
+        if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
 
         const sunEmitter = scene.getMeshByName('sunMesh') || scene.getLightByName('sun');
         if (sunEmitter) {
@@ -1452,12 +1456,7 @@ export class FlightSceneSimple extends Scene3D {
             if (bloomEl) p.bloomEnabled = bloomEl.checked;
             if (bloomWEl) p.bloomWeight = parseInt(bloomWEl.value) / 100;
             if (ssaoEl && ssao) {
-                const cam = scene.activeCamera;
-                if (ssaoEl.checked) {
-                    if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
-                } else {
-                    if (cam) scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('ssao', cam);
-                }
+                ssao.totalStrength = ssaoEl.checked ? 1.2 : 0;
             }
             if (shadowsEl && this._shadowGen) {
                 if (!shadowsEl.checked) {
