@@ -366,6 +366,8 @@ export class FlightSceneSimple extends Scene3D {
     private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string } | null = null;
 
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
+    private _navGlowLayer: BABYLON.GlowLayer | null = null;
+    private _navGlowTex: BABYLON.DynamicTexture | null = null;
     private _navBlinkTimer = 0;
     private _navStrobeTimer = 0;
 
@@ -481,6 +483,12 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('aircraft-panel')?.remove();
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         this.mpClient?.dispose();
+        this._disposeNavLights();
+        if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
+        if (this._ssao) { this._ssao.dispose(); this._ssao = null; }
+        if (this._lensFlareSystem) { this._lensFlareSystem.dispose(); this._lensFlareSystem = null; }
+        if (this._shadowGen) { this._shadowGen.dispose(); this._shadowGen = null; }
+        if (this.camera) this.camera.detachControl();
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
@@ -563,6 +571,7 @@ export class FlightSceneSimple extends Scene3D {
         BABYLON.SceneLoader.ImportMesh(
             '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[]) => {
+                if (!meshes.length) return;
                 const glbRoot = meshes[0];
                 const bb = glbRoot.getHierarchyBoundingVectors(true);
                 const center = bb.min.add(bb.max).scale(0.5);
@@ -1105,7 +1114,9 @@ export class FlightSceneSimple extends Scene3D {
             this.thrust = cfg.spawn_airborne_thrust || 0.7;
             this.flapIndex = cfg.default_flap_index_air;
             this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 0;
-            const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, new BABYLON.Matrix()));
+            const rotMatrix = new BABYLON.Matrix();
+            BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, rotMatrix);
+            const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMatrix);
             this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
         } else {
             this.planeRoot.position.set(0, GROUND_Y, 0);
@@ -1130,6 +1141,7 @@ export class FlightSceneSimple extends Scene3D {
         BABYLON.SceneLoader.ImportMesh(
             '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[]) => {
+                if (!meshes.length) return;
                 this._loadedModelMeshes = meshes;
                 const root = meshes[0];
 
@@ -1226,7 +1238,10 @@ export class FlightSceneSimple extends Scene3D {
             { name: 'navBelly', color: new BABYLON.Color3(1, 0.1, 0.05),  pos: new BABYLON.Vector3(0, -0.3, 0),              strobe: true,  intensity: 50, range: 250, glowSize: 4.0 },
         ];
 
+        this._disposeNavLights();
+
         const glowTex = new BABYLON.DynamicTexture('navGlowTex', 128, scene, false);
+        this._navGlowTex = glowTex;
         const ctx = glowTex.getContext();
         const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
         grad.addColorStop(0, 'rgba(255,255,255,1)');
@@ -1274,10 +1289,22 @@ export class FlightSceneSimple extends Scene3D {
 
         const gl = new BABYLON.GlowLayer('navGlow', scene, { blurKernelSize: 128 });
         gl.intensity = 2.0;
+        this._navGlowLayer = gl;
         for (const nav of this._navLights) {
             gl.addIncludedOnlyMesh(nav.core as BABYLON.Mesh);
             gl.addIncludedOnlyMesh(nav.mesh as BABYLON.Mesh);
         }
+    }
+
+    private _disposeNavLights(): void {
+        for (const nav of this._navLights) {
+            nav.light.dispose();
+            nav.mesh.dispose();
+            nav.core.dispose();
+        }
+        this._navLights = [];
+        if (this._navGlowLayer) { this._navGlowLayer.dispose(); this._navGlowLayer = null; }
+        if (this._navGlowTex) { this._navGlowTex.dispose(); this._navGlowTex = null; }
     }
 
     private _updateNavLights(dt: number): void {
@@ -1639,7 +1666,8 @@ export class FlightSceneSimple extends Scene3D {
             return !!el.closest('#touch-throttle,#touch-flap-btns');
         };
 
-        const canvas = this.scene!.getEngine().getRenderingCanvas()!;
+        const canvas = this.scene?.getEngine()?.getRenderingCanvas();
+        if (!canvas) return;
         canvas.style.touchAction = 'none';
 
         const isInDeadZone = (x: number, y: number): boolean => {
