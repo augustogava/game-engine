@@ -1187,7 +1187,7 @@ wss.on('connection', (ws) => {
                             ).catch(err => console.error('[DB] Existing-session stats persist error:', err.message));
                         }
 
-                        if (!reuseFlight && existing.sessionDbId) {
+                        if (existing.sessionDbId) {
                             const dur = (Date.now() - existing.sessionStart) / 60000;
                             dbPool.execute(
                                 `UPDATE game_sessions SET disconnected_at = NOW(), flight_duration_min = ? WHERE id = ?`,
@@ -1233,7 +1233,7 @@ wss.on('connection', (ws) => {
                     statsRecalculated: false,
                     onGroundCount: reuseFlight ? existing.onGroundCount : 0,
                     lastFlightEndTime: reuseFlight ? existing.lastFlightEndTime : 0,
-                    sessionDbId: reuseFlight ? existing.sessionDbId : undefined,
+                    sessionDbId: undefined,
                 });
 
                 fetchPlayerInfo(playerId).then(info => {
@@ -1317,6 +1317,12 @@ wss.on('connection', (ws) => {
                         entry.creatingFlightLog = true;
                         try {
                             const airport = await findNearestAirportWithFallback(lat, lon);
+
+                            if (players.get(playerId) !== entry) {
+                                console.warn(`[Flight] Aborting flight log creation for user ${playerId}: entry no longer active`);
+                                return;
+                            }
+
                             if (airport) entry.departureAirportId = airport.id;
 
                             if (msg.missionId) entry.missionId = Number(msg.missionId) || null;
@@ -1343,7 +1349,26 @@ wss.on('connection', (ws) => {
                                  VALUES (?, ?, ?, ?, ?, ?, NOW(), 'departed')`,
                                 [playerId, entry.departureAirportId, aircraftIdNum, entry.aircraftType, entry.aircraftRegistration, entry.missionId]
                             );
-                            entry.flightLogId = result.insertId;
+                            const insertId = result.insertId;
+
+                            if (players.get(playerId) !== entry) {
+                                console.warn(`[Flight] Player ${playerId} disconnected after flight log INSERT (log ${insertId}); cancelling immediately`);
+                                try {
+                                    await dbPool.execute(
+                                        `UPDATE flight_logs
+                                            SET status = 'cancelled',
+                                                arrival_time = NOW(),
+                                                flight_duration_min = TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60
+                                          WHERE id = ?`,
+                                        [insertId]
+                                    );
+                                } catch (cancelErr) {
+                                    console.error(`[DB] Failed to auto-cancel orphan flight log ${insertId}:`, cancelErr.message);
+                                }
+                                return;
+                            }
+
+                            entry.flightLogId = insertId;
                             entry.flightStartTime = Date.now();
                             entry.maxAltitudeFt = alt || 0;
                             entry.speedSamples = [];
