@@ -765,7 +765,7 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _updatePlayerLabel(remote: RemotePlayer, state: PlayerState): void {
-        const username = state.username;
+        const username = state.username || `Pilot ${state.userId.slice(-4)}`;
         if (!username) return;
 
         const avatarUrl = state.avatarUrl ?? null;
