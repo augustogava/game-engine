@@ -16,6 +16,8 @@ export interface PlayerState {
     aircraftId?: number;
     aircraftCode?: string;
     aircraftModelFile?: string;
+    username?: string;
+    avatarUrl?: string;
 }
 
 type PlayersUpdateCallback = (players: PlayerState[]) => void;

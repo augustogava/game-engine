@@ -132,6 +132,10 @@ interface RemotePlayer {
     nextState: PlayerState | null;
     lastUpdateTime: number;
     aircraftCode: string | null;
+    labelPlane: BABYLON.Mesh | null;
+    labelTexture: BABYLON.DynamicTexture | null;
+    currentUsername: string | null;
+    currentAvatarUrl: string | null;
 }
 
 const G_ACCEL          = 9.81;
@@ -516,10 +520,13 @@ export class FlightSceneSimple extends Scene3D {
                 remote.prevState = remote.nextState;
                 remote.nextState = p;
                 remote.lastUpdateTime = now;
+                this._updatePlayerLabel(remote, p);
             }
 
             for (const [id, remote] of this.remotePlayers) {
                 if (!activeIds.has(id)) {
+                    remote.labelTexture?.dispose();
+                    remote.labelPlane?.dispose();
                     remote.meshes.forEach(m => m.dispose());
                     remote.root.dispose();
                     this.remotePlayers.delete(id);
@@ -555,7 +562,7 @@ export class FlightSceneSimple extends Scene3D {
         root.rotationQuaternion = BABYLON.Quaternion.Identity();
 
         const aircraftCode = modelFile || null;
-        const remote: RemotePlayer = { root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0, aircraftCode };
+        const remote: RemotePlayer = { root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0, aircraftCode, labelPlane: null, labelTexture: null, currentUsername: null, currentAvatarUrl: null };
 
         this._loadRemoteModel(id, root, remote, modelFile || DEFAULT_AIRCRAFT_CONFIG.model_file);
 
@@ -629,6 +636,157 @@ export class FlightSceneSimple extends Scene3D {
             m.isPickable = false;
             remote.meshes.push(m);
         });
+    }
+
+    private static readonly LABEL_TEX_W = 256;
+    private static readonly LABEL_TEX_H = 80;
+    private static readonly LABEL_AVATAR_SIZE = 48;
+    private static readonly LABEL_PLANE_WIDTH = 18;
+    private static readonly LABEL_PLANE_HEIGHT = 5.6;
+    private static readonly LABEL_Y_OFFSET = 22;
+
+    private _createPlayerLabel(remote: RemotePlayer, username: string, avatarUrl: string | null): void {
+        const scene = this.scene;
+        const texW = FlightSceneSimple.LABEL_TEX_W;
+        const texH = FlightSceneSimple.LABEL_TEX_H;
+
+        const tex = new BABYLON.DynamicTexture(`playerLabel_${remote.root.name}`, { width: texW, height: texH }, scene, false);
+        tex.hasAlpha = true;
+
+        const plane = BABYLON.MeshBuilder.CreatePlane(`playerLabelPlane_${remote.root.name}`, {
+            width: FlightSceneSimple.LABEL_PLANE_WIDTH,
+            height: FlightSceneSimple.LABEL_PLANE_HEIGHT,
+        }, scene);
+        plane.parent = remote.root;
+        plane.position.y = FlightSceneSimple.LABEL_Y_OFFSET;
+        plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+        plane.isPickable = false;
+
+        const mat = new BABYLON.StandardMaterial(`playerLabelMat_${remote.root.name}`, scene);
+        mat.diffuseTexture = tex;
+        mat.useAlphaFromDiffuseTexture = true;
+        mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+        mat.disableLighting = true;
+        mat.backFaceCulling = false;
+        plane.material = mat;
+
+        remote.labelPlane = plane;
+        remote.labelTexture = tex;
+        remote.currentUsername = username;
+        remote.currentAvatarUrl = avatarUrl ?? null;
+
+        this._drawPlayerLabel(tex, username, null);
+
+        if (avatarUrl) {
+            this._loadAvatarAndRedraw(tex, username, avatarUrl);
+        }
+    }
+
+    private _drawPlayerLabel(tex: BABYLON.DynamicTexture, username: string, avatarImg: HTMLImageElement | null): void {
+        const texW = FlightSceneSimple.LABEL_TEX_W;
+        const texH = FlightSceneSimple.LABEL_TEX_H;
+        const avatarSz = FlightSceneSimple.LABEL_AVATAR_SIZE;
+        const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
+
+        ctx.clearRect(0, 0, texW, texH);
+
+        const radius = 12;
+        const pad = 6;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(0, 0, texW, texH, radius);
+        } else {
+            ctx.rect(0, 0, texW, texH);
+        }
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(64, 255, 170, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(0, 0, texW, texH, radius);
+        } else {
+            ctx.rect(0, 0, texW, texH);
+        }
+        ctx.stroke();
+
+        const cx = pad + avatarSz / 2;
+        const cy = texH / 2;
+        const r = avatarSz / 2 - 2;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+
+        if (avatarImg) {
+            ctx.drawImage(avatarImg, cx - r, cy - r, r * 2, r * 2);
+        } else {
+            ctx.fillStyle = '#2a6e4e';
+            ctx.fill();
+            const initials = username.substring(0, 2).toUpperCase();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 20px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(initials, cx, cy + 1);
+        }
+        ctx.restore();
+
+        ctx.strokeStyle = 'rgba(64, 255, 170, 0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        const textX = pad + avatarSz + 8;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const maxTextW = texW - textX - pad;
+        ctx.fillText(username, textX, cy, maxTextW);
+
+        tex.update();
+    }
+
+    private _loadAvatarAndRedraw(tex: BABYLON.DynamicTexture, username: string, avatarUrl: string): void {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            this._drawPlayerLabel(tex, username, img);
+        };
+        img.onerror = () => {
+            this._drawPlayerLabel(tex, username, null);
+        };
+        img.src = avatarUrl;
+    }
+
+    private _updatePlayerLabel(remote: RemotePlayer, state: PlayerState): void {
+        const username = state.username;
+        if (!username) return;
+
+        const avatarUrl = state.avatarUrl ?? null;
+        const nameChanged = remote.currentUsername !== username;
+        const avatarChanged = remote.currentAvatarUrl !== avatarUrl;
+
+        if (!remote.labelPlane) {
+            this._createPlayerLabel(remote, username, avatarUrl);
+            return;
+        }
+
+        if (!nameChanged && !avatarChanged) return;
+
+        remote.currentUsername = username;
+        remote.currentAvatarUrl = avatarUrl;
+
+        if (avatarUrl) {
+            this._loadAvatarAndRedraw(remote.labelTexture!, username, avatarUrl);
+        } else {
+            this._drawPlayerLabel(remote.labelTexture!, username, null);
+        }
     }
 
     private _latLonToLocal(lat: number, lon: number, alt: number): BABYLON.Vector3 {
