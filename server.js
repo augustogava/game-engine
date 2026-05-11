@@ -52,6 +52,23 @@ async function initDatabase() {
                 INDEX idx_game_sessions_connected (connected_at)
             )
         `);
+
+        try {
+            const [sweep] = await dbPool.execute(
+                `UPDATE flight_logs
+                    SET status = 'cancelled',
+                        arrival_time = COALESCE(arrival_time, NOW()),
+                        flight_duration_min = COALESCE(flight_duration_min, TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60),
+                        updated_at = NOW()
+                  WHERE status IN ('departed','in_flight')`
+            );
+            if (sweep.affectedRows > 0) {
+                console.warn(`[DB] Closed ${sweep.affectedRows} orphaned flight log(s) on startup`);
+            }
+        } catch (err) {
+            console.error('[DB] Orphan flight log sweep failed:', err.message);
+        }
+
         console.log('[DB] Connected and tables ready.');
     } catch (err) {
         console.error('[DB] Init failed:', err.message);
@@ -111,7 +128,14 @@ const KMH_TO_KNOTS = 1 / 1.852;
 const POINTS_PER_KM      = 0.1;
 const POINTS_PER_LANDING = 0;
 const FLIGHT_LOG_COOLDOWN_MS = 15000;
-const MIN_AIRSPEED_TO_START_LOG = 5;
+const MIN_AIRSPEED_TO_START_LOG = 30;
+const MAX_STEP_NM = 1;
+const MAX_ROUTE_POINTS = 5000;
+const RECONNECT_REUSE_WINDOW_MS = 30000;
+const NEAREST_AIRPORT_RADIUS_NM = 5;
+const NEAREST_AIRPORT_FALLBACK_NM = 15;
+const PERIODIC_FLUSH_MS = 30000;
+const PERIODIC_MIN_SESSION_MIN = 0.5;
 
 // ── HTTP infrastructure helpers ──────────────────────────────────────────────
 function parseBody(req) {
@@ -187,6 +211,7 @@ function getQueryParams(url) {
 // ── Find nearest airport ─────────────────────────────────────────────────────
 async function findNearestAirport(lat, lon, radiusNm) {
     if (!dbPool) return null;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radiusNm) || radiusNm <= 0) return null;
     try {
         const [rows] = await dbPool.execute(
             `SELECT id, icao_code, name, latitude, longitude,
@@ -211,24 +236,36 @@ async function findNearestAirport(lat, lon, radiusNm) {
     }
 }
 
+async function findNearestAirportWithFallback(lat, lon) {
+    let airport = await findNearestAirport(lat, lon, NEAREST_AIRPORT_RADIUS_NM);
+    if (!airport) airport = await findNearestAirport(lat, lon, NEAREST_AIRPORT_FALLBACK_NM);
+    return airport;
+}
+
 // ── Finalize flight log ──────────────────────────────────────────────────────
 async function finalizeFlight(userId, entry, status, lastMsg) {
     if (!entry.flightLogId || !dbPool) return;
 
+    const flightLogId = entry.flightLogId;
+    entry.flightLogId = null;
+    entry.creatingFlightLog = false;
+
     const elapsed = entry.flightStartTime ? (Date.now() - entry.flightStartTime) : 0;
-    const durationMin = elapsed > 0 ? elapsed / 60000 : 0;
     const distKm = entry.flightDistanceNm * 1.852;
     const avgSpeed = entry.speedSamples.length
         ? entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length
         : null;
 
     let arrivalAirportId = null;
-    if (status === 'landed' && lastMsg) {
-        const airport = await findNearestAirport(lastMsg.lat, lastMsg.lon, 5);
+    if (status === 'landed' && lastMsg && Number.isFinite(lastMsg.lat) && Number.isFinite(lastMsg.lon)) {
+        const airport = await findNearestAirportWithFallback(lastMsg.lat, lastMsg.lon);
         if (airport) arrivalAirportId = airport.id;
     }
 
-    if (lastMsg) {
+    if (lastMsg && Number.isFinite(lastMsg.lat) && Number.isFinite(lastMsg.lon)) {
+        if (entry.routePoints.length >= MAX_ROUTE_POINTS) {
+            entry.routePoints = entry.routePoints.filter((_, i) => i % 2 === 0);
+        }
         entry.routePoints.push([
             Math.round(lastMsg.lat * 10000) / 10000,
             Math.round(lastMsg.lon * 10000) / 10000,
@@ -239,11 +276,10 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     const maxAltFt = Math.round(entry.maxAltitudeFt * METERS_TO_FEET);
     const avgSpeedKnots = avgSpeed ? Math.round(avgSpeed * KMH_TO_KNOTS * 100) / 100 : null;
     const landingFpm = status === 'landed' ? Math.round(entry.lastVerticalFpm * METERS_TO_FEET) : null;
-    const finalDuration = Math.round(durationMin * 100) / 100;
     const finalDistKm = Math.round(distKm * 100) / 100;
     const finalDistNm = Math.round(entry.flightDistanceNm * 100) / 100;
 
-    console.log(`[Flight] Finalizing: user=${userId}, log=${entry.flightLogId}, status=${status}, elapsed=${elapsed}ms, duration=${finalDuration}min, dist=${finalDistKm}km, maxAlt=${maxAltFt}ft, avgSpd=${avgSpeedKnots}kts, routePts=${entry.routePoints.length}, startTime=${entry.flightStartTime}`);
+    console.log(`[Flight] Finalizing: user=${userId}, log=${flightLogId}, status=${status}, elapsed=${elapsed}ms, dist=${finalDistKm}km, maxAlt=${maxAltFt}ft, avgSpd=${avgSpeedKnots}kts, routePts=${entry.routePoints.length}, startTime=${entry.flightStartTime}`);
 
     try {
         await dbPool.execute(
@@ -251,7 +287,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
                 status = ?,
                 arrival_airport_id = ?,
                 arrival_time = NOW(),
-                flight_duration_min = ?,
+                flight_duration_min = TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60,
                 distance_km = ?,
                 distance_nm = ?,
                 max_altitude_ft = ?,
@@ -262,19 +298,18 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
             [
                 status,
                 arrivalAirportId,
-                finalDuration,
                 finalDistKm,
                 finalDistNm,
                 maxAltFt,
                 avgSpeedKnots,
                 landingFpm,
                 JSON.stringify(entry.routePoints),
-                entry.flightLogId,
+                flightLogId,
             ]
         );
-        console.log(`[Flight] ${status}: user ${userId}, log ${entry.flightLogId}, ${finalDuration}min, ${finalDistNm}nm`);
+        console.log(`[Flight] ${status}: user ${userId}, log ${flightLogId}, ${finalDistNm}nm`);
     } catch (err) {
-        console.error(`[DB] Flight log finalize error:`, err.message);
+        console.error(`[DB] Flight log finalize error (log ${flightLogId}, user ${userId}):`, err.message);
     }
 
     if (entry.userMissionId && entry.missionId) {
@@ -306,17 +341,13 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
         }
     }
 
-    if (status === 'landed') {
-        const ok = await recalculateStats(userId);
-        if (ok) {
-            entry.distanceNm = 0;
-            entry.lastPersist = Date.now();
-            entry.statsRecalculated = true;
-        }
+    const ok = await recalculateStats(userId);
+    if (ok) {
+        entry.distanceNm = 0;
+        entry.lastPersist = Date.now();
+        entry.statsRecalculated = true;
     }
 
-    entry.flightLogId = null;
-    entry.creatingFlightLog = false;
     entry.lastFlightEndTime = Date.now();
     entry.departureAirportId = null;
     entry.departureAlt = 0;
@@ -329,6 +360,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     entry.missionId = null;
     entry.userMissionId = null;
     entry.aircraftRegistration = null;
+    entry.aircraftType = null;
     entry.prevAlt = undefined;
     entry.lastUpdateTime = 0;
     entry.lastVerticalFpm = 0;
@@ -350,13 +382,14 @@ async function recalculateStats(userId) {
     if (!dbPool) return false;
     try {
         const [[flightAgg]] = await dbPool.execute(
-            `SELECT COUNT(*) AS cnt,
-                    COALESCE(SUM(flight_duration_min), 0) / 60 AS hours,
-                    COALESCE(SUM(distance_km), 0) AS dist_km,
-                    COALESCE(SUM(distance_nm), 0) AS dist_nm,
-                    MAX(landing_rate_fpm) AS best_lr,
-                    AVG(landing_rate_fpm) AS avg_lr
-             FROM flight_logs WHERE user_id = ? AND status = 'landed'`,
+            `SELECT
+                SUM(CASE WHEN status = 'landed' THEN 1 ELSE 0 END) AS cnt,
+                COALESCE(SUM(CASE WHEN status IN ('landed','cancelled') THEN flight_duration_min ELSE 0 END), 0) / 60 AS hours,
+                COALESCE(SUM(CASE WHEN status IN ('landed','cancelled') THEN distance_km ELSE 0 END), 0) AS dist_km,
+                COALESCE(SUM(CASE WHEN status IN ('landed','cancelled') THEN distance_nm ELSE 0 END), 0) AS dist_nm,
+                MAX(CASE WHEN status = 'landed' THEN landing_rate_fpm END) AS best_lr,
+                AVG(CASE WHEN status = 'landed' THEN landing_rate_fpm END) AS avg_lr
+             FROM flight_logs WHERE user_id = ?`,
             [userId]
         );
 
@@ -374,8 +407,9 @@ async function recalculateStats(userId) {
             [userId]
         );
 
+        const flightCount = Number(flightAgg.cnt) || 0;
         const distancePoints = Math.floor((flightAgg.dist_km || 0) * POINTS_PER_KM);
-        const landingPoints = (flightAgg.cnt || 0) * POINTS_PER_LANDING;
+        const landingPoints = flightCount * POINTS_PER_LANDING;
         const totalPoints = (missionPts.pts || 0) + distancePoints + landingPoints;
 
         let favAirportId = null;
@@ -421,7 +455,7 @@ async function recalculateStats(userId) {
                 last_flight_at           = NOW()`,
             [
                 userId,
-                flightAgg.cnt || 0,
+                flightCount,
                 Math.round((flightAgg.hours || 0) * 100) / 100,
                 Math.round((flightAgg.dist_km || 0) * 100) / 100,
                 Math.round((flightAgg.dist_nm || 0) * 100) / 100,
@@ -435,7 +469,7 @@ async function recalculateStats(userId) {
                 rank,
             ]
         );
-        console.log(`[Stats] Recalculated for user ${userId}: ${flightAgg.cnt} flights, rank=${rank}, pts=${totalPoints}`);
+        console.log(`[Stats] Recalculated for user ${userId}: ${flightCount} flights, rank=${rank}, pts=${totalPoints}`);
         return true;
     } catch (err) {
         console.error(`[DB] recalculateStats error for user ${userId}:`, err.message);
@@ -1124,71 +1158,82 @@ wss.on('connection', (ws) => {
                 const username = decoded.username;
 
                 const existing = players.get(playerId);
+                const reuseFlight = !!(existing
+                    && existing.flightLogId
+                    && existing.lastUpdateTime
+                    && (Date.now() - existing.lastUpdateTime) < RECONNECT_REUSE_WINDOW_MS);
+
                 if (existing) {
                     if (dbPool) {
-                        if (existing.flightLogId) {
+                        if (existing.flightLogId && !reuseFlight) {
                             await finalizeFlight(playerId, existing, 'cancelled', existing.state);
                         }
 
-                        if (!existing.statsRecalculated) {
+                        if (!reuseFlight && !existing.statsRecalculated) {
                             const sm = (Date.now() - existing.lastPersist) / 60000;
-                            const hi = sm / 60;
-                            const dk = existing.distanceNm * 1.852;
+                            const hi = existing.flightLogId ? 0 : sm / 60;
+                            const distNm = existing.flightLogId ? 0 : existing.distanceNm;
+                            const dk = distNm * 1.852;
                             dbPool.execute(
                                 `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
-                                 VALUES (?, 1, ?, ?, ?, FLOOR(? * ?), NOW())
+                                 VALUES (?, 0, ?, ?, ?, FLOOR(? * ?), NOW())
                                  ON DUPLICATE KEY UPDATE
-                                   total_flights      = total_flights + 1,
                                    total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                                    total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                                    total_distance_km  = total_distance_km  + VALUES(total_distance_km),
                                    total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
                                    last_flight_at = NOW()`,
-                                [playerId, hi, existing.distanceNm, dk, dk, POINTS_PER_KM, POINTS_PER_KM]
-                            ).catch(() => {});
+                                [playerId, hi, distNm, dk, dk, POINTS_PER_KM, POINTS_PER_KM]
+                            ).catch(err => console.error('[DB] Existing-session stats persist error:', err.message));
                         }
 
-                        if (existing.sessionDbId) {
+                        if (!reuseFlight && existing.sessionDbId) {
                             const dur = (Date.now() - existing.sessionStart) / 60000;
                             dbPool.execute(
                                 `UPDATE game_sessions SET disconnected_at = NOW(), flight_duration_min = ? WHERE id = ?`,
                                 [dur, existing.sessionDbId]
-                            ).catch(() => {});
+                            ).catch(err => console.error('[DB] Existing-session close error:', err.message));
                         }
                     }
                     try { existing.ws.close(4000, 'Replaced by new session'); } catch (_) {}
                 }
 
+                if (reuseFlight) {
+                    console.log(`[WS] Reusing open flight log ${existing.flightLogId} for user ${playerId} on reconnect`);
+                }
+
                 players.set(playerId, {
                     ws,
-                    state: null,
+                    state: reuseFlight ? existing.state : null,
                     username,
-                    avatarUrl: null,
-                    sessionStart: Date.now(),
-                    lastPersist: Date.now(),
-                    distanceNm: 0,
-                    prevLat: null,
-                    prevLon: null,
-                    flightLogId: null,
+                    avatarUrl: reuseFlight ? existing.avatarUrl : null,
+                    sessionStart: reuseFlight ? existing.sessionStart : Date.now(),
+                    lastPersist: reuseFlight ? existing.lastPersist : Date.now(),
+                    distanceNm: reuseFlight ? existing.distanceNm : 0,
+                    prevLat: reuseFlight ? existing.prevLat : null,
+                    prevLon: reuseFlight ? existing.prevLon : null,
+                    flightLogId: reuseFlight ? existing.flightLogId : null,
                     creatingFlightLog: false,
-                    departureAirportId: null,
-                    departureAlt: 0,
-                    isAirborne: false,
-                    maxAltitudeFt: 0,
-                    speedSamples: [],
-                    routePoints: [],
-                    lastRouteSample: 0,
-                    flightStartTime: null,
-                    flightDistanceNm: 0,
-                    prevAlt: undefined,
-                    lastUpdateTime: 0,
-                    lastVerticalFpm: 0,
-                    missionId: null,
-                    userMissionId: null,
-                    aircraftRegistration: null,
+                    departureAirportId: reuseFlight ? existing.departureAirportId : null,
+                    departureAlt: reuseFlight ? existing.departureAlt : 0,
+                    isAirborne: reuseFlight ? existing.isAirborne : false,
+                    maxAltitudeFt: reuseFlight ? existing.maxAltitudeFt : 0,
+                    speedSamples: reuseFlight ? existing.speedSamples : [],
+                    routePoints: reuseFlight ? existing.routePoints : [],
+                    lastRouteSample: reuseFlight ? existing.lastRouteSample : 0,
+                    flightStartTime: reuseFlight ? existing.flightStartTime : null,
+                    flightDistanceNm: reuseFlight ? existing.flightDistanceNm : 0,
+                    prevAlt: reuseFlight ? existing.prevAlt : undefined,
+                    lastUpdateTime: reuseFlight ? existing.lastUpdateTime : 0,
+                    lastVerticalFpm: reuseFlight ? existing.lastVerticalFpm : 0,
+                    missionId: reuseFlight ? existing.missionId : null,
+                    userMissionId: reuseFlight ? existing.userMissionId : null,
+                    aircraftRegistration: reuseFlight ? existing.aircraftRegistration : null,
+                    aircraftType: reuseFlight ? existing.aircraftType : null,
                     statsRecalculated: false,
-                    onGroundCount: 0,
-                    lastFlightEndTime: 0,
+                    onGroundCount: reuseFlight ? existing.onGroundCount : 0,
+                    lastFlightEndTime: reuseFlight ? existing.lastFlightEndTime : 0,
+                    sessionDbId: reuseFlight ? existing.sessionDbId : undefined,
                 });
 
                 fetchPlayerInfo(playerId).then(info => {
@@ -1242,11 +1287,10 @@ wss.on('connection', (ws) => {
 
                     let stepNm = 0;
                     if (entry.prevLat !== null && entry.prevLon !== null) {
-                        stepNm = haversineNm(entry.prevLat, entry.prevLon, lat, lon);
-                        if (stepNm < 50) {
+                        const rawStep = haversineNm(entry.prevLat, entry.prevLon, lat, lon);
+                        if (rawStep < MAX_STEP_NM) {
+                            stepNm = rawStep;
                             entry.distanceNm += stepNm;
-                        } else {
-                            stepNm = 0;
                         }
                     }
                     entry.prevLat = lat;
@@ -1261,32 +1305,43 @@ wss.on('connection', (ws) => {
                     entry.lastUpdateTime = nowMs;
 
                     const cooldownExpired = !entry.lastFlightEndTime || (Date.now() - entry.lastFlightEndTime) >= FLIGHT_LOG_COOLDOWN_MS;
-                    if (!entry.flightLogId && !entry.creatingFlightLog && dbPool && cooldownExpired && airspeed >= MIN_AIRSPEED_TO_START_LOG) {
-                        entry.creatingFlightLog = true;
-                        const airport = await findNearestAirport(lat, lon, 5);
-                        if (airport) entry.departureAirportId = airport.id;
-
-                        if (msg.missionId) entry.missionId = Number(msg.missionId) || null;
-                        if (msg.aircraftRegistration) entry.aircraftRegistration = String(msg.aircraftRegistration);
-
-                        if (entry.missionId) {
-                            try {
-                                const [umRows] = await dbPool.execute(
-                                    `SELECT id FROM user_missions WHERE user_id = ? AND mission_id = ? AND status IN ('started','in_progress') LIMIT 1`,
-                                    [playerId, entry.missionId]);
-                                if (umRows.length) {
-                                    entry.userMissionId = umRows[0].id;
-                                    await dbPool.execute(`UPDATE user_missions SET status = 'in_progress' WHERE id = ?`, [entry.userMissionId]);
-                                }
-                            } catch (_) {}
+                    const aircraftIdNum = Number(msg.aircraftId);
+                    const hasValidAircraftId = Number.isInteger(aircraftIdNum) && aircraftIdNum > 0;
+                    if (!entry.flightLogId && !entry.creatingFlightLog && dbPool && cooldownExpired && airspeed >= MIN_AIRSPEED_TO_START_LOG && !hasValidAircraftId) {
+                        if (!entry.warnedMissingAircraftId || (Date.now() - entry.warnedMissingAircraftId) > 60000) {
+                            console.warn(`[Flight] Skipping flight log creation for user ${playerId}: missing or invalid aircraftId (received: ${msg.aircraftId})`);
+                            entry.warnedMissingAircraftId = Date.now();
                         }
-
+                    }
+                    if (!entry.flightLogId && !entry.creatingFlightLog && dbPool && cooldownExpired && airspeed >= MIN_AIRSPEED_TO_START_LOG && hasValidAircraftId) {
+                        entry.creatingFlightLog = true;
                         try {
+                            const airport = await findNearestAirportWithFallback(lat, lon);
+                            if (airport) entry.departureAirportId = airport.id;
+
+                            if (msg.missionId) entry.missionId = Number(msg.missionId) || null;
+                            if (msg.aircraftRegistration) entry.aircraftRegistration = String(msg.aircraftRegistration);
+                            entry.aircraftType = msg.aircraftCode ? String(msg.aircraftCode) : (msg.aircraft ? String(msg.aircraft) : null);
+
+                            if (entry.missionId) {
+                                try {
+                                    const [umRows] = await dbPool.execute(
+                                        `SELECT id FROM user_missions WHERE user_id = ? AND mission_id = ? AND status IN ('started','in_progress') LIMIT 1`,
+                                        [playerId, entry.missionId]);
+                                    if (umRows.length) {
+                                        entry.userMissionId = umRows[0].id;
+                                        await dbPool.execute(`UPDATE user_missions SET status = 'in_progress' WHERE id = ?`, [entry.userMissionId]);
+                                    }
+                                } catch (err) {
+                                    console.error(`[DB] User mission lookup error for user ${playerId}:`, err.message);
+                                }
+                            }
+
                             const [result] = await dbPool.execute(
                                 `INSERT INTO flight_logs
-                                 (user_id, departure_airport_id, aircraft_id, aircraft_registration, mission_id, departure_time, status)
-                                 VALUES (?, ?, ?, ?, ?, NOW(), 'departed')`,
-                                [playerId, entry.departureAirportId, msg.aircraftId ? Number(msg.aircraftId) : null, entry.aircraftRegistration, entry.missionId]
+                                 (user_id, departure_airport_id, aircraft_id, aircraft_type, aircraft_registration, mission_id, departure_time, status)
+                                 VALUES (?, ?, ?, ?, ?, ?, NOW(), 'departed')`,
+                                [playerId, entry.departureAirportId, aircraftIdNum, entry.aircraftType, entry.aircraftRegistration, entry.missionId]
                             );
                             entry.flightLogId = result.insertId;
                             entry.flightStartTime = Date.now();
@@ -1302,11 +1357,12 @@ wss.on('connection', (ws) => {
                             entry.departureAlt = alt;
                             entry.lastRouteSample = Date.now();
                             entry.statsRecalculated = false;
-                            console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, mission: ${entry.missionId || 'none'}`);
+                            console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, aircraft: ${aircraftIdNum} (${entry.aircraftType || '?'}), mission: ${entry.missionId || 'none'}`);
                         } catch (err) {
-                            console.error(`[DB] Flight log insert error:`, err.message);
+                            console.error(`[DB] Flight log insert error for user ${playerId}:`, err.message);
+                        } finally {
+                            entry.creatingFlightLog = false;
                         }
-                        entry.creatingFlightLog = false;
                     }
 
                     if (entry.flightLogId) {
@@ -1316,6 +1372,9 @@ wss.on('connection', (ws) => {
 
                         const now = Date.now();
                         if (now - entry.lastRouteSample > 5000) {
+                            if (entry.routePoints.length >= MAX_ROUTE_POINTS) {
+                                entry.routePoints = entry.routePoints.filter((_, i) => i % 2 === 0);
+                            }
                             entry.routePoints.push([
                                 Math.round(lat * 10000) / 10000,
                                 Math.round(lon * 10000) / 10000,
@@ -1349,49 +1408,52 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', async () => {
-        if (playerId) {
-            const entry = players.get(playerId);
-            if (entry && dbPool) {
-                if (entry.flightLogId) {
-                    await finalizeFlight(playerId, entry, 'cancelled', entry.state);
-                }
+        if (!playerId) return;
+        const entry = players.get(playerId);
+        if (!entry || entry.ws !== ws) {
+            console.log(`[WS] Stale close for player ${playerId} (replaced by newer session)`);
+            return;
+        }
+        if (dbPool) {
+            if (entry.flightLogId) {
+                await finalizeFlight(playerId, entry, 'cancelled', entry.state);
+            }
 
-                if (!entry.statsRecalculated) {
-                    const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
-                    const hoursIncrement = sessionMinutes / 60;
-                    const distKm = entry.distanceNm * 1.852;
-                    try {
-                        await dbPool.execute(
-                            `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
-                             VALUES (?, 1, ?, ?, ?, FLOOR(? * ?), NOW())
-                             ON DUPLICATE KEY UPDATE
-                               total_flights      = total_flights + 1,
-                               total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
-                               total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
-                               total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                               total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
-                               last_flight_at = NOW()`,
-                            [playerId, hoursIncrement, entry.distanceNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
-                        );
-                    } catch (err) {
-                        console.error(`[DB] Final persist error for user ${playerId}:`, err.message);
-                    }
-                }
-
-                if (entry.sessionDbId) {
-                    const durationMin = (Date.now() - entry.sessionStart) / 60000;
-                    dbPool.execute(
-                        `UPDATE game_sessions SET disconnected_at = NOW(), flight_duration_min = ? WHERE id = ?`,
-                        [durationMin, entry.sessionDbId]
-                    ).catch(err => console.error('[DB] Session update error:', err.message));
+            if (!entry.statsRecalculated) {
+                const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
+                const hoursIncrement = entry.flightLogId ? 0 : sessionMinutes / 60;
+                const distNm = entry.flightLogId ? 0 : entry.distanceNm;
+                const distKm = distNm * 1.852;
+                try {
+                    await dbPool.execute(
+                        `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
+                         VALUES (?, 0, ?, ?, ?, FLOOR(? * ?), NOW())
+                         ON DUPLICATE KEY UPDATE
+                           total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
+                           total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
+                           total_distance_km  = total_distance_km  + VALUES(total_distance_km),
+                           total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
+                           last_flight_at = NOW()`,
+                        [playerId, hoursIncrement, distNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
+                    );
+                } catch (err) {
+                    console.error(`[DB] Final persist error for user ${playerId}:`, err.message);
                 }
             }
 
-            players.delete(playerId);
-            const onlineCount = players.size;
-            broadcast({ type: 'playerLeft', userId: playerId, onlineCount });
-            console.log(`[WS] Player left: ${playerId} (online: ${onlineCount})`);
+            if (entry.sessionDbId) {
+                const durationMin = (Date.now() - entry.sessionStart) / 60000;
+                dbPool.execute(
+                    `UPDATE game_sessions SET disconnected_at = NOW(), flight_duration_min = ? WHERE id = ?`,
+                    [durationMin, entry.sessionDbId]
+                ).catch(err => console.error('[DB] Session update error:', err.message));
+            }
         }
+
+        players.delete(playerId);
+        const onlineCount = players.size;
+        broadcast({ type: 'playerLeft', userId: playerId, onlineCount });
+        console.log(`[WS] Player left: ${playerId} (online: ${onlineCount})`);
     });
 
     ws.on('error', (err) => {
@@ -1427,16 +1489,24 @@ setInterval(() => {
 }, 50);
 
 // Periodic stats flush every 30 seconds
+let periodicFlushRunning = false;
 setInterval(async () => {
     if (!dbPool || players.size === 0) return;
-
+    if (periodicFlushRunning) {
+        console.warn('[Periodic] Previous flush still running, skipping this tick');
+        return;
+    }
+    periodicFlushRunning = true;
+    try {
     for (const [userId, entry] of players) {
         const now = Date.now();
         const sessionMinutes = (now - entry.lastPersist) / 60000;
-        if (sessionMinutes < 0.5) continue;
+        if (sessionMinutes < PERIODIC_MIN_SESSION_MIN) continue;
 
-        const hoursIncrement = sessionMinutes / 60;
-        const distKm = entry.distanceNm * 1.852;
+        const hasActiveFlight = !!entry.flightLogId;
+        const hoursIncrement = hasActiveFlight ? 0 : sessionMinutes / 60;
+        const distNm = hasActiveFlight ? 0 : entry.distanceNm;
+        const distKm = distNm * 1.852;
 
         try {
             await dbPool.execute(
@@ -1448,7 +1518,7 @@ setInterval(async () => {
                    total_distance_km  = total_distance_km  + VALUES(total_distance_km),
                    total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
                    last_flight_at = NOW()`,
-                [userId, hoursIncrement, entry.distanceNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
+                [userId, hoursIncrement, distNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
             );
         } catch (err) {
             console.error(`[DB] Stats persist error for user ${userId}:`, err.message);
@@ -1475,12 +1545,10 @@ setInterval(async () => {
             console.error(`[DB] Flight balance check error for user ${userId}:`, err.message);
         }
 
-        entry.distanceNm = 0;
+        if (!hasActiveFlight) entry.distanceNm = 0;
         entry.lastPersist = now;
 
         if (entry.flightLogId && entry.flightStartTime) {
-            const elapsed = now - entry.flightStartTime;
-            const durMin = Math.round((elapsed / 60000) * 100) / 100;
             const fDistKm = Math.round(entry.flightDistanceNm * 1.852 * 100) / 100;
             const fDistNm = Math.round(entry.flightDistanceNm * 100) / 100;
             const maxAltFt = Math.round(entry.maxAltitudeFt * METERS_TO_FEET);
@@ -1490,21 +1558,24 @@ setInterval(async () => {
             try {
                 await dbPool.execute(
                     `UPDATE flight_logs SET
-                        flight_duration_min = ?,
+                        flight_duration_min = TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60,
                         distance_km = ?,
                         distance_nm = ?,
                         max_altitude_ft = ?,
                         avg_speed_knots = ?,
                         route_data = ?
-                     WHERE id = ?`,
-                    [durMin, fDistKm, fDistNm, maxAltFt, avgSpd, JSON.stringify(entry.routePoints), entry.flightLogId]
+                     WHERE id = ? AND status IN ('departed','in_flight')`,
+                    [fDistKm, fDistNm, maxAltFt, avgSpd, JSON.stringify(entry.routePoints), entry.flightLogId]
                 );
             } catch (err) {
                 console.error(`[DB] Flight log periodic update error for user ${userId}:`, err.message);
             }
         }
     }
-}, 30000);
+    } finally {
+        periodicFlushRunning = false;
+    }
+}, PERIODIC_FLUSH_MS);
 
 // Ping/pong heartbeat + stale connection cleanup
 setInterval(() => {
@@ -1532,22 +1603,24 @@ async function gracefulShutdown() {
 
             if (!entry.statsRecalculated) {
                 const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
-                const hoursIncrement = sessionMinutes / 60;
-                const distKm = entry.distanceNm * 1.852;
+                const hoursIncrement = entry.flightLogId ? 0 : sessionMinutes / 60;
+                const distNm = entry.flightLogId ? 0 : entry.distanceNm;
+                const distKm = distNm * 1.852;
                 try {
                     await dbPool.execute(
                         `INSERT INTO user_flight_stats (user_id, total_flights, total_flight_hours, total_distance_nm, total_distance_km, total_reward_points, last_flight_at)
-                         VALUES (?, 1, ?, ?, ?, FLOOR(? * ?), NOW())
+                         VALUES (?, 0, ?, ?, ?, FLOOR(? * ?), NOW())
                          ON DUPLICATE KEY UPDATE
-                           total_flights      = total_flights + 1,
                            total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                            total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                            total_distance_km  = total_distance_km  + VALUES(total_distance_km),
                            total_reward_points = GREATEST(total_reward_points, FLOOR((total_distance_km + VALUES(total_distance_km)) * ?)),
                            last_flight_at = NOW()`,
-                        [userId, hoursIncrement, entry.distanceNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
+                        [userId, hoursIncrement, distNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
                     );
-                } catch (_) {}
+                } catch (err) {
+                    console.error(`[Shutdown] Stats persist error for user ${userId}:`, err.message);
+                }
             }
 
             if (entry.sessionDbId) {
