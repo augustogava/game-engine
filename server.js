@@ -56,9 +56,12 @@ async function initDatabase() {
         try {
             const [sweep] = await dbPool.execute(
                 `UPDATE flight_logs
-                    SET status = 'cancelled',
-                        arrival_time = COALESCE(arrival_time, NOW()),
-                        flight_duration_min = COALESCE(flight_duration_min, TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60),
+                    SET arrival_time = COALESCE(arrival_time, updated_at, departure_time),
+                        flight_duration_min = COALESCE(
+                            flight_duration_min,
+                            GREATEST(TIMESTAMPDIFF(SECOND, departure_time, COALESCE(updated_at, departure_time)) / 60, 0)
+                        ),
+                        status = 'cancelled',
                         updated_at = NOW()
                   WHERE status IN ('departed','in_flight')`
             );
@@ -1562,8 +1565,8 @@ setInterval(async () => {
         if (sessionMinutes < PERIODIC_MIN_SESSION_MIN) continue;
 
         const hasActiveFlight = !!entry.flightLogId;
-        const hoursIncrement = hasActiveFlight ? 0 : sessionMinutes / 60;
-        const distNm = hasActiveFlight ? 0 : entry.distanceNm;
+        const hoursIncrement = sessionMinutes / 60;
+        const distNm = entry.distanceNm;
         const distKm = distNm * 1.852;
 
         try {
@@ -1603,7 +1606,7 @@ setInterval(async () => {
             console.error(`[DB] Flight balance check error for user ${userId}:`, err.message);
         }
 
-        if (!hasActiveFlight) entry.distanceNm = 0;
+        entry.distanceNm = 0;
         entry.lastPersist = now;
 
         if (entry.flightLogId && entry.flightStartTime) {
