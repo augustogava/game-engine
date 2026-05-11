@@ -1000,6 +1000,19 @@ const server = http.createServer(async (req, res) => {
         return proxyToMainApi(`/api/aircrafts/${routeParams.id}`, req, res);
     }
 
+    if (req.method === 'GET' && urlPath === '/api/flight-plans') {
+        const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+        return proxyToMainApi(`/api/flight-plans${qs}`, req, res);
+    }
+
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/flight-plans/:id'))) {
+        return proxyToMainApi(`/api/flight-plans/${routeParams.id}`, req, res);
+    }
+
+    if (req.method === 'PATCH' && (routeParams = matchRoute(req.method, urlPath, '/api/flight-plans/:id/status'))) {
+        return proxyToMainApi(`/api/flight-plans/${routeParams.id}/status`, req, res, await parseBody(req));
+    }
+
     if (req.method === 'GET' && urlPath === '/api/user-aircrafts') {
         return proxyToMainApi('/api/user-aircrafts', req, res);
     }

@@ -382,6 +382,7 @@ export class FlightSceneSimple extends Scene3D {
     private _pendingFlightPlanHdg: number | null = null;
     private _pendingFlightPlanAltM: number | null = null;
     private _activeFlightPlanId: number | null = null;
+    private _simTimeOffsetMs = 0;
     private _activeFlightPlanNav: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; name: string } | null = null;
     private _navInfoEl: HTMLElement | null = null;
     private _navDestEl: HTMLElement | null = null;
@@ -528,6 +529,13 @@ export class FlightSceneSimple extends Scene3D {
         this._pendingFlightPlanLat = Number(plan.dep_rwy_latitude);
         this._pendingFlightPlanLon = Number(plan.dep_rwy_longitude);
         this._pendingFlightPlanHdg = Number(plan.dep_rwy_heading);
+        if (plan.scheduled_departure_at) {
+            const scheduled = new Date(plan.scheduled_departure_at).getTime();
+            if (!isNaN(scheduled)) {
+                this._simTimeOffsetMs = scheduled - Date.now();
+                console.log(`[FlightPlan] Sim time offset: ${Math.round(this._simTimeOffsetMs / 60000)} min`);
+            }
+        }
         const elevFt = plan.dep_rwy_elevation_ft ?? plan.dep_elevation_ft ?? 0;
         this._pendingFlightPlanAltM = Number(elevFt) * 0.3048;
         const arrLat = plan.arr_rwy_latitude ?? plan.arr_latitude;
@@ -1141,8 +1149,12 @@ export class FlightSceneSimple extends Scene3D {
         }
     }
 
+    private _getSimDate(): Date {
+        return new Date(Date.now() + this._simTimeOffsetMs);
+    }
+
     private _applyDayNightCycle(scene: BABYLON.Scene): void {
-        const { elevation, azimuth } = getSunPosition(this.originLat, this.originLon, new Date());
+        const { elevation, azimuth } = getSunPosition(this.originLat, this.originLon, this._getSimDate());
         this._sunElevation = elevation;
         const rad = Math.PI / 180;
         const elevR = elevation * rad;
@@ -3368,7 +3380,7 @@ export class FlightSceneSimple extends Scene3D {
     // ── HUD Update ────────────────────────────────────────────────────────────
 
     private _updateHUD(): void {
-        const now = new Date();
+        const now = this._getSimDate();
         const hh = String(now.getUTCHours()).padStart(2, '0');
         const mm = String(now.getUTCMinutes()).padStart(2, '0');
         const ss = String(now.getUTCSeconds()).padStart(2, '0');
