@@ -382,6 +382,7 @@ export class FlightSceneSimple extends Scene3D {
     private _pendingFlightPlanHdg: number | null = null;
     private _pendingFlightPlanAltM: number | null = null;
     private _activeFlightPlanId: number | null = null;
+    private _activeFlightPlanArrivalAirportId: number | null = null;
     private _simTimeOffsetMs = 0;
     private _activeFlightPlanNav: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; name: string } | null = null;
     private _navInfoEl: HTMLElement | null = null;
@@ -525,6 +526,7 @@ export class FlightSceneSimple extends Scene3D {
             return;
         }
         this._activeFlightPlanId = Number(plan.id);
+        this._activeFlightPlanArrivalAirportId = plan.arrival_airport_id != null ? Number(plan.arrival_airport_id) : null;
         this._patchFlightPlanStatus(this._activeFlightPlanId, 'in_progress');
         this._pendingFlightPlanLat = Number(plan.dep_rwy_latitude);
         this._pendingFlightPlanLon = Number(plan.dep_rwy_longitude);
@@ -614,12 +616,14 @@ export class FlightSceneSimple extends Scene3D {
         this.mpClient.onFlightLogEnded((msg) => {
             if (!this._activeFlightPlanId) return;
             if (msg.status === 'landed') {
-                this._patchFlightPlanStatus(this._activeFlightPlanId, 'completed');
-                this._activeFlightPlanId = null;
+                const arrivedAtDest = this._activeFlightPlanArrivalAirportId != null
+                    && msg.arrivalAirportId === this._activeFlightPlanArrivalAirportId;
+                this._patchFlightPlanStatus(this._activeFlightPlanId, arrivedAtDest ? 'completed' : 'cancelled');
             } else if (msg.status === 'crashed' || msg.status === 'cancelled') {
                 this._patchFlightPlanStatus(this._activeFlightPlanId, 'cancelled');
-                this._activeFlightPlanId = null;
             }
+            this._activeFlightPlanId = null;
+            this._activeFlightPlanArrivalAirportId = null;
         });
 
         if (this.dbgMpUserId) this.dbgMpUserId.textContent = '…';
