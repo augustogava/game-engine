@@ -56,6 +56,18 @@ export class MultiplayerClient {
             if (msg.type === 'noFlightHours') {
                 this.onNoFlightHoursCb?.();
             }
+            if (msg.type === 'flightLogStarted') {
+                console.log(`[FlightLog] STARTED id=${msg.flightLogId} aircraftId=${msg.aircraftId} type=${msg.aircraftType} departureAirportId=${msg.departureAirportId} missionId=${msg.missionId}`);
+            }
+            if (msg.type === 'flightLogUpdated') {
+                console.log(`[FlightLog] UPDATED id=${msg.flightLogId} distance=${msg.distanceKm}km/${msg.distanceNm}nm maxAlt=${msg.maxAltitudeFt}ft avgSpd=${msg.avgSpeedKnots}kts routePts=${msg.routePoints}`);
+            }
+            if (msg.type === 'flightLogEnded') {
+                console.log(`[FlightLog] ENDED id=${msg.flightLogId} status=${msg.status} distance=${msg.distanceKm}km/${msg.distanceNm}nm maxAlt=${msg.maxAltitudeFt}ft avgSpd=${msg.avgSpeedKnots}kts landingFpm=${msg.landingRateFpm} arrivalAirportId=${msg.arrivalAirportId}`);
+            }
+            if (msg.type === 'flightLogSkipped') {
+                console.warn(`[FlightLog] SKIPPED reason=${msg.reason} received=${msg.received}`);
+            }
         });
 
         this.rt.onClose((code) => {

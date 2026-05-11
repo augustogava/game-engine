@@ -308,6 +308,21 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
             ]
         );
         console.log(`[Flight] ${status}: user ${userId}, log ${flightLogId}, ${finalDistNm}nm`);
+        if (entry.ws && entry.ws.readyState === 1) {
+            try {
+                entry.ws.send(JSON.stringify({
+                    type: 'flightLogEnded',
+                    flightLogId,
+                    status,
+                    distanceKm: finalDistKm,
+                    distanceNm: finalDistNm,
+                    maxAltitudeFt: maxAltFt,
+                    avgSpeedKnots,
+                    landingRateFpm: landingFpm,
+                    arrivalAirportId,
+                }));
+            } catch (_) {}
+        }
     } catch (err) {
         console.error(`[DB] Flight log finalize error (log ${flightLogId}, user ${userId}):`, err.message);
     }
@@ -1311,6 +1326,13 @@ wss.on('connection', (ws) => {
                         if (!entry.warnedMissingAircraftId || (Date.now() - entry.warnedMissingAircraftId) > 60000) {
                             console.warn(`[Flight] Skipping flight log creation for user ${playerId}: missing or invalid aircraftId (received: ${msg.aircraftId})`);
                             entry.warnedMissingAircraftId = Date.now();
+                            try {
+                                ws.send(JSON.stringify({
+                                    type: 'flightLogSkipped',
+                                    reason: 'missingAircraftId',
+                                    received: msg.aircraftId === undefined ? null : msg.aircraftId,
+                                }));
+                            } catch (_) {}
                         }
                     }
                     if (!entry.flightLogId && !entry.creatingFlightLog && dbPool && cooldownExpired && airspeed >= MIN_AIRSPEED_TO_START_LOG && hasValidAircraftId) {
@@ -1383,6 +1405,17 @@ wss.on('connection', (ws) => {
                             entry.lastRouteSample = Date.now();
                             entry.statsRecalculated = false;
                             console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, aircraft: ${aircraftIdNum} (${entry.aircraftType || '?'}), mission: ${entry.missionId || 'none'}`);
+                            try {
+                                ws.send(JSON.stringify({
+                                    type: 'flightLogStarted',
+                                    flightLogId: entry.flightLogId,
+                                    aircraftId: aircraftIdNum,
+                                    aircraftType: entry.aircraftType || null,
+                                    departureAirportId: entry.departureAirportId,
+                                    missionId: entry.missionId,
+                                    departureTime: entry.flightStartTime,
+                                }));
+                            } catch (_) {}
                         } catch (err) {
                             console.error(`[DB] Flight log insert error for user ${playerId}:`, err.message);
                         } finally {
@@ -1581,7 +1614,7 @@ setInterval(async () => {
                 ? Math.round((entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length) * KMH_TO_KNOTS * 100) / 100
                 : null;
             try {
-                await dbPool.execute(
+                const [updRes] = await dbPool.execute(
                     `UPDATE flight_logs SET
                         flight_duration_min = TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60,
                         distance_km = ?,
@@ -1592,6 +1625,19 @@ setInterval(async () => {
                      WHERE id = ? AND status IN ('departed','in_flight')`,
                     [fDistKm, fDistNm, maxAltFt, avgSpd, JSON.stringify(entry.routePoints), entry.flightLogId]
                 );
+                if (updRes && updRes.affectedRows > 0 && entry.ws && entry.ws.readyState === 1) {
+                    try {
+                        entry.ws.send(JSON.stringify({
+                            type: 'flightLogUpdated',
+                            flightLogId: entry.flightLogId,
+                            distanceKm: fDistKm,
+                            distanceNm: fDistNm,
+                            maxAltitudeFt: maxAltFt,
+                            avgSpeedKnots: avgSpd,
+                            routePoints: entry.routePoints.length,
+                        }));
+                    } catch (_) {}
+                }
             } catch (err) {
                 console.error(`[DB] Flight log periodic update error for user ${userId}:`, err.message);
             }

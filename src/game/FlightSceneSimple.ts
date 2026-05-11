@@ -102,22 +102,28 @@ async function fetchAircraftConfig(aircraftId: number): Promise<AircraftConfig> 
 async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
     try {
         const token = localStorage.getItem('auth_token') || '';
-        if (!token) return DEFAULT_AIRCRAFT_CONFIG;
+        if (!token) {
+            console.warn('[Aircraft] No auth token, using DEFAULT_AIRCRAFT_CONFIG (id=0). Flight logs will NOT be saved.');
+            return DEFAULT_AIRCRAFT_CONFIG;
+        }
         const headers: Record<string, string> = { 'Authorization': `Bearer ${token}` };
         const resp = await fetch('/api/user-aircrafts', { headers });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         console.debug('[Aircraft] fetchSelectedAircraftConfig raw response:', JSON.stringify(data));
-        const selected = data.data?.find((ua: any) => ua.is_selected === 1);
+        const list: any[] = Array.isArray(data.data) ? data.data : [];
+        const selected = list.find((ua: any) => ua.is_selected === 1) || list.find((ua: any) => ua.aircraft);
         if (selected?.aircraft) {
             const cfg = selected.aircraft as AircraftConfig;
             console.debug('[Aircraft] selected aircraft config:', JSON.stringify(cfg));
+            console.log(`[Aircraft] Using ${selected.is_selected === 1 ? 'SELECTED' : 'FALLBACK (first owned)'} aircraft: id=${cfg.id} code=${cfg.code} name=${cfg.name}`);
             if (typeof cfg.flap_steps_json === 'string') {
                 cfg.flap_steps_json = JSON.parse(cfg.flap_steps_json as unknown as string);
             }
             if (!Array.isArray(cfg.surfaces)) cfg.surfaces = [];
             return cfg;
         }
+        console.warn('[Aircraft] No owned aircraft found for user, using DEFAULT_AIRCRAFT_CONFIG (id=0). Flight logs will NOT be saved.');
         return DEFAULT_AIRCRAFT_CONFIG;
     } catch (err) {
         console.error('[Aircraft] Failed to fetch selected aircraft, using default:', err);
@@ -274,6 +280,7 @@ export class FlightSceneSimple extends Scene3D {
     private brakesOn = false;
     private brakeKeyLock = false;
     private aircraftConfig: AircraftConfig = DEFAULT_AIRCRAFT_CONFIG;
+    private _lastSentAircraftId: number | undefined = undefined;
     private FLAP_STEPS: number[] = DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
     private flapIndex = 2;
     private flapKeyLock5 = false;
@@ -843,6 +850,19 @@ export class FlightSceneSimple extends Scene3D {
         const pitchDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this._tmpFwd, this._tmpUp)))) * 180 / Math.PI;
         const rollDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this._tmpRight, this._tmpUp)))) * 180 / Math.PI;
 
+        const aircraftIdToSend = this.aircraftConfig.id && this.aircraftConfig.id > 0
+            ? this.aircraftConfig.id
+            : undefined;
+
+        if (aircraftIdToSend !== this._lastSentAircraftId) {
+            if (aircraftIdToSend) {
+                console.log(`[Flight] sendUpdate now sending aircraftId=${aircraftIdToSend} code=${this.aircraftConfig.code} -- flight log persistence ENABLED`);
+            } else {
+                console.warn(`[Flight] sendUpdate sending aircraftId=undefined (aircraftConfig.id=${this.aircraftConfig.id}) -- flight log persistence DISABLED on server`);
+            }
+            this._lastSentAircraftId = aircraftIdToSend;
+        }
+
         this.mpClient.sendUpdate({
             lat, lon,
             alt: this.refAlt + pos.y,
@@ -852,7 +872,7 @@ export class FlightSceneSimple extends Scene3D {
             pitch: pitchDeg,
             roll: rollDeg,
             onGround: this.isOnGround,
-            aircraftId: this.aircraftConfig.id || undefined,
+            aircraftId: aircraftIdToSend,
             aircraftCode: this.aircraftConfig.code || undefined,
             aircraftModelFile: this.aircraftConfig.model_file || undefined,
         });
