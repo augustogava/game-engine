@@ -643,7 +643,7 @@ export class FlightSceneSimple extends Scene3D {
     private static readonly LABEL_AVATAR_SIZE = 48;
     private static readonly LABEL_PLANE_WIDTH = 18;
     private static readonly LABEL_PLANE_HEIGHT = 5.6;
-    private static readonly LABEL_Y_OFFSET = 22;
+    private static readonly LABEL_Y_OFFSET = 10;
 
     private _createPlayerLabel(remote: RemotePlayer, username: string, avatarUrl: string | null): void {
         const scene = this.scene;
