@@ -1358,7 +1358,7 @@ setInterval(() => {
         const others = [];
         for (const [otherId, otherEntry] of players) {
             if (otherId !== selfId && otherEntry.state) {
-                others.push(otherEntry.state);
+                others.push({ ...otherEntry.state, username: otherEntry.username });
             }
         }
         try {
