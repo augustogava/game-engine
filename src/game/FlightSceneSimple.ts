@@ -2205,8 +2205,8 @@ export class FlightSceneSimple extends Scene3D {
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
 #flight-pfd{top:22%!important;width:200px!important;height:140px!important}
 #gps-map{width:110px!important;height:110px!important;top:4px!important;left:2px!important}
-.hud-panel-left{left:4px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom left}
-.hud-panel-right{right:4px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom right}
+.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom left}
+.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom right}
 .hud-tape{height:110px!important}
 .hud-value-main{font-size:16px!important}
 .hud-engine-col{display:none!important}
@@ -2221,8 +2221,8 @@ export class FlightSceneSimple extends Scene3D {
 #flight-pfd{top:30%!important;width:220px!important;height:150px!important}
 #gps-map{width:100px!important;height:100px!important;top:2px!important;left:2px!important}
 #hud-utc{font-size:7px!important}
-.hud-panel-left{bottom:4px!important;transform:scale(.7);transform-origin:bottom left}
-.hud-panel-right{bottom:4px!important;transform:scale(.7);transform-origin:bottom right}
+.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.7);transform-origin:bottom left}
+.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.7);transform-origin:bottom right}
 }
 
 </style>
