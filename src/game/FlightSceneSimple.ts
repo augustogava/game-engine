@@ -1717,12 +1717,12 @@ export class FlightSceneSimple extends Scene3D {
         let targetRoll: number;
         let targetYaw: number;
 
-        const SMOOTHING_RATE = this.isMobile ? 1.5 : 2.5;
-        const RETURN_RATE    = this.isMobile ? 1.2 : 2.0;
+        const SMOOTHING_RATE = this.isMobile ? 0.9 : 1.6;
+        const RETURN_RATE    = this.isMobile ? 0.7 : 1.2;
 
         if (this.isMobile) {
-            targetPitch = this.touchPitchInput;
-            targetRoll = this.touchRollInput * 0.25;
+            targetPitch = this.touchPitchInput * 0.7;
+            targetRoll = this.touchRollInput * 0.18;
             targetYaw = 0;
             this.thrust = this.touchThrust;
         } else {
@@ -1732,7 +1732,7 @@ export class FlightSceneSimple extends Scene3D {
             if (p('KeyS')) this.thrust = Math.max(0, this.thrust - _dt * this.aircraftConfig.throttle_down_rate);
 
             targetPitch = p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0;
-            targetRoll  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.25;
+            targetRoll  = (p('ArrowRight') ? -1 : p('ArrowLeft') ? 1 : 0) * 0.18;
             targetYaw   = (p('KeyQ') || p('KeyA')) ? 1 : (p('KeyE') || p('KeyD')) ? -1 : 0;
 
             if (p('Digit5') && !this.flapKeyLock5) {
