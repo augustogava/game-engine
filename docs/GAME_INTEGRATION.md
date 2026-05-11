@@ -623,3 +623,32 @@ The `pilot_rank` field in `user_flight_stats` is an ENUM. The game/backend shoul
 - `user_flight_stats.total_reward_points` = SUM of all `missions.reward_points` where `user_missions.status = 'completed'`
 - Points are recalculated via `PUT /api/flight-stats/recalculate`
 - Points are displayed on Dashboard and Flight Stats pages
+
+### Flight Plan Points
+
+Each flight plan has a `points_reward` field, auto-calculated at creation based on distance between departure and arrival airports:
+
+- **Formula:** `Math.max(1, Math.round(distance_km / 10))` — 1 point per 10 km, minimum 1 point.
+- When the game calls `PATCH /api/flight-plans/:id/status` with `{ "status": "completed" }`:
+  - Points are added to `user_flight_stats.total_reward_points`
+  - A record is inserted in `user_points_log` (audit table) with `source_type = 'flight_plan'`
+  - The response includes `points_awarded` (0 if already completed — no double-awarding)
+
+**Game flow:**
+1. `PATCH /api/flight-plans/:id/status` → `{ "status": "in_progress" }` (takeoff)
+2. `PATCH /api/flight-plans/:id/status` → `{ "status": "completed" }` (landed at destination)
+3. Response: `{ "message": "Flight plan status updated", "points_awarded": 50 }`
+
+### Points History Table (`user_points_log`)
+
+Audit-only table. Not used for computing totals.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INT PK | Auto-increment |
+| `user_id` | INT FK | References `users(id)` |
+| `points` | INT | Points credited |
+| `source_type` | VARCHAR(50) | Origin: `'flight_plan'`, `'mission'`, etc. |
+| `source_id` | INT | ID of the source record (e.g. `flight_plans.id`) |
+| `description` | VARCHAR(255) | Human-readable description |
+| `created_at` | TIMESTAMP | When points were awarded |
