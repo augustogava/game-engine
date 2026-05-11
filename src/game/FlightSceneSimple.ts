@@ -753,25 +753,10 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _loadAvatarAndRedraw(tex: BABYLON.DynamicTexture, username: string, avatarUrl: string): void {
-        fetch(avatarUrl, { mode: 'cors' })
-            .then(resp => {
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                return resp.blob();
-            })
-            .then(blob => createImageBitmap(blob))
-            .then(bitmap => {
-                const canvas = document.createElement('canvas');
-                canvas.width = bitmap.width;
-                canvas.height = bitmap.height;
-                const ctx2 = canvas.getContext('2d')!;
-                ctx2.drawImage(bitmap, 0, 0);
-                const img = new Image();
-                img.onload = () => this._drawPlayerLabel(tex, username, img);
-                img.src = canvas.toDataURL();
-            })
-            .catch(() => {
-                this._drawPlayerLabel(tex, username, null);
-            });
+        const img = new Image();
+        img.onload = () => this._drawPlayerLabel(tex, username, img);
+        img.onerror = () => this._drawPlayerLabel(tex, username, null);
+        img.src = avatarUrl;
     }
 
     private _updatePlayerLabel(remote: RemotePlayer, state: PlayerState): void {
