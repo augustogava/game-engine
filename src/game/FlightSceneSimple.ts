@@ -374,6 +374,18 @@ export class FlightSceneSimple extends Scene3D {
     private _missionBtnEl: HTMLElement | null = null;
     private _aircraftPanelEl: HTMLElement | null = null;
     private _aircraftBtnEl: HTMLElement | null = null;
+    private _flightPlansPanelEl: HTMLElement | null = null;
+    private _flightPlansBtnEl: HTMLElement | null = null;
+    private _pendingFlightPlanLat: number | null = null;
+    private _pendingFlightPlanLon: number | null = null;
+    private _pendingFlightPlanHdg: number | null = null;
+    private _pendingFlightPlanAltM: number | null = null;
+    private _activeFlightPlanId: number | null = null;
+    private _activeFlightPlanNav: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; name: string } | null = null;
+    private _navInfoEl: HTMLElement | null = null;
+    private _navDestEl: HTMLElement | null = null;
+    private _navDistEl: HTMLElement | null = null;
+    private _navBrgEl:  HTMLElement | null = null;
     private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string } | null = null;
 
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
@@ -500,6 +512,33 @@ export class FlightSceneSimple extends Scene3D {
         if (this._lensFlareSystem) { this._lensFlareSystem.dispose(); this._lensFlareSystem = null; }
         if (this._shadowGen) { this._shadowGen.dispose(); this._shadowGen = null; }
         if (this.camera) this.camera.detachControl();
+    }
+
+    setFlightPlanSpawn(plan: any): void {
+        if (plan?.dep_rwy_latitude == null || plan?.dep_rwy_longitude == null || plan?.dep_rwy_heading == null) {
+            console.warn('[FlightPlan] Plan missing dep runway data — skipping spawn override');
+            return;
+        }
+        this._activeFlightPlanId = Number(plan.id);
+        this._pendingFlightPlanLat = Number(plan.dep_rwy_latitude);
+        this._pendingFlightPlanLon = Number(plan.dep_rwy_longitude);
+        this._pendingFlightPlanHdg = Number(plan.dep_rwy_heading);
+        const elevFt = plan.dep_rwy_elevation_ft ?? plan.dep_elevation_ft ?? 0;
+        this._pendingFlightPlanAltM = Number(elevFt) * 0.3048;
+        const arrLat = plan.arr_rwy_latitude ?? plan.arr_latitude;
+        const arrLon = plan.arr_rwy_longitude ?? plan.arr_longitude;
+        if (arrLat != null && arrLon != null) {
+            this._activeFlightPlanNav = {
+                departure_lat: Number(plan.dep_rwy_latitude),
+                departure_lon: Number(plan.dep_rwy_longitude),
+                arrival_lat: Number(arrLat),
+                arrival_lon: Number(arrLon),
+                departure_icao: plan.departure_icao || '',
+                arrival_icao: plan.arrival_icao || '',
+                name: plan.name || '',
+            };
+        }
+        console.log(`[FlightPlan] Active plan id=${this._activeFlightPlanId}`);
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
@@ -875,6 +914,7 @@ export class FlightSceneSimple extends Scene3D {
             aircraftId: aircraftIdToSend,
             aircraftCode: this.aircraftConfig.code || undefined,
             aircraftModelFile: this.aircraftConfig.model_file || undefined,
+            flightPlanId: this._activeFlightPlanId ?? undefined,
         });
     }
 
@@ -888,11 +928,13 @@ export class FlightSceneSimple extends Scene3D {
             return;
         }
 
-        const lat = parseFloat(params.get('lat') || '-23.4354');
-        const lon = parseFloat(params.get('lng') || '-46.4745');
-        const alt = parseFloat(params.get('alt') || '750');
-        this.initialHeading = parseFloat(params.get('hdg') || '75');
-        this.spawnAirborne = params.has('lat');
+        const hasPlan = this._pendingFlightPlanLat != null;
+        const lat = hasPlan ? this._pendingFlightPlanLat! : parseFloat(params.get('lat') || '-23.4354');
+        const lon = hasPlan ? this._pendingFlightPlanLon! : parseFloat(params.get('lng') || '-46.4745');
+        const alt = hasPlan ? (this._pendingFlightPlanAltM! + GROUND_Y) : parseFloat(params.get('alt') || '750');
+        this.initialHeading = hasPlan ? this._pendingFlightPlanHdg! : parseFloat(params.get('hdg') || '75');
+        this.spawnAirborne = hasPlan ? false : params.has('lat');
+        if (hasPlan) console.log(`[FlightPlan] Ground spawn at runway lat=${lat} lon=${lon} hdg=${this.initialHeading}`);
         this.originLat = lat;
         this.originLon = lon;
         this.mapApiKey = apiKey;
@@ -2371,8 +2413,11 @@ export class FlightSceneSimple extends Scene3D {
 .hud-engine-col{display:none!important}
 #missions-btn{top:22px!important;right:10px!important}
 #aircraft-btn{top:60px!important;right:10px!important}
+#flight-plans-btn{top:98px!important;right:10px!important}
 #missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
+#flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
+#nav-info{top:150px!important;left:2px!important;width:140px!important;font-size:9px!important}
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
@@ -2389,6 +2434,9 @@ export class FlightSceneSimple extends Scene3D {
 #aircraft-btn{top:40px!important;right:6px!important;width:28px!important;height:28px!important}
 #missions-panel{top:4px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
 #aircraft-panel{top:38px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+#flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
+#flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+#nav-info{top:120px!important;left:2px!important;width:110px!important;font-size:8px!important}
 }
 @media(max-height:440px){
 #flight-pfd{top:30%!important;width:220px!important;height:150px!important}
@@ -2511,6 +2559,22 @@ export class FlightSceneSimple extends Scene3D {
 <div id="aircraft-panel" style="display:none;position:absolute;top:102px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
   <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">AIRCRAFT</div>
   <div id="aircraft-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+</div>
+
+<div id="flight-plans-btn" style="position:absolute;top:150px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Flight Plans">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h4l3-4 4 4h7"/><path d="M3 17h4l3 4 4-4h7"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+</div>
+
+<div id="flight-plans-panel" style="display:none;position:absolute;top:140px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">FLIGHT PLANS</div>
+  <div id="flight-plans-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+</div>
+
+<div id="nav-info" style="display:none;position:absolute;top:190px;left:4px;width:180px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:6px;padding:6px 8px;font-family:'Inter',sans-serif;color:#fff;font-size:10px;pointer-events:none;box-shadow:0 0 12px rgba(0,255,128,.1)">
+  <div style="font-family:'Orbitron',monospace;font-size:8px;color:#40ffaa;letter-spacing:.15em;margin-bottom:3px">NAV</div>
+  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DEST</span><span id="nav-dest" style="color:#fff">\u2014</span></div>
+  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DIST</span><span id="nav-dist" style="color:#40ffaa">\u2014 nm</span></div>
+  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">BRG</span><span id="nav-brg" style="color:#40ffaa">\u2014\u00B0</span></div>
 </div>`;
         document.body.appendChild(hud);
         this.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
@@ -2553,6 +2617,15 @@ export class FlightSceneSimple extends Scene3D {
         this._aircraftPanelEl = document.getElementById('aircraft-panel');
         this._setupAircraftBtn();
 
+        this._flightPlansBtnEl = document.getElementById('flight-plans-btn');
+        this._flightPlansPanelEl = document.getElementById('flight-plans-panel');
+        this._setupFlightPlansBtn();
+
+        this._navInfoEl = document.getElementById('nav-info');
+        this._navDestEl = document.getElementById('nav-dest');
+        this._navDistEl = document.getElementById('nav-dist');
+        this._navBrgEl  = document.getElementById('nav-brg');
+
         this._initTapeMarks();
         this._initFlapBar();
         this._buildDebugPanel();
@@ -2561,8 +2634,8 @@ export class FlightSceneSimple extends Scene3D {
     // ── Panel Management ────────────────────────────────────────────────────────
 
     private _closeAllPanels(except?: HTMLElement | null): void {
-        const panels = [this._missionPanelEl, this._aircraftPanelEl];
-        const btns = [this._missionBtnEl, this._aircraftBtnEl];
+        const panels = [this._missionPanelEl, this._aircraftPanelEl, this._flightPlansPanelEl];
+        const btns = [this._missionBtnEl, this._aircraftBtnEl, this._flightPlansBtnEl];
         for (let i = 0; i < panels.length; i++) {
             const p = panels[i];
             if (p && p !== except) {
@@ -2655,6 +2728,90 @@ export class FlightSceneSimple extends Scene3D {
             } else {
                 this._activeMission = null;
             }
+        } catch (err) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+        }
+    }
+
+    // ── Flight Plans Button ────────────────────────────────────────────────────
+
+    private _setupFlightPlansBtn(): void {
+        if (!this._flightPlansBtnEl || !this._flightPlansPanelEl) return;
+        const btn = this._flightPlansBtnEl;
+        const panel = this._flightPlansPanelEl;
+
+        btn.addEventListener('mouseenter', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; } });
+        btn.addEventListener('mouseleave', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; } });
+
+        btn.addEventListener('click', () => {
+            const visible = panel.style.display !== 'none';
+            this._closeAllPanels(visible ? null : panel);
+            if (visible) {
+                panel.style.display = 'none';
+                btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none';
+            } else {
+                panel.style.display = 'block';
+                btn.style.borderColor = 'rgba(80,255,160,.9)'; btn.style.boxShadow = '0 0 12px rgba(0,255,128,.35)';
+                this._loadFlightPlans();
+            }
+        });
+    }
+
+    private async _loadFlightPlans(): Promise<void> {
+        const listEl = document.getElementById('flight-plans-list');
+        if (!listEl) return;
+        listEl.textContent = 'Loading...';
+
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login required</div>';
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/flight-plans?is_active=1', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Failed to load flight plans</div>';
+                return;
+            }
+            const json = await res.json();
+            const plans = json.data || [];
+
+            if (!plans.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No flight plans</div>';
+                return;
+            }
+
+            let html = '';
+            for (const p of plans) {
+                const name = p.name || 'Unnamed plan';
+                const depIcao = p.departure_icao || '???';
+                const arrIcao = p.arrival_icao || '???';
+                const depRwy = p.dep_rwy_ident ? ` RWY ${p.dep_rwy_ident}` : '';
+                const arrRwy = p.arr_rwy_ident ? ` RWY ${p.arr_rwy_ident}` : '';
+                const scheduled = p.scheduled_departure_at ? new Date(p.scheduled_departure_at).toLocaleString() : '';
+                html += `<div style="border:1px solid rgba(80,255,160,.25);border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
+                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${name}</div>
+                    <div style="font-size:10px;color:rgba(255,255,255,.6)">
+                        ${depIcao}${depRwy} <span style="color:#40ffaa">\u2708</span> ${arrIcao}${arrRwy}
+                    </div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${p.departure_airport_name || ''} \u2192 ${p.arrival_airport_name || ''}</div>
+                    ${scheduled ? `<div style="font-size:9px;color:rgba(255,200,0,.6);margin-top:3px">\u{1F552} ${scheduled}</div>` : ''}
+                    <button data-start-plan="${p.id}" style="margin-top:6px;background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit;letter-spacing:.06em">START</button>
+                </div>`;
+            }
+            listEl.innerHTML = html;
+
+            listEl.querySelectorAll('[data-start-plan]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    const planId = (e.currentTarget as HTMLElement).getAttribute('data-start-plan');
+                    if (planId) {
+                        window.location.search = `?flightPlanId=${planId}`;
+                    }
+                });
+            });
         } catch (err) {
             listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
         }
@@ -2968,6 +3125,30 @@ export class FlightSceneSimple extends Scene3D {
         return { lat, lon, hdg };
     }
 
+    private _missionDestForNav(): typeof this._activeFlightPlanNav | null {
+        const m = this._activeMission;
+        if (!m || m.arrival_lat == null || m.arrival_lon == null) return null;
+        return { departure_lat: m.departure_lat, departure_lon: m.departure_lon, arrival_lat: m.arrival_lat, arrival_lon: m.arrival_lon, departure_icao: m.departure_icao, arrival_icao: m.arrival_icao, name: m.mission_title };
+    }
+
+    private _haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const R_NM = 3440.065;
+        const toRad = Math.PI / 180;
+        const dLat = (lat2 - lat1) * toRad;
+        const dLon = (lon2 - lon1) * toRad;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+        return 2 * R_NM * Math.asin(Math.min(1, Math.sqrt(a)));
+    }
+
+    private _initialBearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const toRad = Math.PI / 180;
+        const phi1 = lat1 * toRad, phi2 = lat2 * toRad;
+        const dLon = (lon2 - lon1) * toRad;
+        const y = Math.sin(dLon) * Math.cos(phi2);
+        const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+        return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+    }
+
     private _updateMap(): void {
         if (!this.mapImg) return;
         const now = performance.now();
@@ -3061,6 +3242,65 @@ export class FlightSceneSimple extends Scene3D {
             ctx.fillText(m.departure_icao, depX + 6, depY - 2);
             ctx.fillText(m.arrival_icao, arrX + 6, arrY - 2);
             ctx.restore();
+        }
+
+        if (this._activeFlightPlanNav) {
+            const fp = this._activeFlightPlanNav;
+            const MAP_ZOOM_FP = 13;
+            const scaleFP = 256 * Math.pow(2, MAP_ZOOM_FP) / 360;
+            const pxPerDegLatFP = scaleFP * Math.cos(lat * Math.PI / 180);
+            const pxPerDegLonFP = scaleFP;
+            const pxPerDegFP = cv.width / (360 / Math.pow(2, MAP_ZOOM_FP));
+
+            const fpDepDx = (fp.departure_lon - lon) * pxPerDegFP;
+            const fpDepDy = -(fp.departure_lat - lat) * pxPerDegLatFP / pxPerDegLonFP * pxPerDegFP;
+            const fpArrDx = (fp.arrival_lon - lon) * pxPerDegFP;
+            const fpArrDy = -(fp.arrival_lat - lat) * pxPerDegLatFP / pxPerDegLonFP * pxPerDegFP;
+
+            const fpDepX = cx + fpDepDx;
+            const fpDepY = cy + fpDepDy;
+            const fpArrX = cx + fpArrDx;
+            const fpArrY = cy + fpArrDy;
+
+            ctx.save();
+            ctx.setLineDash([4, 3]);
+            ctx.strokeStyle = 'rgba(80,255,160,0.7)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(fpDepX, fpDepY);
+            ctx.lineTo(fpArrX, fpArrY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.fillStyle = 'rgba(0,200,255,0.9)';
+            ctx.beginPath();
+            ctx.arc(fpDepX, fpDepY, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(255,80,80,0.9)';
+            ctx.beginPath();
+            ctx.arc(fpArrX, fpArrY, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.font = '7px Inter, sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillText(fp.departure_icao, fpDepX + 6, fpDepY - 2);
+            ctx.fillText(fp.arrival_icao, fpArrX + 6, fpArrY - 2);
+            ctx.restore();
+        }
+
+        const nav = this._activeFlightPlanNav ?? this._missionDestForNav();
+        if (this._navInfoEl) {
+            if (nav) {
+                const distNm = this._haversineNm(lat, lon, nav.arrival_lat, nav.arrival_lon);
+                const brgDeg = this._initialBearingDeg(lat, lon, nav.arrival_lat, nav.arrival_lon);
+                if (this._navDestEl) this._navDestEl.textContent = nav.arrival_icao || '\u2014';
+                if (this._navDistEl) this._navDistEl.textContent = `${distNm.toFixed(1)} nm`;
+                if (this._navBrgEl)  this._navBrgEl.textContent  = `${Math.round(brgDeg)}\u00B0`;
+                this._navInfoEl.style.display = 'block';
+            } else {
+                this._navInfoEl.style.display = 'none';
+            }
         }
 
         const coordsEl = document.getElementById('gps-coords');

@@ -12,6 +12,7 @@ export interface PlayerState {
     roll: number;
     onGround?: boolean;
     missionId?: number;
+    flightPlanId?: number;
     aircraftRegistration?: string;
     aircraftId?: number;
     aircraftCode?: string;
@@ -57,7 +58,7 @@ export class MultiplayerClient {
                 this.onNoFlightHoursCb?.();
             }
             if (msg.type === 'flightLogStarted') {
-                console.log(`[FlightLog] STARTED id=${msg.flightLogId} aircraftId=${msg.aircraftId} type=${msg.aircraftType} departureAirportId=${msg.departureAirportId} missionId=${msg.missionId}`);
+                console.log(`[FlightLog] STARTED id=${msg.flightLogId} aircraftId=${msg.aircraftId} type=${msg.aircraftType} departureAirportId=${msg.departureAirportId} missionId=${msg.missionId} flightPlanId=${msg.flightPlanId}`);
             }
             if (msg.type === 'flightLogUpdated') {
                 console.log(`[FlightLog] UPDATED id=${msg.flightLogId} distance=${msg.distanceKm}km/${msg.distanceNm}nm maxAlt=${msg.maxAltitudeFt}ft avgSpd=${msg.avgSpeedKnots}kts routePts=${msg.routePoints}`);

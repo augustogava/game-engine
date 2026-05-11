@@ -67,6 +67,7 @@ CREATE TABLE flight_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,                          -- FK users(id)
   mission_id INT DEFAULT NULL,                   -- FK missions(id), NULL if free flight
+  flight_plan_id INT DEFAULT NULL,               -- FK flight_plans(id), NULL if not from a plan
   departure_airport_id INT NOT NULL,             -- FK airports(id)
   arrival_airport_id INT DEFAULT NULL,           -- FK airports(id)
   departure_time DATETIME NOT NULL,
@@ -358,7 +359,7 @@ Content-Type: application/json
 }
 ```
 
-Only `departure_airport_id` is required. `mission_id` links the flight to a mission.
+Only `departure_airport_id` is required. `mission_id` links the flight to a mission. `flight_plan_id` links it to a flight plan.
 
 **Response:** `201`
 ```json

@@ -25,6 +25,7 @@ if (token) {
     localStorage.setItem('token', token);
 }
 
+const flightPlanId = params.get('flightPlanId');
 params.delete('token');
 const cleanSearch = params.toString();
 history.replaceState(null, '', window.location.pathname + (cleanSearch ? `?${cleanSearch}` : ''));
@@ -54,17 +55,37 @@ scene.onSpawned = () => {
     dismissLoading();
 };
 
-game.start(scene);
+(async () => {
+    if (flightPlanId && token) {
+        try {
+            loadingStatus.textContent = 'Loading flight plan...';
+            const res = await fetch(`/api/flight-plans/${encodeURIComponent(flightPlanId)}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (res.ok) {
+                const plan = await res.json();
+                scene.setFlightPlanSpawn(plan);
+                console.log(`[flight-main] Flight plan ${flightPlanId} loaded for spawn`);
+            } else {
+                console.warn(`[flight-main] Flight plan ${flightPlanId} fetch failed: ${res.status}`);
+            }
+        } catch (err) {
+            console.error('[flight-main] Flight plan fetch error:', err);
+        }
+    }
 
-if (token) {
-    scene.initMultiplayer(token, () => {
-        console.warn('[flight-main] Auth failure — redirecting to login');
-        window.location.href = WEBSITE_LOGIN_URL;
-    }, () => {
-        console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
-        window.location.href = FLIGHT_HOURS_URL;
-    });
-}
+    game.start(scene);
+
+    if (token) {
+        scene.initMultiplayer(token, () => {
+            console.warn('[flight-main] Auth failure — redirecting to login');
+            window.location.href = WEBSITE_LOGIN_URL;
+        }, () => {
+            console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
+            window.location.href = FLIGHT_HOURS_URL;
+        });
+    }
+})();
 
 setInterval(() => {
     if (!sceneReady && (scene as any).spawned) {
