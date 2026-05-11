@@ -960,6 +960,24 @@ const server = http.createServer(async (req, res) => {
         return proxyToMainApi(`/api/user-aircrafts/${routeParams.id}/acquire`, req, res, await parseBody(req));
     }
 
+    // ── Avatar proxy (same-origin for canvas CORS) ────────────────────────
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/avatar/:id'))) {
+        if (!MAIN_API_URL) { res.writeHead(404); res.end(); return; }
+        try {
+            const resp = await fetch(`${MAIN_API_URL}/api/user/${routeParams.id}/avatar-image`);
+            if (!resp.ok) { res.writeHead(resp.status); res.end(); return; }
+            const contentType = resp.headers.get('content-type') || 'image/png';
+            const buffer = Buffer.from(await resp.arrayBuffer());
+            res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=300' });
+            res.end(buffer);
+        } catch (err) {
+            console.error(`[API] Avatar proxy error:`, err.message);
+            res.writeHead(502);
+            res.end();
+        }
+        return;
+    }
+
     // Static files from dist/
     let staticPath = decodeURIComponent(urlPath);
     if (staticPath === '/') staticPath = '/index.html';
@@ -1023,7 +1041,7 @@ async function fetchPlayerInfo(userId) {
         const player = Array.isArray(data.players) ? data.players.find(p => p.userId === userId) : null;
         const info = {
             username: player?.username || null,
-            avatarUrl: player?.avatarUrl || null,
+            avatarUrl: player?.avatarUrl ? `/api/avatar/${userId}` : null,
             fetchedAt: Date.now(),
         };
         playerInfoCache.set(userId, info);
