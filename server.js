@@ -1002,6 +1002,38 @@ const server = http.createServer(async (req, res) => {
     });
 });
 
+// ── Fetch player info from main API ──────────────────────────────────────────
+const playerInfoCache = new Map();
+const PLAYER_INFO_CACHE_TTL = 300000;
+
+async function fetchPlayerInfo(userId) {
+    const cached = playerInfoCache.get(userId);
+    if (cached && (Date.now() - cached.fetchedAt) < PLAYER_INFO_CACHE_TTL) {
+        return cached;
+    }
+    if (!MAIN_API_URL) return { username: null, avatarUrl: null };
+    try {
+        const resp = await fetch(`${MAIN_API_URL}/api/user/batch-info`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userIds: [userId] }),
+        });
+        if (!resp.ok) return { username: null, avatarUrl: null };
+        const data = await resp.json();
+        const player = Array.isArray(data.players) ? data.players.find(p => p.userId === userId) : null;
+        const info = {
+            username: player?.username || null,
+            avatarUrl: player?.avatarUrl || null,
+            fetchedAt: Date.now(),
+        };
+        playerInfoCache.set(userId, info);
+        return info;
+    } catch (err) {
+        console.error(`[API] fetchPlayerInfo error for user ${userId}:`, err.message);
+        return { username: null, avatarUrl: null };
+    }
+}
+
 // ── WebSocket multiplayer ────────────────────────────────────────────────────
 const players = new Map();
 const joinAttempts = new Map();
@@ -1113,6 +1145,7 @@ wss.on('connection', (ws) => {
                     ws,
                     state: null,
                     username,
+                    avatarUrl: null,
                     sessionStart: Date.now(),
                     lastPersist: Date.now(),
                     distanceNm: 0,
@@ -1138,6 +1171,14 @@ wss.on('connection', (ws) => {
                     statsRecalculated: false,
                     onGroundCount: 0,
                     lastFlightEndTime: 0,
+                });
+
+                fetchPlayerInfo(playerId).then(info => {
+                    const entry = players.get(playerId);
+                    if (entry) {
+                        if (info.username) entry.username = info.username;
+                        entry.avatarUrl = info.avatarUrl;
+                    }
                 });
 
                 if (dbPool) {
@@ -1358,7 +1399,7 @@ setInterval(() => {
         const others = [];
         for (const [otherId, otherEntry] of players) {
             if (otherId !== selfId && otherEntry.state) {
-                others.push({ ...otherEntry.state, username: otherEntry.username });
+                others.push({ ...otherEntry.state, username: otherEntry.username, avatarUrl: otherEntry.avatarUrl });
             }
         }
         try {
