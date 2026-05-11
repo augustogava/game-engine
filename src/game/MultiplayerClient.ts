@@ -33,6 +33,7 @@ export class MultiplayerClient {
     private onCountChangeCb: CountChangeCallback | null = null;
     private onAuthFailureCb: (() => void) | null = null;
     private onNoFlightHoursCb: (() => void) | null = null;
+    private _onFlightLogEndedCb: ((msg: any) => void) | null = null;
     private _onlineCount = 0;
 
     constructor(token: string) {
@@ -65,6 +66,7 @@ export class MultiplayerClient {
             }
             if (msg.type === 'flightLogEnded') {
                 console.log(`[FlightLog] ENDED id=${msg.flightLogId} status=${msg.status} distance=${msg.distanceKm}km/${msg.distanceNm}nm maxAlt=${msg.maxAltitudeFt}ft avgSpd=${msg.avgSpeedKnots}kts landingFpm=${msg.landingRateFpm} arrivalAirportId=${msg.arrivalAirportId}`);
+                this._onFlightLogEndedCb?.(msg);
             }
             if (msg.type === 'flightLogSkipped') {
                 console.warn(`[FlightLog] SKIPPED reason=${msg.reason} received=${msg.received}`);
@@ -116,6 +118,10 @@ export class MultiplayerClient {
 
     onNoFlightHours(cb: () => void): void {
         this.onNoFlightHoursCb = cb;
+    }
+
+    onFlightLogEnded(cb: (msg: any) => void): void {
+        this._onFlightLogEndedCb = cb;
     }
 
     dispose(): void {

@@ -147,6 +147,7 @@ interface RemotePlayer {
 const G_ACCEL          = 9.81;
 const ANGULAR_DAMPING  = 0.5;
 const GROUND_Y         = 6;
+const CRASH_VS_THRESHOLD_MS = -12;
 
 // ── ISA atmosphere ────────────────────────────────────────────────────────────
 function getAirDensity(altitudeM: number): number {
@@ -386,6 +387,8 @@ export class FlightSceneSimple extends Scene3D {
     private _navDestEl: HTMLElement | null = null;
     private _navDistEl: HTMLElement | null = null;
     private _navBrgEl:  HTMLElement | null = null;
+    private _crashed = false;
+    private _crashOverlayEl: HTMLElement | null = null;
     private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string } | null = null;
 
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
@@ -465,6 +468,7 @@ export class FlightSceneSimple extends Scene3D {
     update(dt: number): void {
         if (!this.spawned) return;
         if (this.tiles) this.tiles.update();
+        if (this._crashed) return;
         
         this._handleInput(dt);
         
@@ -520,6 +524,7 @@ export class FlightSceneSimple extends Scene3D {
             return;
         }
         this._activeFlightPlanId = Number(plan.id);
+        this._patchFlightPlanStatus(this._activeFlightPlanId, 'in_progress');
         this._pendingFlightPlanLat = Number(plan.dep_rwy_latitude);
         this._pendingFlightPlanLon = Number(plan.dep_rwy_longitude);
         this._pendingFlightPlanHdg = Number(plan.dep_rwy_heading);
@@ -597,6 +602,17 @@ export class FlightSceneSimple extends Scene3D {
 
         if (onAuthFailure) this.mpClient.onAuthFailure(onAuthFailure);
         if (onNoFlightHours) this.mpClient.onNoFlightHours(onNoFlightHours);
+
+        this.mpClient.onFlightLogEnded((msg) => {
+            if (!this._activeFlightPlanId) return;
+            if (msg.status === 'landed') {
+                this._patchFlightPlanStatus(this._activeFlightPlanId, 'completed');
+                this._activeFlightPlanId = null;
+            } else if (msg.status === 'crashed' || msg.status === 'cancelled') {
+                this._patchFlightPlanStatus(this._activeFlightPlanId, 'cancelled');
+                this._activeFlightPlanId = null;
+            }
+        });
 
         if (this.dbgMpUserId) this.dbgMpUserId.textContent = '…';
         this.mpClient.connect();
@@ -1996,6 +2012,21 @@ export class FlightSceneSimple extends Scene3D {
         });
     }
 
+    private _triggerCrash(): void {
+        this._crashed = true;
+        this.velocity.setAll(0);
+        this.angularVelocity.setAll(0);
+        this.thrust = 0;
+        if (this._crashOverlayEl) this._crashOverlayEl.style.display = 'block';
+        console.log('[Crash] Ground impact detected — respawning in 3s');
+        const RESPAWN_DELAY_MS = 3000;
+        setTimeout(() => {
+            if (this._crashOverlayEl) this._crashOverlayEl.style.display = 'none';
+            this._crashed = false;
+            this._spawnPlane();
+        }, RESPAWN_DELAY_MS);
+    }
+
     private _spawnPlane(): void {
         if (!this.planeRoot) return;
         const cfg = this.aircraftConfig;
@@ -2249,6 +2280,10 @@ export class FlightSceneSimple extends Scene3D {
         if (pos.y <= groundLevel) {
             pos.y = groundLevel;
             const downSpeed = this.velocity.y;
+            if (downSpeed < CRASH_VS_THRESHOLD_MS) {
+                this._triggerCrash();
+                return;
+            }
             if (downSpeed < 0) {
                 this.velocity.y = 0;
                 if (downSpeed < -5) {
@@ -2455,6 +2490,12 @@ export class FlightSceneSimple extends Scene3D {
 </div>
 <div id="hud-utc" style="position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
+<div id="crash-overlay" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(180,0,0,.35);z-index:500;pointer-events:none">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
+    <div style="font-family:'Orbitron',monospace;font-size:36px;color:#ff2200;letter-spacing:.3em;text-shadow:0 0 30px rgba(255,0,0,.8);animation:stallPulse 0.8s ease-in-out infinite">CRASHED</div>
+    <div style="font-family:'Inter',sans-serif;font-size:12px;color:rgba(255,255,255,.5);margin-top:12px;letter-spacing:.1em">Respawning...</div>
+  </div>
+</div>
 
 <!-- Left Panel - Airspeed & Engine side by side -->
 <div class="hud-panel-left">
@@ -2585,6 +2626,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudThrPct   = document.getElementById('hud-thr-pct')!;
         this.hudAttitude = document.getElementById('bb-att')!;
         this.hudWarning  = document.getElementById('hw')!;
+        this._crashOverlayEl = document.getElementById('crash-overlay');
         this.hudFps      = document.getElementById('hfps')!;
         this.hudOnline   = document.getElementById('h-online')!;
         this.hudFlapVal  = document.getElementById('bb-flp')!;
@@ -2769,7 +2811,7 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         try {
-            const res = await fetch('/api/flight-plans?is_active=1', {
+            const res = await fetch('/api/flight-plans', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) {
@@ -2814,6 +2856,22 @@ export class FlightSceneSimple extends Scene3D {
             });
         } catch (err) {
             listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+        }
+    }
+
+    private async _patchFlightPlanStatus(planId: number, status: string): Promise<void> {
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) return;
+        try {
+            const res = await fetch(`/api/flight-plans/${planId}/status`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status }),
+            });
+            if (!res.ok) console.warn(`[FlightPlan] PATCH status=${status} failed: ${res.status}`);
+            else console.log(`[FlightPlan] Plan ${planId} status -> ${status}`);
+        } catch (err) {
+            console.error('[FlightPlan] PATCH status error:', err);
         }
     }
 
