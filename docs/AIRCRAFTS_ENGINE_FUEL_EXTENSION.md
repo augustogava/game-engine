@@ -18,6 +18,7 @@ This spec is consumed by the **Admin API team** (the team that owns the database
 | §8 Gear mechanics fields (`ALTER TABLE`, seed UPDATEs) | **PENDING** — run the statements in §8.1 and §8.2 |
 | §8.4 API response for `gear_spring_k` / `gear_damping_c` | PENDING (Admin API) |
 | §9 Thrust re-tuning (`max_thrust_n` for DC-8 / C172) | **PENDING** — run the statement in §9.2 |
+| §10 Wing loading re-tuning (DC-8 `mass_kg` / `fuel_capacity_kg`) | **PENDING** — run the statement in §10.2 |
 
 ---
 
@@ -368,7 +369,87 @@ No schema change. Only the existing `max_thrust_n` column values are changed. Ga
 
 ---
 
-## 10. What is intentionally NOT in scope here
+## 10. Wing-loading re-tuning (`mass_kg` / `fuel_capacity_kg`) — PENDING
+
+After §9 was applied, in-flight testing showed the DC-8 still could not climb beyond ~1000 ft. The plane stabilised at ~100 KT but in a stalled-attitude phugoid cycle. Root cause was **excessive wing loading**, not thrust.
+
+### 10.1 Why this is needed
+
+The seeded DC-8 has `mass_kg = 10000` + `fuel_capacity_kg = 23000` = **33000 kg total** with only **76 m² total wing area** (38 m² per wing in `aircraft_surfaces`). With the lift model (`lift_slope = 5.5`, `stall_alpha = 0.26 rad`, AR = 7.5), `Cl_max ≈ 1.23`. Stall speed becomes:
+
+```
+v_stall = √( W / (½·ρ·Cl_max·S) )
+        = √( 33000·9.81 / (0.5 · 1.225 · 1.23 · 76) )
+        = 75.2 m/s ≈ 146 KT
+```
+
+Pilots could not accelerate the aircraft past 100 KT in climb attitude — drag at the high AoA needed to support weight at that speed equals the available thrust, and the aircraft sits on the back side of the power curve forever.
+
+Two ways out:
+
+1. Increase wing area (would require multi-row updates in `aircraft_surfaces`).
+2. **Reduce mass / fuel weight** (single-row update in `aircrafts`). **This is the chosen path.**
+
+### 10.2 Seed update
+
+```sql
+UPDATE aircrafts SET
+    mass_kg          = 5000.00,    -- was 10000
+    fuel_capacity_kg = 8000.00     -- was 23000
+WHERE code = 'dc8';
+```
+
+### 10.3 Verification
+
+```sql
+SELECT code, mass_kg, fuel_capacity_kg, max_thrust_n,
+       ROUND(SQRT((mass_kg + fuel_capacity_kg) * 9.81 / (0.5 * 1.225 * 1.23 * 76)) * 1.94384, 1) AS v_stall_kt_clean,
+       ROUND(max_thrust_n / ((mass_kg + fuel_capacity_kg) * 9.81), 3) AS twr_full
+FROM aircrafts WHERE code = 'dc8';
+```
+
+Expected after the UPDATE:
+
+```
+dc8   mass=5000.00  fuel=8000.00  thrust=160000.00  v_stall_kt_clean≈92.5  twr_full=1.253
+```
+
+Result: clean stall drops from ~146 KT to ~92 KT, so the DC-8 can sustain level flight at 100+ KT and climb out properly. `twr_full` becomes 1.25 (arcade-powerful, similar to a fighter), which is intentional.
+
+### 10.4 Dimensioning formula for new aircraft
+
+When seeding a new aircraft, sanity-check the stall speed against expected operating speed:
+
+```
+v_stall_kt = √( (mass_kg + fuel_capacity_kg) · 9.81 / (0.5 · 1.225 · Cl_max · S_wing_total) ) · 1.94384
+```
+
+Where:
+- `S_wing_total` = sum of `area` in `aircraft_surfaces` for left and right wings
+- `Cl_max ≈ lift_slope_eff · (stall_alpha_rad - zero_lift_aoa)`, with `lift_slope_eff = lift_slope · AR / (AR + 2 · (AR + 4) / (AR + 2))`
+
+Rule of thumb: target `v_stall_kt < 0.65 × typical_cruise_kt`. Otherwise the aircraft will be stuck on the back side of the power curve at low speeds.
+
+### 10.5 C172 stall margin (OPTIONAL)
+
+The C172 in DB uses real-world airfoil parameters (`lift_slope = 5.2`, `stall_alpha_rad = 0.28`), which produces a calculated clean stall of **~62 KT**. The real C172 publishes a stall of 48 KT — the difference comes from leading-edge geometry and finite-wing tip effects that our finite-wing model doesn't fully reproduce.
+
+Raising `stall_alpha_rad` to **0.40** (23°) drops the clean stall to **~51 KT**, matching real publications:
+
+```sql
+-- OPTIONAL: bring C172 clean stall down to real-world value (~51 KT)
+UPDATE aircrafts SET stall_alpha_rad = 0.40 WHERE code = 'c172';
+```
+
+Recalculation: `Cl_max = 3.90 × (0.40 + 0.03) = 1.68`, so `v_stall = √(12311 / (0.5·1.225·1.68·16.2)) ≈ 26.4 m/s ≈ 51 KT`.
+
+### 10.6 Backwards compatibility
+
+No schema change. Only existing column values change. The lift / drag model in `FlightSceneSimple.ts` requires no code change.
+
+---
+
+## 11. What is intentionally NOT in scope here
 
 - Per-engine geometry (position/axis per engine). Total `max_thrust_n` keeps the existing semantics of "total thrust along body forward". A later spec may add an `aircraft_engines` child table.
 - Engine thermodynamic state (MAP, CHT, EGT, mixture lever value, magneto position). Those are runtime telemetry, not aircraft-definition data, and stay on the client.
