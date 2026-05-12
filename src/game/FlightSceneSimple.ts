@@ -28,7 +28,7 @@ const MAGNETO_BOTH  = 3;
 
 const BEST_POWER_MIX        = 0.7;
 const MAGNETO_SINGLE_FACTOR = 0.96;
-const GEAR_MAX_TRAVEL_M     = 0.8;
+const GEAR_MAX_TRAVEL_M     = 1.5;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -2683,8 +2683,11 @@ export class FlightSceneSimple extends Scene3D {
                 if (groundSpeed > 0.5) {
                     const wm2 = this.planeRoot.getWorldMatrix();
                     const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm2).normalize();
-                    this.velocity.x = fwd.x * groundSpeed;
-                    this.velocity.z = fwd.z * groundSpeed;
+                    const fwdHorizLen = Math.sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
+                    if (fwdHorizLen > 0.01) {
+                        this.velocity.x = (fwd.x / fwdHorizLen) * groundSpeed;
+                        this.velocity.z = (fwd.z / fwdHorizLen) * groundSpeed;
+                    }
                 }
             }
         }
