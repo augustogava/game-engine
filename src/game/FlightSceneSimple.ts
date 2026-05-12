@@ -35,6 +35,7 @@ const GEAR_STATE_RETRACTING = 1;
 const GEAR_STATE_UP         = 2;
 const GEAR_STATE_EXTENDING  = 3;
 const GEAR_INSTANT_TRANSITION_MS = 1500;
+const SPAWN_SNAP_FRAMES = 90;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -394,6 +395,7 @@ export class FlightSceneSimple extends Scene3D {
     private gearState: number = GEAR_STATE_DOWN;
     private gearKeyLockG = false;
     private _gearTransitionStartMs = 0;
+    private _spawnSnapFramesLeft = 0;
 
     private mpClient: MultiplayerClient | null = null;
     private remotePlayers = new Map<string, RemotePlayer>();
@@ -2333,6 +2335,7 @@ export class FlightSceneSimple extends Scene3D {
         this.gearCompression = new Array(cfg.gear_positions.length).fill(0);
         this.gearState = GEAR_STATE_DOWN;
         this._gearTransitionStartMs = 0;
+        this._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
         if (this._gearUpAnimGroup) this._gearUpAnimGroup.stop();
         if (this._gearDownAnimGroup) this._gearDownAnimGroup.stop();
         if (cfg.engine_type === ENGINE_TYPE_PISTON) {
@@ -2540,27 +2543,35 @@ export class FlightSceneSimple extends Scene3D {
 
         const gearDeployed = this.gearState === GEAR_STATE_DOWN || this.gearState === GEAR_STATE_EXTENDING;
 
-        // ── Spawn / terrain-rise safety snap (only when gear deployed) ────
-        if (gearDeployed) {
-            const groundLevelNow = this.tiles ? this.terrainY : GROUND_Y;
-            let maxBury = 0;
-            for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
-                const gp = cfg.gear_positions[gi];
-                const wheelY = pos.y + toWorld(new BABYLON.Vector3(gp.x, gp.y, gp.z)).y;
-                const bury = groundLevelNow - wheelY;
-                if (bury > maxBury) maxBury = bury;
-            }
-            if (maxBury > GEAR_MAX_TRAVEL_M) {
-                const nGearsSnap = Math.max(1, cfg.gear_positions.length);
-                const sitMassSnap = cfg.mass_kg + (this.fuelRemaining || 0);
-                const eqComp = Math.min(
-                    GEAR_MAX_TRAVEL_M * 0.5,
-                    (sitMassSnap * G_ACCEL) / (nGearsSnap * cfg.gear_spring_k),
-                );
-                pos.y += (maxBury - eqComp);
-                if (this.velocity.y < 0) this.velocity.y = 0;
-                this.angularVelocity.set(0, 0, 0);
-                console.warn(`[Gear] Terrain rose ${maxBury.toFixed(2)}m below plane; snapped pos.y +${(maxBury - eqComp).toFixed(2)}m (target comp ${eqComp.toFixed(3)}m)`);
+        // ── Spawn safety snap (ONLY during initial spawn settle window) ───
+        // This handles the case where the physics terrain ray returns a
+        // higher altitude than the spawn position (airport elevation > 0).
+        // After the spawn window, in-flight terrain interactions are handled
+        // purely by oleo compression + crash detection, so the snap never
+        // fires during flight and never resets user input/angular velocity.
+        if (this._spawnSnapFramesLeft > 0) {
+            this._spawnSnapFramesLeft--;
+            if (gearDeployed) {
+                const groundLevelNow = this.tiles ? this.terrainY : GROUND_Y;
+                let maxBury = 0;
+                for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
+                    const gp = cfg.gear_positions[gi];
+                    const wheelY = pos.y + toWorld(new BABYLON.Vector3(gp.x, gp.y, gp.z)).y;
+                    const bury = groundLevelNow - wheelY;
+                    if (bury > maxBury) maxBury = bury;
+                }
+                if (maxBury > GEAR_MAX_TRAVEL_M) {
+                    const nGearsSnap = Math.max(1, cfg.gear_positions.length);
+                    const sitMassSnap = cfg.mass_kg + (this.fuelRemaining || 0);
+                    const eqComp = Math.min(
+                        GEAR_MAX_TRAVEL_M * 0.5,
+                        (sitMassSnap * G_ACCEL) / (nGearsSnap * cfg.gear_spring_k),
+                    );
+                    pos.y += (maxBury - eqComp);
+                    if (this.velocity.y < 0) this.velocity.y = 0;
+                    this.angularVelocity.set(0, 0, 0);
+                    console.warn(`[Gear/spawn] Terrain rose ${maxBury.toFixed(2)}m below plane; snapped pos.y +${(maxBury - eqComp).toFixed(2)}m (target comp ${eqComp.toFixed(3)}m)`);
+                }
             }
         }
         const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;

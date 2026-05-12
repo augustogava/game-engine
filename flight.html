@@ -516,15 +516,17 @@
         if (loadingNode && loadingNode.parentNode) {
             const obs = new MutationObserver(() => {
                 if (!document.getElementById('loading')) {
-                    showKeysHelper();
+                    if (!keysHelperDismissed) showKeysHelper();
                     obs.disconnect();
                 }
             });
             obs.observe(loadingNode.parentNode, { childList: true });
         } else {
-            showKeysHelper();
+            if (!keysHelperDismissed) showKeysHelper();
         }
-        setTimeout(() => { if (!document.getElementById('loading')) showKeysHelper(); }, 22000);
+        setTimeout(() => {
+            if (!document.getElementById('loading') && !keysHelperDismissed) showKeysHelper();
+        }, 22000);
     </script>
 </body>
 
