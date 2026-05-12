@@ -3918,22 +3918,18 @@ export class FlightSceneSimple extends Scene3D {
         this.hudBrakeVal.textContent = this.brakesOn ? 'ON' : 'OFF';
         this.hudBrakeVal.style.color = this.brakesOn ? '#ff4040' : '';
 
-        const isJetHud = this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOFAN
-                      || this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOJET;
         if (this.hudGearRow) {
-            this.hudGearRow.style.display = isJetHud ? '' : 'none';
-            if (isJetHud) {
-                const gs = this.gearState;
-                const label = gs === GEAR_STATE_DOWN ? 'DOWN'
-                    : gs === GEAR_STATE_UP ? 'UP'
-                    : gs === GEAR_STATE_RETRACTING ? 'RET...'
-                    : 'EXT...';
-                const color = gs === GEAR_STATE_DOWN ? '#50ff80'
-                    : gs === GEAR_STATE_UP ? '#888'
-                    : '#ffcc00';
-                this.hudGearState.textContent = label;
-                this.hudGearState.style.color = color;
-            }
+            this.hudGearRow.style.display = '';
+            const gs = this.gearState;
+            const label = gs === GEAR_STATE_DOWN ? 'DOWN'
+                : gs === GEAR_STATE_UP ? 'UP'
+                : gs === GEAR_STATE_RETRACTING ? 'RET...'
+                : 'EXT...';
+            const color = gs === GEAR_STATE_DOWN ? '#50ff80'
+                : gs === GEAR_STATE_UP ? '#888'
+                : '#ffcc00';
+            this.hudGearState.textContent = label;
+            this.hudGearState.style.color = color;
         }
 
         const wm = this.planeRoot.getWorldMatrix();

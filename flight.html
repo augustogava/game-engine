@@ -163,7 +163,25 @@
             color: #40ffaa;
             margin: 0;
         }
-        
+        #debug-toggle {
+            position: fixed;
+            top: 36px; right: 14px;
+            width: 32px; height: 32px;
+            background: rgba(2, 10, 20, 0.85);
+            border: 1px solid rgba(64, 255, 170, 0.3);
+            border-radius: 4px;
+            color: #40ffaa;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-family: monospace;
+            font-size: 16px;
+            z-index: 10001;
+            transition: border-color .2s, box-shadow .2s, background .2s;
+        }
+        #debug-toggle:hover {
+            border-color: rgba(64, 255, 170, 0.7);
+            box-shadow: 0 0 12px rgba(64, 255, 170, 0.3);
+        }
         .debug-form {
             display: flex; flex-direction: column; gap: 8px;
         }
@@ -187,6 +205,7 @@
         .debug-btn:hover { background: #00ccff; }
 
         @media(max-width:768px){
+            #debug-toggle{display:none!important}
             #debug-ui{display:none!important}
         }
 
@@ -259,12 +278,17 @@
         <div class="kh-group"><span class="kh-label">Roll</span><kbd>&larr;</kbd><kbd>&rarr;</kbd></div>
         <div class="kh-group"><span class="kh-label">Yaw</span><kbd>Q</kbd><kbd>E</kbd></div>
         <div class="kh-group"><span class="kh-label">Flaps</span><kbd>5</kbd><kbd>6</kbd></div>
+        <div class="kh-group"><span class="kh-label">Trim Pitch</span><kbd>7</kbd><kbd>8</kbd></div>
+        <div class="kh-group"><span class="kh-label">Trim Yaw</span><kbd>9</kbd><kbd>0</kbd></div>
         <div class="kh-group"><span class="kh-label">Brake</span><kbd>B</kbd></div>
         <div class="kh-group"><span class="kh-label">Gear</span><kbd>G</kbd></div>
         <div class="kh-group"><span class="kh-label">Respawn</span><kbd>R</kbd></div>
     </div>
 
-    <!-- Debug UI Panel -->
+    <!-- Settings toggle button (also Shift+D) -->
+    <div id="debug-toggle" title="Settings (Shift+D)">&#9881;</div>
+
+    <!-- Debug UI Panel (toggle with Shift+D or the gear button) -->
     <div id="debug-ui" class="minimized">
         <header>
             <h3>LOCATION</h3>
@@ -424,6 +448,22 @@
             dest.searchParams.set('lng', lngInput.value.trim());
             window.location.href = dest.toString();
         });
+
+        // --- Settings panel toggle (gear icon + Shift+D) ---
+        const dbgUi = document.getElementById('debug-ui');
+        const dbgToggleBtn = document.getElementById('debug-toggle');
+        if (dbgToggleBtn && dbgUi) {
+            dbgToggleBtn.addEventListener('click', () => {
+                dbgUi.classList.toggle('minimized');
+            });
+        }
+        if (dbgUi) {
+            window.addEventListener('keydown', (e) => {
+                if (e.shiftKey && e.code === 'KeyD') {
+                    dbgUi.classList.toggle('minimized');
+                }
+            });
+        }
 
         // --- Graphics settings collapse toggle ---
         const gfxHeader = document.getElementById('gfx-header');
