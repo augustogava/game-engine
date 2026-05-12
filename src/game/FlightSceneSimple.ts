@@ -30,6 +30,12 @@ const BEST_POWER_MIX        = 0.7;
 const MAGNETO_SINGLE_FACTOR = 0.96;
 const GEAR_MAX_TRAVEL_M     = 1.5;
 
+const GEAR_STATE_DOWN       = 0;
+const GEAR_STATE_RETRACTING = 1;
+const GEAR_STATE_UP         = 2;
+const GEAR_STATE_EXTENDING  = 3;
+const GEAR_INSTANT_TRANSITION_MS = 1500;
+
 interface AircraftSurfaceConfig {
     surface_index: number;
     label: string;
@@ -90,6 +96,7 @@ interface AircraftConfig {
     gear_positions: { x: number; y: number; z: number }[];
     fuselage_side_area: number;
     fuselage_cn_beta: number;
+    gear_drag_cd?: number;
 }
 
 const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
@@ -122,7 +129,7 @@ const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
         { x: -3, y: -1.5, z: -0.5 },
         { x: 3, y: -1.5, z: -0.5 },
     ],
-    fuselage_side_area: 80, fuselage_cn_beta: -0.1,
+    fuselage_side_area: 80, fuselage_cn_beta: -0.1, gear_drag_cd: 0,
 };
 
 async function fetchAircraftConfig(aircraftId: number): Promise<AircraftConfig> {
@@ -382,6 +389,11 @@ export class FlightSceneSimple extends Scene3D {
     private mixtureKeyLockPlus = false;
     private mixtureKeyLockMinus = false;
     private magnetoKeyLockN = false;
+    private _gearUpAnimGroup: BABYLON.AnimationGroup | null = null;
+    private _gearDownAnimGroup: BABYLON.AnimationGroup | null = null;
+    private gearState: number = GEAR_STATE_DOWN;
+    private gearKeyLockG = false;
+    private _gearTransitionStartMs = 0;
 
     private mpClient: MultiplayerClient | null = null;
     private remotePlayers = new Map<string, RemotePlayer>();
@@ -416,11 +428,14 @@ export class FlightSceneSimple extends Scene3D {
     private dbgMixture!:    HTMLElement;
     private dbgMagneto!:    HTMLElement;
     private dbgGearComp!:   HTMLElement;
+    private dbgGearState!:  HTMLElement;
     private hudCanvas!:    HTMLCanvasElement;
     private hudCtx!:       CanvasRenderingContext2D;
     private hudFlapVal!:   HTMLElement;
     private hudFlapBar!:   HTMLElement;
     private hudBrakeVal!:  HTMLElement;
+    private hudGearRow!:   HTMLElement;
+    private hudGearState!: HTMLElement;
     private hudSpeedVal!:  HTMLElement;
     private hudAltVal!:    HTMLElement;
     private hudTasVal!:    HTMLElement;
@@ -544,6 +559,8 @@ export class FlightSceneSimple extends Scene3D {
                 this._loadedAnimGroups.forEach((g) => g.dispose());
                 this._loadedAnimGroups = [];
                 this._propellerAnimGroup = null;
+                this._gearUpAnimGroup = null;
+                this._gearDownAnimGroup = null;
                 const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
                 if (pivot) pivot.dispose();
                 this._loadAircraftModel(scene);
@@ -602,6 +619,7 @@ export class FlightSceneSimple extends Scene3D {
         this._updateNavLights(dt);
         this._updateClouds();
         this._updatePropellerAnim();
+        this._updateGearState();
         this._updateHUD();
         this._sendOwnState();
         this._updateRemotePlayers();
@@ -621,6 +639,48 @@ export class FlightSceneSimple extends Scene3D {
         group.speedRatio = speedRatio;
         if (!group.isPlaying) {
             group.play(true);
+        }
+    }
+
+    private _toggleGear(): void {
+        if (this.gearState === GEAR_STATE_RETRACTING || this.gearState === GEAR_STATE_EXTENDING) return;
+        if (this.gearState === GEAR_STATE_DOWN) {
+            if (this.isOnGround) {
+                console.warn('[Gear] Cannot retract gear while on ground.');
+                return;
+            }
+            this.gearState = GEAR_STATE_RETRACTING;
+            this._gearTransitionStartMs = performance.now();
+            if (this._gearUpAnimGroup) {
+                this._gearUpAnimGroup.start(false, 1.0, this._gearUpAnimGroup.from, this._gearUpAnimGroup.to);
+            }
+            console.log('[Gear] Retracting...');
+        } else if (this.gearState === GEAR_STATE_UP) {
+            this.gearState = GEAR_STATE_EXTENDING;
+            this._gearTransitionStartMs = performance.now();
+            if (this._gearDownAnimGroup) {
+                this._gearDownAnimGroup.start(false, 1.0, this._gearDownAnimGroup.from, this._gearDownAnimGroup.to);
+            }
+            console.log('[Gear] Extending...');
+        }
+    }
+
+    private _updateGearState(): void {
+        const now = performance.now();
+        if (this.gearState === GEAR_STATE_RETRACTING) {
+            const animDone = this._gearUpAnimGroup ? !this._gearUpAnimGroup.isPlaying : false;
+            const timerDone = (now - this._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
+            if (animDone || (!this._gearUpAnimGroup && timerDone)) {
+                this.gearState = GEAR_STATE_UP;
+                console.log('[Gear] UP.');
+            }
+        } else if (this.gearState === GEAR_STATE_EXTENDING) {
+            const animDone = this._gearDownAnimGroup ? !this._gearDownAnimGroup.isPlaying : false;
+            const timerDone = (now - this._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
+            if (animDone || (!this._gearDownAnimGroup && timerDone)) {
+                this.gearState = GEAR_STATE_DOWN;
+                console.log('[Gear] DOWN.');
+            }
         }
     }
 
@@ -1549,7 +1609,7 @@ export class FlightSceneSimple extends Scene3D {
                     const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
                     if (hasProp) {
                         const propGroup = this._loadedAnimGroups.find((g) =>
-                            /propell?er|prop\b/i.test(g.name)
+                            /propell?er|prop\b|engine[_\s\-.]?start|engine[_\s\-.]?run|spin/i.test(g.name)
                         );
                         if (propGroup) {
                             this._propellerAnimGroup = propGroup;
@@ -1557,6 +1617,20 @@ export class FlightSceneSimple extends Scene3D {
                             console.log(`[FlightSimple] Propeller animation found: "${propGroup.name}" (${propGroup.from}-${propGroup.to})`);
                         } else {
                             console.warn(`[FlightSimple] Aircraft ${cfg.code} is a prop engine but no "propeller" animation found in GLB. Available: ${this._loadedAnimGroups.map((g) => g.name).join(', ') || '(none)'}`);
+                        }
+                    }
+                    const isJet = cfg.engine_type === ENGINE_TYPE_TURBOFAN || cfg.engine_type === ENGINE_TYPE_TURBOJET;
+                    this._gearUpAnimGroup = null;
+                    this._gearDownAnimGroup = null;
+                    if (isJet) {
+                        this._gearUpAnimGroup = this._loadedAnimGroups.find((g) => /gear[_\s]?up|gear[_\s]?retract/i.test(g.name)) ?? null;
+                        this._gearDownAnimGroup = this._loadedAnimGroups.find((g) => /gear[_\s]?down|gear[_\s]?extend/i.test(g.name)) ?? null;
+                        if (this._gearUpAnimGroup) this._gearUpAnimGroup.loopAnimation = false;
+                        if (this._gearDownAnimGroup) this._gearDownAnimGroup.loopAnimation = false;
+                        if (!this._gearUpAnimGroup && !this._gearDownAnimGroup) {
+                            console.log(`[FlightSimple] ${cfg.code}: jet without gear animations — instant transition will be used (G key still works).`);
+                        } else {
+                            console.log(`[FlightSimple] Gear animations found: up="${this._gearUpAnimGroup?.name ?? 'none'}", down="${this._gearDownAnimGroup?.name ?? 'none'}"`);
                         }
                     }
                 }
@@ -2019,6 +2093,14 @@ export class FlightSceneSimple extends Scene3D {
             }
             if (!p('KeyB')) this.brakeKeyLock = false;
 
+            const isJetAc = this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOFAN
+                         || this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOJET;
+            if (isJetAc && p('KeyG') && !this.gearKeyLockG) {
+                this.gearKeyLockG = true;
+                this._toggleGear();
+            }
+            if (!p('KeyG')) this.gearKeyLockG = false;
+
             // Trim: 7/8 = pitch trim nose down/up, 9/0 = yaw trim left/right
             if (p('Digit7') && !this.trimKeyLock7) { this.trimKeyLock7 = true; this.trimPitch = Math.max(-0.15, this.trimPitch - 0.005); }
             if (!p('Digit7')) this.trimKeyLock7 = false;
@@ -2249,6 +2331,10 @@ export class FlightSceneSimple extends Scene3D {
         this.trimPitch = 0;
         this.trimYaw = 0;
         this.gearCompression = new Array(cfg.gear_positions.length).fill(0);
+        this.gearState = GEAR_STATE_DOWN;
+        this._gearTransitionStartMs = 0;
+        if (this._gearUpAnimGroup) this._gearUpAnimGroup.stop();
+        if (this._gearDownAnimGroup) this._gearDownAnimGroup.stop();
         if (cfg.engine_type === ENGINE_TYPE_PISTON) {
             this.mixtureLevel = 0.7;
             this.magnetoSwitch = MAGNETO_BOTH;
@@ -2452,12 +2538,10 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
 
-        // ── Spawn / terrain-rise safety snap ────────────────────────────────
-        // If the gear is buried deeper than the strut can absorb (e.g. 3D tiles
-        // loaded asynchronously and raised the ground after spawn), lift the
-        // plane so the lowest wheel sits on the ground and reset rigid-body
-        // motion to prevent runaway spring forces and pitch instability.
-        {
+        const gearDeployed = this.gearState === GEAR_STATE_DOWN || this.gearState === GEAR_STATE_EXTENDING;
+
+        // ── Spawn / terrain-rise safety snap (only when gear deployed) ────
+        if (gearDeployed) {
             const groundLevelNow = this.tiles ? this.terrainY : GROUND_Y;
             let maxBury = 0;
             for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
@@ -2467,8 +2551,6 @@ export class FlightSceneSimple extends Scene3D {
                 if (bury > maxBury) maxBury = bury;
             }
             if (maxBury > GEAR_MAX_TRAVEL_M) {
-                // Target the static-equilibrium compression so the spring force
-                // matches the weight after snapping (no kick-up shockwave).
                 const nGearsSnap = Math.max(1, cfg.gear_positions.length);
                 const sitMassSnap = cfg.mass_kg + (this.fuelRemaining || 0);
                 const eqComp = Math.min(
@@ -2542,25 +2624,29 @@ export class FlightSceneSimple extends Scene3D {
         const gearForce  = BABYLON.Vector3.Zero();
         const gearTorque = BABYLON.Vector3.Zero();
         let anyGearOnGround = false;
-        for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
-            const gp = cfg.gear_positions[gi];
-            const bodyPos = new BABYLON.Vector3(gp.x, gp.y, gp.z);
-            const worldOffset = toWorld(bodyPos);
-            const wheelY = pos.y + worldOffset.y;
-            const compression = Math.max(0, groundLevel - wheelY);
-            this.gearCompression[gi] = compression;
+        if (gearDeployed) {
+            for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
+                const gp = cfg.gear_positions[gi];
+                const bodyPos = new BABYLON.Vector3(gp.x, gp.y, gp.z);
+                const worldOffset = toWorld(bodyPos);
+                const wheelY = pos.y + worldOffset.y;
+                const compression = Math.max(0, groundLevel - wheelY);
+                this.gearCompression[gi] = compression;
 
-            if (compression > 0) {
-                anyGearOnGround = true;
-                const gearBodyVel = toBody(this.velocity).add(
-                    BABYLON.Vector3.Cross(this.angularVelocity, bodyPos),
-                );
-                const gearWorldVelY = toWorld(gearBodyVel).y;
-                const compressionRate = -gearWorldVelY;
-                const springF = Math.max(0, cfg.gear_spring_k * compression + cfg.gear_damping_c * compressionRate);
-                gearForce.y += springF;
-                gearTorque.addInPlace(BABYLON.Vector3.Cross(bodyPos, toBody(new BABYLON.Vector3(0, springF, 0))));
+                if (compression > 0) {
+                    anyGearOnGround = true;
+                    const gearBodyVel = toBody(this.velocity).add(
+                        BABYLON.Vector3.Cross(this.angularVelocity, bodyPos),
+                    );
+                    const gearWorldVelY = toWorld(gearBodyVel).y;
+                    const compressionRate = -gearWorldVelY;
+                    const springF = Math.max(0, cfg.gear_spring_k * compression + cfg.gear_damping_c * compressionRate);
+                    gearForce.y += springF;
+                    gearTorque.addInPlace(BABYLON.Vector3.Cross(bodyPos, toBody(new BABYLON.Vector3(0, springF, 0))));
+                }
             }
+        } else {
+            this.gearCompression.fill(0);
         }
 
         const computeForces = (vel: BABYLON.Vector3, angVel: BABYLON.Vector3) => {
@@ -2584,10 +2670,11 @@ export class FlightSceneSimple extends Scene3D {
                 totalTorque.addInPlace(torque);
             }
 
-            // Fuselage parasite drag
+            // Fuselage parasite drag (+ gear drag when deployed)
             const spd = vel.length();
             if (spd >= 1.0) {
-                const qBody = 0.5 * airDensity * spd * spd * cfg.fuselage_cd0 * cfg.fuselage_ref_area;
+                const effectiveCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0);
+                const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area;
                 totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
 
                 // Fuselage sideslip Cy/Cn
@@ -2957,6 +3044,7 @@ export class FlightSceneSimple extends Scene3D {
     <div class="hud-instr-group">
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-flp">OFF</span><span class="hud-instr-lbl">FLAPS</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-brk">OFF</span><span class="hud-instr-lbl">BRK</span></div>
+      <div class="hud-instr-item" id="hud-gear-row" style="display:none"><span class="hud-instr-val" id="hud-gear-state">DOWN</span><span class="hud-instr-lbl">GEAR</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="hud-trim-v">0</span><span class="hud-instr-lbl">TRIM</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="hud-thr-pct" style="min-width:22px">0%</span><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span></div>
     </div>
@@ -3038,6 +3126,8 @@ export class FlightSceneSimple extends Scene3D {
         this.hudFlapVal  = document.getElementById('bb-flp')!;
         this.hudFlapBar  = document.getElementById('bb-flp')!;
         this.hudBrakeVal = document.getElementById('bb-brk')!;
+        this.hudGearRow  = document.getElementById('hud-gear-row')!;
+        this.hudGearState = document.getElementById('hud-gear-state')!;
         this.hudTasVal   = document.getElementById('hud-tas-v')!;
         this.hudRpmVal   = document.getElementById('hud-rpm-v')!;
         this.hudRpmNeedle = document.getElementById('hud-rpm-needle')!;
@@ -3414,6 +3504,8 @@ export class FlightSceneSimple extends Scene3D {
             this._loadedAnimGroups.forEach((g) => g.dispose());
             this._loadedAnimGroups = [];
             this._propellerAnimGroup = null;
+            this._gearUpAnimGroup = null;
+            this._gearDownAnimGroup = null;
             const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
             if (pivot) pivot.dispose();
 
@@ -3472,6 +3564,7 @@ export class FlightSceneSimple extends Scene3D {
   <div class="dbg-row"><span class="dbg-lbl">mixture</span><span class="dbg-val" id="dbg-mixture">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">magneto</span><span class="dbg-val" id="dbg-magneto">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">gear comp</span><span class="dbg-val" id="dbg-gearcomp">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">gear state</span><span class="dbg-val" id="dbg-gearstate">\u2014</span></div>
 </div>
 <div class="dbg-section">
   <div class="dbg-title">AIRPLANE</div>
@@ -3524,6 +3617,7 @@ export class FlightSceneSimple extends Scene3D {
         this.dbgMixture    = document.getElementById('dbg-mixture')!;
         this.dbgMagneto    = document.getElementById('dbg-magneto')!;
         this.dbgGearComp   = document.getElementById('dbg-gearcomp')!;
+        this.dbgGearState  = document.getElementById('dbg-gearstate')!;
 
         const buildVerEl = document.getElementById('dbg-buildver');
         if (buildVerEl) buildVerEl.textContent = `v${BUILD_VERSION}`;
@@ -3809,6 +3903,24 @@ export class FlightSceneSimple extends Scene3D {
         this.hudFlapVal.textContent = flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF';
         this.hudBrakeVal.textContent = this.brakesOn ? 'ON' : 'OFF';
         this.hudBrakeVal.style.color = this.brakesOn ? '#ff4040' : '';
+
+        const isJetHud = this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOFAN
+                      || this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOJET;
+        if (this.hudGearRow) {
+            this.hudGearRow.style.display = isJetHud ? '' : 'none';
+            if (isJetHud) {
+                const gs = this.gearState;
+                const label = gs === GEAR_STATE_DOWN ? 'DOWN'
+                    : gs === GEAR_STATE_UP ? 'UP'
+                    : gs === GEAR_STATE_RETRACTING ? 'RET...'
+                    : 'EXT...';
+                const color = gs === GEAR_STATE_DOWN ? '#50ff80'
+                    : gs === GEAR_STATE_UP ? '#888'
+                    : '#ffcc00';
+                this.hudGearState.textContent = label;
+                this.hudGearState.style.color = color;
+            }
+        }
 
         const wm = this.planeRoot.getWorldMatrix();
         BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
@@ -4192,5 +4304,10 @@ export class FlightSceneSimple extends Scene3D {
             ? String(this.magnetoSwitch)
             : 'n/a';
         this.dbgGearComp.textContent = gearCompText;
+
+        const gsLabels = ['DOWN', 'RETRACTING', 'UP', 'EXTENDING'];
+        const gsColors = ['#40ffaa', '#ffcc00', '#888888', '#ffcc00'];
+        this.dbgGearState.textContent = gsLabels[this.gearState] || '??';
+        this.dbgGearState.style.color = gsColors[this.gearState] || '#fff';
     }
 }

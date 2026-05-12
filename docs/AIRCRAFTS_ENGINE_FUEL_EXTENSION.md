@@ -15,6 +15,8 @@ This spec is consumed by the **Admin API team** (the team that owns the database
 | §5 DC-8 seed `UPDATE` | **PENDING** — run the statement in §5 next |
 | §2.1 Validation rules on create/update endpoints | PENDING (Admin API) |
 | §4 API response additions on `GET /api/aircrafts*` | PENDING (Admin API) |
+| §8 Gear mechanics fields (`ALTER TABLE`, seed UPDATEs) | **PENDING** — run the statements in §8.1 and §8.2 |
+| §8.4 API response for `gear_spring_k` / `gear_damping_c` | PENDING (Admin API) |
 
 ---
 
@@ -247,7 +249,59 @@ The Admin API team is free to tune these three numbers; the client only requires
 
 ---
 
-## 8. What is intentionally NOT in scope here
+## 8. Gear mechanics fields — PENDING
+
+Add **two** new nullable columns to `aircrafts` for per-aircraft landing gear stiffness and damping. Without these, the client falls back to hardcoded DC-8 defaults (`gear_spring_k = 200000`, `gear_damping_c = 50000`) which are far too stiff for lighter aircraft like the C172 and cause violent bouncing.
+
+### 8.1 Schema migration
+
+```sql
+ALTER TABLE aircrafts
+    ADD COLUMN gear_spring_k DOUBLE NULL COMMENT 'Spring constant per gear leg (N/m)' AFTER gear_positions,
+    ADD COLUMN gear_damping_c DOUBLE NULL COMMENT 'Damping coefficient per gear leg (N·s/m)' AFTER gear_spring_k;
+```
+
+### 8.2 Seed updates
+
+```sql
+-- DC-8: persist current hardcoded values explicitly
+UPDATE aircrafts
+SET gear_spring_k  = 200000,
+    gear_damping_c = 50000
+WHERE code = 'dc8';
+
+-- C172: dimensioned for 1255 kg, 3 gear legs, 5cm static deflection, damping ratio 0.7
+UPDATE aircrafts
+SET gear_spring_k  = 82000,
+    gear_damping_c = 8200
+WHERE code = 'c172';
+```
+
+### 8.3 Dimensioning formula for new aircraft
+
+Target a static deflection `d` (5 cm is a good default) and a damping ratio `ξ ≈ 0.7` (critically-damped-ish, no oscillation):
+
+```
+gear_spring_k = (mass_kg × 9.81) / (N_gear_legs × d)
+gear_damping_c = 2 × ξ × √(gear_spring_k × mass_kg / N_gear_legs)
+```
+
+Example for C172 (mass=1255 kg, N=3 legs, d=0.05 m):
+- `gear_spring_k = 1255 × 9.81 / (3 × 0.05) ≈ 82,070 N/m`
+- `gear_damping_c = 2 × 0.7 × √(82070 × 418) ≈ 8,200 N·s/m`
+
+### 8.4 API response
+
+Both columns must be returned in `GET /api/aircrafts`, `GET /api/aircrafts/:id`, and the nested `aircraft` object in `GET /api/user-aircrafts`. Type: `number | null`. When `null`, the client uses the DEFAULT_AIRCRAFT_CONFIG fallback.
+
+### 8.5 Validation rules
+
+- Both columns are nullable (backwards-compatible; existing aircraft not yet updated get client-side fallback).
+- When provided, `gear_spring_k > 0` and `gear_damping_c >= 0`.
+
+---
+
+## 9. What is intentionally NOT in scope here
 
 - Per-engine geometry (position/axis per engine). Total `max_thrust_n` keeps the existing semantics of "total thrust along body forward". A later spec may add an `aircraft_engines` child table.
 - Engine thermodynamic state (MAP, CHT, EGT, mixture lever value, magneto position). Those are runtime telemetry, not aircraft-definition data, and stay on the client.

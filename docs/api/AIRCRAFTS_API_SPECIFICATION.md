@@ -99,6 +99,10 @@ CREATE TABLE IF NOT EXISTS aircrafts (
     spawn_airborne_thrust     DECIMAL(4,2) NOT NULL DEFAULT 0.70 COMMENT 'Initial throttle (0-1) when spawning airborne',
     spawn_airborne_speed_ms   DECIMAL(8,1) NOT NULL DEFAULT 100.0 COMMENT 'Initial forward velocity in m/s when spawning airborne',
 
+    -- Gear Mechanics (nullable; client falls back to hardcoded defaults when NULL)
+    gear_spring_k             DOUBLE NULL COMMENT 'Spring constant per gear leg (N/m). Dimensioned for aircraft mass.',
+    gear_damping_c            DOUBLE NULL COMMENT 'Damping coefficient per gear leg (N·s/m). Dimensioned for aircraft mass.',
+
     -- Marketplace / Unlocking
     price                     INT NOT NULL DEFAULT 0 COMMENT 'Price in reward points. 0 = free/starter aircraft',
     min_pilot_rank            VARCHAR(30) NOT NULL DEFAULT 'student' COMMENT 'Minimum pilot rank required to unlock. Values: student, private_pilot, commercial_pilot, airline_pilot, captain, senior_captain',
@@ -345,6 +349,8 @@ List all active aircrafts with their surfaces.
             "spawn_alt_offset_m": 600.0,
             "spawn_airborne_thrust": 0.70,
             "spawn_airborne_speed_ms": 100.0,
+            "gear_spring_k": 200000,
+            "gear_damping_c": 50000,
             "price": 0,
             "min_pilot_rank": "student",
             "is_default": 1,
@@ -544,3 +550,5 @@ Acquire/unlock an aircraft. `:id` is the `aircraft_id`.
 | `fuel_capacity_kg` | Initial fuel mass at spawn. When `> 0`, the real fuel model is activated; when `0`, the client uses the cosmetic countdown (legacy). |
 | `fuel_burn_rate_kg_per_s_max` | Per-second fuel mass drained at full throttle. Engine interpolates linearly with throttle between idle and max. |
 | `fuel_burn_rate_kg_per_s_idle` | Per-second fuel mass drained at idle. Lower bound for fuel burn interpolation. |
+| `gear_spring_k` | Spring constant per gear leg (N/m). Used in gear oleo: `F = k * compression + c * compressionRate`. When `null`, client uses hardcoded default (200000). |
+| `gear_damping_c` | Damping coefficient per gear leg (N·s/m). Used in gear oleo force. When `null`, client uses hardcoded default (50000). |
