@@ -7,6 +7,15 @@ This spec is consumed by the **Admin API team** (the team that owns the database
 - Affected endpoints: `GET /api/aircrafts`, `GET /api/aircrafts/:id`, `GET /api/user-aircrafts`
 - Affected table: `aircrafts`
 
+## Status
+
+| Step | Status |
+|---|---|
+| §2 Schema migration (`ALTER TABLE aircrafts ADD COLUMN ...`) | **APPLIED** |
+| §5 DC-8 seed `UPDATE` | **PENDING** — run the statement in §5 next |
+| §2.1 Validation rules on create/update endpoints | PENDING (Admin API) |
+| §4 API response additions on `GET /api/aircrafts*` | PENDING (Admin API) |
+
 ---
 
 ## 1. Motivation
@@ -24,7 +33,9 @@ In addition, the current API does not expose any fuel data, so the client fakes 
 
 ---
 
-## 2. Schema changes
+## 2. Schema changes — APPLIED
+
+> Status: the migration below has already been executed against the database. It is kept here for reference and for replay on other environments.
 
 Add **nine** new columns to the existing `aircrafts` table. No tables are dropped or renamed. No existing column is changed.
 
@@ -161,9 +172,9 @@ Example delta for a hypothetical Cessna 172 (piston-prop, 1 engine):
 
 ---
 
-## 5. Seed update for the existing Douglas DC-8
+## 5. Seed update for the existing Douglas DC-8 — RUN THIS NEXT
 
-The DC-8 NASA/USAF AFRC research variant uses **four Pratt & Whitney JT3D-3B turbofans**. The seed row created by [AIRCRAFTS_API_SPECIFICATION.md §Seed Data](./AIRCRAFTS_API_SPECIFICATION.md) MUST be updated:
+The DC-8 NASA/USAF AFRC research variant uses **four Pratt & Whitney JT3D-3B turbofans**. The seed row created by [AIRCRAFTS_API_SPECIFICATION.md §Seed Data](./AIRCRAFTS_API_SPECIFICATION.md) MUST be updated. Run this single statement against the production DB after §2 has been applied:
 
 ```sql
 UPDATE aircrafts SET
@@ -177,6 +188,31 @@ UPDATE aircrafts SET
   fuel_burn_rate_kg_per_s_max  = 2.15000,
   fuel_burn_rate_kg_per_s_idle = 0.18000
 WHERE code = 'dc8';
+```
+
+Verify after running:
+
+```sql
+SELECT id, code,
+       engine_type, engine_count,
+       prop_diameter_m, prop_rotation_dir, prop_inertia_kgm2, prop_rpm_max,
+       fuel_capacity_kg, fuel_burn_rate_kg_per_s_max, fuel_burn_rate_kg_per_s_idle
+FROM aircrafts
+WHERE code = 'dc8';
+```
+
+Expected single row:
+
+```
+engine_type                  = turbofan
+engine_count                 = 4
+prop_diameter_m              = NULL
+prop_rotation_dir            = NULL
+prop_inertia_kgm2            = NULL
+prop_rpm_max                 = NULL
+fuel_capacity_kg             = 23000.00
+fuel_burn_rate_kg_per_s_max  = 2.15000
+fuel_burn_rate_kg_per_s_idle = 0.18000
 ```
 
 Numeric justification:
@@ -201,13 +237,13 @@ The Admin API team is free to tune these three numbers; the client only requires
 
 ## 7. Acceptance criteria
 
-1. `DESCRIBE aircrafts` shows the 9 new columns with the types and defaults above.
-2. `GET /api/aircrafts/1` (the DC-8 row) returns `engine_type: 3`, `engine_count: 4`, all `prop_*` fields `null`, `fuel_capacity_kg: 23000.00`, `fuel_burn_rate_kg_per_s_max: 2.15`, `fuel_burn_rate_kg_per_s_idle: 0.18`.
-3. `GET /api/aircrafts` includes the same fields for every row.
-4. `GET /api/user-aircrafts` includes the same fields inside each `aircraft` nested object.
-5. Posting an aircraft with `engine_type='piston'` and `prop_diameter_m: null` returns HTTP 400.
-6. Posting an aircraft with `engine_type='turbofan'` and a non-null `prop_inertia_kgm2` returns HTTP 400.
-7. Posting an aircraft with `engine_count: 0` returns HTTP 400.
+1. **[DONE]** `DESCRIBE aircrafts` shows the 9 new columns with the types and defaults above.
+2. **[PENDING]** `GET /api/aircrafts/1` (the DC-8 row) returns `engine_type: 3`, `engine_count: 4`, all `prop_*` fields `null`, `fuel_capacity_kg: 23000.00`, `fuel_burn_rate_kg_per_s_max: 2.15`, `fuel_burn_rate_kg_per_s_idle: 0.18`.
+3. **[PENDING]** `GET /api/aircrafts` includes the same fields for every row.
+4. **[PENDING]** `GET /api/user-aircrafts` includes the same fields inside each `aircraft` nested object.
+5. **[PENDING]** Posting an aircraft with `engine_type='piston'` and `prop_diameter_m: null` returns HTTP 400.
+6. **[PENDING]** Posting an aircraft with `engine_type='turbofan'` and a non-null `prop_inertia_kgm2` returns HTTP 400.
+7. **[PENDING]** Posting an aircraft with `engine_count: 0` returns HTTP 400.
 
 ---
 

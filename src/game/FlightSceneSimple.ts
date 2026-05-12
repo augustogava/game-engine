@@ -10,6 +10,25 @@ import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
 
 const BUILD_VERSION = 8;
 
+const ENGINE_TYPE_PISTON    = 0;
+const ENGINE_TYPE_TURBOPROP = 1;
+const ENGINE_TYPE_TURBOJET  = 2;
+const ENGINE_TYPE_TURBOFAN  = 3;
+const ENGINE_TYPE_ELECTRIC  = 4;
+
+const FLAP_TYPE_PLAIN   = 0;
+const FLAP_TYPE_SPLIT   = 1;
+const FLAP_TYPE_SLOTTED = 2;
+const FLAP_TYPE_FOWLER  = 3;
+
+const MAGNETO_OFF   = 0;
+const MAGNETO_LEFT  = 1;
+const MAGNETO_RIGHT = 2;
+const MAGNETO_BOTH  = 3;
+
+const BEST_POWER_MIX        = 0.7;
+const MAGNETO_SINGLE_FACTOR = 0.96;
+
 interface AircraftSurfaceConfig {
     surface_index: number;
     label: string;
@@ -55,6 +74,21 @@ interface AircraftConfig {
     spawn_airborne_thrust: number;
     spawn_airborne_speed_ms: number;
     surfaces: AircraftSurfaceConfig[];
+    engine_type: number;
+    engine_count: number;
+    prop_diameter_m: number | null;
+    prop_rotation_dir: number | null;
+    prop_inertia_kgm2: number | null;
+    prop_rpm_max: number | null;
+    fuel_capacity_kg: number;
+    fuel_burn_rate_kg_per_s_max: number;
+    fuel_burn_rate_kg_per_s_idle: number;
+    flap_type: number;
+    gear_spring_k: number;
+    gear_damping_c: number;
+    gear_positions: { x: number; y: number; z: number }[];
+    fuselage_side_area: number;
+    fuselage_cn_beta: number;
 }
 
 const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
@@ -77,6 +111,17 @@ const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
         { surface_index: 2, label: 'h_stab',     pos_x:  0, pos_y: 0, pos_z: -7,   normal_x: 0, normal_y: 1, normal_z: 0, area: 7.2, chord: 1.8, aspect_ratio: 2.2, zero_lift_aoa: 0, flap_fraction: 0.35 },
         { surface_index: 3, label: 'v_stab',     pos_x:  0, pos_y: 1.5, pos_z: -7, normal_x: 1, normal_y: 0, normal_z: 0, area: 7.0, chord: 2.0, aspect_ratio: 1.75, zero_lift_aoa: 0, flap_fraction: 0.35 },
     ],
+    engine_type: ENGINE_TYPE_TURBOFAN, engine_count: 4,
+    prop_diameter_m: null, prop_rotation_dir: null, prop_inertia_kgm2: null, prop_rpm_max: null,
+    fuel_capacity_kg: 23000, fuel_burn_rate_kg_per_s_max: 2.15, fuel_burn_rate_kg_per_s_idle: 0.18,
+    flap_type: FLAP_TYPE_SLOTTED,
+    gear_spring_k: 200000, gear_damping_c: 50000,
+    gear_positions: [
+        { x: 0, y: -1.5, z: 4 },
+        { x: -3, y: -1.5, z: -0.5 },
+        { x: 3, y: -1.5, z: -0.5 },
+    ],
+    fuselage_side_area: 80, fuselage_cn_beta: -0.1,
 };
 
 async function fetchAircraftConfig(aircraftId: number): Promise<AircraftConfig> {
@@ -182,6 +227,7 @@ function computeCoefficients(
     alpha: number, liftSlope: number, skinFriction: number,
     zeroLiftAoA: number, stallAlpha: number, aspectRatio: number,
     oswaldE: number, flapFraction: number, controlInput: number,
+    groundEffectFactor: number, flapType: number,
 ): { cl: number; cd: number } {
     const corrSlope = liftSlope * aspectRatio /
         (aspectRatio + 2 * (aspectRatio + 4) / (aspectRatio + 2));
@@ -191,15 +237,21 @@ function computeCoefficients(
     if (absAlpha <= stallAlpha) {
         cl = corrSlope * (alpha - zeroLiftAoA);
         if (flapFraction > 0 && controlInput !== 0) {
-            cl += Math.sqrt(flapFraction) * corrSlope * controlInput * 0.52;
+            let flapEff = Math.sqrt(flapFraction) * 0.52;
+            if (flapType === FLAP_TYPE_SLOTTED)  flapEff *= 1.25;
+            else if (flapType === FLAP_TYPE_FOWLER) flapEff *= 1.45;
+            else if (flapType === FLAP_TYPE_SPLIT)  flapEff *= 0.85;
+            cl += flapEff * corrSlope * controlInput;
         }
-        cd = skinFriction + (cl * cl) / (Math.PI * aspectRatio * oswaldE);
+        const cdInduced = (cl * cl) / (Math.PI * aspectRatio * oswaldE);
+        cd = skinFriction + cdInduced * groundEffectFactor;
     } else {
         const sign    = alpha >= 0 ? 1 : -1;
         const clFlat  = 2 * sign * Math.sin(absAlpha) * Math.cos(absAlpha);
         const cdFlat  = 2 * Math.sin(absAlpha) * Math.sin(absAlpha);
         const clStall = corrSlope * (stallAlpha * sign - zeroLiftAoA);
-        const cdStall = skinFriction + (clStall * clStall) / (Math.PI * aspectRatio * oswaldE);
+        const cdInducedStall = (clStall * clStall) / (Math.PI * aspectRatio * oswaldE);
+        const cdStall = skinFriction + cdInducedStall * groundEffectFactor;
         const t = Math.min(1, (absAlpha - stallAlpha) / 0.26);
         const s = t * t * (3 - 2 * t);
         cl = clStall * (1 - s) + clFlat * s;
@@ -210,6 +262,7 @@ function computeCoefficients(
 
 function computeSurfaceForces(
     surface: AeroSurface, bodyVelocity: BABYLON.Vector3, airDensity: number,
+    groundEffectFactor: number, flapType: number, propwashSpeedBoost: number,
 ): { force: BABYLON.Vector3; torque: BABYLON.Vector3 } {
     const speed = bodyVelocity.length();
     const zero  = { force: BABYLON.Vector3.Zero(), torque: BABYLON.Vector3.Zero() };
@@ -228,9 +281,11 @@ function computeSurfaceForces(
         alpha, surface.liftSlope, surface.skinFriction,
         surface.zeroLiftAoA, surface.stallAlpha, surface.aspectRatio,
         surface.oswaldE, surface.flapFraction, surface.controlInput,
+        groundEffectFactor, flapType,
     );
 
-    const q     = 0.5 * airDensity * speed * speed * surface.area;
+    const effectiveSpeed = speed + propwashSpeedBoost;
+    const q     = 0.5 * airDensity * effectiveSpeed * effectiveSpeed * surface.area;
     const force = liftDir.scale(cl * q).addInPlace(dragDir.scale(cd * q));
     const torque = BABYLON.Vector3.Cross(surface.position, force);
     return { force, torque };
@@ -310,6 +365,23 @@ export class FlightSceneSimple extends Scene3D {
     private smoothedRoll = 0;
     private smoothedYaw = 0;
 
+    private fuelRemaining = 0;
+    private trimPitch = 0;
+    private trimYaw = 0;
+    private mixtureLevel = 0.7;
+    private magnetoSwitch = MAGNETO_BOTH;
+    private engineRpm = 0;
+    private enginePower = 0;
+    private wingSpan = 30;
+    private gearCompression: number[] = [0, 0, 0];
+    private trimKeyLock7 = false;
+    private trimKeyLock8 = false;
+    private trimKeyLock9 = false;
+    private trimKeyLock0 = false;
+    private mixtureKeyLockPlus = false;
+    private mixtureKeyLockMinus = false;
+    private magnetoKeyLockN = false;
+
     private mpClient: MultiplayerClient | null = null;
     private remotePlayers = new Map<string, RemotePlayer>();
     private hudOnline!: HTMLElement;
@@ -337,6 +409,12 @@ export class FlightSceneSimple extends Scene3D {
     private dbgAltMsl!:    HTMLElement;
     private dbgLatLon!:    HTMLElement;
     private dbgTilesInfo!: HTMLElement;
+    private dbgEngineType!: HTMLElement;
+    private dbgEnginePerf!: HTMLElement;
+    private dbgFuelDbg!:    HTMLElement;
+    private dbgMixture!:    HTMLElement;
+    private dbgMagneto!:    HTMLElement;
+    private dbgGearComp!:   HTMLElement;
     private hudCanvas!:    HTMLCanvasElement;
     private hudCtx!:       CanvasRenderingContext2D;
     private hudFlapVal!:   HTMLElement;
@@ -421,9 +499,22 @@ export class FlightSceneSimple extends Scene3D {
     private hudUtc!: HTMLElement;
 
     private _applyAircraftConfig(cfg: AircraftConfig): void {
+        if (cfg.engine_type == null) cfg.engine_type = DEFAULT_AIRCRAFT_CONFIG.engine_type;
+        if (cfg.engine_count == null) cfg.engine_count = DEFAULT_AIRCRAFT_CONFIG.engine_count;
+        if (cfg.fuel_capacity_kg == null) cfg.fuel_capacity_kg = DEFAULT_AIRCRAFT_CONFIG.fuel_capacity_kg;
+        if (cfg.fuel_burn_rate_kg_per_s_max == null) cfg.fuel_burn_rate_kg_per_s_max = DEFAULT_AIRCRAFT_CONFIG.fuel_burn_rate_kg_per_s_max;
+        if (cfg.fuel_burn_rate_kg_per_s_idle == null) cfg.fuel_burn_rate_kg_per_s_idle = DEFAULT_AIRCRAFT_CONFIG.fuel_burn_rate_kg_per_s_idle;
+        if (cfg.flap_type == null) cfg.flap_type = DEFAULT_AIRCRAFT_CONFIG.flap_type;
+        if (cfg.gear_spring_k == null) cfg.gear_spring_k = DEFAULT_AIRCRAFT_CONFIG.gear_spring_k;
+        if (cfg.gear_damping_c == null) cfg.gear_damping_c = DEFAULT_AIRCRAFT_CONFIG.gear_damping_c;
+        if (!cfg.gear_positions || !cfg.gear_positions.length) cfg.gear_positions = DEFAULT_AIRCRAFT_CONFIG.gear_positions;
+        if (cfg.fuselage_side_area == null) cfg.fuselage_side_area = DEFAULT_AIRCRAFT_CONFIG.fuselage_side_area;
+        if (cfg.fuselage_cn_beta == null) cfg.fuselage_cn_beta = DEFAULT_AIRCRAFT_CONFIG.fuselage_cn_beta;
         this.aircraftConfig = cfg;
         this.FLAP_STEPS = cfg.flap_steps_json || DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
         this.baseZeroLiftAoA = cfg.base_zero_lift_aoa;
+        this.fuelRemaining = cfg.fuel_capacity_kg;
+        this.gearCompression = new Array(cfg.gear_positions.length).fill(0);
     }
 
     onCreate(scene: any, _input: InputManager): void {
@@ -1843,7 +1934,29 @@ export class FlightSceneSimple extends Scene3D {
             }
             if (!p('KeyB')) this.brakeKeyLock = false;
 
-            
+            // Trim: 7/8 = pitch trim nose down/up, 9/0 = yaw trim left/right
+            if (p('Digit7') && !this.trimKeyLock7) { this.trimKeyLock7 = true; this.trimPitch = Math.max(-0.15, this.trimPitch - 0.005); }
+            if (!p('Digit7')) this.trimKeyLock7 = false;
+            if (p('Digit8') && !this.trimKeyLock8) { this.trimKeyLock8 = true; this.trimPitch = Math.min(0.15, this.trimPitch + 0.005); }
+            if (!p('Digit8')) this.trimKeyLock8 = false;
+            if (p('Digit9') && !this.trimKeyLock9) { this.trimKeyLock9 = true; this.trimYaw = Math.max(-0.1, this.trimYaw - 0.005); }
+            if (!p('Digit9')) this.trimKeyLock9 = false;
+            if (p('Digit0') && !this.trimKeyLock0) { this.trimKeyLock0 = true; this.trimYaw = Math.min(0.1, this.trimYaw + 0.005); }
+            if (!p('Digit0')) this.trimKeyLock0 = false;
+
+            // Mixture: Shift+Plus / Shift+Minus (piston only)
+            if (this.aircraftConfig.engine_type === ENGINE_TYPE_PISTON) {
+                if (p('Equal') && !this.mixtureKeyLockPlus) { this.mixtureKeyLockPlus = true; this.mixtureLevel = Math.min(1.0, this.mixtureLevel + 0.05); }
+                if (!p('Equal')) this.mixtureKeyLockPlus = false;
+                if (p('Minus') && !this.mixtureKeyLockMinus) { this.mixtureKeyLockMinus = true; this.mixtureLevel = Math.max(0, this.mixtureLevel - 0.05); }
+                if (!p('Minus')) this.mixtureKeyLockMinus = false;
+
+                if (p('KeyN') && !this.magnetoKeyLockN) {
+                    this.magnetoKeyLockN = true;
+                    this.magnetoSwitch = (this.magnetoSwitch + 1) % 4;
+                }
+                if (!p('KeyN')) this.magnetoKeyLockN = false;
+            }
         }
 
         const lerpAxis = (current: number, target: number): number => {
@@ -1864,6 +1977,12 @@ export class FlightSceneSimple extends Scene3D {
         this.surfaces[1].controlInput = -this.smoothedRoll;
         this.surfaces[2].controlInput = -this.smoothedPitch;
         this.surfaces[3].controlInput = -this.smoothedYaw;
+
+        // Trim tabs: bias the zeroLiftAoA on the relevant surfaces
+        if (this.surfaces.length >= 4) {
+            this.surfaces[2].zeroLiftAoA = (this.aircraftConfig.surfaces[2]?.zero_lift_aoa ?? 0) + this.trimPitch;
+            this.surfaces[3].zeroLiftAoA = (this.aircraftConfig.surfaces[3]?.zero_lift_aoa ?? 0) + this.trimYaw;
+        }
 
         this._applyFlaps();
     }
@@ -2041,6 +2160,17 @@ export class FlightSceneSimple extends Scene3D {
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.planeRoot.rotationQuaternion!);
         this.angularVelocity.set(0, 0, 0);
         this.terrainY = GROUND_Y;
+        this.fuelRemaining = cfg.fuel_capacity_kg;
+        this.trimPitch = 0;
+        this.trimYaw = 0;
+        this.gearCompression = new Array(cfg.gear_positions.length).fill(0);
+        if (cfg.engine_type === ENGINE_TYPE_PISTON) {
+            this.mixtureLevel = 0.7;
+            this.magnetoSwitch = MAGNETO_BOTH;
+        }
+        const gearHeight = cfg.gear_positions.length > 0
+            ? Math.abs(Math.min(...cfg.gear_positions.map(g => g.y)))
+            : 0;
         if (this.spawnAirborne) {
             const altOffset = Math.max(100, cfg.spawn_alt_offset_m);
             this.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
@@ -2052,7 +2182,7 @@ export class FlightSceneSimple extends Scene3D {
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
             this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
         } else {
-            this.planeRoot.position.set(0, GROUND_Y, 0);
+            this.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);
             this.velocity.set(0, 0, 0);
             this.thrust = 0;
             this.flapIndex = cfg.default_flap_index_ground;
@@ -2150,14 +2280,41 @@ export class FlightSceneSimple extends Scene3D {
         if (this.currentFlapDeg > targetDeg) this.currentFlapDeg = Math.max(targetDeg, this.currentFlapDeg - rate * 0.016);
 
         const flapRad = this.currentFlapDeg * Math.PI / 180;
-        const zeroLiftShift = -flapRad * 0.04;
-        const extraFriction = this.currentFlapDeg * 0.0008;
-        const stallBoost = this.currentFlapDeg * 0.0008;
+        const ft = this.aircraftConfig.flap_type;
+
+        let zeroLiftShift: number;
+        let extraFriction: number;
+        let stallBoost: number;
+        let areaScale = 1.0;
+
+        if (ft === FLAP_TYPE_FOWLER) {
+            zeroLiftShift = -flapRad * 0.06;
+            extraFriction = this.currentFlapDeg * 0.0006;
+            stallBoost = this.currentFlapDeg * 0.0014;
+            areaScale = 1.0 + this.currentFlapDeg * 0.004;
+        } else if (ft === FLAP_TYPE_SLOTTED) {
+            zeroLiftShift = -flapRad * 0.05;
+            extraFriction = this.currentFlapDeg * 0.0007;
+            stallBoost = this.currentFlapDeg * 0.0012;
+        } else if (ft === FLAP_TYPE_SPLIT) {
+            zeroLiftShift = -flapRad * 0.035;
+            extraFriction = this.currentFlapDeg * 0.0015;
+            stallBoost = this.currentFlapDeg * 0.0005;
+        } else {
+            zeroLiftShift = -flapRad * 0.04;
+            extraFriction = this.currentFlapDeg * 0.0008;
+            stallBoost = this.currentFlapDeg * 0.0008;
+        }
 
         for (let i = 0; i < 2; i++) {
+            if (!this.surfaces[i]) continue;
             this.surfaces[i].zeroLiftAoA  = this.baseZeroLiftAoA + zeroLiftShift;
             this.surfaces[i].skinFriction = this.aircraftConfig.skin_friction + extraFriction;
             this.surfaces[i].stallAlpha   = this.aircraftConfig.stall_alpha_rad + stallBoost;
+            if (ft === FLAP_TYPE_FOWLER) {
+                const baseCfg = this.aircraftConfig.surfaces[i];
+                if (baseCfg) this.surfaces[i].area = baseCfg.area * areaScale;
+            }
         }
     }
 
@@ -2173,6 +2330,10 @@ export class FlightSceneSimple extends Scene3D {
             stallAlpha: cfg.stall_alpha_rad, zeroLiftAoA: s.zero_lift_aoa,
             oswaldE: cfg.oswald_efficiency, flapFraction: s.flap_fraction, controlInput: 0,
         }));
+        const leftWing = cfg.surfaces.find(s => s.label === 'left_wing');
+        if (leftWing) {
+            this.wingSpan = 2 * Math.sqrt(leftWing.area * leftWing.aspect_ratio);
+        }
     }
 
     // ── Physics (component-based aero with substep) ───────────────────────────
@@ -2193,13 +2354,87 @@ export class FlightSceneSimple extends Scene3D {
         const toBody  = (v: BABYLON.Vector3) => BABYLON.Vector3.TransformNormal(v, invRotMatrix);
 
         const cfg = this.aircraftConfig;
-        const MASS = cfg.mass_kg;
+        const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
+        const isPiston = cfg.engine_type === ENGINE_TYPE_PISTON;
+
+        // ── Engine model ─────────────────────────────────────────────────────
+        let effectiveThrust = this.thrust;
+        if (isPiston) {
+            const mapFraction = this.thrust * (airDensity / 1.225);
+            const mixDelta = Math.abs(this.mixtureLevel - BEST_POWER_MIX);
+            const mixEfficiency = Math.max(0, 1.0 - mixDelta * 2.5);
+            let magFactor = 0;
+            if (this.magnetoSwitch === MAGNETO_BOTH) magFactor = 1.0;
+            else if (this.magnetoSwitch === MAGNETO_LEFT || this.magnetoSwitch === MAGNETO_RIGHT) magFactor = MAGNETO_SINGLE_FACTOR;
+            this.enginePower = Math.max(0, Math.min(1, mapFraction * mixEfficiency * magFactor));
+            this.engineRpm = (cfg.prop_rpm_max || 2700) * Math.sqrt(this.enginePower);
+            effectiveThrust = this.enginePower;
+        } else {
+            this.enginePower = this.thrust;
+            this.engineRpm = Math.round(1200 + this.thrust * 1500);
+        }
+        if (this.fuelRemaining <= 0 && cfg.fuel_capacity_kg > 0) {
+            effectiveThrust = 0;
+            this.enginePower = 0;
+            this.engineRpm = 0;
+        }
+
+        // ── Fuel burn (after engine model so piston uses actual output) ──────
+        if (this.fuelRemaining > 0 && cfg.fuel_capacity_kg > 0) {
+            const burnFraction = isPiston ? this.enginePower : this.thrust;
+            const burnRate = cfg.fuel_burn_rate_kg_per_s_idle +
+                (cfg.fuel_burn_rate_kg_per_s_max - cfg.fuel_burn_rate_kg_per_s_idle) * burnFraction;
+            this.fuelRemaining = Math.max(0, this.fuelRemaining - burnRate * dt);
+        }
+        const MASS = cfg.fuel_capacity_kg > 0
+            ? cfg.mass_kg + this.fuelRemaining
+            : cfg.mass_kg;
         const cIxx = cfg.inertia_xx;
         const cIyy = cfg.inertia_yy;
         const cIzz = cfg.inertia_zz;
 
         const thrustVec = this._tmpFwd;
-        thrustVec.set(0, 0, this.thrust * cfg.max_thrust_n);
+        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n);
+
+        // ── Ground effect ────────────────────────────────────────────────────
+        const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
+        const agl = Math.max(0.1, pos.y - groundLevel);
+        const hb = agl / Math.max(1, this.wingSpan);
+        const hb15 = Math.pow(hb, 1.5);
+        const groundEffectFactor = (33 * hb15) / (1 + 33 * hb15);
+
+        // ── Propwash speed boost on tail surfaces ────────────────────────────
+        let propwashBoost = 0;
+        if (hasProp && effectiveThrust > 0 && cfg.prop_diameter_m) {
+            const discArea = Math.PI * (cfg.prop_diameter_m * 0.5) * (cfg.prop_diameter_m * 0.5);
+            const thr = effectiveThrust * cfg.max_thrust_n;
+            propwashBoost = Math.sqrt(Math.max(0, thr / (0.5 * Math.max(0.01, airDensity) * discArea)));
+        }
+
+        // ── Gear oleo forces (position-dependent, computed once per substep) ─
+        const gearForce  = BABYLON.Vector3.Zero();
+        const gearTorque = BABYLON.Vector3.Zero();
+        let anyGearOnGround = false;
+        for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
+            const gp = cfg.gear_positions[gi];
+            const bodyPos = new BABYLON.Vector3(gp.x, gp.y, gp.z);
+            const worldOffset = toWorld(bodyPos);
+            const wheelY = pos.y + worldOffset.y;
+            const compression = Math.max(0, groundLevel - wheelY);
+            this.gearCompression[gi] = compression;
+
+            if (compression > 0) {
+                anyGearOnGround = true;
+                const gearBodyVel = toBody(this.velocity).add(
+                    BABYLON.Vector3.Cross(this.angularVelocity, bodyPos),
+                );
+                const gearWorldVelY = toWorld(gearBodyVel).y;
+                const compressionRate = -gearWorldVelY;
+                const springF = Math.max(0, cfg.gear_spring_k * compression + cfg.gear_damping_c * compressionRate);
+                gearForce.y += springF;
+                gearTorque.addInPlace(BABYLON.Vector3.Cross(bodyPos, toBody(new BABYLON.Vector3(0, springF, 0))));
+            }
+        }
 
         const computeForces = (vel: BABYLON.Vector3, angVel: BABYLON.Vector3) => {
             const totalForce  = BABYLON.Vector3.Zero();
@@ -2210,22 +2445,61 @@ export class FlightSceneSimple extends Scene3D {
             totalForce.addInPlace(toWorld(thrustVec));
 
             const bodyVel = toBody(vel);
-            for (const surface of this.surfaces) {
+            for (let si = 0; si < this.surfaces.length; si++) {
+                const surface = this.surfaces[si];
                 const pointVel = bodyVel.add(BABYLON.Vector3.Cross(angVel, surface.position));
-                const { force, torque } = computeSurfaceForces(surface, pointVel, airDensity);
+                const isTailSurface = si >= 2;
+                const pwBoost = isTailSurface ? propwashBoost : 0;
+                const { force, torque } = computeSurfaceForces(
+                    surface, pointVel, airDensity, groundEffectFactor, cfg.flap_type, pwBoost,
+                );
                 totalForce.addInPlace(toWorld(force));
                 totalTorque.addInPlace(torque);
             }
 
+            // Fuselage parasite drag
             const spd = vel.length();
             if (spd >= 1.0) {
                 const qBody = 0.5 * airDensity * spd * spd * cfg.fuselage_cd0 * cfg.fuselage_ref_area;
                 totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
+
+                // Fuselage sideslip Cy/Cn
+                const bodyVelNow = toBody(vel);
+                const beta = Math.atan2(bodyVelNow.x, Math.max(1, Math.abs(bodyVelNow.z)));
+                const qSide = 0.5 * airDensity * spd * spd * cfg.fuselage_side_area;
+                const sideForce = -beta * qSide * 0.4;
+                totalForce.addInPlace(toWorld(new BABYLON.Vector3(sideForce, 0, 0)));
+                totalTorque.y += cfg.fuselage_cn_beta * beta * qSide * 5.0;
             }
+
+            // P-factor (prop aircraft only)
+            if (hasProp && effectiveThrust > 0) {
+                const bodyVelNow = toBody(vel);
+                const alphaBody = Math.atan2(-bodyVelNow.y, Math.max(1, Math.abs(bodyVelNow.z)));
+                const propDir = cfg.prop_rotation_dir === 0 ? 1 : -1;
+                totalTorque.y += effectiveThrust * cfg.max_thrust_n * Math.sin(alphaBody) * 0.04 * propDir;
+
+                // Reaction torque
+                totalTorque.x += effectiveThrust * cfg.max_thrust_n * 0.015 * -propDir;
+            }
+
+            // Propeller gyroscopic precession
+            if (hasProp && cfg.prop_inertia_kgm2 && cfg.prop_rpm_max) {
+                const omegaProp = (this.engineRpm / 60) * 2 * Math.PI;
+                const propDir = cfg.prop_rotation_dir === 0 ? 1 : -1;
+                const Hprop = cfg.prop_inertia_kgm2 * omegaProp * propDir;
+                totalTorque.x += angVel.y * Hprop;
+                totalTorque.y -= angVel.x * Hprop;
+            }
+
+            // Gear oleo
+            totalForce.addInPlace(gearForce);
+            totalTorque.addInPlace(gearTorque);
 
             return { force: totalForce, torque: totalTorque };
         };
 
+        // ── Heun integrator ──────────────────────────────────────────────────
         const f1 = computeForces(this.velocity, this.angularVelocity);
 
         const halfDt  = dt * 0.5;
@@ -2271,6 +2545,7 @@ export class FlightSceneSimple extends Scene3D {
         orientation.w += qDot.w * 0.5 * dt;
         orientation.normalize();
 
+        // ── Terrain ray ──────────────────────────────────────────────────────
         if (this.tiles) {
             this._terrainRay.origin.set(pos.x, pos.y + 200, pos.z);
             const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
@@ -2281,24 +2556,21 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
 
-        const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
-        const isOnGround = pos.y <= groundLevel + 0.5;
-        this.isOnGround = isOnGround;
-        if (pos.y <= groundLevel) {
-            pos.y = groundLevel;
-            const downSpeed = this.velocity.y;
-            if (downSpeed < CRASH_VS_THRESHOLD_MS) {
+        // ── Ground contact ───────────────────────────────────────────────────
+        this.isOnGround = anyGearOnGround;
+
+        // Hard floor safety + crash detection
+        const safetyFloor = groundLevel - 0.5;
+        if (pos.y < safetyFloor) {
+            if (this.velocity.y < CRASH_VS_THRESHOLD_MS) {
                 this._triggerCrash();
                 return;
             }
-            if (downSpeed < 0) {
-                this.velocity.y = 0;
-                if (downSpeed < -5) {
-                    this.velocity.scaleInPlace(0.97);
-                    this.angularVelocity.scaleInPlace(0.5);
-                }
-            }
-            
+            pos.y = safetyFloor;
+            if (this.velocity.y < 0) this.velocity.y = 0;
+        }
+
+        if (anyGearOnGround) {
             const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
             if (speed > 0.5) {
                 const rollingFriction = cfg.rolling_friction;
@@ -3062,6 +3334,15 @@ export class FlightSceneSimple extends Scene3D {
   <div class="dbg-row"><span class="dbg-lbl">build</span><span class="dbg-val" id="dbg-buildver" style="color:#ffcc00">\u2014</span></div>
 </div>
 <div class="dbg-section">
+  <div class="dbg-title">POWERTRAIN</div>
+  <div class="dbg-row"><span class="dbg-lbl">engine_type</span><span class="dbg-val" id="dbg-engtype">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">power / rpm</span><span class="dbg-val" id="dbg-engperf">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">fuel kg / %</span><span class="dbg-val" id="dbg-fueldbg">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">mixture</span><span class="dbg-val" id="dbg-mixture">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">magneto</span><span class="dbg-val" id="dbg-magneto">\u2014</span></div>
+  <div class="dbg-row"><span class="dbg-lbl">gear comp</span><span class="dbg-val" id="dbg-gearcomp">\u2014</span></div>
+</div>
+<div class="dbg-section">
   <div class="dbg-title">AIRPLANE</div>
   <div class="dbg-row"><span class="dbg-lbl">POS (x,y,z)</span><span class="dbg-val" id="dbg-ppos">\u2014</span></div>
   <div class="dbg-row"><span class="dbg-lbl">ROT (H,P,R)</span><span class="dbg-val" id="dbg-prot">\u2014</span></div>
@@ -3106,6 +3387,12 @@ export class FlightSceneSimple extends Scene3D {
         this.dbgAltMsl    = document.getElementById('dbg-altmsl')!;
         this.dbgLatLon    = document.getElementById('dbg-latlon')!;
         this.dbgTilesInfo = document.getElementById('dbg-tilesinfo')!;
+        this.dbgEngineType = document.getElementById('dbg-engtype')!;
+        this.dbgEnginePerf = document.getElementById('dbg-engperf')!;
+        this.dbgFuelDbg    = document.getElementById('dbg-fueldbg')!;
+        this.dbgMixture    = document.getElementById('dbg-mixture')!;
+        this.dbgMagneto    = document.getElementById('dbg-magneto')!;
+        this.dbgGearComp   = document.getElementById('dbg-gearcomp')!;
 
         const buildVerEl = document.getElementById('dbg-buildver');
         if (buildVerEl) buildVerEl.textContent = `v${BUILD_VERSION}`;
@@ -3413,14 +3700,16 @@ export class FlightSceneSimple extends Scene3D {
 
         if (this.hudTasVal) this.hudTasVal.textContent = String(speedKts);
 
-        const rpm = Math.round(1200 + this.thrust * 1500);
-        if (this.hudRpmVal) this.hudRpmVal.textContent = String(rpm);
+        if (this.hudRpmVal) this.hudRpmVal.textContent = String(Math.round(this.engineRpm));
         if (this.hudRpmNeedle) {
-            const rpmAngle = -120 + (this.thrust * 240);
+            const rpmMax = this.aircraftConfig.prop_rpm_max || 2700;
+            const rpmAngle = -120 + (this.engineRpm / rpmMax) * 240;
             this.hudRpmNeedle.style.transform = `rotate(${rpmAngle}deg)`;
         }
 
-        const fuelPct = 100 - Math.min(100, Math.round(performance.now() / 60000));
+        const fuelPct = this.aircraftConfig.fuel_capacity_kg > 0
+            ? Math.round((this.fuelRemaining / this.aircraftConfig.fuel_capacity_kg) * 100)
+            : 100;
         if (this.hudFuelVal) this.hudFuelVal.textContent = `${fuelPct}%`;
 
         const aoaDeg = Math.round(pitchDeg);
@@ -3439,7 +3728,7 @@ export class FlightSceneSimple extends Scene3D {
                 : 'linear-gradient(to bottom,rgba(200,100,50,.8),rgba(255,150,100,.6))';
         }
 
-        if (this.hudTrimVal) this.hudTrimVal.textContent = String(Math.round(pitchDeg * 0.5));
+        if (this.hudTrimVal) this.hudTrimVal.textContent = String(Math.round(this.trimPitch * 1000));
         if (this.hudBaroVal) this.hudBaroVal.textContent = '29.92';
 
         if (this.hudHdgVal) {
@@ -3749,5 +4038,22 @@ export class FlightSceneSimple extends Scene3D {
         this.dbgLatLon.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 
         this.dbgTilesInfo.textContent = this.tiles ? 'loaded' : 'none';
+
+        const fuelPct = this.aircraftConfig.fuel_capacity_kg > 0
+            ? (this.fuelRemaining / this.aircraftConfig.fuel_capacity_kg) * 100
+            : 100;
+        const gearCompText = this.gearCompression.length > 0
+            ? this.gearCompression.map((g) => g.toFixed(2)).join(', ')
+            : 'n/a';
+        this.dbgEngineType.textContent = String(this.aircraftConfig.engine_type);
+        this.dbgEnginePerf.textContent = `${Math.round(this.enginePower * 100)}% / ${Math.round(this.engineRpm)}`;
+        this.dbgFuelDbg.textContent = `${this.fuelRemaining.toFixed(1)} / ${fuelPct.toFixed(1)}%`;
+        this.dbgMixture.textContent = this.aircraftConfig.engine_type === ENGINE_TYPE_PISTON
+            ? this.mixtureLevel.toFixed(2)
+            : 'n/a';
+        this.dbgMagneto.textContent = this.aircraftConfig.engine_type === ENGINE_TYPE_PISTON
+            ? String(this.magnetoSwitch)
+            : 'n/a';
+        this.dbgGearComp.textContent = gearCompText;
     }
 }
