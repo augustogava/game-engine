@@ -17,6 +17,7 @@ This spec is consumed by the **Admin API team** (the team that owns the database
 | §4 API response additions on `GET /api/aircrafts*` | PENDING (Admin API) |
 | §8 Gear mechanics fields (`ALTER TABLE`, seed UPDATEs) | **PENDING** — run the statements in §8.1 and §8.2 |
 | §8.4 API response for `gear_spring_k` / `gear_damping_c` | PENDING (Admin API) |
+| §9 Thrust re-tuning (`max_thrust_n` for DC-8 / C172) | **PENDING** — run the statement in §9.2 |
 
 ---
 
@@ -301,7 +302,73 @@ Both columns must be returned in `GET /api/aircrafts`, `GET /api/aircrafts/:id`,
 
 ---
 
-## 9. What is intentionally NOT in scope here
+## 9. Thrust re-tuning (`max_thrust_n`) — PENDING
+
+In-flight testing showed that the original arcade-light `max_thrust_n = 50000 N` for the DC-8 produces a **thrust-to-weight ratio of only 0.15** at the seeded mass (10000 kg empty + 23000 kg fuel = 33000 kg), which is below the minimum a swept-wing jetliner needs to climb. Symptoms: at full throttle the aircraft tops out around 240 KIAS at 1000 ft, loses speed in any pitch-up, and cannot climb sustainably.
+
+### 9.1 Target thrust-to-weight ratios
+
+| Aircraft | Real T/W (empty) | Game target T/W (full fuel) | Calculation |
+|---|---|---|---|
+| DC-8 (4× JT3D) | ~0.50 | **0.49** | `160000 / (33000 × 9.81)` |
+| C172 SP (180 hp) | ~0.23 | **~0.22** | `2700 / ((mass + fuel) × 9.81)` |
+
+### 9.2 Seed updates
+
+```sql
+-- DC-8: bring T/W into the realistic 0.45-0.50 band so climb is possible
+UPDATE aircrafts
+SET max_thrust_n = 160000.00
+WHERE code = 'dc8';
+
+-- Cessna 172 SP: real-world static thrust at sea level (180 hp piston, fixed-pitch prop)
+UPDATE aircrafts
+SET max_thrust_n = 2700.00
+WHERE code = 'c172';
+```
+
+### 9.3 Verification
+
+```sql
+SELECT code, mass_kg, max_thrust_n, fuel_capacity_kg,
+       ROUND(max_thrust_n / (mass_kg * 9.81), 3)                          AS twr_empty,
+       ROUND(max_thrust_n / ((mass_kg + fuel_capacity_kg) * 9.81), 3)     AS twr_full
+FROM aircrafts
+WHERE code IN ('dc8', 'c172');
+```
+
+Expected:
+
+```
+dc8   mass=10000.00  thrust=160000.00  twr_empty=1.631  twr_full=0.494
+c172  mass=<as-seeded>  thrust=2700.00  twr_empty=~0.25  twr_full=~0.22
+```
+
+### 9.4 Dimensioning formula for new aircraft
+
+For new aircraft, target T/W in this band:
+
+```
+T/W (full fuel) =  max_thrust_n / ((mass_kg + fuel_capacity_kg) × 9.81)
+```
+
+| Aircraft class | Target T/W full | Notes |
+|---|---|---|
+| Light piston single | 0.20 – 0.30 | Long takeoff roll OK |
+| Turboprop / regional | 0.30 – 0.40 | |
+| Narrow-body / heavy jet | 0.25 – 0.35 | If real-mass-scaled |
+| Game-scaled jet (light mass) | 0.45 – 0.55 | Compensates for game-mass scaling |
+| Fighter / military | 0.80 – 1.20 | |
+
+So: `max_thrust_n = target_TW × (mass_kg + fuel_capacity_kg) × 9.81`.
+
+### 9.5 Backwards compatibility
+
+No schema change. Only the existing `max_thrust_n` column values are changed. Game client requires no code change.
+
+---
+
+## 10. What is intentionally NOT in scope here
 
 - Per-engine geometry (position/axis per engine). Total `max_thrust_n` keeps the existing semantics of "total thrust along body forward". A later spec may add an `aircraft_engines` child table.
 - Engine thermodynamic state (MAP, CHT, EGT, mixture lever value, magneto position). Those are runtime telemetry, not aircraft-definition data, and stay on the client.

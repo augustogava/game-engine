@@ -4043,7 +4043,6 @@ export class FlightSceneSimple extends Scene3D {
 
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(rollRad);
 
         const horizonY = pitchDeg * ppd;
         const attR = 100;
@@ -4112,23 +4111,27 @@ export class FlightSceneSimple extends Scene3D {
 
         ctx.restore();
 
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rollRad);
         ctx.strokeStyle = 'rgba(0,255,100,0.9)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(cx - 80, cy);
-        ctx.lineTo(cx - 15, cy);
-        ctx.lineTo(cx - 15, cy + 6);
-        ctx.moveTo(cx + 15, cy);
-        ctx.lineTo(cx + 80, cy);
-        ctx.moveTo(cx + 15, cy);
-        ctx.lineTo(cx + 15, cy + 6);
+        ctx.moveTo(-80, 0);
+        ctx.lineTo(-15, 0);
+        ctx.lineTo(-15, 6);
+        ctx.moveTo(15, 0);
+        ctx.lineTo(80, 0);
+        ctx.moveTo(15, 0);
+        ctx.lineTo(15, 6);
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-        ctx.moveTo(cx, cy - 5);
-        ctx.lineTo(cx, cy - 2);
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.moveTo(0, -5);
+        ctx.lineTo(0, -2);
         ctx.stroke();
+        ctx.restore();
 
         const bankR = 80;
         ctx.save();
