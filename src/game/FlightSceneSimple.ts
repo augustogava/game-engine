@@ -28,6 +28,7 @@ const MAGNETO_BOTH  = 3;
 
 const BEST_POWER_MIX        = 0.7;
 const MAGNETO_SINGLE_FACTOR = 0.96;
+const GEAR_MAX_TRAVEL_M     = 0.8;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -2153,7 +2154,7 @@ export class FlightSceneSimple extends Scene3D {
         }, RESPAWN_DELAY_MS);
     }
 
-    private _spawnPlane(): void {
+    private _spawnPlane(forceGround: boolean = false): void {
         if (!this.planeRoot) return;
         const cfg = this.aircraftConfig;
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
@@ -2171,7 +2172,8 @@ export class FlightSceneSimple extends Scene3D {
         const gearHeight = cfg.gear_positions.length > 0
             ? Math.abs(Math.min(...cfg.gear_positions.map(g => g.y)))
             : 0;
-        if (this.spawnAirborne) {
+        const useAirborne = this.spawnAirborne && !forceGround;
+        if (useAirborne) {
             const altOffset = Math.max(100, cfg.spawn_alt_offset_m);
             this.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
             this.thrust = cfg.spawn_airborne_thrust || 0.7;
@@ -2354,6 +2356,39 @@ export class FlightSceneSimple extends Scene3D {
         const toBody  = (v: BABYLON.Vector3) => BABYLON.Vector3.TransformNormal(v, invRotMatrix);
 
         const cfg = this.aircraftConfig;
+
+        // ── Terrain ray (runs FIRST so gear uses fresh terrainY this tick) ───
+        if (this.tiles) {
+            this._terrainRay.origin.set(pos.x, pos.y + 200, pos.z);
+            const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
+                mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
+            );
+            if (hit?.hit && hit.pickedPoint && hit.pickedPoint.y <= pos.y + 10) {
+                this.terrainY = hit.pickedPoint.y + 3;
+            }
+        }
+
+        // ── Spawn / terrain-rise safety snap ────────────────────────────────
+        // If the gear is buried deeper than the strut can absorb (e.g. 3D tiles
+        // loaded asynchronously and raised the ground after spawn), lift the
+        // plane so the lowest wheel sits on the ground and reset rigid-body
+        // motion to prevent runaway spring forces and pitch instability.
+        {
+            const groundLevelNow = this.tiles ? this.terrainY : GROUND_Y;
+            let maxBury = 0;
+            for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
+                const gp = cfg.gear_positions[gi];
+                const wheelY = pos.y + toWorld(new BABYLON.Vector3(gp.x, gp.y, gp.z)).y;
+                const bury = groundLevelNow - wheelY;
+                if (bury > maxBury) maxBury = bury;
+            }
+            if (maxBury > GEAR_MAX_TRAVEL_M) {
+                pos.y += (maxBury - GEAR_MAX_TRAVEL_M);
+                if (this.velocity.y < 0) this.velocity.y = 0;
+                this.angularVelocity.set(0, 0, 0);
+                console.warn(`[Gear] Terrain rose ${maxBury.toFixed(2)}m below plane; snapped pos.y +${(maxBury - GEAR_MAX_TRAVEL_M).toFixed(2)}m`);
+            }
+        }
         const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
         const isPiston = cfg.engine_type === ENGINE_TYPE_PISTON;
 
@@ -2544,17 +2579,6 @@ export class FlightSceneSimple extends Scene3D {
         orientation.z += qDot.z * 0.5 * dt;
         orientation.w += qDot.w * 0.5 * dt;
         orientation.normalize();
-
-        // ── Terrain ray ──────────────────────────────────────────────────────
-        if (this.tiles) {
-            this._terrainRay.origin.set(pos.x, pos.y + 200, pos.z);
-            const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
-                mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
-            );
-            if (hit?.hit && hit.pickedPoint && hit.pickedPoint.y <= pos.y + 10) {
-                this.terrainY = hit.pickedPoint.y + 3;
-            }
-        }
 
         // ── Ground contact ───────────────────────────────────────────────────
         this.isOnGround = anyGearOnGround;
@@ -3287,10 +3311,10 @@ export class FlightSceneSimple extends Scene3D {
             if (pivot) pivot.dispose();
 
             this._loadAircraftModel(this.scene);
-            this._spawnPlane();
+            this._spawnPlane(true);
 
             if (this._aircraftPanelEl) this._aircraftPanelEl.style.display = 'none';
-            console.log(`[Aircraft] Switched to: ${cfg.name} (${cfg.code})`);
+            console.log(`[Aircraft] Switched to: ${cfg.name} (${cfg.code}) — reset to airport ground`);
             this._loadAircraftList();
         } catch (err) {
             console.error('[Aircraft] Switch error:', err);
@@ -3702,8 +3726,14 @@ export class FlightSceneSimple extends Scene3D {
 
         if (this.hudRpmVal) this.hudRpmVal.textContent = String(Math.round(this.engineRpm));
         if (this.hudRpmNeedle) {
+            const et = this.aircraftConfig.engine_type;
+            const isProp = et === ENGINE_TYPE_PISTON || et === ENGINE_TYPE_TURBOPROP;
             const rpmMax = this.aircraftConfig.prop_rpm_max || 2700;
-            const rpmAngle = -120 + (this.engineRpm / rpmMax) * 240;
+            const fraction = isProp
+                ? (rpmMax > 0 ? this.engineRpm / rpmMax : 0)
+                : this.enginePower;
+            const clamped = Math.max(0, Math.min(1, fraction));
+            const rpmAngle = -120 + clamped * 240;
             this.hudRpmNeedle.style.transform = `rotate(${rpmAngle}deg)`;
         }
 
