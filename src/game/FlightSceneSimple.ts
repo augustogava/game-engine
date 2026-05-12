@@ -541,6 +541,9 @@ export class FlightSceneSimple extends Scene3D {
                 console.log(`[Aircraft] Initial fetch returned ${cfg.code}; reloading model (was ${initialModelFile}).`);
                 this._loadedModelMeshes.forEach((m) => m.dispose());
                 this._loadedModelMeshes = [];
+                this._loadedAnimGroups.forEach((g) => g.dispose());
+                this._loadedAnimGroups = [];
+                this._propellerAnimGroup = null;
                 const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
                 if (pivot) pivot.dispose();
                 this._loadAircraftModel(scene);
@@ -598,9 +601,27 @@ export class FlightSceneSimple extends Scene3D {
         this._updateStarTwinkle(dt);
         this._updateNavLights(dt);
         this._updateClouds();
+        this._updatePropellerAnim();
         this._updateHUD();
         this._sendOwnState();
         this._updateRemotePlayers();
+    }
+
+    private _updatePropellerAnim(): void {
+        const group = this._propellerAnimGroup;
+        if (!group) return;
+        const throttle = Math.max(0, Math.min(1, this.thrust));
+        if (throttle <= 0.001) {
+            if (group.isPlaying) group.pause();
+            return;
+        }
+        const PROP_MIN_SPEED = 0.5;
+        const PROP_MAX_SPEED = 6.0;
+        const speedRatio = PROP_MIN_SPEED + (PROP_MAX_SPEED - PROP_MIN_SPEED) * throttle;
+        group.speedRatio = speedRatio;
+        if (!group.isPlaying) {
+            group.play(true);
+        }
     }
 
     onDispose(): void {
@@ -1496,6 +1517,8 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _loadedModelMeshes: BABYLON.AbstractMesh[] = [];
+    private _loadedAnimGroups: BABYLON.AnimationGroup[] = [];
+    private _propellerAnimGroup: BABYLON.AnimationGroup | null = null;
     private _modelLoadVersion = 0;
 
     private _loadAircraftModel(scene: BABYLON.Scene): void {
@@ -1508,14 +1531,35 @@ export class FlightSceneSimple extends Scene3D {
 
         BABYLON.SceneLoader.ImportMesh(
             '', folder, file, scene,
-            (meshes: BABYLON.AbstractMesh[]) => {
+            (meshes: BABYLON.AbstractMesh[], _ps: BABYLON.IParticleSystem[], _sk: BABYLON.Skeleton[], animationGroups: BABYLON.AnimationGroup[]) => {
                 if (!meshes.length) return;
                 if (myVersion !== this._modelLoadVersion) {
                     console.log(`[FlightSimple] Discarding stale model load (${cfg.code}) — newer load in progress.`);
                     meshes.forEach((m) => m.dispose());
+                    if (animationGroups && animationGroups.length) {
+                        animationGroups.forEach((g) => g.dispose());
+                    }
                     return;
                 }
                 this._loadedModelMeshes = meshes;
+                this._loadedAnimGroups = animationGroups || [];
+                this._propellerAnimGroup = null;
+                if (this._loadedAnimGroups.length) {
+                    this._loadedAnimGroups.forEach((g) => g.stop());
+                    const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
+                    if (hasProp) {
+                        const propGroup = this._loadedAnimGroups.find((g) =>
+                            /propell?er|prop\b/i.test(g.name)
+                        );
+                        if (propGroup) {
+                            this._propellerAnimGroup = propGroup;
+                            propGroup.loopAnimation = true;
+                            console.log(`[FlightSimple] Propeller animation found: "${propGroup.name}" (${propGroup.from}-${propGroup.to})`);
+                        } else {
+                            console.warn(`[FlightSimple] Aircraft ${cfg.code} is a prop engine but no "propeller" animation found in GLB. Available: ${this._loadedAnimGroups.map((g) => g.name).join(', ') || '(none)'}`);
+                        }
+                    }
+                }
                 const root = meshes[0];
 
                 const bb = root.getHierarchyBoundingVectors(true);
@@ -3367,6 +3411,9 @@ export class FlightSceneSimple extends Scene3D {
 
             this._loadedModelMeshes.forEach((m) => m.dispose());
             this._loadedModelMeshes = [];
+            this._loadedAnimGroups.forEach((g) => g.dispose());
+            this._loadedAnimGroups = [];
+            this._propellerAnimGroup = null;
             const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
             if (pivot) pivot.dispose();
 
