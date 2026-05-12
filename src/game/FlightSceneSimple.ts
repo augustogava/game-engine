@@ -2057,11 +2057,11 @@ export class FlightSceneSimple extends Scene3D {
         let targetRoll: number;
         let targetYaw: number;
 
-        const SMOOTHING_RATE = this.isMobile ? 0.9 : 1.0;
-        const RETURN_RATE    = this.isMobile ? 0.7 : 0.8;
-        const KEY_PITCH_MAGNITUDE = 0.55;
-        const KEY_ROLL_MAGNITUDE  = 0.14;
-        const KEY_YAW_MAGNITUDE   = 0.60;
+        const SMOOTHING_RATE = this.isMobile ? 0.9 : 1.2;
+        const RETURN_RATE    = this.isMobile ? 0.7 : 0.9;
+        const KEY_PITCH_MAGNITUDE = 0.75;
+        const KEY_ROLL_MAGNITUDE  = 0.15;
+        const KEY_YAW_MAGNITUDE   = 0.65;
 
         if (this.isMobile) {
             targetPitch = this.touchPitchInput * 0.7;

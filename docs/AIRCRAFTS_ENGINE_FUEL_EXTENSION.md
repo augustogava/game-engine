@@ -18,7 +18,7 @@ This spec is consumed by the **Admin API team** (the team that owns the database
 | §8 Gear mechanics fields (`ALTER TABLE`, seed UPDATEs) | **PENDING** — run the statements in §8.1 and §8.2 |
 | §8.4 API response for `gear_spring_k` / `gear_damping_c` | PENDING (Admin API) |
 | §9 Thrust re-tuning (`max_thrust_n` for DC-8 / C172) | **PENDING** — run the statement in §9.2 |
-| §10 Wing loading re-tuning (DC-8 `mass_kg` / `fuel_capacity_kg`) | **PENDING** — run the statement in §10.2 |
+| §10 Wing loading re-tuning (DC-8 `mass_kg` / `fuel_capacity_kg`) | **APPLIED** |
 
 ---
 
