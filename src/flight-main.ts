@@ -30,6 +30,10 @@ params.delete('token');
 const cleanSearch = params.toString();
 history.replaceState(null, '', window.location.pathname + (cleanSearch ? `?${cleanSearch}` : ''));
 
+const FREE_HOUR_FIRST_DELAY_MS = 2000;
+const FREE_HOUR_INTERVAL_MS = 5 * 60 * 1000;
+let freeHourTimer: number | undefined;
+
 let sceneReady = false;
 let dismissed = false;
 let statusInterval: number | undefined;
@@ -84,6 +88,13 @@ scene.onSpawned = () => {
             console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
             window.location.href = FLIGHT_HOURS_URL;
         });
+
+        setTimeout(() => { claimFreeFlightHour(token); }, FREE_HOUR_FIRST_DELAY_MS);
+        freeHourTimer = window.setInterval(() => claimFreeFlightHour(token), FREE_HOUR_INTERVAL_MS);
+
+        window.addEventListener('beforeunload', () => {
+            if (freeHourTimer !== undefined) clearInterval(freeHourTimer);
+        });
     }
 })();
 
@@ -104,3 +115,28 @@ setTimeout(() => {
 }, 20000);
 
 statusInterval = (window as any).__loadingStatusInterval;
+
+async function claimFreeFlightHour(authToken: string): Promise<void> {
+    try {
+        const resp = await fetch('/api/flight-stats/claim-free-hour', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: '{}',
+        });
+        if (!resp.ok) {
+            console.warn(`[FreeHour] Claim failed: HTTP ${resp.status}`);
+            return;
+        }
+        const data = await resp.json();
+        if (typeof data?.granted === 'number' && data.granted > 0) {
+            console.log(`[FreeHour] Granted ${data.granted}h (reward_type=${data.reward_type}, total=${data.free_flight_hours_given_total}, remaining=${data.free_flight_hours_remaining_limit})`);
+        } else {
+            console.log(`[FreeHour] No grant (reason_code=${data?.reason_code}, next_available_at=${data?.next_available_at ?? 'null'})`);
+        }
+    } catch (err) {
+        console.warn('[FreeHour] Claim error:', err);
+    }
+}

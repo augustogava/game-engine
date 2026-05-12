@@ -838,6 +838,10 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    if (req.method === 'POST' && urlPath === '/api/flight-stats/claim-free-hour') {
+        return proxyToMainApi('/api/flight-stats/claim-free-hour', req, res, await parseBody(req));
+    }
+
     if (req.method === 'PUT' && urlPath === '/api/flight-stats/recalculate') {
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });

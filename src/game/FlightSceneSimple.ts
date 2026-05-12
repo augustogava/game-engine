@@ -337,7 +337,6 @@ export class FlightSceneSimple extends Scene3D {
     private dbgAltMsl!:    HTMLElement;
     private dbgLatLon!:    HTMLElement;
     private dbgTilesInfo!: HTMLElement;
-    private dbgKeyLock = false;
     private hudCanvas!:    HTMLCanvasElement;
     private hudCtx!:       CanvasRenderingContext2D;
     private hudFlapVal!:   HTMLElement;
@@ -506,7 +505,7 @@ export class FlightSceneSimple extends Scene3D {
     onDispose(): void {
         document.getElementById('flight-hud')?.remove();
         document.getElementById('dbg-panel')?.remove();
-        document.getElementById('dbg-panel-toggle')?.remove();
+        
         document.getElementById('touch-overlay')?.remove();
         document.getElementById('aircraft-btn')?.remove();
         document.getElementById('aircraft-panel')?.remove();
@@ -1844,15 +1843,7 @@ export class FlightSceneSimple extends Scene3D {
             }
             if (!p('KeyB')) this.brakeKeyLock = false;
 
-            if (p('Backquote') && !this.dbgKeyLock) {
-                this.dbgKeyLock = true;
-                if (this.dbgPanel) {
-                    this.dbgPanel.classList.toggle('hidden');
-                    const btn = document.getElementById('dbg-panel-toggle');
-                    if (btn) btn.textContent = this.dbgPanel.classList.contains('hidden') ? 'SHOW DEBUG' : 'HIDE DEBUG';
-                }
-            }
-            if (!p('Backquote')) this.dbgKeyLock = false;
+            
         }
 
         const lerpAxis = (current: number, target: number): number => {
@@ -2453,7 +2444,6 @@ export class FlightSceneSimple extends Scene3D {
 
 @media(max-width:768px){
 #hfps{display:none}
-#dbg-panel-toggle{display:none!important}
 #hud-utc{font-size:8px!important;letter-spacing:.08em!important}
 #flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
 #gps-map{width:140px!important;height:140px!important;top:2px!important;left:2px!important}
@@ -3049,9 +3039,6 @@ export class FlightSceneSimple extends Scene3D {
   backdrop-filter:blur(12px);box-shadow:0 0 24px rgba(0,255,128,.08);
   display:flex;gap:20px;font-size:10px;max-width:95vw;overflow-x:auto;}
 #dbg-panel.hidden{display:none}
-#dbg-panel-toggle{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:201;
-  background:rgba(0,20,15,.6);border:1px solid rgba(80,255,160,.3);color:#7df9c8;
-  padding:4px 12px;border-radius:6px;cursor:pointer;font-family:'Inter',monospace;font-size:10px;pointer-events:auto;display:none}
 .dbg-section{display:flex;flex-direction:column;gap:3px;min-width:200px}
 .dbg-title{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.15em;color:rgba(100,240,180,.6);border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:3px;margin-bottom:2px}
 .dbg-row{display:flex;justify-content:space-between;gap:8px}
@@ -3125,15 +3112,10 @@ export class FlightSceneSimple extends Scene3D {
 
         panel.classList.add('hidden');
 
-        const toggleBtn = document.createElement('div');
-        toggleBtn.id = 'dbg-panel-toggle';
-        toggleBtn.textContent = 'SHOW DEBUG';
-        toggleBtn.style.display = 'block';
-        document.body.appendChild(toggleBtn);
-
-        toggleBtn.addEventListener('click', () => {
-            panel.classList.toggle('hidden');
-            toggleBtn.textContent = panel.classList.contains('hidden') ? 'SHOW DEBUG' : 'HIDE DEBUG';
+        window.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.shiftKey && e.code === 'KeyD') {
+                panel.classList.toggle('hidden');
+            }
         });
 
         document.getElementById('dbg-cr')!.addEventListener('input', (e: any) => {
