@@ -68,6 +68,7 @@ scene.onSpawned = () => {
             });
             if (res.ok) {
                 const plan = await res.json();
+                console.log(`[flight-main] Flight plan ${flightPlanId} data:`, { dep_rwy_lat: plan.dep_rwy_latitude, dep_rwy_lon: plan.dep_rwy_longitude, dep_rwy_hdg: plan.dep_rwy_heading, dep_lat: plan.dep_latitude, dep_lon: plan.dep_longitude });
                 scene.setFlightPlanSpawn(plan);
                 console.log(`[flight-main] Flight plan ${flightPlanId} loaded for spawn`);
             } else {

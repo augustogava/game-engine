@@ -263,7 +263,7 @@
         <div class="kh-group"><span class="kh-label">Respawn</span><kbd>R</kbd></div>
     </div>
 
-    <!-- Debug UI Panel (toggle with Shift+D) -->
+    <!-- Debug UI Panel -->
     <div id="debug-ui" class="minimized">
         <header>
             <h3>LOCATION</h3>
@@ -415,13 +415,6 @@
                     geocodeStatus.textContent = 'Search error';
                 }
             }, 600);
-        });
-
-        const dbgUi = document.getElementById('debug-ui');
-        window.addEventListener('keydown', (e) => {
-            if (e.shiftKey && e.code === 'KeyD') {
-                dbgUi.classList.toggle('minimized');
-            }
         });
 
         document.getElementById('dbg-reload').addEventListener('click', () => {

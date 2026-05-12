@@ -532,10 +532,19 @@ export class FlightSceneSimple extends Scene3D {
         this.angularVelocity = BABYLON.Vector3.Zero();
 
         this._applyAircraftConfig(DEFAULT_AIRCRAFT_CONFIG);
+        const initialModelFile = DEFAULT_AIRCRAFT_CONFIG.model_file;
 
         fetchSelectedAircraftConfig().then((cfg) => {
             this._applyAircraftConfig(cfg);
             this._initSurfaces();
+            if (cfg.model_file !== initialModelFile && this.planeRoot) {
+                console.log(`[Aircraft] Initial fetch returned ${cfg.code}; reloading model (was ${initialModelFile}).`);
+                this._loadedModelMeshes.forEach((m) => m.dispose());
+                this._loadedModelMeshes = [];
+                const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
+                if (pivot) pivot.dispose();
+                this._loadAircraftModel(scene);
+            }
             console.log(`[Aircraft] Loaded: ${cfg.name} (${cfg.code})`);
         });
 
@@ -612,16 +621,28 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     setFlightPlanSpawn(plan: any): void {
-        if (plan?.dep_rwy_latitude == null || plan?.dep_rwy_longitude == null || plan?.dep_rwy_heading == null) {
-            console.warn('[FlightPlan] Plan missing dep runway data — skipping spawn override');
+        const hasRunway = plan?.dep_rwy_latitude != null && plan?.dep_rwy_longitude != null && plan?.dep_rwy_heading != null;
+        const hasAirportCenter = plan?.dep_latitude != null && plan?.dep_longitude != null;
+
+        if (!hasRunway && !hasAirportCenter) {
+            console.warn('[FlightPlan] Plan missing both runway and airport coordinates — skipping spawn override');
             return;
         }
+
+        const spawnLat = hasRunway ? Number(plan.dep_rwy_latitude) : Number(plan.dep_latitude);
+        const spawnLon = hasRunway ? Number(plan.dep_rwy_longitude) : Number(plan.dep_longitude);
+        const spawnHdg = hasRunway ? Number(plan.dep_rwy_heading) : Number(plan.dep_rwy_heading ?? 0);
+
+        if (!hasRunway) {
+            console.debug('[FlightPlan] Runway data unavailable, using airport center as spawn position');
+        }
+
         this._activeFlightPlanId = Number(plan.id);
         this._activeFlightPlanArrivalAirportId = plan.arrival_airport_id != null ? Number(plan.arrival_airport_id) : null;
         this._patchFlightPlanStatus(this._activeFlightPlanId, 'in_progress');
-        this._pendingFlightPlanLat = Number(plan.dep_rwy_latitude);
-        this._pendingFlightPlanLon = Number(plan.dep_rwy_longitude);
-        this._pendingFlightPlanHdg = Number(plan.dep_rwy_heading);
+        this._pendingFlightPlanLat = spawnLat;
+        this._pendingFlightPlanLon = spawnLon;
+        this._pendingFlightPlanHdg = spawnHdg;
         if (plan.scheduled_departure_at) {
             const scheduled = new Date(plan.scheduled_departure_at).getTime();
             if (!isNaN(scheduled)) {
@@ -635,8 +656,8 @@ export class FlightSceneSimple extends Scene3D {
         const arrLon = plan.arr_rwy_longitude ?? plan.arr_longitude;
         if (arrLat != null && arrLon != null) {
             this._activeFlightPlanNav = {
-                departure_lat: Number(plan.dep_rwy_latitude),
-                departure_lon: Number(plan.dep_rwy_longitude),
+                departure_lat: spawnLat,
+                departure_lon: spawnLon,
                 arrival_lat: Number(arrLat),
                 arrival_lon: Number(arrLon),
                 departure_icao: plan.departure_icao || '',
@@ -644,7 +665,7 @@ export class FlightSceneSimple extends Scene3D {
                 name: plan.name || '',
             };
         }
-        console.log(`[FlightPlan] Active plan id=${this._activeFlightPlanId}`);
+        console.log(`[FlightPlan] Active plan id=${this._activeFlightPlanId}, spawn lat=${spawnLat} lon=${spawnLon} hdg=${spawnHdg} (runway=${hasRunway})`);
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
@@ -1052,7 +1073,8 @@ export class FlightSceneSimple extends Scene3D {
         const lon = hasPlan ? this._pendingFlightPlanLon! : parseFloat(params.get('lng') || '-46.4745');
         const alt = hasPlan ? (this._pendingFlightPlanAltM! + GROUND_Y) : parseFloat(params.get('alt') || '750');
         this.initialHeading = hasPlan ? this._pendingFlightPlanHdg! : parseFloat(params.get('hdg') || '75');
-        this.spawnAirborne = hasPlan ? false : params.has('lat');
+        const hasFlightPlanParam = params.has('flightPlanId');
+        this.spawnAirborne = (hasPlan || hasFlightPlanParam) ? false : params.has('lat');
         if (hasPlan) console.log(`[FlightPlan] Ground spawn at runway lat=${lat} lon=${lon} hdg=${this.initialHeading}`);
         this.originLat = lat;
         this.originLon = lon;
@@ -1474,6 +1496,7 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _loadedModelMeshes: BABYLON.AbstractMesh[] = [];
+    private _modelLoadVersion = 0;
 
     private _loadAircraftModel(scene: BABYLON.Scene): void {
         const cfg = this.aircraftConfig;
@@ -1481,11 +1504,17 @@ export class FlightSceneSimple extends Scene3D {
         const lastSlash = modelPath.lastIndexOf('/');
         const folder = lastSlash >= 0 ? modelPath.substring(0, lastSlash + 1) : '';
         const file = lastSlash >= 0 ? modelPath.substring(lastSlash + 1) : modelPath;
+        const myVersion = ++this._modelLoadVersion;
 
         BABYLON.SceneLoader.ImportMesh(
             '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[]) => {
                 if (!meshes.length) return;
+                if (myVersion !== this._modelLoadVersion) {
+                    console.log(`[FlightSimple] Discarding stale model load (${cfg.code}) — newer load in progress.`);
+                    meshes.forEach((m) => m.dispose());
+                    return;
+                }
                 this._loadedModelMeshes = meshes;
                 const root = meshes[0];
 
@@ -1497,13 +1526,19 @@ export class FlightSceneSimple extends Scene3D {
                 modelPivot.parent = this.planeRoot;
 
                 root.parent = modelPivot;
+                const scaleFactor = cfg.model_target_size / Math.max(size, 0.1);
+                // Align the visual bottom of the model with the lowest physics
+                // gear position so the wheels touch the ground instead of the
+                // model floating |gear_y| meters above the runway.
+                const gearMinY = cfg.gear_positions.length > 0
+                    ? Math.min(...cfg.gear_positions.map((g) => g.y))
+                    : 0;
                 const offset = center.negate();
-                offset.y = -bb.min.y;
+                offset.y = -bb.min.y + gearMinY / scaleFactor;
                 root.position = offset;
                 root.rotationQuaternion = null;
                 root.rotation = BABYLON.Vector3.Zero();
 
-                const scaleFactor = cfg.model_target_size / Math.max(size, 0.1);
                 modelPivot.scaling.setAll(scaleFactor);
                 modelPivot.rotation = new BABYLON.Vector3(0, cfg.model_rotation_y, 0);
 
@@ -2626,6 +2661,15 @@ export class FlightSceneSimple extends Scene3D {
             orientation.normalize();
 
             this.angularVelocity.z *= 0.05;
+
+            // Pitch damping at taxi speed: prevents the asymmetric tricycle-gear
+            // torque (nose arm >> main arm) from accumulating into a nose-up
+            // flip when the plane is parked/taxiing. Above takeoff roll speed
+            // the elevator is free so rotation works normally.
+            const taxiSpeed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+            if (taxiSpeed < 20) {
+                this.angularVelocity.x *= 0.4;
+            }
 
             const GROUND_YAW_RATE = 1.2;
             const yawInput = this.smoothedYaw;
