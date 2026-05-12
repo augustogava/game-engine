@@ -1604,6 +1604,8 @@ export class FlightSceneSimple extends Scene3D {
                 this._loadedModelMeshes = meshes;
                 this._loadedAnimGroups = animationGroups || [];
                 this._propellerAnimGroup = null;
+                this._gearUpAnimGroup = null;
+                this._gearDownAnimGroup = null;
                 if (this._loadedAnimGroups.length) {
                     this._loadedAnimGroups.forEach((g) => g.stop());
                     const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
@@ -1620,8 +1622,6 @@ export class FlightSceneSimple extends Scene3D {
                         }
                     }
                     const isJet = cfg.engine_type === ENGINE_TYPE_TURBOFAN || cfg.engine_type === ENGINE_TYPE_TURBOJET;
-                    this._gearUpAnimGroup = null;
-                    this._gearDownAnimGroup = null;
                     if (isJet) {
                         this._gearUpAnimGroup = this._loadedAnimGroups.find((g) => /gear[_\s]?up|gear[_\s]?retract/i.test(g.name)) ?? null;
                         this._gearDownAnimGroup = this._loadedAnimGroups.find((g) => /gear[_\s]?down|gear[_\s]?extend/i.test(g.name)) ?? null;
