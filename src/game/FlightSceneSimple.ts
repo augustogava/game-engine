@@ -1527,14 +1527,19 @@ export class FlightSceneSimple extends Scene3D {
 
                 root.parent = modelPivot;
                 const scaleFactor = cfg.model_target_size / Math.max(size, 0.1);
-                // Align the visual bottom of the model with the lowest physics
-                // gear position so the wheels touch the ground instead of the
-                // model floating |gear_y| meters above the runway.
+                // Align the visual bottom of the model with the COMPRESSED gear
+                // position (gear_y + static spring deflection). This way when the
+                // aircraft sits in equilibrium on its struts, the visual wheels
+                // touch the ground instead of floating (DC-8 would sink ~0.5m
+                // and C172 would sit a few cm above without this offset).
                 const gearMinY = cfg.gear_positions.length > 0
                     ? Math.min(...cfg.gear_positions.map((g) => g.y))
                     : 0;
+                const nGears = Math.max(1, cfg.gear_positions.length);
+                const sitMass = cfg.mass_kg + (cfg.fuel_capacity_kg || 0);
+                const staticGearComp = (sitMass * G_ACCEL) / (nGears * cfg.gear_spring_k);
                 const offset = center.negate();
-                offset.y = -bb.min.y + gearMinY / scaleFactor;
+                offset.y = -bb.min.y + (gearMinY + staticGearComp) / scaleFactor;
                 root.position = offset;
                 root.rotationQuaternion = null;
                 root.rotation = BABYLON.Vector3.Zero();
@@ -2399,7 +2404,7 @@ export class FlightSceneSimple extends Scene3D {
                 mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
             );
             if (hit?.hit && hit.pickedPoint && hit.pickedPoint.y <= pos.y + 10) {
-                this.terrainY = hit.pickedPoint.y + 3;
+                this.terrainY = hit.pickedPoint.y;
             }
         }
 
@@ -2418,10 +2423,18 @@ export class FlightSceneSimple extends Scene3D {
                 if (bury > maxBury) maxBury = bury;
             }
             if (maxBury > GEAR_MAX_TRAVEL_M) {
-                pos.y += (maxBury - GEAR_MAX_TRAVEL_M);
+                // Target the static-equilibrium compression so the spring force
+                // matches the weight after snapping (no kick-up shockwave).
+                const nGearsSnap = Math.max(1, cfg.gear_positions.length);
+                const sitMassSnap = cfg.mass_kg + (this.fuelRemaining || 0);
+                const eqComp = Math.min(
+                    GEAR_MAX_TRAVEL_M * 0.5,
+                    (sitMassSnap * G_ACCEL) / (nGearsSnap * cfg.gear_spring_k),
+                );
+                pos.y += (maxBury - eqComp);
                 if (this.velocity.y < 0) this.velocity.y = 0;
                 this.angularVelocity.set(0, 0, 0);
-                console.warn(`[Gear] Terrain rose ${maxBury.toFixed(2)}m below plane; snapped pos.y +${(maxBury - GEAR_MAX_TRAVEL_M).toFixed(2)}m`);
+                console.warn(`[Gear] Terrain rose ${maxBury.toFixed(2)}m below plane; snapped pos.y +${(maxBury - eqComp).toFixed(2)}m (target comp ${eqComp.toFixed(3)}m)`);
             }
         }
         const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
