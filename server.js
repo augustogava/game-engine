@@ -472,11 +472,13 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
                         [entry.userMissionId]);
                     console.log(`[Mission] Failed (wrong airport): user ${userId}, userMission ${entry.userMissionId}`);
                 }
-            } else {
+            } else if (status === 'crashed') {
                 await dbPool.execute(
                     `UPDATE user_missions SET status = 'failed' WHERE id = ?`,
                     [entry.userMissionId]);
                 console.log(`[Mission] Failed (${status}): user ${userId}, userMission ${entry.userMissionId}`);
+            } else {
+                console.log(`[Mission] Kept in_progress (${status}): user ${userId}, userMission ${entry.userMissionId}`);
             }
         } catch (err) {
             console.error(`[DB] Mission auto-update error:`, err.message);
