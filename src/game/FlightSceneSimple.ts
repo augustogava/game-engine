@@ -492,6 +492,13 @@ export class FlightSceneSimple extends Scene3D {
     private _crashed = false;
     private _crashOverlayEl: HTMLElement | null = null;
     private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string } | null = null;
+    private _activeMissionId: number | null = null;
+    private _activeUserMissionId: number | null = null;
+    private _pendingMissionLat: number | null = null;
+    private _pendingMissionLon: number | null = null;
+    private _pendingMissionHdg: number | null = null;
+    private _pendingMissionAltM: number | null = null;
+    private _pendingMissionAirborne = false;
 
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
     private _navGlowLayer: BABYLON.GlowLayer | null = null;
@@ -754,6 +761,45 @@ export class FlightSceneSimple extends Scene3D {
             };
         }
         console.log(`[FlightPlan] Active plan id=${this._activeFlightPlanId}, spawn lat=${spawnLat} lon=${spawnLon} hdg=${spawnHdg} (runway=${hasRunway})`);
+    }
+
+    setMissionSpawn(mission: any, userMissionId: number | null): void {
+        this._activeMissionId = Number(mission.id);
+        this._activeUserMissionId = userMissionId;
+
+        const isDiscovery = mission.type === 'discovery';
+        const isRoute = mission.type === 'route';
+
+        if (isDiscovery && mission.spawn_latitude != null && mission.spawn_longitude != null) {
+            this._pendingMissionLat = Number(mission.spawn_latitude);
+            this._pendingMissionLon = Number(mission.spawn_longitude);
+            this._pendingMissionAltM = mission.spawn_altitude_ft != null ? Number(mission.spawn_altitude_ft) * 0.3048 : 1000;
+            this._pendingMissionHdg = 0;
+            this._pendingMissionAirborne = true;
+        } else if (isRoute && mission.departure_lat != null && mission.departure_lon != null) {
+            this._pendingMissionLat = Number(mission.departure_lat);
+            this._pendingMissionLon = Number(mission.departure_lon);
+            this._pendingMissionHdg = 0;
+            this._pendingMissionAltM = 0;
+            this._pendingMissionAirborne = false;
+        } else {
+            console.warn(`[Mission] Mission ${mission.id} has no spawn coordinates — skipping spawn override`);
+            return;
+        }
+
+        if (mission.arrival_lat != null && mission.arrival_lon != null) {
+            this._activeMission = {
+                departure_lat: this._pendingMissionLat,
+                departure_lon: this._pendingMissionLon,
+                arrival_lat: Number(mission.arrival_lat),
+                arrival_lon: Number(mission.arrival_lon),
+                departure_icao: mission.departure_icao || '',
+                arrival_icao: mission.arrival_icao || '',
+                mission_title: mission.title || '',
+            };
+        }
+
+        console.log(`[Mission] Active mission id=${this._activeMissionId}, type=${mission.type}, spawn lat=${this._pendingMissionLat} lon=${this._pendingMissionLon} airborne=${this._pendingMissionAirborne}`);
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
@@ -1143,6 +1189,7 @@ export class FlightSceneSimple extends Scene3D {
             aircraftCode: this.aircraftConfig.code || undefined,
             aircraftModelFile: this.aircraftConfig.model_file || undefined,
             flightPlanId: this._activeFlightPlanId ?? undefined,
+            missionId: this._activeMissionId ?? undefined,
         });
     }
 
@@ -1157,13 +1204,28 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         const hasPlan = this._pendingFlightPlanLat != null;
-        const lat = hasPlan ? this._pendingFlightPlanLat! : parseFloat(params.get('lat') || '-23.4354');
-        const lon = hasPlan ? this._pendingFlightPlanLon! : parseFloat(params.get('lng') || '-46.4745');
-        const alt = hasPlan ? (this._pendingFlightPlanAltM! + GROUND_Y) : parseFloat(params.get('alt') || '750');
-        this.initialHeading = hasPlan ? this._pendingFlightPlanHdg! : parseFloat(params.get('hdg') || '75');
+        const hasMission = this._pendingMissionLat != null;
+        let lat: number, lon: number, alt: number;
+        if (hasPlan) {
+            lat = this._pendingFlightPlanLat!;
+            lon = this._pendingFlightPlanLon!;
+            alt = this._pendingFlightPlanAltM! + GROUND_Y;
+            this.initialHeading = this._pendingFlightPlanHdg!;
+        } else if (hasMission) {
+            lat = this._pendingMissionLat!;
+            lon = this._pendingMissionLon!;
+            alt = (this._pendingMissionAltM || 0) + GROUND_Y;
+            this.initialHeading = this._pendingMissionHdg || 0;
+        } else {
+            lat = parseFloat(params.get('lat') || '-23.4354');
+            lon = parseFloat(params.get('lng') || '-46.4745');
+            alt = parseFloat(params.get('alt') || '750');
+            this.initialHeading = parseFloat(params.get('hdg') || '75');
+        }
         const hasFlightPlanParam = params.has('flightPlanId');
-        this.spawnAirborne = (hasPlan || hasFlightPlanParam) ? false : params.has('lat');
+        this.spawnAirborne = this._pendingMissionAirborne ? true : ((hasPlan || hasFlightPlanParam) ? false : params.has('lat'));
         if (hasPlan) console.log(`[FlightPlan] Ground spawn at runway lat=${lat} lon=${lon} hdg=${this.initialHeading}`);
+        if (hasMission) console.log(`[Mission] Spawn at lat=${lat} lon=${lon} hdg=${this.initialHeading} airborne=${this._pendingMissionAirborne}`);
         this.originLat = lat;
         this.originLon = lon;
         this.mapApiKey = apiKey;
@@ -3265,17 +3327,30 @@ export class FlightSceneSimple extends Scene3D {
 
             let html = '';
             for (const m of missions) {
+                const mi = m.mission || {};
                 const isActive = m.status === 'in_progress';
                 const borderColor = isActive ? 'rgba(80,255,160,.5)' : 'rgba(255,255,255,.15)';
                 const statusLabel = m.status === 'in_progress' ? 'IN PROGRESS' : 'STARTED';
                 const statusColor = isActive ? '#40ffaa' : '#ffcc00';
+                const mType = m.mission_type || mi.type || '';
+                const depIcao = m.departure_icao || mi.departure_icao || '';
+                const arrIcao = m.arrival_icao || mi.arrival_icao || '';
+                const depName = m.departure_airport_name || mi.departure_airport_name || '';
+                const arrName = m.arrival_airport_name || mi.arrival_airport_name || '';
+                const isRoute = depIcao && arrIcao;
+                let routeHtml = '';
+                if (isRoute) {
+                    routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)">${depIcao} <span style="color:#40ffaa">\u2708</span> ${arrIcao}</div>
+                        <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${depName} \u2192 ${arrName}</div>`;
+                } else if (mType === 'discovery') {
+                    routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)"><span style="color:#40ffaa">\u2708</span> Discovery Flight</div>`;
+                } else {
+                    routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)">${mType || 'Free Flight'}</div>`;
+                }
                 html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
-                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${m.mission_title || 'Mission'}</div>
+                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${m.mission_title || mi.title || 'Mission'}</div>
                     <div style="font-size:9px;color:${statusColor};letter-spacing:.08em;margin-bottom:4px">${statusLabel}</div>
-                    <div style="font-size:10px;color:rgba(255,255,255,.5)">
-                        ${m.departure_icao || '???'} <span style="color:#40ffaa">\u2708</span> ${m.arrival_icao || '???'}
-                    </div>
-                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${m.departure_airport_name || ''} → ${m.arrival_airport_name || ''}</div>
+                    ${routeHtml}
                 </div>`;
             }
             listEl.innerHTML = html;

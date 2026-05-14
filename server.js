@@ -160,10 +160,114 @@ function authenticateRequest(req) {
     try {
         const decoded = jwt.verify(token, SECRET_KEY);
         if (!decoded.id || !decoded.username) return null;
-        return { id: decoded.id, username: decoded.username };
+        return { id: decoded.id, username: decoded.username, isAdmin: !!decoded.isAdmin };
     } catch (_) {
         return null;
     }
+}
+
+function tryAuthenticate(req) {
+    return authenticateRequest(req);
+}
+
+// ── Shared missions SQL fragments ────────────────────────────────────────────
+const MISSION_SELECT = `
+    m.id, m.title, m.description, m.type, m.difficulty,
+    m.departure_airport_id, m.departure_runway_id,
+    m.arrival_airport_id, m.arrival_runway_id,
+    m.spawn_latitude, m.spawn_longitude, m.spawn_altitude_ft,
+    m.distance_nm, m.estimated_duration_min, m.reward_points,
+    m.image_base64, m.is_active, m.is_enabled, m.sort_order,
+    da.name AS departure_airport_name, da.icao_code AS departure_icao,
+    da.latitude AS departure_lat, da.longitude AS departure_lon,
+    aa.name AS arrival_airport_name, aa.icao_code AS arrival_icao,
+    aa.latitude AS arrival_lat, aa.longitude AS arrival_lon,
+    dr.le_ident AS departure_runway_ident, dr.length_ft AS departure_runway_length_ft,
+    ar.le_ident AS arrival_runway_ident, ar.length_ft AS arrival_runway_length_ft`;
+
+const MISSION_JOINS = `
+    FROM missions m
+    LEFT JOIN airports da ON m.departure_airport_id = da.id
+    LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+    LEFT JOIN airport_runways dr ON m.departure_runway_id = dr.id
+    LEFT JOIN airport_runways ar ON m.arrival_runway_id = ar.id`;
+
+function buildMissionNested(row) {
+    return {
+        title: row.mission_title_full || row.title,
+        description: row.mission_description || row.description,
+        type: row.mission_type_full || row.type,
+        difficulty: row.mission_difficulty_full || row.difficulty,
+        distance_nm: row.mission_distance_nm != null ? row.mission_distance_nm : row.distance_nm,
+        estimated_duration_min: row.mission_estimated_duration_min != null ? row.mission_estimated_duration_min : row.estimated_duration_min,
+        reward_points: row.mission_reward_points != null ? row.mission_reward_points : row.reward_points,
+        spawn_latitude: row.mission_spawn_latitude != null ? row.mission_spawn_latitude : row.spawn_latitude,
+        spawn_longitude: row.mission_spawn_longitude != null ? row.mission_spawn_longitude : row.spawn_longitude,
+        spawn_altitude_ft: row.mission_spawn_altitude_ft != null ? row.mission_spawn_altitude_ft : row.spawn_altitude_ft,
+        image_base64: row.mission_image_base64 != null ? row.mission_image_base64 : row.image_base64,
+        is_enabled: row.mission_is_enabled != null ? row.mission_is_enabled : row.is_enabled,
+        departure_airport_name: row.departure_airport_name,
+        departure_icao: row.departure_icao,
+        arrival_airport_name: row.arrival_airport_name,
+        arrival_icao: row.arrival_icao,
+        departure_runway_ident: row.departure_runway_ident,
+        departure_runway_length_ft: row.departure_runway_length_ft,
+        arrival_runway_ident: row.arrival_runway_ident,
+        arrival_runway_length_ft: row.arrival_runway_length_ft,
+    };
+}
+
+const USER_MISSION_SELECT = `
+    um.id, um.user_id, um.mission_id, um.status, um.started_at, um.completed_at, um.score, um.notes,
+    m.title AS mission_title, m.type AS mission_type, m.difficulty AS mission_difficulty,
+    m.title AS mission_title_full, m.description AS mission_description,
+    m.type AS mission_type_full, m.difficulty AS mission_difficulty_full,
+    m.distance_nm AS mission_distance_nm, m.estimated_duration_min AS mission_estimated_duration_min,
+    m.reward_points AS mission_reward_points,
+    m.spawn_latitude AS mission_spawn_latitude, m.spawn_longitude AS mission_spawn_longitude,
+    m.spawn_altitude_ft AS mission_spawn_altitude_ft,
+    m.image_base64 AS mission_image_base64, m.is_enabled AS mission_is_enabled,
+    da.name AS departure_airport_name, da.latitude AS departure_lat, da.longitude AS departure_lon, da.icao_code AS departure_icao,
+    aa.name AS arrival_airport_name, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon, aa.icao_code AS arrival_icao,
+    dr.le_ident AS departure_runway_ident, dr.length_ft AS departure_runway_length_ft,
+    ar.le_ident AS arrival_runway_ident, ar.length_ft AS arrival_runway_length_ft`;
+
+const USER_MISSION_JOINS = `
+    FROM user_missions um
+    JOIN missions m ON um.mission_id = m.id
+    LEFT JOIN airports da ON m.departure_airport_id = da.id
+    LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+    LEFT JOIN airport_runways dr ON m.departure_runway_id = dr.id
+    LEFT JOIN airport_runways ar ON m.arrival_runway_id = ar.id`;
+
+function enrichUserMissionRow(row) {
+    const result = {
+        id: row.id,
+        user_id: row.user_id,
+        mission_id: row.mission_id,
+        status: row.status,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        score: row.score,
+        notes: row.notes,
+        mission_title: row.mission_title,
+        mission_type: row.mission_type,
+        mission_difficulty: row.mission_difficulty,
+        departure_airport_name: row.departure_airport_name,
+        departure_lat: row.departure_lat,
+        departure_lon: row.departure_lon,
+        departure_icao: row.departure_icao,
+        arrival_airport_name: row.arrival_airport_name,
+        arrival_lat: row.arrival_lat,
+        arrival_lon: row.arrival_lon,
+        arrival_icao: row.arrival_icao,
+        departure_runway_ident: row.departure_runway_ident,
+        departure_runway_length_ft: row.departure_runway_length_ft,
+        arrival_runway_ident: row.arrival_runway_ident,
+        arrival_runway_length_ft: row.arrival_runway_length_ft,
+        mission: buildMissionNested(row),
+    };
+    return result;
 }
 
 // ── Proxy to main API ────────────────────────────────────────────────────────
@@ -602,21 +706,23 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && urlPath === '/api/missions') {
         if (!dbPool) return jsonResponse(res, 200, { data: [], total: 0, page: 1, limit: 20 });
+        const user = tryAuthenticate(req);
+        const isAdmin = user && user.isAdmin;
         const page = Math.max(1, parseInt(query.page) || 1);
         const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 20));
         const offset = (page - 1) * limit;
-        let where = 'WHERE m.is_active = 1';
+        const activeFilter = isAdmin && query.is_active !== undefined ? parseInt(query.is_active) : 1;
+        let where = `WHERE m.is_active = ${activeFilter ? 1 : 0}`;
         const params = [];
+        if (!(isAdmin && query.include_disabled === '1')) {
+            where += ' AND m.is_enabled = 1';
+        }
         if (query.type) { where += ' AND m.type = ?'; params.push(query.type); }
         if (query.difficulty) { where += ' AND m.difficulty = ?'; params.push(query.difficulty); }
         try {
             const [[{ total }]] = await dbPool.execute(`SELECT COUNT(*) AS total FROM missions m ${where}`, params);
             const [rows] = await dbPool.execute(
-                `SELECT m.*, da.name AS departure_airport_name, da.latitude AS departure_lat, da.longitude AS departure_lon, da.icao_code AS departure_icao,
-                        aa.name AS arrival_airport_name, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon, aa.icao_code AS arrival_icao
-                 FROM missions m
-                 LEFT JOIN airports da ON m.departure_airport_id = da.id
-                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+                `SELECT ${MISSION_SELECT} ${MISSION_JOINS}
                  ${where} ORDER BY m.sort_order, m.id LIMIT ${limit} OFFSET ${offset}`, params);
             return jsonResponse(res, 200, { data: rows, total, page, limit });
         } catch (err) {
@@ -627,16 +733,15 @@ const server = http.createServer(async (req, res) => {
 
     let routeParams;
     if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/missions/:id'))) {
-        if (!dbPool) return jsonResponse(res, 404, { error: 'Not found' });
+        if (!dbPool) return jsonResponse(res, 404, { error: 'Mission not found' });
+        const user = tryAuthenticate(req);
+        const isAdmin = user && user.isAdmin;
         const { id } = routeParams;
         try {
+            let where = 'WHERE m.id = ? AND m.is_active = 1';
+            if (!isAdmin) where += ' AND m.is_enabled = 1';
             const [rows] = await dbPool.execute(
-                `SELECT m.*, da.name AS departure_airport_name, da.icao_code AS departure_icao, da.latitude AS departure_lat, da.longitude AS departure_lon,
-                        aa.name AS arrival_airport_name, aa.icao_code AS arrival_icao, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon
-                 FROM missions m
-                 LEFT JOIN airports da ON m.departure_airport_id = da.id
-                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
-                 WHERE m.id = ?`, [id]);
+                `SELECT ${MISSION_SELECT} ${MISSION_JOINS} ${where}`, [id]);
             if (!rows.length) return jsonResponse(res, 404, { error: 'Mission not found' });
             return jsonResponse(res, 200, rows[0]);
         } catch (err) {
@@ -647,18 +752,30 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && urlPath === '/api/user-missions') {
         const user = authenticateRequest(req);
-        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!user) return jsonResponse(res, 401, { error: 'Not authenticated' });
         if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
         const body = await parseBody(req);
         if (!body || !body.mission_id) return jsonResponse(res, 400, { error: 'mission_id is required' });
         try {
+            const [missionRows] = await dbPool.execute(
+                `SELECT id, is_active, is_enabled FROM missions WHERE id = ?`, [body.mission_id]);
+            if (!missionRows.length) return jsonResponse(res, 404, { error: 'Mission not found' });
+            if (!missionRows[0].is_active || !missionRows[0].is_enabled) {
+                return jsonResponse(res, 403, { error: 'Mission not available' });
+            }
             const [existing] = await dbPool.execute(
                 `SELECT id FROM user_missions WHERE user_id = ? AND mission_id = ? AND status IN ('started','in_progress')`,
                 [user.id, body.mission_id]);
             if (existing.length) return jsonResponse(res, 409, { error: 'Mission already in progress' });
             const [result] = await dbPool.execute(
-                `INSERT INTO user_missions (user_id, mission_id, status, started_at) VALUES (?, ?, 'started', NOW())`,
+                `INSERT INTO user_missions (user_id, mission_id, status, started_at) VALUES (?, ?, 'in_progress', NOW())`,
                 [user.id, body.mission_id]);
+            const [enrichedRows] = await dbPool.execute(
+                `SELECT ${USER_MISSION_SELECT} ${USER_MISSION_JOINS}
+                 WHERE um.id = ?`, [result.insertId]);
+            if (enrichedRows.length) {
+                return jsonResponse(res, 201, enrichUserMissionRow(enrichedRows[0]));
+            }
             return jsonResponse(res, 201, { id: result.insertId, message: 'Mission started' });
         } catch (err) {
             console.error('[API] POST /api/user-missions error:', err.message);
@@ -672,17 +789,10 @@ const server = http.createServer(async (req, res) => {
         if (!dbPool) return jsonResponse(res, 200, { data: [] });
         try {
             const [rows] = await dbPool.execute(
-                `SELECT um.*, m.title AS mission_title, m.type AS mission_type,
-                        m.difficulty AS mission_difficulty,
-                        da.name AS departure_airport_name, da.latitude AS departure_lat, da.longitude AS departure_lon, da.icao_code AS departure_icao,
-                        aa.name AS arrival_airport_name, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon, aa.icao_code AS arrival_icao
-                 FROM user_missions um
-                 JOIN missions m ON um.mission_id = m.id
-                 LEFT JOIN airports da ON m.departure_airport_id = da.id
-                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
+                `SELECT ${USER_MISSION_SELECT} ${USER_MISSION_JOINS}
                  WHERE um.user_id = ? AND um.status IN ('started','in_progress')
-                 ORDER BY um.created_at DESC`, [user.id]);
-            return jsonResponse(res, 200, { data: rows });
+                 ORDER BY um.started_at DESC`, [user.id]);
+            return jsonResponse(res, 200, { data: rows.map(enrichUserMissionRow) });
         } catch (err) {
             console.error('[API] GET /api/user-missions/active error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
@@ -694,17 +804,19 @@ const server = http.createServer(async (req, res) => {
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
         if (!dbPool) return jsonResponse(res, 200, { data: [] });
         try {
+            let where = 'WHERE um.user_id = ?';
+            const params = [user.id];
+            if (query.status) {
+                const statuses = query.status.split(',').map(s => s.trim()).filter(Boolean);
+                if (statuses.length) {
+                    where += ` AND um.status IN (${statuses.map(() => '?').join(',')})`;
+                    params.push(...statuses);
+                }
+            }
             const [rows] = await dbPool.execute(
-                `SELECT um.*, m.title AS mission_title, m.type AS mission_type,
-                        m.difficulty AS mission_difficulty,
-                        da.name AS departure_airport_name, da.latitude AS departure_lat, da.longitude AS departure_lon, da.icao_code AS departure_icao,
-                        aa.name AS arrival_airport_name, aa.latitude AS arrival_lat, aa.longitude AS arrival_lon, aa.icao_code AS arrival_icao
-                 FROM user_missions um
-                 JOIN missions m ON um.mission_id = m.id
-                 LEFT JOIN airports da ON m.departure_airport_id = da.id
-                 LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
-                 WHERE um.user_id = ? ORDER BY um.created_at DESC`, [user.id]);
-            return jsonResponse(res, 200, { data: rows });
+                `SELECT ${USER_MISSION_SELECT} ${USER_MISSION_JOINS}
+                 ${where} ORDER BY um.started_at DESC`, params);
+            return jsonResponse(res, 200, { data: rows.map(enrichUserMissionRow) });
         } catch (err) {
             console.error('[API] GET /api/user-missions error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
@@ -750,7 +862,7 @@ const server = http.createServer(async (req, res) => {
             vals.push(id);
             await dbPool.execute(`UPDATE user_missions SET ${sets.join(', ')} WHERE id = ?`, vals);
             if (body.status === 'completed' || body.status === 'failed') await recalculateStats(user.id);
-            return jsonResponse(res, 200, { message: 'Mission updated' });
+            return jsonResponse(res, 200, { message: 'Mission progress updated' });
         } catch (err) {
             console.error('[API] PUT /api/user-missions/:id error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });

@@ -26,6 +26,7 @@ if (token) {
 }
 
 const flightPlanId = params.get('flightPlanId');
+const missionId = params.get('missionId');
 params.delete('token');
 const cleanSearch = params.toString();
 history.replaceState(null, '', window.location.pathname + (cleanSearch ? `?${cleanSearch}` : ''));
@@ -76,6 +77,38 @@ scene.onSpawned = () => {
             }
         } catch (err) {
             console.error('[flight-main] Flight plan fetch error:', err);
+        }
+    }
+
+    if (missionId && token && !flightPlanId) {
+        try {
+            loadingStatus.textContent = 'Loading mission...';
+            const detailRes = await fetch(`/api/missions/${encodeURIComponent(missionId)}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (detailRes.ok) {
+                const mission = await detailRes.json();
+                console.log(`[flight-main] Mission ${missionId} loaded:`, { type: mission.type, departure_icao: mission.departure_icao, arrival_icao: mission.arrival_icao });
+
+                const startRes = await fetch('/api/user-missions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mission_id: Number(missionId) }),
+                });
+                if (startRes.ok || startRes.status === 409) {
+                    const startData = await startRes.json();
+                    const userMissionId = startData.id || null;
+                    console.log(`[flight-main] Mission ${missionId} ${startRes.status === 409 ? 'already active' : 'started'}, userMissionId=${userMissionId}`);
+                    scene.setMissionSpawn(mission, userMissionId);
+                } else {
+                    console.warn(`[flight-main] Mission ${missionId} start failed: ${startRes.status}`);
+                    scene.setMissionSpawn(mission, null);
+                }
+            } else {
+                console.warn(`[flight-main] Mission ${missionId} fetch failed: ${detailRes.status}`);
+            }
+        } catch (err) {
+            console.error('[flight-main] Mission fetch error:', err);
         }
     }
 
