@@ -3,6 +3,7 @@ import { FlightSceneSimple } from './game/FlightSceneSimple.js';
 
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
 const FLIGHT_HOURS_URL = 'https://simflightpro.com/flight-time';
+const WEBSITE_STORE_URL = 'https://simflightpro.com/aircrafts';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const loadingEl = document.getElementById('loading')!;
@@ -94,6 +95,58 @@ scene.onSpawned = () => {
                 const mission = await detailRes.json();
                 console.log(`[flight-main] Mission ${missionId} loaded:`, { type: mission.type, departure_icao: mission.departure_icao, arrival_icao: mission.arrival_icao });
 
+                const requiredAircraftId = mission?.required_aircraft_id != null
+                    ? Number(mission.required_aircraft_id)
+                    : null;
+
+                if (requiredAircraftId != null && Number.isFinite(requiredAircraftId) && requiredAircraftId > 0) {
+                    let owns = false;
+                    let alreadySelected = false;
+                    try {
+                        const ownedRes = await fetch('/api/user-aircrafts', {
+                            headers: { 'Authorization': `Bearer ${token}` },
+                        });
+                        if (ownedRes.ok) {
+                            const ownedJson = await ownedRes.json();
+                            const list: any[] = Array.isArray(ownedJson?.data) ? ownedJson.data : [];
+                            const match = list.find((ua: any) => Number(ua?.aircraft?.id) === requiredAircraftId);
+                            if (match) {
+                                owns = true;
+                                alreadySelected = Number(match.is_selected) === 1;
+                            }
+                        } else {
+                            console.warn(`[flight-main] Owned aircrafts fetch failed: HTTP ${ownedRes.status}`);
+                        }
+                    } catch (err) {
+                        console.warn('[flight-main] Owned aircrafts fetch error:', err);
+                    }
+
+                    if (!owns) {
+                        console.warn(`[flight-main] Player does not own required aircraft id=${requiredAircraftId} code=${mission.required_aircraft_code ?? '?'} for mission ${missionId} - blocking start`);
+                        showRequiredAircraftBlockPanel(mission);
+                        return;
+                    }
+
+                    if (!alreadySelected) {
+                        try {
+                            loadingStatus.textContent = 'Trocando aeronave...';
+                            const selectRes = await fetch(`/api/user-aircrafts/${requiredAircraftId}/select`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            });
+                            if (selectRes.ok) {
+                                console.log(`[flight-main] Auto-switched to required aircraft id=${requiredAircraftId} code=${mission.required_aircraft_code ?? '?'} for mission ${missionId}`);
+                            } else {
+                                console.warn(`[flight-main] Failed to auto-switch to required aircraft ${requiredAircraftId}: HTTP ${selectRes.status}`);
+                            }
+                        } catch (err) {
+                            console.warn('[flight-main] Required aircraft switch error:', err);
+                        }
+                    } else {
+                        console.log(`[flight-main] Required aircraft id=${requiredAircraftId} is already selected for mission ${missionId}`);
+                    }
+                }
+
                 let userMissionId: number | null = null;
                 let alreadyActive = false;
 
@@ -181,6 +234,48 @@ setTimeout(() => {
 }, 20000);
 
 statusInterval = (window as any).__loadingStatusInterval;
+
+function showRequiredAircraftBlockPanel(mission: any): void {
+    const ring = loadingEl.querySelector('.loading-ring') as HTMLElement | null;
+    const status = document.getElementById('loading-status');
+    const logo = loadingEl.querySelector('.loading-logo') as HTMLElement | null;
+    const subtitle = loadingEl.querySelector('.loading-subtitle') as HTMLElement | null;
+    if (ring) ring.style.display = 'none';
+    if (status) status.style.display = 'none';
+    if (logo) logo.style.display = 'none';
+    if (subtitle) subtitle.style.display = 'none';
+
+    const statusInt = (window as any).__loadingStatusInterval;
+    if (statusInt) clearInterval(statusInt);
+
+    const thumbnail = mission?.required_aircraft_thumbnail || '';
+    const name = mission?.required_aircraft_name || mission?.required_aircraft_code || '';
+
+    const panel = document.createElement('div');
+    panel.id = 'aircraft-required-panel';
+    panel.style.cssText = [
+        'display:flex', 'flex-direction:column', 'align-items:center',
+        'gap:18px', 'padding:28px 32px', 'max-width:380px',
+        'background:rgba(2,10,20,0.85)', 'backdrop-filter:blur(10px)',
+        'border:1px solid rgba(64,255,170,0.3)', 'border-radius:12px',
+        'box-shadow:0 8px 32px rgba(0,0,0,0.5)', 'color:#fff',
+        'font-family:Inter,system-ui,sans-serif', 'text-align:center',
+    ].join(';');
+
+    panel.innerHTML = `
+        ${thumbnail ? `<img src="${thumbnail}" alt="${name}" style="width:160px;height:auto;border-radius:8px;border:1px solid rgba(64,255,170,0.2)"/>` : ''}
+        <div style="font-family:'Orbitron',monospace;font-size:14px;letter-spacing:0.15em;color:#40ffaa;text-transform:uppercase">Aeronave necessária</div>
+        ${name ? `<div style="font-size:18px;font-weight:600">${name}</div>` : ''}
+        <div style="font-size:13px;line-height:1.5;color:rgba(220,240,235,0.75)">
+            Você não possui a aeronave necessária para iniciar esta missão.
+        </div>
+        <a id="aircraft-required-buy" href="${WEBSITE_STORE_URL}" style="display:inline-block;background:#40ffaa;color:#020810;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;text-transform:uppercase;letter-spacing:0.1em;font-size:12px;cursor:pointer">
+            Comprar aeronave
+        </a>
+    `;
+
+    loadingEl.appendChild(panel);
+}
 
 async function claimFreeFlightHour(authToken: string): Promise<void> {
     try {

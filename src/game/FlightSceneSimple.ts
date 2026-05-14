@@ -37,7 +37,6 @@ const GEAR_STATE_EXTENDING  = 3;
 const GEAR_INSTANT_TRANSITION_MS = 1500;
 const SPAWN_SNAP_FRAMES = 600;
 const AIRBORNE_MISSION_MIN_OFFSET_M = 300;
-const AIRBORNE_MISSION_SNAP_FRAMES = 1800;
 const TERRAIN_RAY_HEIGHT_M = 200;
 const TERRAIN_RAY_LENGTH_M = 1000;
 const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;
@@ -218,6 +217,8 @@ const G_ACCEL          = 9.81;
 const ANGULAR_DAMPING  = 0.5;
 const GROUND_Y         = 6;
 const CRASH_VS_THRESHOLD_MS = -12;
+const CRASH_GROUND_SPEED_MS = 25.7;
+const CRASH_GROUND_ATTITUDE_DEG = 45;
 
 // ── ISA atmosphere ────────────────────────────────────────────────────────────
 function getAirDensity(altitudeM: number): number {
@@ -412,6 +413,7 @@ export class FlightSceneSimple extends Scene3D {
     private gearKeyLockG = false;
     private _gearTransitionStartMs = 0;
     private _spawnSnapFramesLeft = 0;
+    private _pendingAirborneGearRetract = false;
 
     private mpClient: MultiplayerClient | null = null;
     private remotePlayers = new Map<string, RemotePlayer>();
@@ -1705,9 +1707,10 @@ export class FlightSceneSimple extends Scene3D {
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMatrix);
             this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
             if (isAirborneMission) {
-                this._spawnSnapFramesLeft = AIRBORNE_MISSION_SNAP_FRAMES;
+                this._spawnSnapFramesLeft = 0;
+                this._pendingAirborneGearRetract = true;
                 const missionAlt = this._pendingMissionAltM ?? 0;
-                console.debug(`[FlightSimple] Airborne mission spawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.refAlt.toFixed(1)}m posY=${this.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapFrames=${AIRBORNE_MISSION_SNAP_FRAMES} terrainY=${this.terrainY.toFixed(1)}m`);
+                console.debug(`[FlightSimple] Airborne mission spawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.refAlt.toFixed(1)}m posY=${this.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapDisabled pendingGearRetract terrainY=${this.terrainY.toFixed(1)}m`);
             }
         } else {
             this.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);
@@ -1716,6 +1719,7 @@ export class FlightSceneSimple extends Scene3D {
             this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 15;
             this.velocity = BABYLON.Vector3.Zero();
             this._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
+            this._pendingAirborneGearRetract = false;
             console.debug(`[FlightSimple] Initial ground spawn: snap window armed for ${SPAWN_SNAP_FRAMES} frames, gearHeight=${gearHeight.toFixed(3)}`);
         }
 
@@ -1779,6 +1783,16 @@ export class FlightSceneSimple extends Scene3D {
                             console.log(`[FlightSimple] Gear animations found: up="${this._gearUpAnimGroup?.name ?? 'none'}", down="${this._gearDownAnimGroup?.name ?? 'none'}"`);
                         }
                     }
+                }
+                if (this._pendingAirborneGearRetract) {
+                    if (this._gearUpAnimGroup) {
+                        this.gearState = GEAR_STATE_UP;
+                        this._gearUpAnimGroup.start(false, 100.0, this._gearUpAnimGroup.from, this._gearUpAnimGroup.to);
+                        console.debug(`[FlightSimple] Airborne mission: retracting gear (${cfg.code})`);
+                    } else {
+                        console.debug(`[FlightSimple] Airborne mission: ${cfg.code} has no gear retract animation, gear stays DOWN`);
+                    }
+                    this._pendingAirborneGearRetract = false;
                 }
                 const root = meshes[0];
 
@@ -2522,9 +2536,15 @@ export class FlightSceneSimple extends Scene3D {
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
             this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
             if (isAirborneMission) {
-                this._spawnSnapFramesLeft = AIRBORNE_MISSION_SNAP_FRAMES;
+                this._spawnSnapFramesLeft = 0;
+                if (this._gearUpAnimGroup) {
+                    this.gearState = GEAR_STATE_UP;
+                    this._gearUpAnimGroup.start(false, 100.0, this._gearUpAnimGroup.from, this._gearUpAnimGroup.to);
+                }
+                this._pendingAirborneGearRetract = false;
                 const missionAlt = this._pendingMissionAltM ?? 0;
-                console.debug(`[FlightSimple] Airborne mission respawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.refAlt.toFixed(1)}m posY=${this.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapFrames=${AIRBORNE_MISSION_SNAP_FRAMES} terrainY=${this.terrainY.toFixed(1)}m`);
+                const gearLabel = this._gearUpAnimGroup ? 'UP' : 'DOWN(fixed)';
+                console.debug(`[FlightSimple] Airborne mission respawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.refAlt.toFixed(1)}m posY=${this.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapDisabled gear=${gearLabel} terrainY=${this.terrainY.toFixed(1)}m`);
             }
         } else {
             this.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);
@@ -2984,6 +3004,18 @@ export class FlightSceneSimple extends Scene3D {
             const bodyRight = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
             const worldUp = new BABYLON.Vector3(0, 1, 0);
             const rollAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(bodyRight, worldUp))));
+            const horizSpeed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+            if (horizSpeed > CRASH_GROUND_SPEED_MS) {
+                const bodyFwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
+                const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(bodyFwd, worldUp))));
+                const pitchAbsDeg = Math.abs(pitchAngle) * 180 / Math.PI;
+                const rollAbsDeg = Math.abs(rollAngle) * 180 / Math.PI;
+                if (pitchAbsDeg > CRASH_GROUND_ATTITUDE_DEG || rollAbsDeg > CRASH_GROUND_ATTITUDE_DEG) {
+                    console.warn(`[Crash] Ground attitude crash: speed=${(horizSpeed * 1.94384).toFixed(1)}kt pitch=${pitchAbsDeg.toFixed(1)}deg roll=${rollAbsDeg.toFixed(1)}deg`);
+                    this._triggerCrash();
+                    return;
+                }
+            }
             const GROUND_ROLL_CORRECTION_RATE = 8.0;
             const correction = BABYLON.Quaternion.RotationAxis(
                 BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize(),

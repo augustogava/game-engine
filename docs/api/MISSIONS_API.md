@@ -34,6 +34,7 @@ The Missions API manages flight missions and user mission progress. It provides 
 | `is_active` | BOOLEAN | Soft delete flag. `0` = hidden everywhere |
 | `is_enabled` | BOOLEAN | Playability flag. `0` = hidden from non-admin users |
 | `sort_order` | INT | Display ordering (lower = first) |
+| `required_aircraft_id` | INT (nullable) | FK to `aircrafts.id`. If set, the mission can only be played with this aircraft. `null` = any aircraft allowed |
 
 ### Mission Waypoints
 
@@ -135,7 +136,11 @@ List missions with pagination and filters.
       "departure_runway_ident": "28R",
       "departure_runway_length_ft": 11870,
       "arrival_runway_ident": "25L",
-      "arrival_runway_length_ft": 10285
+      "arrival_runway_length_ft": 10285,
+      "required_aircraft_id": 1,
+      "required_aircraft_code": "c172",
+      "required_aircraft_name": "Cessna 172",
+      "required_aircraft_thumbnail": "/uploads/aircrafts/cessna172.png"
     }
   ],
   "total": 10,
@@ -211,7 +216,8 @@ Create a new mission. Admin only.
   "distance_nm": 293,
   "estimated_duration_min": 90,
   "reward_points": 200,
-  "is_enabled": 1
+  "is_enabled": 1,
+  "required_aircraft_id": 1
 }
 ```
 
@@ -358,6 +364,10 @@ List the authenticated user's missions with full enriched mission data.
         "departure_runway_length_ft": 11870,
         "arrival_runway_ident": "25L",
         "arrival_runway_length_ft": 10285,
+        "required_aircraft_id": 1,
+        "required_aircraft_code": "c172",
+        "required_aircraft_name": "Cessna 172",
+        "required_aircraft_thumbnail": "/uploads/aircrafts/cessna172.png",
         "waypoints": [
           { "id": 1, "mission_id": 5, "order_index": 1, "name": "San Jose", "latitude": 37.3626, "longitude": -121.929, "altitude_ft": 10000 },
           { "id": 2, "mission_id": 5, "order_index": 2, "name": "Monterey Bay", "latitude": 36.6002, "longitude": -121.8947, "altitude_ft": 12000 }
