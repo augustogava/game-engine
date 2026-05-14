@@ -1,7 +1,7 @@
 # Aircrafts — Engine Type & Fuel System Extension
 
 Addendum to [AIRCRAFTS_API_SPECIFICATION.md](./AIRCRAFTS_API_SPECIFICATION.md).
-This spec is consumed by the **Admin API team** (the team that owns the database, migrations and `/api/aircrafts*` endpoints). The game client (`FlightSceneSimple.ts`) cannot enable propeller-specific physics or a real fuel system until these fields are present in the API response.
+This spec is consumed by the **Admin API team** (the team that owns the database, migrations and `/api/aircrafts`* endpoints). The game client (`FlightSceneSimple.ts`) cannot enable propeller-specific physics or a real fuel system until these fields are present in the API response.
 
 - API Base URL: `https://api.simflightpro.com/api` (production) or `http://localhost:3011/api` (dev)
 - Affected endpoints: `GET /api/aircrafts`, `GET /api/aircrafts/:id`, `GET /api/user-aircrafts`
@@ -9,16 +9,18 @@ This spec is consumed by the **Admin API team** (the team that owns the database
 
 ## Status
 
-| Step | Status |
-|---|---|
-| §2 Schema migration (`ALTER TABLE aircrafts ADD COLUMN ...`) | **APPLIED** |
-| §5 DC-8 seed `UPDATE` | **PENDING** — run the statement in §5 next |
-| §2.1 Validation rules on create/update endpoints | PENDING (Admin API) |
-| §4 API response additions on `GET /api/aircrafts*` | PENDING (Admin API) |
-| §8 Gear mechanics fields (`ALTER TABLE`, seed UPDATEs) | **PENDING** — run the statements in §8.1 and §8.2 |
-| §8.4 API response for `gear_spring_k` / `gear_damping_c` | PENDING (Admin API) |
-| §9 Thrust re-tuning (`max_thrust_n` for DC-8 / C172) | **PENDING** — run the statement in §9.2 |
-| §10 Wing loading re-tuning (DC-8 `mass_kg` / `fuel_capacity_kg`) | **APPLIED** |
+
+| Step                                                             | Status                                            |
+| ---------------------------------------------------------------- | ------------------------------------------------- |
+| §2 Schema migration (`ALTER TABLE aircrafts ADD COLUMN ...`)     | **APPLIED**                                       |
+| §5 DC-8 seed `UPDATE`                                            | **PENDING** — run the statement in §5 next        |
+| §2.1 Validation rules on create/update endpoints                 | PENDING (Admin API)                               |
+| §4 API response additions on `GET /api/aircrafts`*               | PENDING (Admin API)                               |
+| §8 Gear mechanics fields (`ALTER TABLE`, seed UPDATEs)           | **PENDING** — run the statements in §8.1 and §8.2 |
+| §8.4 API response for `gear_spring_k` / `gear_damping_c`         | PENDING (Admin API)                               |
+| §9 Thrust re-tuning (`max_thrust_n` for DC-8 / C172)             | **PENDING** — run the statement in §9.2           |
+| §10 Wing loading re-tuning (DC-8 `mass_kg` / `fuel_capacity_kg`) | **APPLIED**                                       |
+
 
 ---
 
@@ -105,20 +107,24 @@ Following the existing project rule (`enums at request/response always use the n
 
 `engine_type` index map:
 
-| Index | Value |
-|---|---|
-| 0 | `piston` |
-| 1 | `turboprop` |
-| 2 | `turbojet` |
-| 3 | `turbofan` |
-| 4 | `electric` |
+
+| Index | Value       |
+| ----- | ----------- |
+| 0     | `piston`    |
+| 1     | `turboprop` |
+| 2     | `turbojet`  |
+| 3     | `turbofan`  |
+| 4     | `electric`  |
+
 
 `prop_rotation_dir` index map:
 
+
 | Index | Value |
-|---|---|
-| 0 | `cw` |
-| 1 | `ccw` |
+| ----- | ----- |
+| 0     | `cw`  |
+| 1     | `ccw` |
+
 
 `null` MUST be emitted as JSON `null` (not `0`) when the column is NULL.
 
@@ -242,7 +248,7 @@ The Admin API team is free to tune these three numbers; the client only requires
 ## 7. Acceptance criteria
 
 1. **[DONE]** `DESCRIBE aircrafts` shows the 9 new columns with the types and defaults above.
-2. **[PENDING]** `GET /api/aircrafts/1` (the DC-8 row) returns `engine_type: 3`, `engine_count: 4`, all `prop_*` fields `null`, `fuel_capacity_kg: 23000.00`, `fuel_burn_rate_kg_per_s_max: 2.15`, `fuel_burn_rate_kg_per_s_idle: 0.18`.
+2. **[PENDING]** `GET /api/aircrafts/1` (the DC-8 row) returns `engine_type: 3`, `engine_count: 4`, all `prop_`* fields `null`, `fuel_capacity_kg: 23000.00`, `fuel_burn_rate_kg_per_s_max: 2.15`, `fuel_burn_rate_kg_per_s_idle: 0.18`.
 3. **[PENDING]** `GET /api/aircrafts` includes the same fields for every row.
 4. **[PENDING]** `GET /api/user-aircrafts` includes the same fields inside each `aircraft` nested object.
 5. **[PENDING]** Posting an aircraft with `engine_type='piston'` and `prop_diameter_m: null` returns HTTP 400.
@@ -289,6 +295,7 @@ gear_damping_c = 2 × ξ × √(gear_spring_k × mass_kg / N_gear_legs)
 ```
 
 Example for C172 (mass=1255 kg, N=3 legs, d=0.05 m):
+
 - `gear_spring_k = 1255 × 9.81 / (3 × 0.05) ≈ 82,070 N/m`
 - `gear_damping_c = 2 × 0.7 × √(82070 × 418) ≈ 8,200 N·s/m`
 
@@ -309,10 +316,12 @@ In-flight testing showed that the original arcade-light `max_thrust_n = 50000 N`
 
 ### 9.1 Target thrust-to-weight ratios
 
-| Aircraft | Real T/W (empty) | Game target T/W (full fuel) | Calculation |
-|---|---|---|---|
-| DC-8 (4× JT3D) | ~0.50 | **0.49** | `160000 / (33000 × 9.81)` |
-| C172 SP (180 hp) | ~0.23 | **~0.22** | `2700 / ((mass + fuel) × 9.81)` |
+
+| Aircraft         | Real T/W (empty) | Game target T/W (full fuel) | Calculation                     |
+| ---------------- | ---------------- | --------------------------- | ------------------------------- |
+| DC-8 (4× JT3D)   | ~0.50            | **0.49**                    | `160000 / (33000 × 9.81)`       |
+| C172 SP (180 hp) | ~0.23            | **~0.22**                   | `2700 / ((mass + fuel) × 9.81)` |
+
 
 ### 9.2 Seed updates
 
@@ -353,13 +362,15 @@ For new aircraft, target T/W in this band:
 T/W (full fuel) =  max_thrust_n / ((mass_kg + fuel_capacity_kg) × 9.81)
 ```
 
-| Aircraft class | Target T/W full | Notes |
-|---|---|---|
-| Light piston single | 0.20 – 0.30 | Long takeoff roll OK |
-| Turboprop / regional | 0.30 – 0.40 | |
-| Narrow-body / heavy jet | 0.25 – 0.35 | If real-mass-scaled |
-| Game-scaled jet (light mass) | 0.45 – 0.55 | Compensates for game-mass scaling |
-| Fighter / military | 0.80 – 1.20 | |
+
+| Aircraft class               | Target T/W full | Notes                             |
+| ---------------------------- | --------------- | --------------------------------- |
+| Light piston single          | 0.20 – 0.30     | Long takeoff roll OK              |
+| Turboprop / regional         | 0.30 – 0.40     |                                   |
+| Narrow-body / heavy jet      | 0.25 – 0.35     | If real-mass-scaled               |
+| Game-scaled jet (light mass) | 0.45 – 0.55     | Compensates for game-mass scaling |
+| Fighter / military           | 0.80 – 1.20     |                                   |
+
 
 So: `max_thrust_n = target_TW × (mass_kg + fuel_capacity_kg) × 9.81`.
 
@@ -425,6 +436,7 @@ v_stall_kt = √( (mass_kg + fuel_capacity_kg) · 9.81 / (0.5 · 1.225 · Cl_max
 ```
 
 Where:
+
 - `S_wing_total` = sum of `area` in `aircraft_surfaces` for left and right wings
 - `Cl_max ≈ lift_slope_eff · (stall_alpha_rad - zero_lift_aoa)`, with `lift_slope_eff = lift_slope · AR / (AR + 2 · (AR + 4) / (AR + 2))`
 
@@ -455,3 +467,4 @@ No schema change. Only existing column values change. The lift / drag model in `
 - Engine thermodynamic state (MAP, CHT, EGT, mixture lever value, magneto position). Those are runtime telemetry, not aircraft-definition data, and stay on the client.
 - Multi-tank fuel modeling. A single fuel mass is sufficient for the current flight model.
 - Changes to `aircraft_surfaces`, `user_aircrafts`, `flight_logs`, or any other table.
+

@@ -35,7 +35,12 @@ const GEAR_STATE_RETRACTING = 1;
 const GEAR_STATE_UP         = 2;
 const GEAR_STATE_EXTENDING  = 3;
 const GEAR_INSTANT_TRANSITION_MS = 1500;
-const SPAWN_SNAP_FRAMES = 90;
+const SPAWN_SNAP_FRAMES = 600;
+const TERRAIN_RAY_HEIGHT_M = 200;
+const TERRAIN_RAY_LENGTH_M = 1000;
+const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;
+const SPAWN_TERRAIN_RAY_LENGTH_M = 10000;
+const TERRAIN_HIT_ABOVE_LIMIT_M = 10;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -1573,6 +1578,8 @@ export class FlightSceneSimple extends Scene3D {
             this.flapIndex = cfg.default_flap_index_ground;
             this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 15;
             this.velocity = BABYLON.Vector3.Zero();
+            this._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
+            console.debug(`[FlightSimple] Initial ground spawn: snap window armed for ${SPAWN_SNAP_FRAMES} frames`);
         }
 
         this._loadAircraftModel(scene);
@@ -2535,12 +2542,19 @@ export class FlightSceneSimple extends Scene3D {
 
         // ── Terrain ray (runs FIRST so gear uses fresh terrainY this tick) ───
         if (this.tiles) {
-            this._terrainRay.origin.set(pos.x, pos.y + 200, pos.z);
+            const inSpawnWindow = this._spawnSnapFramesLeft > 0;
+            const rayHeight = inSpawnWindow ? SPAWN_TERRAIN_RAY_HEIGHT_M : TERRAIN_RAY_HEIGHT_M;
+            const rayLength = inSpawnWindow ? SPAWN_TERRAIN_RAY_LENGTH_M : TERRAIN_RAY_LENGTH_M;
+            this._terrainRay.origin.set(pos.x, pos.y + rayHeight, pos.z);
+            this._terrainRay.length = rayLength;
             const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
                 mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
             );
-            if (hit?.hit && hit.pickedPoint && hit.pickedPoint.y <= pos.y + 10) {
-                this.terrainY = hit.pickedPoint.y;
+            if (hit?.hit && hit.pickedPoint) {
+                const accept = inSpawnWindow || hit.pickedPoint.y <= pos.y + TERRAIN_HIT_ABOVE_LIMIT_M;
+                if (accept) {
+                    this.terrainY = hit.pickedPoint.y;
+                }
             }
         }
 
