@@ -599,6 +599,14 @@ export class FlightSceneSimple extends Scene3D {
                 if (pivot) pivot.dispose();
                 this._loadAircraftModel(scene);
             }
+            if (this.planeRoot) {
+                const modelStillLoading = !this._gearUpAnimGroup && !this._gearDownAnimGroup;
+                this._spawnPlane();
+                if (this._pendingMissionAirborne && modelStillLoading) {
+                    this._pendingAirborneGearRetract = true;
+                }
+                console.log(`[FlightSimple] Initial spawn re-applied with active config (${cfg.code}) after async fetch`);
+            }
             console.log(`[Aircraft] Loaded: ${cfg.name} (${cfg.code})`);
         });
 
@@ -3353,7 +3361,7 @@ export class FlightSceneSimple extends Scene3D {
 <div id="nav-info" style="display:none;position:absolute;top:190px;left:4px;width:180px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:6px;padding:6px 8px;font-family:'Inter',sans-serif;color:#fff;font-size:10px;pointer-events:none;box-shadow:0 0 12px rgba(0,255,128,.1)">
   <div style="font-family:'Orbitron',monospace;font-size:8px;color:#40ffaa;letter-spacing:.15em;margin-bottom:3px">NAV</div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DEST</span><span id="nav-dest" style="color:#fff">\u2014</span></div>
-  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DIST</span><span id="nav-dist" style="color:#40ffaa">\u2014 nm</span></div>
+  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DIST</span><span id="nav-dist" style="color:#40ffaa">\u2014 km</span></div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">BRG</span><span id="nav-brg" style="color:#40ffaa">\u2014\u00B0</span></div>
 </div>`;
         document.body.appendChild(hud);
@@ -4174,7 +4182,7 @@ export class FlightSceneSimple extends Scene3D {
                 const distNm = this._haversineNm(lat, lon, nav.arrival_lat, nav.arrival_lon);
                 const brgDeg = this._initialBearingDeg(lat, lon, nav.arrival_lat, nav.arrival_lon);
                 if (this._navDestEl) this._navDestEl.textContent = nav.arrival_icao || '\u2014';
-                if (this._navDistEl) this._navDistEl.textContent = `${distNm.toFixed(1)} nm`;
+                if (this._navDistEl) this._navDistEl.textContent = `${Math.round(distNm * 1.852)} km`;
                 if (this._navBrgEl)  this._navBrgEl.textContent  = `${Math.round(brgDeg)}\u00B0`;
                 this._navInfoEl.style.display = 'block';
             } else {
