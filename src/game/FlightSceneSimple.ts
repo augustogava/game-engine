@@ -42,6 +42,7 @@ const TERRAIN_RAY_LENGTH_M = 1000;
 const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;
 const SPAWN_TERRAIN_RAY_LENGTH_M = 10000;
 const TERRAIN_HIT_ABOVE_LIMIT_M = 10;
+const TERRAIN_UNKNOWN_Y = -1e9;
 const NAV_LIGHT_REFERENCE_HALF_SPAN_M = 22;
 const NAV_LIGHT_MIN_SCALE = 0.2;
 const NAV_LIGHT_MAX_SCALE = 1.5;
@@ -2734,7 +2735,11 @@ export class FlightSceneSimple extends Scene3D {
                 const accept = inSpawnWindow || hit.pickedPoint.y <= pos.y + TERRAIN_HIT_ABOVE_LIMIT_M;
                 if (accept) {
                     this.terrainY = hit.pickedPoint.y;
+                } else {
+                    this.terrainY = TERRAIN_UNKNOWN_Y;
                 }
+            } else {
+                this.terrainY = TERRAIN_UNKNOWN_Y;
             }
         }
 
