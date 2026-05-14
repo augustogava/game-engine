@@ -240,7 +240,9 @@ const USER_MISSION_JOINS = `
     LEFT JOIN airport_runways dr ON m.departure_runway_id = dr.id
     LEFT JOIN airport_runways ar ON m.arrival_runway_id = ar.id`;
 
-function enrichUserMissionRow(row) {
+function enrichUserMissionRow(row, waypoints = []) {
+    const mission = buildMissionNested(row);
+    mission.waypoints = waypoints;
     const result = {
         id: row.id,
         user_id: row.user_id,
@@ -265,9 +267,27 @@ function enrichUserMissionRow(row) {
         departure_runway_length_ft: row.departure_runway_length_ft,
         arrival_runway_ident: row.arrival_runway_ident,
         arrival_runway_length_ft: row.arrival_runway_length_ft,
-        mission: buildMissionNested(row),
+        mission,
     };
     return result;
+}
+
+async function loadWaypointsForMissionIds(missionIds) {
+    if (!dbPool || !missionIds.length) return new Map();
+    const placeholders = missionIds.map(() => '?').join(',');
+    const [rows] = await dbPool.execute(
+        `SELECT id, mission_id, order_index, name, latitude, longitude, altitude_ft
+           FROM mission_waypoints
+          WHERE mission_id IN (${placeholders})
+          ORDER BY mission_id ASC, order_index ASC, id ASC`,
+        missionIds
+    );
+    const byMission = new Map();
+    for (const r of rows) {
+        if (!byMission.has(r.mission_id)) byMission.set(r.mission_id, []);
+        byMission.get(r.mission_id).push(r);
+    }
+    return byMission;
 }
 
 // ── Proxy to main API ────────────────────────────────────────────────────────
@@ -724,6 +744,9 @@ const server = http.createServer(async (req, res) => {
             const [rows] = await dbPool.execute(
                 `SELECT ${MISSION_SELECT} ${MISSION_JOINS}
                  ${where} ORDER BY m.sort_order, m.id LIMIT ${limit} OFFSET ${offset}`, params);
+            const missionIds = rows.map(r => r.id);
+            const wps = await loadWaypointsForMissionIds(missionIds);
+            for (const r of rows) r.waypoints = wps.get(r.id) || [];
             return jsonResponse(res, 200, { data: rows, total, page, limit });
         } catch (err) {
             console.error('[API] GET /api/missions error:', err.message);
@@ -743,6 +766,8 @@ const server = http.createServer(async (req, res) => {
             const [rows] = await dbPool.execute(
                 `SELECT ${MISSION_SELECT} ${MISSION_JOINS} ${where}`, [id]);
             if (!rows.length) return jsonResponse(res, 404, { error: 'Mission not found' });
+            const wps = await loadWaypointsForMissionIds([rows[0].id]);
+            rows[0].waypoints = wps.get(rows[0].id) || [];
             return jsonResponse(res, 200, rows[0]);
         } catch (err) {
             console.error('[API] GET /api/missions/:id error:', err.message);
@@ -774,7 +799,8 @@ const server = http.createServer(async (req, res) => {
                 `SELECT ${USER_MISSION_SELECT} ${USER_MISSION_JOINS}
                  WHERE um.id = ?`, [result.insertId]);
             if (enrichedRows.length) {
-                return jsonResponse(res, 201, enrichUserMissionRow(enrichedRows[0]));
+                const wps = await loadWaypointsForMissionIds([enrichedRows[0].mission_id]);
+                return jsonResponse(res, 201, enrichUserMissionRow(enrichedRows[0], wps.get(enrichedRows[0].mission_id) || []));
             }
             return jsonResponse(res, 201, { id: result.insertId, message: 'Mission started' });
         } catch (err) {
@@ -792,7 +818,9 @@ const server = http.createServer(async (req, res) => {
                 `SELECT ${USER_MISSION_SELECT} ${USER_MISSION_JOINS}
                  WHERE um.user_id = ? AND um.status IN ('started','in_progress')
                  ORDER BY um.started_at DESC`, [user.id]);
-            return jsonResponse(res, 200, { data: rows.map(enrichUserMissionRow) });
+            const missionIds = rows.map(r => r.mission_id);
+            const wps = await loadWaypointsForMissionIds(missionIds);
+            return jsonResponse(res, 200, { data: rows.map(r => enrichUserMissionRow(r, wps.get(r.mission_id) || [])) });
         } catch (err) {
             console.error('[API] GET /api/user-missions/active error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
@@ -816,7 +844,9 @@ const server = http.createServer(async (req, res) => {
             const [rows] = await dbPool.execute(
                 `SELECT ${USER_MISSION_SELECT} ${USER_MISSION_JOINS}
                  ${where} ORDER BY um.started_at DESC`, params);
-            return jsonResponse(res, 200, { data: rows.map(enrichUserMissionRow) });
+            const missionIds = rows.map(r => r.mission_id);
+            const wps = await loadWaypointsForMissionIds(missionIds);
+            return jsonResponse(res, 200, { data: rows.map(r => enrichUserMissionRow(r, wps.get(r.mission_id) || [])) });
         } catch (err) {
             console.error('[API] GET /api/user-missions error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });

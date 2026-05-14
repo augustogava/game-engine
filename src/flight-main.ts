@@ -83,29 +83,61 @@ scene.onSpawned = () => {
     if (missionId && token && !flightPlanId) {
         try {
             loadingStatus.textContent = 'Loading mission...';
+            const missionIdNum = Number(missionId);
+
             const detailRes = await fetch(`/api/missions/${encodeURIComponent(missionId)}`, {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
-            if (detailRes.ok) {
+            if (!detailRes.ok) {
+                console.warn(`[flight-main] Mission ${missionId} fetch failed: ${detailRes.status}`);
+            } else {
                 const mission = await detailRes.json();
                 console.log(`[flight-main] Mission ${missionId} loaded:`, { type: mission.type, departure_icao: mission.departure_icao, arrival_icao: mission.arrival_icao });
 
-                const startRes = await fetch('/api/user-missions', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mission_id: Number(missionId) }),
-                });
-                if (startRes.ok || startRes.status === 409) {
-                    const startData = await startRes.json();
-                    const userMissionId = startData.id || null;
-                    console.log(`[flight-main] Mission ${missionId} ${startRes.status === 409 ? 'already active' : 'started'}, userMissionId=${userMissionId}`);
+                let userMissionId: number | null = null;
+                let alreadyActive = false;
+
+                try {
+                    const activeRes = await fetch('/api/user-missions?status=in_progress', {
+                        headers: { 'Authorization': `Bearer ${token}` },
+                    });
+                    if (activeRes.ok) {
+                        const activeJson = await activeRes.json();
+                        const activeList = Array.isArray(activeJson?.data) ? activeJson.data : [];
+                        const existing = activeList.find((um: any) => Number(um?.mission_id) === missionIdNum);
+                        if (existing && existing.id != null) {
+                            userMissionId = Number(existing.id);
+                            alreadyActive = true;
+                        }
+                    } else {
+                        console.warn(`[flight-main] Active user-missions check failed: ${activeRes.status}`);
+                    }
+                } catch (err) {
+                    console.warn('[flight-main] Active user-missions check error:', err);
+                }
+
+                if (alreadyActive) {
+                    console.log(`[flight-main] Mission ${missionId} already active, userMissionId=${userMissionId}`);
                     scene.setMissionSpawn(mission, userMissionId);
                 } else {
-                    console.warn(`[flight-main] Mission ${missionId} start failed: ${startRes.status}`);
-                    scene.setMissionSpawn(mission, null);
+                    const startRes = await fetch('/api/user-missions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mission_id: missionIdNum }),
+                    });
+                    if (startRes.ok) {
+                        const startData = await startRes.json();
+                        userMissionId = startData?.id != null ? Number(startData.id) : null;
+                        console.log(`[flight-main] Mission ${missionId} started, userMissionId=${userMissionId}`);
+                        scene.setMissionSpawn(mission, userMissionId);
+                    } else if (startRes.status === 409) {
+                        console.log(`[flight-main] Mission ${missionId} already active (race), spawning without userMissionId`);
+                        scene.setMissionSpawn(mission, null);
+                    } else {
+                        console.warn(`[flight-main] Mission ${missionId} start failed: ${startRes.status}`);
+                        scene.setMissionSpawn(mission, null);
+                    }
                 }
-            } else {
-                console.warn(`[flight-main] Mission ${missionId} fetch failed: ${detailRes.status}`);
             }
         } catch (err) {
             console.error('[flight-main] Mission fetch error:', err);

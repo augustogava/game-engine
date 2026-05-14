@@ -35,6 +35,29 @@ The Missions API manages flight missions and user mission progress. It provides 
 | `is_enabled` | BOOLEAN | Playability flag. `0` = hidden from non-admin users |
 | `sort_order` | INT | Display ordering (lower = first) |
 
+### Mission Waypoints
+
+Missions can have ordered waypoints that define a flight path for the player to follow. The game engine uses these to draw a minimap path and detect when the player reaches each checkpoint.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | INT | Auto-increment primary key |
+| `mission_id` | INT | FK to `missions.id` (CASCADE on delete) |
+| `order_index` | INT | Sequence number (1, 2, 3…). Player must reach them in order |
+| `name` | VARCHAR(100) (nullable) | Display label (e.g. "Monterey Bay", "Everest Base Camp") |
+| `latitude` | DECIMAL(10,7) | Waypoint latitude |
+| `longitude` | DECIMAL(10,7) | Waypoint longitude |
+| `altitude_ft` | INT (nullable) | Suggested altitude at this waypoint |
+
+**How waypoints work:**
+
+1. Each mission can have 0 or more waypoints, ordered by `order_index`.
+2. Route missions use waypoints as intermediate navigation points between departure and arrival airports.
+3. Discovery missions use waypoints as exploration checkpoints — the player spawns at the spawn point and must fly to each waypoint in sequence.
+4. When the player reaches the **last waypoint**, the mission objective is considered complete.
+5. The game engine draws the waypoints on the minimap as a path for the player to follow.
+6. Waypoints are returned in the `waypoints` array on `GET /api/missions/:id`, `GET /api/user-missions`, `GET /api/user-missions/active`, and `POST /api/user-missions`.
+
 ### Mission Types
 
 | Type | Description | Required Fields |
@@ -125,11 +148,39 @@ List missions with pagination and filters.
 
 ### `GET /api/missions/:id`
 
-Get a single mission with full detail.
+Get a single mission with full detail, including waypoints.
 
 **Auth:** Optional (admins see disabled missions).
 
-**Response (200):** Same structure as a single item from the list.
+**Response (200):** Same structure as a single item from the list, plus a `waypoints` array:
+
+```json
+{
+  "id": 1,
+  "title": "Bay Area to Los Angeles",
+  "type": "route",
+  "waypoints": [
+    {
+      "id": 1,
+      "mission_id": 1,
+      "order_index": 1,
+      "name": "San Jose",
+      "latitude": 37.3626,
+      "longitude": -121.929,
+      "altitude_ft": 10000
+    },
+    {
+      "id": 2,
+      "mission_id": 1,
+      "order_index": 2,
+      "name": "Monterey Bay",
+      "latitude": 36.6002,
+      "longitude": -121.8947,
+      "altitude_ft": 12000
+    }
+  ]
+}
+```
 
 **Response (404):**
 
@@ -164,12 +215,30 @@ Create a new mission. Admin only.
 }
 ```
 
+**Optional `waypoints` array:**
+
+```json
+{
+  "title": "Grand Canyon Explorer",
+  "type": "discovery",
+  "spawn_latitude": 36.0544,
+  "spawn_longitude": -112.1401,
+  "spawn_altitude_ft": 8500,
+  "waypoints": [
+    { "order_index": 1, "name": "South Rim", "latitude": 36.057, "longitude": -112.125, "altitude_ft": 8500 },
+    { "order_index": 2, "name": "Bright Angel", "latitude": 36.0585, "longitude": -112.094, "altitude_ft": 7500 },
+    { "order_index": 3, "name": "Desert View", "latitude": 36.0405, "longitude": -111.8265, "altitude_ft": 8000 }
+  ]
+}
+```
+
 **Validation:**
 - `title` is required.
 - `type` must be one of the valid enum values.
 - `difficulty` must be one of the valid enum values.
 - If `type=route`: `departure_airport_id` and `arrival_airport_id` are required.
 - If `type=discovery`: `spawn_latitude`, `spawn_longitude`, and `spawn_altitude_ft` are required.
+- Each waypoint must have `latitude` and `longitude`. `order_index`, `name`, and `altitude_ft` are optional.
 
 **Response (201):**
 
@@ -195,12 +264,15 @@ Update an existing mission. Admin only.
 
 **Auth:** Required (admin).
 
-**Request Body:** Partial — only include fields to update.
+**Request Body:** Partial — only include fields to update. If `waypoints` array is provided, all existing waypoints are replaced.
 
 ```json
 {
   "title": "Updated Title",
-  "is_enabled": 0
+  "is_enabled": 0,
+  "waypoints": [
+    { "order_index": 1, "name": "Point A", "latitude": 40.0, "longitude": -74.0, "altitude_ft": 5000 }
+  ]
 }
 ```
 
@@ -285,12 +357,26 @@ List the authenticated user's missions with full enriched mission data.
         "departure_runway_ident": "28R",
         "departure_runway_length_ft": 11870,
         "arrival_runway_ident": "25L",
-        "arrival_runway_length_ft": 10285
+        "arrival_runway_length_ft": 10285,
+        "waypoints": [
+          { "id": 1, "mission_id": 5, "order_index": 1, "name": "San Jose", "latitude": 37.3626, "longitude": -121.929, "altitude_ft": 10000 },
+          { "id": 2, "mission_id": 5, "order_index": 2, "name": "Monterey Bay", "latitude": 36.6002, "longitude": -121.8947, "altitude_ft": 12000 }
+        ]
       }
     }
   ]
 }
 ```
+
+---
+
+### `GET /api/user-missions/active`
+
+Alias for `GET /api/user-missions?status=in_progress`. Returns only missions with `in_progress` status. Used by the game engine to get the current active mission with full waypoint data for minimap path drawing.
+
+**Auth:** Required.
+
+**Response (200):** Same shape as `GET /api/user-missions`.
 
 ---
 
@@ -354,21 +440,30 @@ Update mission progress. `:id` is the `user_missions.id`.
 
 ### `PUT /api/user-missions/:id/complete`
 
-Mark a mission as completed. `:id` is the `user_missions.id`.
+Mark a mission as completed. Awards `reward_points` to the user and increments `total_missions_completed` in `user_flight_stats`. Also logs the points to `user_points_log` with `source_type='mission'`. This affects pilot rank progression.
+
+`:id` is the `user_missions.id`.
 
 **Auth:** Required.
+
+**Validation:**
+- Mission must be in `in_progress` status.
+- Cannot complete an already completed mission (prevents double points).
 
 **Response (200):**
 
 ```json
-{ "message": "Mission completed" }
+{ "message": "Mission completed", "points_awarded": 200 }
 ```
 
-**Response (404):**
+**Error Responses:**
 
-```json
-{ "error": "User mission not found" }
-```
+| Code | Body | Description |
+|---|---|---|
+| 400 | `{ "error": "Only in_progress missions can be completed" }` | Mission is failed/cancelled |
+| 401 | `{ "error": "Not authenticated" }` | No JWT |
+| 404 | `{ "error": "User mission not found" }` | Invalid id or wrong user |
+| 409 | `{ "error": "Mission already completed" }` | Prevents double completion/points |
 
 ---
 
@@ -406,6 +501,13 @@ curl -s https://api.simflightpro.com/api/user-missions?status=in_progress \
 
 ```bash
 curl -s -X PUT https://api.simflightpro.com/api/user-missions/123/complete \
+  -H "Authorization: Bearer <token>"
+```
+
+### Get active mission with waypoints (game engine)
+
+```bash
+curl -s https://api.simflightpro.com/api/user-missions/active \
   -H "Authorization: Bearer <token>"
 ```
 

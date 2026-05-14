@@ -41,6 +41,15 @@ const TERRAIN_RAY_LENGTH_M = 1000;
 const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;
 const SPAWN_TERRAIN_RAY_LENGTH_M = 10000;
 const TERRAIN_HIT_ABOVE_LIMIT_M = 10;
+const NAV_LIGHT_REFERENCE_HALF_SPAN_M = 22;
+const NAV_LIGHT_MIN_SCALE = 0.2;
+const NAV_LIGHT_MAX_SCALE = 1.5;
+const NAV_LIGHT_CORE_DIAMETER_M = 0.4;
+const CAMERA_RADIUS_LENGTH_FACTOR = 3;
+const CAMERA_RADIUS_MIN_M = 15;
+const CAMERA_RADIUS_MAX_M = 65;
+const ON_GROUND_AGL_M = 5;
+const STALL_WARNING_MIN_AGL_M = 20;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -499,6 +508,11 @@ export class FlightSceneSimple extends Scene3D {
     private _pendingMissionHdg: number | null = null;
     private _pendingMissionAltM: number | null = null;
     private _pendingMissionAirborne = false;
+    private _missionWaypoints: Array<{ id: number; order_index: number; name: string | null; latitude: number; longitude: number; altitude_ft: number | null }> = [];
+    private _missionCurrentWpIndex = 0;
+    private _completedUserMissionIds: Set<number> = new Set();
+    private _missionCompletionInFlight = false;
+    private static readonly WAYPOINT_REACH_NM = 1.0;
 
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
     private _navGlowLayer: BABYLON.GlowLayer | null = null;
@@ -799,7 +813,10 @@ export class FlightSceneSimple extends Scene3D {
             };
         }
 
-        console.log(`[Mission] Active mission id=${this._activeMissionId}, type=${mission.type}, spawn lat=${this._pendingMissionLat} lon=${this._pendingMissionLon} airborne=${this._pendingMissionAirborne}`);
+        this._missionWaypoints = Array.isArray(mission.waypoints) ? mission.waypoints : [];
+        this._missionCurrentWpIndex = 0;
+
+        console.log(`[Mission] Active mission id=${this._activeMissionId}, type=${mission.type}, spawn lat=${this._pendingMissionLat} lon=${this._pendingMissionLon} airborne=${this._pendingMissionAirborne} waypoints=${this._missionWaypoints.length}`);
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
@@ -1191,6 +1208,50 @@ export class FlightSceneSimple extends Scene3D {
             flightPlanId: this._activeFlightPlanId ?? undefined,
             missionId: this._activeMissionId ?? undefined,
         });
+
+        this._checkWaypointProgress(lat, lon);
+    }
+
+    private _checkWaypointProgress(lat: number, lon: number): void {
+        if (!this._missionWaypoints.length) return;
+        if (this._missionCurrentWpIndex >= this._missionWaypoints.length) return;
+        const wp = this._missionWaypoints[this._missionCurrentWpIndex];
+        const dist = this._haversineNm(lat, lon, Number(wp.latitude), Number(wp.longitude));
+        if (dist <= FlightSceneSimple.WAYPOINT_REACH_NM) {
+            console.log(`[Mission] Reached waypoint ${wp.order_index} (${wp.name ?? 'unnamed'}), dist=${dist.toFixed(2)}nm`);
+            this._missionCurrentWpIndex++;
+            if (this._missionCurrentWpIndex >= this._missionWaypoints.length) {
+                this._completeActiveMission();
+            }
+        }
+    }
+
+    private async _completeActiveMission(): Promise<void> {
+        const umId = this._activeUserMissionId;
+        if (!umId || this._completedUserMissionIds.has(umId) || this._missionCompletionInFlight) return;
+        this._missionCompletionInFlight = true;
+        try {
+            const token = localStorage.getItem('auth_token') || '';
+            const res = await fetch(`/api/user-missions/${umId}/complete`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (res.ok) {
+                console.log(`[Mission] Completed userMissionId=${umId}`);
+                this._completedUserMissionIds.add(umId);
+                this._activeMissionId = null;
+                this._activeUserMissionId = null;
+                this._activeMission = null;
+                this._missionWaypoints = [];
+                this._loadMissions();
+            } else {
+                console.warn(`[Mission] Complete failed: HTTP ${res.status}`);
+            }
+        } catch (err) {
+            console.error('[Mission] Complete error:', err);
+        } finally {
+            this._missionCompletionInFlight = false;
+        }
     }
 
     // ── 3D Tiles (Step 1: just load, no coord changes) ────────────────────────
@@ -1750,6 +1811,15 @@ export class FlightSceneSimple extends Scene3D {
                     halfLen: bbD / 2,
                 });
 
+                if (this.camera) {
+                    const initialRadius = Math.max(
+                        CAMERA_RADIUS_MIN_M,
+                        Math.min(CAMERA_RADIUS_MAX_M, bbD * CAMERA_RADIUS_LENGTH_FACTOR),
+                    );
+                    this.camera.radius = initialRadius;
+                    console.debug(`[Camera] Initial radius set to ${initialRadius.toFixed(1)}m for ${cfg.code} (length=${bbD.toFixed(1)}m)`);
+                }
+
                 this.spawned = true;
                 this.onSpawned?.();
                 console.log(`[FlightSimple] Model loaded: ${cfg.code}, scale: ${scaleFactor.toFixed(2)}, dims: ${bbW.toFixed(1)},${bbH.toFixed(1)},${bbD.toFixed(1)}`);
@@ -1813,6 +1883,13 @@ export class FlightSceneSimple extends Scene3D {
 
         this._disposeNavLights();
 
+        const sizeScale = Math.max(
+            NAV_LIGHT_MIN_SCALE,
+            Math.min(NAV_LIGHT_MAX_SCALE, dims.halfSpan / NAV_LIGHT_REFERENCE_HALF_SPAN_M),
+        );
+        const coreDiameter = NAV_LIGHT_CORE_DIAMETER_M * sizeScale;
+        console.debug(`[NavLights] halfSpan=${dims.halfSpan.toFixed(2)}m sizeScale=${sizeScale.toFixed(2)} coreDiameter=${coreDiameter.toFixed(3)}m`);
+
         const glowTex = new BABYLON.DynamicTexture('navGlowTex', 128, scene, false);
         this._navGlowTex = glowTex;
         const ctx = glowTex.getContext();
@@ -1835,7 +1912,7 @@ export class FlightSceneSimple extends Scene3D {
             light.diffuse = def.color.clone();
             light.specular = def.color.clone();
 
-            const core = BABYLON.MeshBuilder.CreateSphere(def.name + 'Core', { diameter: 0.4 }, scene);
+            const core = BABYLON.MeshBuilder.CreateSphere(def.name + 'Core', { diameter: coreDiameter }, scene);
             core.parent = parent;
             core.position = def.pos.clone();
             core.isPickable = false;
@@ -1844,7 +1921,7 @@ export class FlightSceneSimple extends Scene3D {
             coreMat.disableLighting = true;
             core.material = coreMat;
 
-            const halo = BABYLON.MeshBuilder.CreatePlane(def.name + 'Halo', { size: def.glowSize }, scene);
+            const halo = BABYLON.MeshBuilder.CreatePlane(def.name + 'Halo', { size: def.glowSize * sizeScale }, scene);
             halo.parent = parent;
             halo.position = def.pos.clone();
             halo.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
@@ -3366,6 +3443,11 @@ export class FlightSceneSimple extends Scene3D {
                     arrival_icao: active.arrival_icao || '',
                     mission_title: active.mission_title || '',
                 };
+                this._activeUserMissionId = active.id ?? null;
+                this._activeMissionId = active.mission_id ?? null;
+                const mi = active.mission || {};
+                this._missionWaypoints = Array.isArray(mi.waypoints) ? mi.waypoints : [];
+                this._missionCurrentWpIndex = 0;
             } else {
                 this._activeMission = null;
             }
@@ -3868,7 +3950,55 @@ export class FlightSceneSimple extends Scene3D {
 
         ctx.restore();
 
-        if (this._activeMission) {
+        if (this._activeMission && this._missionWaypoints.length > 0) {
+            const MAP_ZOOM = 13;
+            const scale = 256 * Math.pow(2, MAP_ZOOM) / 360;
+            const pixPerDegLat = scale * Math.cos(lat * Math.PI / 180);
+            const pixPerDegLon = scale;
+            const mapPxSize = cv.width;
+            const pxPerDeg = mapPxSize / (360 / Math.pow(2, MAP_ZOOM));
+
+            ctx.save();
+            for (let i = 0; i < this._missionWaypoints.length; i++) {
+                const wp = this._missionWaypoints[i];
+                const wpDx = (Number(wp.longitude) - lon) * pxPerDeg;
+                const wpDy = -(Number(wp.latitude) - lat) * pixPerDegLat / pixPerDegLon * pxPerDeg;
+                const wpX = cx + wpDx;
+                const wpY = cy + wpDy;
+
+                if (i < this._missionCurrentWpIndex) {
+                    ctx.fillStyle = 'rgba(120,120,120,0.5)';
+                    ctx.beginPath();
+                    ctx.arc(wpX, wpY, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (i === this._missionCurrentWpIndex) {
+                    ctx.setLineDash([4, 3]);
+                    ctx.strokeStyle = 'rgba(0,220,255,0.8)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.lineTo(wpX, wpY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    ctx.fillStyle = 'rgba(0,220,255,0.9)';
+                    ctx.beginPath();
+                    ctx.arc(wpX, wpY, 5, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    const label = wp.name || `WP ${wp.order_index}`;
+                    ctx.font = '7px Inter, sans-serif';
+                    ctx.fillStyle = 'rgba(0,220,255,0.9)';
+                    ctx.fillText(label, wpX + 7, wpY - 3);
+                } else {
+                    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                    ctx.beginPath();
+                    ctx.arc(wpX, wpY, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        } else if (this._activeMission) {
             const m = this._activeMission;
             const MAP_ZOOM = 13;
             const scale = 256 * Math.pow(2, MAP_ZOOM) / 360;
@@ -4028,14 +4158,16 @@ export class FlightSceneSimple extends Scene3D {
         const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this._tmpFwd, this._tmpUp))));
         const pitchDeg = Math.round(pitchAngle * 180 / Math.PI);
 
-        const isOnGround = altitudeM < 5;
+        const groundY = this.tiles ? this.terrainY : GROUND_Y;
+        const aglM = Math.max(0, pos.y - groundY);
+        const isOnGround = aglM < ON_GROUND_AGL_M;
 
         this.hudAttitude.textContent =
             isOnGround         ? 'GROUND'   :
             pitchAngle > 0.08  ? 'CLIMB' :
             pitchAngle < -0.08 ? 'DESC'   : 'LEVEL';
         this.hudWarning.style.display =
-            (speedKts < this.aircraftConfig.stall_speed_kts && altitudeM > 20) ? 'block' : 'none';
+            (speedKts < this.aircraftConfig.stall_speed_kts && aglM > STALL_WARNING_MIN_AGL_M) ? 'block' : 'none';
 
         this.hudFps.textContent =
             `${this.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;
