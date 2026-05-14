@@ -1685,6 +1685,11 @@ export class FlightSceneSimple extends Scene3D {
         this.planeRoot = new BABYLON.TransformNode('planeRoot', scene);
         const yawRad = (180 - this.initialHeading) * Math.PI / 180;
         this.planeRoot.rotationQuaternion = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
+        this.angularVelocity.set(0, 0, 0);
+        this.gearCompression = new Array(cfg.gear_positions.length).fill(0);
+        const gearHeight = cfg.gear_positions.length > 0
+            ? Math.abs(Math.min(...cfg.gear_positions.map((g: { y: number }) => g.y)))
+            : 0;
         if (this.spawnAirborne) {
             const altOffset = Math.max(100, cfg.spawn_alt_offset_m);
             this.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
@@ -1696,13 +1701,13 @@ export class FlightSceneSimple extends Scene3D {
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMatrix);
             this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
         } else {
-            this.planeRoot.position.set(0, GROUND_Y, 0);
+            this.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);
             this.thrust = 0;
             this.flapIndex = cfg.default_flap_index_ground;
             this.currentFlapDeg = this.FLAP_STEPS[this.flapIndex] || 15;
             this.velocity = BABYLON.Vector3.Zero();
             this._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
-            console.debug(`[FlightSimple] Initial ground spawn: snap window armed for ${SPAWN_SNAP_FRAMES} frames`);
+            console.debug(`[FlightSimple] Initial ground spawn: snap window armed for ${SPAWN_SNAP_FRAMES} frames, gearHeight=${gearHeight.toFixed(3)}`);
         }
 
         this._loadAircraftModel(scene);
