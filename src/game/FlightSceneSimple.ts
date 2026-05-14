@@ -36,6 +36,8 @@ const GEAR_STATE_UP         = 2;
 const GEAR_STATE_EXTENDING  = 3;
 const GEAR_INSTANT_TRANSITION_MS = 1500;
 const SPAWN_SNAP_FRAMES = 600;
+const AIRBORNE_MISSION_MIN_OFFSET_M = 300;
+const AIRBORNE_MISSION_SNAP_FRAMES = 1800;
 const TERRAIN_RAY_HEIGHT_M = 200;
 const TERRAIN_RAY_LENGTH_M = 1000;
 const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;
@@ -1691,7 +1693,9 @@ export class FlightSceneSimple extends Scene3D {
             ? Math.abs(Math.min(...cfg.gear_positions.map((g: { y: number }) => g.y)))
             : 0;
         if (this.spawnAirborne) {
-            const altOffset = Math.max(100, cfg.spawn_alt_offset_m);
+            const isAirborneMission = this._pendingMissionAirborne === true;
+            const minOffset = isAirborneMission ? AIRBORNE_MISSION_MIN_OFFSET_M : 100;
+            const altOffset = Math.max(minOffset, cfg.spawn_alt_offset_m);
             this.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
             this.thrust = cfg.spawn_airborne_thrust || 0.7;
             this.flapIndex = cfg.default_flap_index_air;
@@ -1700,6 +1704,11 @@ export class FlightSceneSimple extends Scene3D {
             BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, rotMatrix);
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMatrix);
             this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
+            if (isAirborneMission) {
+                this._spawnSnapFramesLeft = AIRBORNE_MISSION_SNAP_FRAMES;
+                const missionAlt = this._pendingMissionAltM ?? 0;
+                console.debug(`[FlightSimple] Airborne mission spawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.refAlt.toFixed(1)}m posY=${this.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapFrames=${AIRBORNE_MISSION_SNAP_FRAMES} terrainY=${this.terrainY.toFixed(1)}m`);
+            }
         } else {
             this.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);
             this.thrust = 0;
@@ -2501,7 +2510,9 @@ export class FlightSceneSimple extends Scene3D {
             : 0;
         const useAirborne = this.spawnAirborne && !forceGround;
         if (useAirborne) {
-            const altOffset = Math.max(100, cfg.spawn_alt_offset_m);
+            const isAirborneMission = this._pendingMissionAirborne === true;
+            const minOffset = isAirborneMission ? AIRBORNE_MISSION_MIN_OFFSET_M : 100;
+            const altOffset = Math.max(minOffset, cfg.spawn_alt_offset_m);
             this.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
             this.thrust = cfg.spawn_airborne_thrust || 0.7;
             this.flapIndex = cfg.default_flap_index_air;
@@ -2510,6 +2521,11 @@ export class FlightSceneSimple extends Scene3D {
             BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion!, rotMat);
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
             this.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
+            if (isAirborneMission) {
+                this._spawnSnapFramesLeft = AIRBORNE_MISSION_SNAP_FRAMES;
+                const missionAlt = this._pendingMissionAltM ?? 0;
+                console.debug(`[FlightSimple] Airborne mission respawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.refAlt.toFixed(1)}m posY=${this.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapFrames=${AIRBORNE_MISSION_SNAP_FRAMES} terrainY=${this.terrainY.toFixed(1)}m`);
+            }
         } else {
             this.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);
             this.velocity.set(0, 0, 0);
@@ -3955,7 +3971,7 @@ export class FlightSceneSimple extends Scene3D {
 
         ctx.restore();
 
-        if (this._activeMission && this._missionWaypoints.length > 0) {
+        if (this._activeMissionId != null && this._missionWaypoints.length > 0) {
             const MAP_ZOOM = 13;
             const scale = 256 * Math.pow(2, MAP_ZOOM) / 360;
             const pixPerDegLat = scale * Math.cos(lat * Math.PI / 180);
