@@ -505,6 +505,7 @@ export class FlightSceneSimple extends Scene3D {
     private _navBrgEl:  HTMLElement | null = null;
     private _crashed = false;
     private _crashOverlayEl: HTMLElement | null = null;
+    private _safetyFloorSnapActive = false;
     private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string } | null = null;
     private _activeMissionId: number | null = null;
     private _activeUserMissionId: number | null = null;
@@ -2731,6 +2732,7 @@ export class FlightSceneSimple extends Scene3D {
             const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
                 mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
             );
+            const wasUnknown = this.terrainY === TERRAIN_UNKNOWN_Y;
             if (hit?.hit && hit.pickedPoint) {
                 const accept = inSpawnWindow || hit.pickedPoint.y <= pos.y + TERRAIN_HIT_ABOVE_LIMIT_M;
                 if (accept) {
@@ -2740,6 +2742,17 @@ export class FlightSceneSimple extends Scene3D {
                 }
             } else {
                 this.terrainY = TERRAIN_UNKNOWN_Y;
+            }
+            const isUnknown = this.terrainY === TERRAIN_UNKNOWN_Y;
+            if (wasUnknown !== isUnknown) {
+                if (isUnknown) {
+                    const hitInfo = hit?.hit && hit.pickedPoint
+                        ? `rejected hit at y=${hit.pickedPoint.y.toFixed(1)}m (above pos.y+${TERRAIN_HIT_ABOVE_LIMIT_M}m)`
+                        : `ray miss (origin.y=${(pos.y + rayHeight).toFixed(1)}m len=${rayLength}m)`;
+                    console.debug(`[Terrain] terrainY -> UNKNOWN at pos.y=${pos.y.toFixed(1)}m, ${hitInfo}`);
+                } else {
+                    console.debug(`[Terrain] terrainY re-acquired at pos.y=${pos.y.toFixed(1)}m, terrainY=${this.terrainY.toFixed(1)}m`);
+                }
             }
         }
 
@@ -2982,8 +2995,15 @@ export class FlightSceneSimple extends Scene3D {
                 this._triggerCrash();
                 return;
             }
+            if (!this._safetyFloorSnapActive) {
+                this._safetyFloorSnapActive = true;
+                console.warn(`[Terrain] Safety-floor snap start: pos.y=${pos.y.toFixed(1)}m -> ${safetyFloor.toFixed(1)}m, terrainY=${this.terrainY.toFixed(1)}m, vy=${this.velocity.y.toFixed(2)}m/s`);
+            }
             pos.y = safetyFloor;
             if (this.velocity.y < 0) this.velocity.y = 0;
+        } else if (this._safetyFloorSnapActive) {
+            this._safetyFloorSnapActive = false;
+            console.debug(`[Terrain] Safety-floor snap ended at pos.y=${pos.y.toFixed(1)}m, terrainY=${this.terrainY.toFixed(1)}m`);
         }
 
         if (anyGearOnGround) {
