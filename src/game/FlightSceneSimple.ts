@@ -55,6 +55,20 @@ const STALL_WARNING_MIN_AGL_M = 20;
 const BANK_COMP_MIN_SIN = 0.174;
 const BANK_COMP_PITCH_GAIN = 0.5;
 const BANK_COMP_MAX_PITCH = 0.6;
+const WORLD_READY_TIMEOUT_MS = 15000;
+const WORLD_READY_PROBE_HEIGHT_M = 5000;
+const WORLD_READY_PROBE_LENGTH_M = 10000;
+const JET_THRUST_LAPSE_EXPONENT = 0.7;
+const MACH_DRAG_RISE_START = 0.78;
+const MACH_DRAG_RISE_COEF = 12;
+const SPECIFIC_HEAT_RATIO_AIR = 1.4;
+const GAS_CONSTANT_AIR_J_PER_KG_K = 287.058;
+const ISA_TROPOPAUSE_TEMP_K = 216.65;
+const ISA_SEA_LEVEL_TEMP_K = 288.15;
+const ISA_LAPSE_RATE_K_PER_M = 0.0065;
+const ISA_TROPOPAUSE_M = 11000;
+const CONTROL_Q_REFERENCE_PA = 5000;
+const SEA_LEVEL_AIR_DENSITY_KG_PER_M3 = 1.225;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -418,6 +432,9 @@ export class FlightSceneSimple extends Scene3D {
     private _gearTransitionStartMs = 0;
     private _spawnSnapFramesLeft = 0;
     private _lastKnownSpawnTerrainY: number = TERRAIN_UNKNOWN_Y;
+    private _worldReady = false;
+    private _worldReadyStartMs = 0;
+    private _worldReadyProbeRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), WORLD_READY_PROBE_LENGTH_M);
     private _pendingAirborneGearRetract = false;
 
     private mpClient: MultiplayerClient | null = null;
@@ -637,7 +654,12 @@ export class FlightSceneSimple extends Scene3D {
         if (!this.spawned) return;
         if (this.tiles) this.tiles.update();
         if (this._crashed) return;
-        
+
+        if (!this._worldReady) {
+            this._tickWorldReadyProbe();
+            return;
+        }
+
         this._handleInput(dt);
         
         this.physicsAccumulator += dt;
@@ -1863,7 +1885,7 @@ export class FlightSceneSimple extends Scene3D {
                 }
 
                 this.spawned = true;
-                this.onSpawned?.();
+                this._maybeFireSpawned();
                 console.log(`[FlightSimple] Model loaded: ${cfg.code}, scale: ${scaleFactor.toFixed(2)}, dims: ${bbW.toFixed(1)},${bbH.toFixed(1)},${bbD.toFixed(1)}`);
             },
             null,
@@ -1902,7 +1924,7 @@ export class FlightSceneSimple extends Scene3D {
             halfLen: 5.5,
         });
         this.spawned = true;
-        this.onSpawned?.();
+        this._maybeFireSpawned();
     }
 
     private _buildNavLights(
@@ -2351,6 +2373,22 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
 
+        if (!this.isOnGround && this.planeRoot) {
+            const speedSq = this.velocity.lengthSquared();
+            if (speedSq > 1) {
+                const altitudeForQ = this.planeRoot.position.y;
+                const airDensityHere = getAirDensity(altitudeForQ);
+                const dynamicPressure = 0.5 * airDensityHere * speedSq;
+                if (dynamicPressure > CONTROL_Q_REFERENCE_PA) {
+                    const qScale = Math.sqrt(CONTROL_Q_REFERENCE_PA / dynamicPressure);
+                    this.surfaces[0].controlInput *= qScale;
+                    this.surfaces[1].controlInput *= qScale;
+                    this.surfaces[2].controlInput *= qScale;
+                    this.surfaces[3].controlInput *= qScale;
+                }
+            }
+        }
+
         // Trim tabs: bias the zeroLiftAoA on the relevant surfaces
         if (this.surfaces.length >= 4) {
             this.surfaces[2].zeroLiftAoA = (this.aircraftConfig.surfaces[2]?.zero_lift_aoa ?? 0) + this.trimPitch;
@@ -2524,6 +2562,77 @@ export class FlightSceneSimple extends Scene3D {
             this._crashed = false;
             this._spawnPlane();
         }, RESPAWN_DELAY_MS);
+    }
+
+    private _tickWorldReadyProbe(): void {
+        if (this._worldReady) return;
+        if (this._worldReadyStartMs === 0) {
+            this._worldReadyStartMs = performance.now();
+            console.debug('[WorldReady] Probe started; waiting for terrain at spawn position');
+        }
+
+        const elapsed = performance.now() - this._worldReadyStartMs;
+
+        if (!this.tiles || !this.planeRoot) {
+            this._worldReady = true;
+            console.warn('[WorldReady] No tiles or planeRoot; activating physics immediately');
+            this._onWorldReady();
+            return;
+        }
+
+        const pos = this.planeRoot.position;
+        this._worldReadyProbeRay.origin.set(pos.x, pos.y + WORLD_READY_PROBE_HEIGHT_M, pos.z);
+        this._worldReadyProbeRay.length = WORLD_READY_PROBE_LENGTH_M;
+        const hit = this.scene.pickWithRay(this._worldReadyProbeRay, (mesh: BABYLON.AbstractMesh) =>
+            mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
+        );
+
+        if (hit?.hit && hit.pickedPoint) {
+            this.terrainY = hit.pickedPoint.y;
+            this._lastKnownSpawnTerrainY = hit.pickedPoint.y;
+            this._worldReady = true;
+            console.debug(`[WorldReady] Terrain detected at y=${hit.pickedPoint.y.toFixed(1)}m after ${elapsed.toFixed(0)}ms`);
+            this._onWorldReady();
+            return;
+        }
+
+        if (elapsed >= WORLD_READY_TIMEOUT_MS) {
+            this._worldReady = true;
+            console.warn(`[WorldReady] Timeout after ${elapsed.toFixed(0)}ms; activating physics without terrain`);
+            this._onWorldReady();
+            return;
+        }
+    }
+
+    private _onWorldReady(): void {
+        if (this.planeRoot && this.terrainY !== TERRAIN_UNKNOWN_Y) {
+            const cfg = this.aircraftConfig;
+            const gearHeight = cfg.gear_positions.length > 0
+                ? Math.abs(Math.min(...cfg.gear_positions.map((g: { y: number }) => g.y)))
+                : 0;
+            if (this.spawnAirborne) {
+                const isAirborneMission = this._pendingMissionAirborne === true;
+                const minOffset = isAirborneMission ? AIRBORNE_MISSION_MIN_OFFSET_M : 100;
+                const altOffset = Math.max(minOffset, cfg.spawn_alt_offset_m);
+                this.planeRoot.position.y = this.terrainY + altOffset;
+                console.debug(`[WorldReady] Airborne spawn snapped to terrainY=${this.terrainY.toFixed(1)}m + offset=${altOffset.toFixed(1)}m -> pos.y=${this.planeRoot.position.y.toFixed(1)}m`);
+            } else {
+                this.planeRoot.position.y = this.terrainY + gearHeight;
+                this.velocity.set(0, 0, 0);
+                this.angularVelocity.set(0, 0, 0);
+                console.debug(`[WorldReady] Ground spawn snapped to terrainY=${this.terrainY.toFixed(1)}m + gearHeight=${gearHeight.toFixed(2)}m -> pos.y=${this.planeRoot.position.y.toFixed(1)}m`);
+            }
+        }
+        this._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
+        this._maybeFireSpawned();
+    }
+
+    private _maybeFireSpawned(): void {
+        if (this.spawned && this._worldReady && this.onSpawned) {
+            const cb = this.onSpawned;
+            this.onSpawned = null;
+            cb();
+        }
     }
 
     private _spawnPlane(forceGround: boolean = false): void {
@@ -2839,6 +2948,9 @@ export class FlightSceneSimple extends Scene3D {
             this.engineRpm = (cfg.prop_rpm_max || 2700) * Math.sqrt(this.enginePower);
             effectiveThrust = this.enginePower;
         } else {
+            const densityRatio = Math.max(0.0001, airDensity / SEA_LEVEL_AIR_DENSITY_KG_PER_M3);
+            const thrustAltitudeLapse = Math.pow(densityRatio, JET_THRUST_LAPSE_EXPONENT);
+            effectiveThrust = this.thrust * thrustAltitudeLapse;
             this.enginePower = this.thrust;
             this.engineRpm = Math.round(1200 + this.thrust * 1500);
         }
@@ -2934,7 +3046,14 @@ export class FlightSceneSimple extends Scene3D {
             const spd = vel.length();
             if (spd >= 1.0) {
                 const effectiveCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0);
-                const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area;
+                const tempK = altitude > ISA_TROPOPAUSE_M
+                    ? ISA_TROPOPAUSE_TEMP_K
+                    : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
+                const speedOfSound = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempK);
+                const machNumber = spd / Math.max(1, speedOfSound);
+                const machExcess = Math.max(0, machNumber - MACH_DRAG_RISE_START);
+                const machDragMult = 1.0 + machExcess * machExcess * MACH_DRAG_RISE_COEF;
+                const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area * machDragMult;
                 totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
 
                 // Fuselage sideslip Cy/Cn
