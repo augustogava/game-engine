@@ -52,6 +52,9 @@ const CAMERA_RADIUS_MIN_M = 15;
 const CAMERA_RADIUS_MAX_M = 65;
 const ON_GROUND_AGL_M = 5;
 const STALL_WARNING_MIN_AGL_M = 20;
+const BANK_COMP_MIN_SIN = 0.174;
+const BANK_COMP_PITCH_GAIN = 0.5;
+const BANK_COMP_MAX_PITCH = 0.6;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -414,6 +417,7 @@ export class FlightSceneSimple extends Scene3D {
     private gearKeyLockG = false;
     private _gearTransitionStartMs = 0;
     private _spawnSnapFramesLeft = 0;
+    private _lastKnownSpawnTerrainY: number = TERRAIN_UNKNOWN_Y;
     private _pendingAirborneGearRetract = false;
 
     private mpClient: MultiplayerClient | null = null;
@@ -2244,7 +2248,7 @@ export class FlightSceneSimple extends Scene3D {
         const SMOOTHING_RATE = this.isMobile ? 0.9 : 1.2;
         const RETURN_RATE    = this.isMobile ? 0.7 : 0.9;
         const KEY_PITCH_MAGNITUDE = 0.75;
-        const KEY_ROLL_MAGNITUDE  = 0.15;
+        const KEY_ROLL_MAGNITUDE  = 0.55;
         const KEY_YAW_MAGNITUDE   = 0.65;
 
         if (this.isMobile) {
@@ -2333,6 +2337,19 @@ export class FlightSceneSimple extends Scene3D {
         this.surfaces[1].controlInput = -this.smoothedRoll;
         this.surfaces[2].controlInput = -this.smoothedPitch;
         this.surfaces[3].controlInput = -this.smoothedYaw;
+
+        if (!this.isOnGround && this.surfaces[2] && this.planeRoot && this.planeRoot.rotationQuaternion) {
+            BABYLON.Matrix.FromQuaternionToRef(this.planeRoot.rotationQuaternion, this._tmpRotMatrix);
+            BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(1, 0, 0), this._tmpRotMatrix, this._tmpRight);
+            const sinBank = Math.max(-1, Math.min(1, this._tmpRight.y));
+            const absSinBank = Math.abs(sinBank);
+            if (absSinBank > BANK_COMP_MIN_SIN) {
+                const cosBank = Math.sqrt(Math.max(0.001, 1 - sinBank * sinBank));
+                const loadComp = (1.0 / cosBank) - 1.0;
+                const pitchBias = Math.min(BANK_COMP_MAX_PITCH, loadComp * BANK_COMP_PITCH_GAIN);
+                this.surfaces[2].controlInput += pitchBias;
+            }
+        }
 
         // Trim tabs: bias the zeroLiftAoA on the relevant surfaces
         if (this.surfaces.length >= 4) {
@@ -2516,6 +2533,7 @@ export class FlightSceneSimple extends Scene3D {
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.planeRoot.rotationQuaternion!);
         this.angularVelocity.set(0, 0, 0);
         this.terrainY = GROUND_Y;
+        this._lastKnownSpawnTerrainY = TERRAIN_UNKNOWN_Y;
         this.fuelRemaining = cfg.fuel_capacity_kg;
         this.trimPitch = 0;
         this.trimYaw = 0;
@@ -2741,13 +2759,18 @@ export class FlightSceneSimple extends Scene3D {
                 mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
             );
             const wasUnknown = this.terrainY === TERRAIN_UNKNOWN_Y;
+            let resolvedTerrainY: number = TERRAIN_UNKNOWN_Y;
             if (hit?.hit && hit.pickedPoint) {
                 const accept = inSpawnWindow || hit.pickedPoint.y <= pos.y + TERRAIN_HIT_ABOVE_LIMIT_M;
                 if (accept) {
-                    this.terrainY = hit.pickedPoint.y;
-                } else {
-                    this.terrainY = TERRAIN_UNKNOWN_Y;
+                    resolvedTerrainY = hit.pickedPoint.y;
                 }
+            }
+            if (resolvedTerrainY !== TERRAIN_UNKNOWN_Y) {
+                this.terrainY = resolvedTerrainY;
+                this._lastKnownSpawnTerrainY = resolvedTerrainY;
+            } else if (inSpawnWindow && this._lastKnownSpawnTerrainY !== TERRAIN_UNKNOWN_Y) {
+                this.terrainY = this._lastKnownSpawnTerrainY;
             } else {
                 this.terrainY = TERRAIN_UNKNOWN_Y;
             }
@@ -2794,6 +2817,9 @@ export class FlightSceneSimple extends Scene3D {
                     if (this.velocity.y < 0) this.velocity.y = 0;
                     this.angularVelocity.set(0, 0, 0);
                     console.warn(`[Gear/spawn] Terrain rose ${maxBury.toFixed(2)}m below plane; snapped pos.y +${(maxBury - eqComp).toFixed(2)}m (target comp ${eqComp.toFixed(3)}m)`);
+                } else if (maxBury > 0) {
+                    const SPAWN_SETTLE_ANG_DAMP = 0.25;
+                    this.angularVelocity.scaleInPlace(SPAWN_SETTLE_ANG_DAMP);
                 }
             }
         }
@@ -4253,7 +4279,7 @@ export class FlightSceneSimple extends Scene3D {
             pitchAngle > 0.08  ? 'CLIMB' :
             pitchAngle < -0.08 ? 'DESC'   : 'LEVEL';
         this.hudWarning.style.display =
-            (speedKts < this.aircraftConfig.stall_speed_kts && aglM > STALL_WARNING_MIN_AGL_M) ? 'block' : 'none';
+            (this._spawnSnapFramesLeft <= 0 && speedKts < this.aircraftConfig.stall_speed_kts && aglM > STALL_WARNING_MIN_AGL_M) ? 'block' : 'none';
 
         this.hudFps.textContent =
             `${this.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;
