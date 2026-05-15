@@ -401,7 +401,10 @@ export class FlightSceneSimple extends Scene3D {
     private _mapImgLat = 0;
     private _mapImgLon = 0;
     private _mapImgValid = false;
-    private static readonly MAP_ZOOM = 13;
+    private static readonly MAP_ZOOM_DEFAULT = 12;
+    private static readonly MAP_ZOOM_MIN = 9;
+    private static readonly MAP_ZOOM_MAX = 17;
+    private _mapZoom = FlightSceneSimple.MAP_ZOOM_DEFAULT;
     private static readonly MAP_REQUEST_SIZE_PX = 256;
     private static readonly MAP_REFETCH_DRIFT_RATIO = 0.25;
     private static readonly MAP_REFETCH_INTERVAL_MS = 5000;
@@ -3508,6 +3511,11 @@ export class FlightSceneSimple extends Scene3D {
   <img id="gps-map-img" style="position:absolute;top:-50%;left:-50%;width:200%;height:200%;object-fit:cover;opacity:0.9;will-change:transform;pointer-events:none;user-select:none" draggable="false">
   <canvas id="gps-map-hdg" width="216" height="216" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
   <div id="gps-map-handle" title="Arrastar GPS" style="position:absolute;top:0;left:0;right:0;height:14px;background:linear-gradient(to bottom,rgba(80,255,160,.18),rgba(80,255,160,0));cursor:grab;display:flex;align-items:center;justify-content:center;font-size:8px;letter-spacing:.18em;color:rgba(100,240,180,.7);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);user-select:none">GPS &#x2022;&#x2022;&#x2022;</div>
+  <div id="gps-zoom-controls" style="position:absolute;top:18px;right:4px;display:flex;flex-direction:column;gap:2px;z-index:2">
+    <button id="gps-zoom-in" title="Aumentar zoom" type="button" style="width:18px;height:18px;padding:0;border:1px solid rgba(80,255,160,.45);background:rgba(2,10,20,.75);color:rgba(100,240,180,.95);font-family:'Orbitron',monospace;font-size:14px;line-height:1;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;user-select:none;touch-action:none">+</button>
+    <button id="gps-zoom-out" title="Diminuir zoom" type="button" style="width:18px;height:18px;padding:0;border:1px solid rgba(80,255,160,.45);background:rgba(2,10,20,.75);color:rgba(100,240,180,.95);font-family:'Orbitron',monospace;font-size:14px;line-height:1;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;user-select:none;touch-action:none">&#8722;</button>
+    <div id="gps-zoom-val" style="width:18px;text-align:center;font-size:8px;color:rgba(100,240,180,.7);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);user-select:none;pointer-events:none">12</div>
+  </div>
   <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap;pointer-events:none"></div>
 </div>
 
@@ -4262,6 +4270,42 @@ export class FlightSceneSimple extends Scene3D {
     private static readonly GPS_POS_STORAGE_KEY = 'gps-map-pos-v1';
     private static readonly GPS_DRAG_VIEWPORT_MARGIN_PX = 4;
 
+    private _persistGpsState(gps: HTMLElement): void {
+        try {
+            const rect = gps.getBoundingClientRect();
+            localStorage.setItem(FlightSceneSimple.GPS_POS_STORAGE_KEY, JSON.stringify({
+                left: Math.round(rect.left),
+                top: Math.round(rect.top),
+                zoom: this._mapZoom,
+            }));
+        } catch (err) {
+            console.warn('[GPS] Failed to save state:', err);
+        }
+    }
+
+    private _updateZoomIndicator(): void {
+        const valEl = document.getElementById('gps-zoom-val');
+        if (valEl) valEl.textContent = String(this._mapZoom);
+        const inBtn = document.getElementById('gps-zoom-in') as HTMLButtonElement | null;
+        const outBtn = document.getElementById('gps-zoom-out') as HTMLButtonElement | null;
+        if (inBtn) inBtn.disabled = this._mapZoom >= FlightSceneSimple.MAP_ZOOM_MAX;
+        if (outBtn) outBtn.disabled = this._mapZoom <= FlightSceneSimple.MAP_ZOOM_MIN;
+        if (inBtn) inBtn.style.opacity = inBtn.disabled ? '0.4' : '1';
+        if (outBtn) outBtn.style.opacity = outBtn.disabled ? '0.4' : '1';
+    }
+
+    private _changeMapZoom(delta: number, gps: HTMLElement): void {
+        const next = Math.min(FlightSceneSimple.MAP_ZOOM_MAX, Math.max(FlightSceneSimple.MAP_ZOOM_MIN, this._mapZoom + delta));
+        if (next === this._mapZoom) return;
+        this._mapZoom = next;
+        this._mapImgValid = false;
+        this.mapLastUpdate = 0;
+        if (this.mapImg) this.mapImg.style.transform = 'translate(0px, 0px)';
+        console.log(`[GPS] Zoom set to ${this._mapZoom}`);
+        this._updateZoomIndicator();
+        this._persistGpsState(gps);
+    }
+
     private _setupMinimapDrag(): void {
         const gps = document.getElementById('gps-map') as HTMLDivElement | null;
         const handle = document.getElementById('gps-map-handle') as HTMLDivElement | null;
@@ -4273,15 +4317,31 @@ export class FlightSceneSimple extends Scene3D {
         try {
             const saved = localStorage.getItem(FlightSceneSimple.GPS_POS_STORAGE_KEY);
             if (saved) {
-                const pos = JSON.parse(saved) as { left?: number; top?: number };
+                const pos = JSON.parse(saved) as { left?: number; top?: number; zoom?: number };
                 if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
                     gps.style.left = `${this._clampGpsX(pos.left as number, gps)}px`;
                     gps.style.top = `${this._clampGpsY(pos.top as number, gps)}px`;
                 }
+                if (pos && Number.isFinite(pos.zoom)) {
+                    const z = Number(pos.zoom);
+                    this._mapZoom = Math.min(FlightSceneSimple.MAP_ZOOM_MAX, Math.max(FlightSceneSimple.MAP_ZOOM_MIN, z));
+                }
             }
         } catch (err) {
-            console.warn('[GPS] Failed to read saved position:', err);
+            console.warn('[GPS] Failed to read saved state:', err);
         }
+
+        const zoomInBtn = document.getElementById('gps-zoom-in') as HTMLButtonElement | null;
+        const zoomOutBtn = document.getElementById('gps-zoom-out') as HTMLButtonElement | null;
+        if (zoomInBtn) {
+            zoomInBtn.addEventListener('click', (ev) => { ev.stopPropagation(); this._changeMapZoom(+1, gps); });
+            zoomInBtn.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); });
+        }
+        if (zoomOutBtn) {
+            zoomOutBtn.addEventListener('click', (ev) => { ev.stopPropagation(); this._changeMapZoom(-1, gps); });
+            zoomOutBtn.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); });
+        }
+        this._updateZoomIndicator();
 
         let dragging = false;
         let pointerId = -1;
@@ -4322,12 +4382,7 @@ export class FlightSceneSimple extends Scene3D {
             dragging = false;
             handle.style.cursor = 'grab';
             try { handle.releasePointerCapture(pointerId); } catch { /* ignore */ }
-            try {
-                const rect = gps.getBoundingClientRect();
-                localStorage.setItem(FlightSceneSimple.GPS_POS_STORAGE_KEY, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
-            } catch (err) {
-                console.warn('[GPS] Failed to save position:', err);
-            }
+            this._persistGpsState(gps);
             pointerId = -1;
         };
 
@@ -4352,7 +4407,7 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _latLonToMapPx(lat: number, lon: number, refLat: number, refLon: number, mapPxSize: number): { x: number; y: number; pxPerDegLon: number; pxPerDegLat: number } {
-        const onScreenPxPerDegLon = (256 * Math.pow(2, FlightSceneSimple.MAP_ZOOM) / 360)
+        const onScreenPxPerDegLon = (256 * Math.pow(2, this._mapZoom) / 360)
             * (mapPxSize / FlightSceneSimple.MAP_REQUEST_SIZE_PX)
             * FlightSceneSimple.MAP_IMG_UPSCALE;
         const cosLat = Math.max(0.001, Math.cos(refLat * Math.PI / 180));
@@ -4389,7 +4444,7 @@ export class FlightSceneSimple extends Scene3D {
             this._mapImgLat = lat;
             this._mapImgLon = lon;
             this._mapImgValid = true;
-            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(5)},${lon.toFixed(5)}&zoom=${FlightSceneSimple.MAP_ZOOM}&size=${FlightSceneSimple.MAP_REQUEST_SIZE_PX}x${FlightSceneSimple.MAP_REQUEST_SIZE_PX}&scale=1&maptype=satellite&key=${this.mapApiKey}`;
+            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(5)},${lon.toFixed(5)}&zoom=${this._mapZoom}&size=${FlightSceneSimple.MAP_REQUEST_SIZE_PX}x${FlightSceneSimple.MAP_REQUEST_SIZE_PX}&scale=1&maptype=satellite&key=${this.mapApiKey}`;
         }
 
         if (this._mapImgValid) {
