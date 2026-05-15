@@ -874,6 +874,10 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/start'))) {
+        return proxyToMainApi(`/api/user-missions/${routeParams.id}/start`, req, res);
+    }
+
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id'))) {
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
@@ -1531,9 +1535,9 @@ wss.on('connection', (ws) => {
 
                             const [result] = await dbPool.execute(
                                 `INSERT INTO flight_logs
-                                 (user_id, departure_airport_id, aircraft_id, aircraft_type, aircraft_registration, mission_id, departure_time, status)
-                                 VALUES (?, ?, ?, ?, ?, ?, NOW(), 'departed')`,
-                                [playerId, entry.departureAirportId, aircraftIdNum, entry.aircraftType, entry.aircraftRegistration, entry.missionId]
+                                 (user_id, departure_airport_id, aircraft_id, aircraft_type, aircraft_registration, mission_id, user_mission_id, departure_time, status)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), 'departed')`,
+                                [playerId, entry.departureAirportId, aircraftIdNum, entry.aircraftType, entry.aircraftRegistration, entry.missionId, entry.userMissionId]
                             );
                             const insertId = result.insertId;
 
@@ -1568,7 +1572,7 @@ wss.on('connection', (ws) => {
                             entry.departureAlt = alt;
                             entry.lastRouteSample = Date.now();
                             entry.statsRecalculated = false;
-                            console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, aircraft: ${aircraftIdNum} (${entry.aircraftType || '?'}), mission: ${entry.missionId || 'none'}`);
+                            console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, aircraft: ${aircraftIdNum} (${entry.aircraftType || '?'}), mission: ${entry.missionId || 'none'}, userMission: ${entry.userMissionId || 'none'}`);
                             try {
                                 ws.send(JSON.stringify({
                                     type: 'flightLogStarted',
@@ -1577,6 +1581,7 @@ wss.on('connection', (ws) => {
                                     aircraftType: entry.aircraftType || null,
                                     departureAirportId: entry.departureAirportId,
                                     missionId: entry.missionId,
+                                    userMissionId: entry.userMissionId,
                                     departureTime: entry.flightStartTime,
                                 }));
                             } catch (_) {}

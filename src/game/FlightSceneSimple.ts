@@ -398,6 +398,14 @@ export class FlightSceneSimple extends Scene3D {
     private mapImg!: HTMLImageElement;
     private mapHeadingCanvas!: HTMLCanvasElement;
     private mapLastUpdate = 0;
+    private _mapImgLat = 0;
+    private _mapImgLon = 0;
+    private _mapImgValid = false;
+    private static readonly MAP_ZOOM = 13;
+    private static readonly MAP_REQUEST_SIZE_PX = 256;
+    private static readonly MAP_REFETCH_DRIFT_RATIO = 0.25;
+    private static readonly MAP_REFETCH_INTERVAL_MS = 5000;
+    private static readonly MAP_IMG_UPSCALE = 2.0;
     private spawnAirborne = false;
     private isMobile = false;
     private touchPitchInput = 0;
@@ -541,7 +549,7 @@ export class FlightSceneSimple extends Scene3D {
     private _missionCurrentWpIndex = 0;
     private _completedUserMissionIds: Set<number> = new Set();
     private _missionCompletionInFlight = false;
-    private static readonly WAYPOINT_REACH_NM = 1.0;
+    private static readonly WAYPOINT_REACH_NM = 0.3;
 
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
     private _navGlowLayer: BABYLON.GlowLayer | null = null;
@@ -1256,12 +1264,23 @@ export class FlightSceneSimple extends Scene3D {
     private _checkWaypointProgress(lat: number, lon: number): void {
         if (!this._missionWaypoints.length) return;
         if (this._missionCurrentWpIndex >= this._missionWaypoints.length) return;
-        const wp = this._missionWaypoints[this._missionCurrentWpIndex];
-        const dist = this._haversineNm(lat, lon, Number(wp.latitude), Number(wp.longitude));
-        if (dist <= FlightSceneSimple.WAYPOINT_REACH_NM) {
-            console.log(`[Mission] Reached waypoint ${wp.order_index} (${wp.name ?? 'unnamed'}), dist=${dist.toFixed(2)}nm`);
+        const total = this._missionWaypoints.length;
+        const idx = this._missionCurrentWpIndex;
+        const wp = this._missionWaypoints[idx];
+        const wpLat = Number(wp.latitude);
+        const wpLon = Number(wp.longitude);
+        if (!Number.isFinite(wpLat) || !Number.isFinite(wpLon)) {
+            console.warn(`[Mission] Skipping invalid waypoint idx=${idx} order=${wp.order_index} lat=${wp.latitude} lon=${wp.longitude}`);
             this._missionCurrentWpIndex++;
-            if (this._missionCurrentWpIndex >= this._missionWaypoints.length) {
+            return;
+        }
+        const dist = this._haversineNm(lat, lon, wpLat, wpLon);
+        if (dist <= FlightSceneSimple.WAYPOINT_REACH_NM) {
+            const reachedNum = idx + 1;
+            console.log(`[Mission] WP ${reachedNum}/${total} reached: order=${wp.order_index} name="${wp.name ?? 'unnamed'}" dist=${dist.toFixed(3)}nm reach=${FlightSceneSimple.WAYPOINT_REACH_NM}nm`);
+            this._missionCurrentWpIndex++;
+            if (this._missionCurrentWpIndex >= total) {
+                console.log(`[Mission] All ${total} waypoints reached, calling /complete for userMissionId=${this._activeUserMissionId}`);
                 this._completeActiveMission();
             }
         }
@@ -3347,7 +3366,7 @@ export class FlightSceneSimple extends Scene3D {
 #hfps{display:none}
 #hud-utc{font-size:8px!important;letter-spacing:.08em!important}
 #flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
-#gps-map{width:140px!important;height:140px!important;top:2px!important;left:2px!important}
+#gps-map{width:168px!important;height:168px!important;top:2px!important;left:2px!important}
 .hud-panel-left{left:6px!important;bottom:6px!important;transform:scale(.8);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.8);transform-origin:bottom right}
 .hud-tape{height:140px!important}
@@ -3364,7 +3383,7 @@ export class FlightSceneSimple extends Scene3D {
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
 #flight-pfd{top:22%!important;width:200px!important;height:140px!important}
-#gps-map{width:110px!important;height:110px!important;top:4px!important;left:2px!important}
+#gps-map{width:132px!important;height:132px!important;top:4px!important;left:2px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom right}
 .hud-tape{height:110px!important}
@@ -3382,7 +3401,7 @@ export class FlightSceneSimple extends Scene3D {
 }
 @media(max-height:440px){
 #flight-pfd{top:30%!important;width:220px!important;height:150px!important}
-#gps-map{width:100px!important;height:100px!important;top:2px!important;left:2px!important}
+#gps-map{width:120px!important;height:120px!important;top:2px!important;left:2px!important}
 #hud-utc{font-size:7px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.7);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.7);transform-origin:bottom right}
@@ -3485,11 +3504,11 @@ export class FlightSceneSimple extends Scene3D {
 </div>
 
 <canvas id="flight-pfd" width="350" height="250" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
-<div id="gps-map" style="position:absolute;top:4px;left:4px;width:180px;height:180px;border-radius:10px;overflow:hidden;border:2px solid rgba(80,255,160,.35);box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6)">
-  <img id="gps-map-img" style="width:100%;height:100%;object-fit:cover;opacity:0.9">
-  <canvas id="gps-map-hdg" width="180" height="180" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
-  <div style="position:absolute;top:6px;left:50%;transform:translateX(-50%);font-size:8px;letter-spacing:.15em;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8)">GPS</div>
-  <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap"></div>
+<div id="gps-map" style="position:absolute;top:4px;left:4px;width:216px;height:216px;border-radius:10px;overflow:hidden;box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6);pointer-events:auto;touch-action:none">
+  <img id="gps-map-img" style="position:absolute;top:-50%;left:-50%;width:200%;height:200%;object-fit:cover;opacity:0.9;will-change:transform;pointer-events:none;user-select:none" draggable="false">
+  <canvas id="gps-map-hdg" width="216" height="216" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
+  <div id="gps-map-handle" title="Arrastar GPS" style="position:absolute;top:0;left:0;right:0;height:14px;background:linear-gradient(to bottom,rgba(80,255,160,.18),rgba(80,255,160,0));cursor:grab;display:flex;align-items:center;justify-content:center;font-size:8px;letter-spacing:.18em;color:rgba(100,240,180,.7);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);user-select:none">GPS &#x2022;&#x2022;&#x2022;</div>
+  <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap;pointer-events:none"></div>
 </div>
 
 <div id="missions-btn" style="position:absolute;top:74px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Missions">
@@ -3560,6 +3579,7 @@ export class FlightSceneSimple extends Scene3D {
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
         this._mapHdgCtx  = this.mapHeadingCanvas.getContext('2d');
+        this._setupMinimapDrag();
 
         this._missionBtnEl = document.getElementById('missions-btn');
         this._missionPanelEl = document.getElementById('missions-panel');
@@ -3739,20 +3759,23 @@ export class FlightSceneSimple extends Scene3D {
                         return;
                     }
                     try {
-                        const promoteRes = await fetch(`/api/user-missions/${startUserMissionId}`, {
+                        const promoteRes = await fetch(`/api/user-missions/${startUserMissionId}/start`, {
                             method: 'PUT',
-                            headers: { 'Authorization': `Bearer ${tk}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ status: 'in_progress' }),
+                            headers: { 'Authorization': `Bearer ${tk}` },
                         });
-                        if (!promoteRes.ok) {
-                            console.warn(`[FlightScene] Failed to promote user-mission ${startUserMissionId} to 'in_progress': HTTP ${promoteRes.status}`);
+                        if (!promoteRes.ok && promoteRes.status !== 409) {
+                            console.warn(`[FlightScene] Failed to start user-mission ${startUserMissionId}: HTTP ${promoteRes.status}`);
                             target.disabled = false;
                             target.textContent = 'INICIAR JOGO';
                             return;
                         }
-                        console.log(`[FlightScene] Promoted user-mission ${startUserMissionId} to 'in_progress', launching mission ${startMissionId}`);
+                        if (promoteRes.status === 409) {
+                            console.log(`[FlightScene] user-mission ${startUserMissionId} already in_progress (409 idempotent), launching mission ${startMissionId}`);
+                        } else {
+                            console.log(`[FlightScene] Started user-mission ${startUserMissionId} (in_progress), launching mission ${startMissionId}`);
+                        }
                     } catch (err) {
-                        console.warn(`[FlightScene] Promote user-mission ${startUserMissionId} error:`, err);
+                        console.warn(`[FlightScene] Start user-mission ${startUserMissionId} error:`, err);
                         target.disabled = false;
                         target.textContent = 'INICIAR JOGO';
                         return;
@@ -4236,21 +4259,144 @@ export class FlightSceneSimple extends Scene3D {
         return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
     }
 
+    private static readonly GPS_POS_STORAGE_KEY = 'gps-map-pos-v1';
+    private static readonly GPS_DRAG_VIEWPORT_MARGIN_PX = 4;
+
+    private _setupMinimapDrag(): void {
+        const gps = document.getElementById('gps-map') as HTMLDivElement | null;
+        const handle = document.getElementById('gps-map-handle') as HTMLDivElement | null;
+        if (!gps || !handle) {
+            console.warn('[GPS] _setupMinimapDrag: missing #gps-map or #gps-map-handle');
+            return;
+        }
+
+        try {
+            const saved = localStorage.getItem(FlightSceneSimple.GPS_POS_STORAGE_KEY);
+            if (saved) {
+                const pos = JSON.parse(saved) as { left?: number; top?: number };
+                if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
+                    gps.style.left = `${this._clampGpsX(pos.left as number, gps)}px`;
+                    gps.style.top = `${this._clampGpsY(pos.top as number, gps)}px`;
+                }
+            }
+        } catch (err) {
+            console.warn('[GPS] Failed to read saved position:', err);
+        }
+
+        let dragging = false;
+        let pointerId = -1;
+        let startClientX = 0;
+        let startClientY = 0;
+        let startLeft = 0;
+        let startTop = 0;
+
+        const onPointerDown = (ev: PointerEvent) => {
+            if (dragging) return;
+            if (ev.button !== undefined && ev.button !== 0) return;
+            dragging = true;
+            pointerId = ev.pointerId;
+            const rect = gps.getBoundingClientRect();
+            startClientX = ev.clientX;
+            startClientY = ev.clientY;
+            startLeft = rect.left;
+            startTop = rect.top;
+            handle.style.cursor = 'grabbing';
+            try { handle.setPointerCapture(pointerId); } catch { /* ignore */ }
+            ev.preventDefault();
+            ev.stopPropagation();
+        };
+
+        const onPointerMove = (ev: PointerEvent) => {
+            if (!dragging || ev.pointerId !== pointerId) return;
+            const dx = ev.clientX - startClientX;
+            const dy = ev.clientY - startClientY;
+            const newLeft = this._clampGpsX(startLeft + dx, gps);
+            const newTop = this._clampGpsY(startTop + dy, gps);
+            gps.style.left = `${newLeft}px`;
+            gps.style.top = `${newTop}px`;
+            ev.preventDefault();
+        };
+
+        const onPointerUp = (ev: PointerEvent) => {
+            if (!dragging || ev.pointerId !== pointerId) return;
+            dragging = false;
+            handle.style.cursor = 'grab';
+            try { handle.releasePointerCapture(pointerId); } catch { /* ignore */ }
+            try {
+                const rect = gps.getBoundingClientRect();
+                localStorage.setItem(FlightSceneSimple.GPS_POS_STORAGE_KEY, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
+            } catch (err) {
+                console.warn('[GPS] Failed to save position:', err);
+            }
+            pointerId = -1;
+        };
+
+        handle.addEventListener('pointerdown', onPointerDown);
+        handle.addEventListener('pointermove', onPointerMove);
+        handle.addEventListener('pointerup', onPointerUp);
+        handle.addEventListener('pointercancel', onPointerUp);
+    }
+
+    private _clampGpsX(x: number, gps: HTMLElement): number {
+        const m = FlightSceneSimple.GPS_DRAG_VIEWPORT_MARGIN_PX;
+        const w = gps.offsetWidth || 216;
+        const max = Math.max(m, window.innerWidth - w - m);
+        return Math.min(max, Math.max(m, x));
+    }
+
+    private _clampGpsY(y: number, gps: HTMLElement): number {
+        const m = FlightSceneSimple.GPS_DRAG_VIEWPORT_MARGIN_PX;
+        const h = gps.offsetHeight || 216;
+        const max = Math.max(m, window.innerHeight - h - m);
+        return Math.min(max, Math.max(m, y));
+    }
+
+    private _latLonToMapPx(lat: number, lon: number, refLat: number, refLon: number, mapPxSize: number): { x: number; y: number; pxPerDegLon: number; pxPerDegLat: number } {
+        const onScreenPxPerDegLon = (256 * Math.pow(2, FlightSceneSimple.MAP_ZOOM) / 360)
+            * (mapPxSize / FlightSceneSimple.MAP_REQUEST_SIZE_PX)
+            * FlightSceneSimple.MAP_IMG_UPSCALE;
+        const cosLat = Math.max(0.001, Math.cos(refLat * Math.PI / 180));
+        const onScreenPxPerDegLat = onScreenPxPerDegLon / cosLat;
+        const x = (lon - refLon) * onScreenPxPerDegLon;
+        const y = -(lat - refLat) * onScreenPxPerDegLat;
+        return { x, y, pxPerDegLon: onScreenPxPerDegLon, pxPerDegLat: onScreenPxPerDegLat };
+    }
+
     private _updateMap(): void {
         if (!this.mapImg) return;
         const now = performance.now();
         const { lat, lon, hdg } = this._getCurrentLatLon();
-
-        if (this.mapApiKey && now - this.mapLastUpdate > 3000) {
-            this.mapLastUpdate = now;
-            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(4)},${lon.toFixed(4)}&zoom=13&size=300x300&scale=2&maptype=satellite&key=${this.mapApiKey}`;
-        }
 
         const cv = this.mapHeadingCanvas;
         const ctx = this._mapHdgCtx || (this._mapHdgCtx = cv.getContext('2d')!);
         if (!ctx) return;
         const cx = cv.width / 2;
         const cy = cv.height / 2;
+
+        let driftPx = 0;
+        if (this._mapImgValid) {
+            const drift = this._latLonToMapPx(lat, lon, this._mapImgLat, this._mapImgLon, cv.width);
+            driftPx = Math.hypot(drift.x, drift.y);
+        }
+        const driftLimitPx = cv.width * FlightSceneSimple.MAP_REFETCH_DRIFT_RATIO;
+        const timeSinceFetch = now - this.mapLastUpdate;
+        const needFetch = !this._mapImgValid
+            || driftPx > driftLimitPx
+            || timeSinceFetch > FlightSceneSimple.MAP_REFETCH_INTERVAL_MS;
+
+        if (this.mapApiKey && needFetch) {
+            this.mapLastUpdate = now;
+            this._mapImgLat = lat;
+            this._mapImgLon = lon;
+            this._mapImgValid = true;
+            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(5)},${lon.toFixed(5)}&zoom=${FlightSceneSimple.MAP_ZOOM}&size=${FlightSceneSimple.MAP_REQUEST_SIZE_PX}x${FlightSceneSimple.MAP_REQUEST_SIZE_PX}&scale=1&maptype=satellite&key=${this.mapApiKey}`;
+        }
+
+        if (this._mapImgValid) {
+            const drift = this._latLonToMapPx(lat, lon, this._mapImgLat, this._mapImgLon, cv.width);
+            this.mapImg.style.transform = `translate(${(-drift.x).toFixed(2)}px, ${(-drift.y).toFixed(2)}px)`;
+        }
+
         ctx.clearRect(0, 0, cv.width, cv.height);
 
         ctx.save();
@@ -4285,20 +4431,15 @@ export class FlightSceneSimple extends Scene3D {
         ctx.restore();
 
         if (this._activeMissionId != null && this._missionWaypoints.length > 0) {
-            const MAP_ZOOM = 13;
-            const scale = 256 * Math.pow(2, MAP_ZOOM) / 360;
-            const pixPerDegLat = scale * Math.cos(lat * Math.PI / 180);
-            const pixPerDegLon = scale;
-            const mapPxSize = cv.width;
-            const pxPerDeg = mapPxSize / (360 / Math.pow(2, MAP_ZOOM));
-
             ctx.save();
             for (let i = 0; i < this._missionWaypoints.length; i++) {
                 const wp = this._missionWaypoints[i];
-                const wpDx = (Number(wp.longitude) - lon) * pxPerDeg;
-                const wpDy = -(Number(wp.latitude) - lat) * pixPerDegLat / pixPerDegLon * pxPerDeg;
-                const wpX = cx + wpDx;
-                const wpY = cy + wpDy;
+                const wpLat = Number(wp.latitude);
+                const wpLon = Number(wp.longitude);
+                if (!Number.isFinite(wpLat) || !Number.isFinite(wpLon)) continue;
+                const p = this._latLonToMapPx(wpLat, wpLon, lat, lon, cv.width);
+                const wpX = cx + p.x;
+                const wpY = cy + p.y;
 
                 if (i < this._missionCurrentWpIndex) {
                     ctx.fillStyle = 'rgba(120,120,120,0.5)';
@@ -4334,94 +4475,78 @@ export class FlightSceneSimple extends Scene3D {
             ctx.restore();
         } else if (this._activeMission) {
             const m = this._activeMission;
-            const MAP_ZOOM = 13;
-            const scale = 256 * Math.pow(2, MAP_ZOOM) / 360;
-            const pixPerDegLat = scale * Math.cos(lat * Math.PI / 180);
-            const pixPerDegLon = scale;
+            if (Number.isFinite(m.departure_lat) && Number.isFinite(m.departure_lon) && Number.isFinite(m.arrival_lat) && Number.isFinite(m.arrival_lon)) {
+                const pDep = this._latLonToMapPx(m.departure_lat, m.departure_lon, lat, lon, cv.width);
+                const pArr = this._latLonToMapPx(m.arrival_lat, m.arrival_lon, lat, lon, cv.width);
+                const depX = cx + pDep.x;
+                const depY = cy + pDep.y;
+                const arrX = cx + pArr.x;
+                const arrY = cy + pArr.y;
 
-            const mapPxSize = cv.width;
-            const pxPerDeg = mapPxSize / (360 / Math.pow(2, MAP_ZOOM));
+                ctx.save();
+                ctx.setLineDash([4, 3]);
+                ctx.strokeStyle = 'rgba(255,200,0,0.7)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(depX, depY);
+                ctx.lineTo(arrX, arrY);
+                ctx.stroke();
+                ctx.setLineDash([]);
 
-            const depDx = (m.departure_lon - lon) * pxPerDeg;
-            const depDy = -(m.departure_lat - lat) * pixPerDegLat / pixPerDegLon * pxPerDeg;
-            const arrDx = (m.arrival_lon - lon) * pxPerDeg;
-            const arrDy = -(m.arrival_lat - lat) * pixPerDegLat / pixPerDegLon * pxPerDeg;
+                ctx.fillStyle = 'rgba(0,200,255,0.9)';
+                ctx.beginPath();
+                ctx.arc(depX, depY, 4, 0, Math.PI * 2);
+                ctx.fill();
 
-            const depX = cx + depDx;
-            const depY = cy + depDy;
-            const arrX = cx + arrDx;
-            const arrY = cy + arrDy;
+                ctx.fillStyle = 'rgba(255,80,80,0.9)';
+                ctx.beginPath();
+                ctx.arc(arrX, arrY, 4, 0, Math.PI * 2);
+                ctx.fill();
 
-            ctx.save();
-            ctx.setLineDash([4, 3]);
-            ctx.strokeStyle = 'rgba(255,200,0,0.7)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(depX, depY);
-            ctx.lineTo(arrX, arrY);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            ctx.fillStyle = 'rgba(0,200,255,0.9)';
-            ctx.beginPath();
-            ctx.arc(depX, depY, 4, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.fillStyle = 'rgba(255,80,80,0.9)';
-            ctx.beginPath();
-            ctx.arc(arrX, arrY, 4, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.font = '7px Inter, sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.8)';
-            ctx.fillText(m.departure_icao, depX + 6, depY - 2);
-            ctx.fillText(m.arrival_icao, arrX + 6, arrY - 2);
-            ctx.restore();
+                ctx.font = '7px Inter, sans-serif';
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.fillText(m.departure_icao, depX + 6, depY - 2);
+                ctx.fillText(m.arrival_icao, arrX + 6, arrY - 2);
+                ctx.restore();
+            }
         }
 
         if (this._activeFlightPlanNav) {
             const fp = this._activeFlightPlanNav;
-            const MAP_ZOOM_FP = 13;
-            const scaleFP = 256 * Math.pow(2, MAP_ZOOM_FP) / 360;
-            const pxPerDegLatFP = scaleFP * Math.cos(lat * Math.PI / 180);
-            const pxPerDegLonFP = scaleFP;
-            const pxPerDegFP = cv.width / (360 / Math.pow(2, MAP_ZOOM_FP));
+            if (Number.isFinite(fp.departure_lat) && Number.isFinite(fp.departure_lon) && Number.isFinite(fp.arrival_lat) && Number.isFinite(fp.arrival_lon)) {
+                const pDep = this._latLonToMapPx(fp.departure_lat, fp.departure_lon, lat, lon, cv.width);
+                const pArr = this._latLonToMapPx(fp.arrival_lat, fp.arrival_lon, lat, lon, cv.width);
+                const fpDepX = cx + pDep.x;
+                const fpDepY = cy + pDep.y;
+                const fpArrX = cx + pArr.x;
+                const fpArrY = cy + pArr.y;
 
-            const fpDepDx = (fp.departure_lon - lon) * pxPerDegFP;
-            const fpDepDy = -(fp.departure_lat - lat) * pxPerDegLatFP / pxPerDegLonFP * pxPerDegFP;
-            const fpArrDx = (fp.arrival_lon - lon) * pxPerDegFP;
-            const fpArrDy = -(fp.arrival_lat - lat) * pxPerDegLatFP / pxPerDegLonFP * pxPerDegFP;
+                ctx.save();
+                ctx.setLineDash([4, 3]);
+                ctx.strokeStyle = 'rgba(80,255,160,0.7)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(fpDepX, fpDepY);
+                ctx.lineTo(fpArrX, fpArrY);
+                ctx.stroke();
+                ctx.setLineDash([]);
 
-            const fpDepX = cx + fpDepDx;
-            const fpDepY = cy + fpDepDy;
-            const fpArrX = cx + fpArrDx;
-            const fpArrY = cy + fpArrDy;
+                ctx.fillStyle = 'rgba(0,200,255,0.9)';
+                ctx.beginPath();
+                ctx.arc(fpDepX, fpDepY, 4, 0, Math.PI * 2);
+                ctx.fill();
 
-            ctx.save();
-            ctx.setLineDash([4, 3]);
-            ctx.strokeStyle = 'rgba(80,255,160,0.7)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(fpDepX, fpDepY);
-            ctx.lineTo(fpArrX, fpArrY);
-            ctx.stroke();
-            ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(255,80,80,0.9)';
+                ctx.beginPath();
+                ctx.arc(fpArrX, fpArrY, 4, 0, Math.PI * 2);
+                ctx.fill();
 
-            ctx.fillStyle = 'rgba(0,200,255,0.9)';
-            ctx.beginPath();
-            ctx.arc(fpDepX, fpDepY, 4, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.fillStyle = 'rgba(255,80,80,0.9)';
-            ctx.beginPath();
-            ctx.arc(fpArrX, fpArrY, 4, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.font = '7px Inter, sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.fillText(fp.departure_icao, fpDepX + 6, fpDepY - 2);
-            ctx.fillText(fp.arrival_icao, fpArrX + 6, fpArrY - 2);
-            ctx.restore();
+                ctx.font = '7px Inter, sans-serif';
+                ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                ctx.fillText(fp.departure_icao, fpDepX + 6, fpDepY - 2);
+                ctx.fillText(fp.arrival_icao, fpArrX + 6, fpArrY - 2);
+                ctx.restore();
+            }
         }
 
         const nav = this._activeFlightPlanNav ?? this._missionDestForNav();

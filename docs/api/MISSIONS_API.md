@@ -59,6 +59,8 @@ Missions can have ordered waypoints that define a flight path for the player to 
 5. The game engine draws the waypoints on the minimap as a path for the player to follow.
 6. Waypoints are returned in the `waypoints` array on `GET /api/missions/:id`, `GET /api/user-missions`, `GET /api/user-missions/active`, and `POST /api/user-missions`.
 
+> **Awarding points on completion:** finishing the route (visually) does **not** automatically credit points. The game engine must call [`PUT /api/user-missions/:id/complete`](#put-apiuser-missionsidcomplete) once the last waypoint is reached. That endpoint adds `mission.reward_points` to `user_flight_stats.total_reward_points`, increments `total_missions_completed`, and writes a row to `user_points_log` with `source_type='mission'` and `source_id=user_mission_id`. See [`docs/POINTS_AND_REWARDS.md`](../POINTS_AND_REWARDS.md) for the full rules.
+
 ### Mission Types
 
 | Type | Description | Required Fields |
@@ -73,10 +75,22 @@ Missions can have ordered waypoints that define a flight path for the player to 
 ### User Mission Status Lifecycle
 
 ```
-in_progress → completed
+started     → in_progress   (game launches the mission)
+in_progress → started       (auto-demoted when the user starts another mission)
+in_progress → completed     (last waypoint reached, points awarded)
+started     → cancelled
 in_progress → failed
 in_progress → cancelled
 ```
+
+| Status | Set by | Meaning |
+|---|---|---|
+| `started` | `POST /api/user-missions` (acquire) **or** automatic demotion when another mission is started | The user has acquired the mission but is not actively flying it right now. May have been previously `in_progress` and pushed back to the queue. |
+| `in_progress` | `PUT /api/user-missions/:id/start` | The game has loaded the mission and the player is actively flying it. **At most one mission per user can be `in_progress` at any time** — starting another one demotes this one back to `started`. Only missions in this state appear in `GET /api/user-missions/active`. |
+| `completed` | `PUT /api/user-missions/:id/complete` | Player completed the mission. `reward_points` are credited to `user_flight_stats.total_reward_points` and a row is added to `user_points_log`. Strict transition — only allowed from `in_progress`. |
+| `failed` / `cancelled` | `PUT /api/user-missions/:id` (generic update) | Mission abandoned/lost. No points awarded. |
+
+> Missions in status `started` are intentionally **not** returned by `GET /api/user-missions/active` — that endpoint is the game's "pick up where I left off" view and must only contain the single mission actively being played.
 
 ### is_enabled vs is_active
 
@@ -392,7 +406,7 @@ Alias for `GET /api/user-missions?status=in_progress`. Returns only missions wit
 
 ### `POST /api/user-missions`
 
-Start a mission. Creates a user-mission record with `status='in_progress'` and returns the full enriched payload.
+Acquire a mission for the user. Creates a user-mission record with `status='started'` (the user has chosen to play the mission, but the game hasn't started it yet) and returns the full enriched payload. Triggered by the **"Iniciar Missão"** button on the website.
 
 **Auth:** Required.
 
@@ -404,7 +418,7 @@ Start a mission. Creates a user-mission record with `status='in_progress'` and r
 
 **Response (201):**
 
-Same shape as a single item from `GET /api/user-missions`, with `status: "in_progress"`.
+Same shape as a single item from `GET /api/user-missions`, with `status: "started"`. The mission will **not** appear in `GET /api/user-missions/active` until the game transitions it via [`PUT /api/user-missions/:id/start`](#put-apiuser-missionsidstart).
 
 **Error Responses:**
 
@@ -414,7 +428,45 @@ Same shape as a single item from `GET /api/user-missions`, with `status: "in_pro
 | 401 | `{ "error": "Not authenticated" }` | No JWT |
 | 403 | `{ "error": "Mission not available" }` | Mission is `is_active=0` or `is_enabled=0` |
 | 404 | `{ "error": "Mission not found" }` | Invalid mission_id |
-| 409 | `{ "error": "Mission already in progress" }` | User already has an active record for this mission |
+| 409 | `{ "error": "Mission already in progress" }` | User already has an active record (`started`, `in_progress`) for this mission |
+
+---
+
+### `PUT /api/user-missions/:id/start`
+
+Transition a user mission from `started` to `in_progress`. **Called by the game** when the player loads the mission and the scene starts. Only after this call does the mission appear in `GET /api/user-missions/active`.
+
+`:id` is the `user_missions.id` (not the mission template id).
+
+**Auth:** Required.
+
+**Request Body:** Empty (or ignored).
+
+**Side effect — single active mission rule:** before promoting `:id` to `in_progress`, **all other** missions of the same user that are currently `in_progress` are demoted back to `'started'` (single SQL `UPDATE ... WHERE user_id = ? AND status = 'in_progress' AND id <> ?`). This guarantees that **at most one mission per user is `in_progress` at any time**, so `GET /api/user-missions/active` always returns either zero or one row, and the player never has two missions "running" in parallel.
+
+**Response (200):**
+
+Same enriched shape as a single item from `GET /api/user-missions`, with `status: "in_progress"`.
+
+**Error Responses:**
+
+| Code | Body | Description |
+|---|---|---|
+| 400 | `{ "error": "Invalid user mission id" }` | `:id` is not a number |
+| 400 | `{ "error": "Only started missions can be transitioned to in_progress" }` | Current status is not `started` (e.g. `completed`, `failed`, `cancelled`) |
+| 401 | `{ "error": "Not authenticated" }` | No JWT |
+| 404 | `{ "error": "User mission not found" }` | Invalid id or wrong user |
+| 409 | `{ "error": "Mission already in progress" }` | Idempotency guard — already transitioned |
+
+> **Game integration tip:** the website launches the game with the URL:
+>
+> ```
+> flight.html?token=<jwt>&missionId=<mission template id>&userMissionId=<user_missions.id>
+> ```
+>
+> - `userMissionId` is **passed when available** (the user already has an acquired `started` row for this mission). The game should call `PUT /api/user-missions/<userMissionId>/start` directly with this value.
+> - If `userMissionId` is **missing** (legacy entry point or the user opened the game without going through the mission card), the game must fall back to `GET /api/user-missions?status=started`, find the row whose `mission_id === missionId`, and use its `id`.
+> - `PUT /:id/start` is idempotent for in-progress missions (returns `409 Mission already in progress`), so it's safe to call on every game load.
 
 ---
 
@@ -460,6 +512,20 @@ Mark a mission as completed. Awards `reward_points` to the user and increments `
 - Mission must be in `in_progress` status.
 - Cannot complete an already completed mission (prevents double points).
 
+**Side effects on success:**
+
+1. `user_missions.status` → `completed`, `completed_at` set to `NOW()`.
+2. `user_flight_stats.total_reward_points` += `mission.reward_points` (upsert).
+3. `user_flight_stats.total_missions_completed` += 1.
+4. New row in `user_points_log`:
+   ```
+   (user_id, points, source_type, source_id, description)
+   = (<user>, <reward_points>, 'mission', <user_mission_id>, 'Mission #<mission_id> completed')
+   ```
+5. Pilot rank is recomputed on the next read using the updated stats.
+
+> See [`docs/POINTS_AND_REWARDS.md`](../POINTS_AND_REWARDS.md) for the full points & rank system, including how mission rewards interact with flight-plan points and the recalculation caveat.
+
 **Response (200):**
 
 ```json
@@ -477,6 +543,40 @@ Mark a mission as completed. Awards `reward_points` to the user and increments `
 
 ---
 
+## URL Parameters Passed to the Game
+
+When the user clicks **"Iniciar Jogo"** on a mission card (Missions list or Mission Detail page), the website opens:
+
+```
+https://game.simflightpro.com/flight.html?token=<jwt>&missionId=<mission template id>&userMissionId=<user_missions.id>
+```
+
+| Parameter | Type | Always present | Description |
+|---|---|---|---|
+| `token` | string | Yes | JWT auth token. |
+| `missionId` | int | Yes | The `missions.id` (template id). Used by the game to know which mission scene/waypoints to render. |
+| `userMissionId` | int | When the user has a `started` row | The `user_missions.id` for this mission, so the game can call `PUT /api/user-missions/<userMissionId>/start` directly without an extra lookup. |
+
+### Game bootstrap flow
+
+```
+1. Game reads `token`, `missionId`, `userMissionId` from URL.
+2. If `userMissionId` is missing:
+     GET /api/user-missions?status=started
+       → find row whose mission_id === missionId
+       → use that id as userMissionId
+3. PUT /api/user-missions/<userMissionId>/start
+     → 200 OK: status is now 'in_progress', mission appears in /active.
+     → 409 Mission already in progress: idempotent retry, ignore.
+4. (Optional) GET /api/user-missions/active
+     → fetch full waypoints + required_aircraft for the HUD/minimap.
+5. ... player flies the mission ...
+6. PUT /api/user-missions/<userMissionId>/complete
+     → 200 OK with `points_awarded`.
+```
+
+---
+
 ## Examples
 
 ### List enabled missions
@@ -491,13 +591,22 @@ curl -s https://api.simflightpro.com/api/missions?type=route&difficulty=beginner
 curl -s https://api.simflightpro.com/api/missions/5
 ```
 
-### Start a mission
+### Acquire a mission (website "Iniciar Missão" button)
+
+Creates a `user_missions` row with `status='started'`.
 
 ```bash
 curl -s -X POST https://api.simflightpro.com/api/user-missions \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"mission_id": 5}'
+```
+
+### Transition mission to in_progress (called by the game on scene load)
+
+```bash
+curl -s -X PUT https://api.simflightpro.com/api/user-missions/123/start \
+  -H "Authorization: Bearer <token>"
 ```
 
 ### List my active missions

@@ -27,7 +27,7 @@ if (token) {
 }
 
 const flightPlanId = params.get('flightPlanId');
-const missionId = params.get('missionId');
+const missionId = params.get('missionId') ?? params.get('mission_id');
 params.delete('token');
 const cleanSearch = params.toString();
 history.replaceState(null, '', window.location.pathname + (cleanSearch ? `?${cleanSearch}` : ''));
@@ -176,18 +176,19 @@ scene.onSpawned = () => {
                 if (alreadyActive) {
                     if (needsPromotion && userMissionId != null) {
                         try {
-                            const promoteRes = await fetch(`/api/user-missions/${userMissionId}`, {
+                            const promoteRes = await fetch(`/api/user-missions/${userMissionId}/start`, {
                                 method: 'PUT',
-                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ status: 'in_progress' }),
+                                headers: { 'Authorization': `Bearer ${token}` },
                             });
                             if (promoteRes.ok) {
-                                console.log(`[flight-main] Promoted user-mission ${userMissionId} from 'started' to 'in_progress'`);
+                                console.log(`[flight-main] Promoted user-mission ${userMissionId} from 'started' to 'in_progress' via /start`);
+                            } else if (promoteRes.status === 409) {
+                                console.log(`[flight-main] user-mission ${userMissionId} already in_progress (409 idempotent)`);
                             } else {
-                                console.warn(`[flight-main] Failed to promote user-mission ${userMissionId} to 'in_progress': HTTP ${promoteRes.status}`);
+                                console.warn(`[flight-main] Failed to start user-mission ${userMissionId}: HTTP ${promoteRes.status}`);
                             }
                         } catch (err) {
-                            console.warn(`[flight-main] Promote user-mission ${userMissionId} error:`, err);
+                            console.warn(`[flight-main] Start user-mission ${userMissionId} error:`, err);
                         }
                     }
                     console.log(`[flight-main] Mission ${missionId} already active, userMissionId=${userMissionId}`);
@@ -201,13 +202,30 @@ scene.onSpawned = () => {
                     if (startRes.ok) {
                         const startData = await startRes.json();
                         userMissionId = startData?.id != null ? Number(startData.id) : null;
-                        console.log(`[flight-main] Mission ${missionId} started, userMissionId=${userMissionId}`);
+                        console.log(`[flight-main] Mission ${missionId} acquired, userMissionId=${userMissionId}`);
+                        if (userMissionId != null) {
+                            try {
+                                const promoteRes = await fetch(`/api/user-missions/${userMissionId}/start`, {
+                                    method: 'PUT',
+                                    headers: { 'Authorization': `Bearer ${token}` },
+                                });
+                                if (promoteRes.ok) {
+                                    console.log(`[flight-main] Started user-mission ${userMissionId} (in_progress) via /start`);
+                                } else if (promoteRes.status === 409) {
+                                    console.log(`[flight-main] user-mission ${userMissionId} already in_progress (409 idempotent)`);
+                                } else {
+                                    console.warn(`[flight-main] Failed to start user-mission ${userMissionId}: HTTP ${promoteRes.status}`);
+                                }
+                            } catch (err) {
+                                console.warn(`[flight-main] Start user-mission ${userMissionId} error:`, err);
+                            }
+                        }
                         scene.setMissionSpawn(mission, userMissionId);
                     } else if (startRes.status === 409) {
                         console.log(`[flight-main] Mission ${missionId} already active (race), spawning without userMissionId`);
                         scene.setMissionSpawn(mission, null);
                     } else {
-                        console.warn(`[flight-main] Mission ${missionId} start failed: ${startRes.status}`);
+                        console.warn(`[flight-main] Mission ${missionId} acquire failed: ${startRes.status}`);
                         scene.setMissionSpawn(mission, null);
                     }
                 }
