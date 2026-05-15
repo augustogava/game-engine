@@ -59,8 +59,10 @@ const WORLD_READY_TIMEOUT_MS = 15000;
 const WORLD_READY_PROBE_HEIGHT_M = 5000;
 const WORLD_READY_PROBE_LENGTH_M = 10000;
 const JET_THRUST_LAPSE_EXPONENT = 0.7;
+const JET_THRUST_MACH_LAPSE_COEF = 0.6;
+const JET_THRUST_MACH_MIN_FACTOR = 0.4;
 const MACH_DRAG_RISE_START = 0.78;
-const MACH_DRAG_RISE_COEF = 12;
+const MACH_DRAG_RISE_COEF = 18;
 const SPECIFIC_HEAT_RATIO_AIR = 1.4;
 const GAS_CONSTANT_AIR_J_PER_KG_K = 287.058;
 const ISA_TROPOPAUSE_TEMP_K = 216.65;
@@ -2950,7 +2952,16 @@ export class FlightSceneSimple extends Scene3D {
         } else {
             const densityRatio = Math.max(0.0001, airDensity / SEA_LEVEL_AIR_DENSITY_KG_PER_M3);
             const thrustAltitudeLapse = Math.pow(densityRatio, JET_THRUST_LAPSE_EXPONENT);
-            effectiveThrust = this.thrust * thrustAltitudeLapse;
+            const tempKEng = altitude > ISA_TROPOPAUSE_M
+                ? ISA_TROPOPAUSE_TEMP_K
+                : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
+            const speedOfSoundEng = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempKEng);
+            const machNow = this.velocity.length() / Math.max(1, speedOfSoundEng);
+            const thrustMachLapse = Math.max(
+                JET_THRUST_MACH_MIN_FACTOR,
+                1.0 - JET_THRUST_MACH_LAPSE_COEF * machNow,
+            );
+            effectiveThrust = this.thrust * thrustAltitudeLapse * thrustMachLapse;
             this.enginePower = this.thrust;
             this.engineRpm = Math.round(1200 + this.thrust * 1500);
         }
@@ -3055,6 +3066,14 @@ export class FlightSceneSimple extends Scene3D {
                 const machDragMult = 1.0 + machExcess * machExcess * MACH_DRAG_RISE_COEF;
                 const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area * machDragMult;
                 totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
+
+                if (machExcess > 0) {
+                    const wingAreaTotal = (cfg.surfaces[0]?.area ?? 0) + (cfg.surfaces[1]?.area ?? 0);
+                    if (wingAreaTotal > 0) {
+                        const wingWaveDrag = 0.5 * airDensity * spd * spd * cfg.skin_friction * wingAreaTotal * (machDragMult - 1.0);
+                        totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-wingWaveDrag));
+                    }
+                }
 
                 // Fuselage sideslip Cy/Cn
                 const bodyVelNow = toBody(vel);
@@ -4357,9 +4376,9 @@ export class FlightSceneSimple extends Scene3D {
         const altitudeFt = Math.round(altitudeM * 3.28084);
         const pct = Math.round(this.thrust * 100);
 
-        const altitudeMsl = Math.round(Math.max(0, this.refAlt + pos.y));
+        const altitudeMslFt = Math.round(Math.max(0, this.refAlt + pos.y) * 3.28084);
         this.hudSpeedVal.textContent = String(speedKts);
-        this.hudAltVal.textContent   = String(altitudeMsl);
+        this.hudAltVal.textContent   = String(altitudeMslFt);
         this.hudThrottle.style.width = `${pct}%`;
         if (this.hudThrPct) this.hudThrPct.textContent = `${pct}%`;
 
