@@ -2347,7 +2347,7 @@ export class FlightSceneSimple extends Scene3D {
                 const cosBank = Math.sqrt(Math.max(0.001, 1 - sinBank * sinBank));
                 const loadComp = (1.0 / cosBank) - 1.0;
                 const pitchBias = Math.min(BANK_COMP_MAX_PITCH, loadComp * BANK_COMP_PITCH_GAIN);
-                this.surfaces[2].controlInput += pitchBias;
+                this.surfaces[2].controlInput -= pitchBias;
             }
         }
 
