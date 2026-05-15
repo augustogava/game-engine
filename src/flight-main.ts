@@ -149,9 +149,10 @@ scene.onSpawned = () => {
 
                 let userMissionId: number | null = null;
                 let alreadyActive = false;
+                let needsPromotion = false;
 
                 try {
-                    const activeRes = await fetch('/api/user-missions?status=in_progress', {
+                    const activeRes = await fetch('/api/user-missions/active', {
                         headers: { 'Authorization': `Bearer ${token}` },
                     });
                     if (activeRes.ok) {
@@ -161,6 +162,9 @@ scene.onSpawned = () => {
                         if (existing && existing.id != null) {
                             userMissionId = Number(existing.id);
                             alreadyActive = true;
+                            if (existing.status === 'started') {
+                                needsPromotion = true;
+                            }
                         }
                     } else {
                         console.warn(`[flight-main] Active user-missions check failed: ${activeRes.status}`);
@@ -170,6 +174,22 @@ scene.onSpawned = () => {
                 }
 
                 if (alreadyActive) {
+                    if (needsPromotion && userMissionId != null) {
+                        try {
+                            const promoteRes = await fetch(`/api/user-missions/${userMissionId}`, {
+                                method: 'PUT',
+                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ status: 'in_progress' }),
+                            });
+                            if (promoteRes.ok) {
+                                console.log(`[flight-main] Promoted user-mission ${userMissionId} from 'started' to 'in_progress'`);
+                            } else {
+                                console.warn(`[flight-main] Failed to promote user-mission ${userMissionId} to 'in_progress': HTTP ${promoteRes.status}`);
+                            }
+                        } catch (err) {
+                            console.warn(`[flight-main] Promote user-mission ${userMissionId} error:`, err);
+                        }
+                    }
                     console.log(`[flight-main] Mission ${missionId} already active, userMissionId=${userMissionId}`);
                     scene.setMissionSpawn(mission, userMissionId);
                 } else {
@@ -194,6 +214,45 @@ scene.onSpawned = () => {
             }
         } catch (err) {
             console.error('[flight-main] Mission fetch error:', err);
+        }
+    }
+
+    if (token && !flightPlanId && !missionId) {
+        try {
+            loadingStatus.textContent = 'Resetting mission state...';
+            const activeRes = await fetch('/api/user-missions?status=in_progress', {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (activeRes.ok) {
+                const activeJson = await activeRes.json();
+                const activeList = Array.isArray(activeJson?.data) ? activeJson.data : [];
+                let resetCount = 0;
+                for (const um of activeList) {
+                    const umId = Number(um?.id);
+                    if (!Number.isFinite(umId) || umId <= 0) continue;
+                    try {
+                        const resetRes = await fetch(`/api/user-missions/${umId}`, {
+                            method: 'PUT',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ status: 'started' }),
+                        });
+                        if (resetRes.ok) {
+                            resetCount++;
+                        } else {
+                            console.warn(`[flight-main] Failed to reset user-mission ${umId} to 'started': HTTP ${resetRes.status}`);
+                        }
+                    } catch (err) {
+                        console.warn(`[flight-main] Reset user-mission ${umId} error:`, err);
+                    }
+                }
+                if (activeList.length) {
+                    console.log(`[flight-main] Normal-game start: reset ${resetCount}/${activeList.length} in_progress user-missions to 'started'`);
+                }
+            } else {
+                console.warn(`[flight-main] In-progress user-missions fetch failed for normal-game cleanup: HTTP ${activeRes.status}`);
+            }
+        } catch (err) {
+            console.warn('[flight-main] Normal-game mission cleanup error:', err);
         }
     }
 

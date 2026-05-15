@@ -546,7 +546,6 @@ export class FlightSceneSimple extends Scene3D {
     private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
     private _navGlowLayer: BABYLON.GlowLayer | null = null;
     private _navGlowTex: BABYLON.DynamicTexture | null = null;
-    private _navBlinkTimer = 0;
     private _navStrobeTimer = 0;
 
     private _hemiLight: BABYLON.HemisphericLight | null = null;
@@ -2025,12 +2024,10 @@ export class FlightSceneSimple extends Scene3D {
 
     private _updateNavLights(dt: number): void {
         if (this._navLights.length === 0) return;
-        this._navBlinkTimer += dt;
         this._navStrobeTimer += dt;
-        const blinkOn  = (this._navBlinkTimer % 1.0) < 0.5;
         const strobeOn = (this._navStrobeTimer % 0.3) < 0.1;
         for (const nav of this._navLights) {
-            const on = nav.strobe ? strobeOn : blinkOn;
+            const on = nav.strobe ? strobeOn : true;
             nav.light.intensity = on ? nav.maxIntensity : 0;
             nav.mesh.isVisible = on;
             nav.core.isVisible = on;
@@ -3636,34 +3633,46 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         try {
-            const res = await fetch('/api/user-missions/active', {
-                headers: { 'Authorization': `Bearer ${token}` }
+            const res = await fetch('/api/user-missions?status=started,in_progress', {
+                headers: { 'Authorization': `Bearer ${token}` },
             });
             if (!res.ok) {
+                console.warn(`[FlightScene] User-missions fetch failed: HTTP ${res.status}`);
                 listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Failed to load missions</div>';
                 return;
             }
             const json = await res.json();
-            const missions = json.data || [];
+            const userMissions = Array.isArray(json?.data) ? json.data : [];
 
-            if (!missions.length) {
-                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No active missions</div>';
+            if (!userMissions.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No missions acquired</div>';
                 this._activeMission = null;
+                this._activeUserMissionId = null;
+                this._activeMissionId = null;
+                this._missionWaypoints = [];
+                this._missionCurrentWpIndex = 0;
                 return;
             }
 
+            const sortedMissions = userMissions.slice().sort((a: any, b: any) => {
+                const aInProg = a?.status === 'in_progress' ? 0 : 1;
+                const bInProg = b?.status === 'in_progress' ? 0 : 1;
+                if (aInProg !== bInProg) return aInProg - bInProg;
+                return 0;
+            });
+
             let html = '';
-            for (const m of missions) {
-                const mi = m.mission || {};
-                const isActive = m.status === 'in_progress';
-                const borderColor = isActive ? 'rgba(80,255,160,.5)' : 'rgba(255,255,255,.15)';
-                const statusLabel = m.status === 'in_progress' ? 'IN PROGRESS' : 'STARTED';
-                const statusColor = isActive ? '#40ffaa' : '#ffcc00';
-                const mType = m.mission_type || mi.type || '';
-                const depIcao = m.departure_icao || mi.departure_icao || '';
-                const arrIcao = m.arrival_icao || mi.arrival_icao || '';
-                const depName = m.departure_airport_name || mi.departure_airport_name || '';
-                const arrName = m.arrival_airport_name || mi.arrival_airport_name || '';
+            for (const um of sortedMissions) {
+                const mid = Number(um?.mission_id);
+                if (!Number.isFinite(mid) || mid <= 0) continue;
+                const mi = um.mission || {};
+                const isInProgress = um.status === 'in_progress';
+                const borderColor = isInProgress ? 'rgba(80,255,160,.5)' : 'rgba(255,200,80,.35)';
+                const mType = um.mission_type || mi.type || '';
+                const depIcao = um.departure_icao || mi.departure_icao || '';
+                const arrIcao = um.arrival_icao || mi.arrival_icao || '';
+                const depName = um.departure_airport_name || mi.departure_airport_name || '';
+                const arrName = um.arrival_airport_name || mi.arrival_airport_name || '';
                 const isRoute = depIcao && arrIcao;
                 let routeHtml = '';
                 if (isRoute) {
@@ -3674,34 +3683,109 @@ export class FlightSceneSimple extends Scene3D {
                 } else {
                     routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)">${mType || 'Free Flight'}</div>`;
                 }
+
+                let actionHtml = '';
+                if (isInProgress) {
+                    actionHtml = `<div style="font-size:9px;color:#40ffaa;letter-spacing:.08em;margin-top:6px">IN PROGRESS</div>`;
+                } else {
+                    const umId = Number(um?.id);
+                    if (!Number.isFinite(umId) || umId <= 0) {
+                        console.warn(`[FlightScene] Skipping START button for mission ${mid}: invalid user-mission id`);
+                        actionHtml = `<div style="font-size:9px;color:#ff8080;letter-spacing:.08em;margin-top:6px">INICIADA (ID INVÁLIDO)</div>`;
+                    } else {
+                        actionHtml = `<div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                            <span style="font-size:9px;color:#ffcc55;letter-spacing:.08em">INICIADA</span>
+                            <button class="mission-start-btn" data-mission-id="${mid}" data-user-mission-id="${umId}" style="padding:4px 10px;background:rgba(0,80,40,.6);border:1px solid rgba(80,255,160,.5);border-radius:4px;color:#40ffaa;font-size:10px;font-family:'Orbitron',monospace;letter-spacing:.08em;cursor:pointer;pointer-events:auto">INICIAR JOGO</button>
+                        </div>`;
+                    }
+                }
+
                 html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
-                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${m.mission_title || mi.title || 'Mission'}</div>
-                    <div style="font-size:9px;color:${statusColor};letter-spacing:.08em;margin-bottom:4px">${statusLabel}</div>
+                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${um.mission_title || mi.title || 'Mission'}</div>
                     ${routeHtml}
+                    ${actionHtml}
                 </div>`;
             }
             listEl.innerHTML = html;
 
-            const active = missions.find((m: any) => m.status === 'in_progress') || missions[0];
-            if (active && active.departure_lat != null && active.arrival_lat != null) {
+            const startButtons = listEl.querySelectorAll<HTMLButtonElement>('.mission-start-btn');
+            startButtons.forEach((btn) => {
+                btn.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    const target = ev.currentTarget as HTMLButtonElement;
+                    const mid = target.dataset.missionId;
+                    const umIdStr = target.dataset.userMissionId;
+                    if (!mid) {
+                        console.warn('[FlightScene] Mission START button clicked without mission id');
+                        return;
+                    }
+                    const startMissionId = Number(mid);
+                    if (!Number.isFinite(startMissionId) || startMissionId <= 0) {
+                        console.warn(`[FlightScene] Invalid mission id on START button: ${mid}`);
+                        return;
+                    }
+                    const startUserMissionId = Number(umIdStr);
+                    if (!Number.isFinite(startUserMissionId) || startUserMissionId <= 0) {
+                        console.warn(`[FlightScene] Invalid user-mission id on START button: ${umIdStr}`);
+                        return;
+                    }
+                    target.disabled = true;
+                    target.textContent = 'CARREGANDO...';
+                    const tk = localStorage.getItem('auth_token') || '';
+                    if (!tk) {
+                        console.warn('[FlightScene] Cannot promote mission: no auth token');
+                        target.disabled = false;
+                        target.textContent = 'INICIAR JOGO';
+                        return;
+                    }
+                    try {
+                        const promoteRes = await fetch(`/api/user-missions/${startUserMissionId}`, {
+                            method: 'PUT',
+                            headers: { 'Authorization': `Bearer ${tk}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ status: 'in_progress' }),
+                        });
+                        if (!promoteRes.ok) {
+                            console.warn(`[FlightScene] Failed to promote user-mission ${startUserMissionId} to 'in_progress': HTTP ${promoteRes.status}`);
+                            target.disabled = false;
+                            target.textContent = 'INICIAR JOGO';
+                            return;
+                        }
+                        console.log(`[FlightScene] Promoted user-mission ${startUserMissionId} to 'in_progress', launching mission ${startMissionId}`);
+                    } catch (err) {
+                        console.warn(`[FlightScene] Promote user-mission ${startUserMissionId} error:`, err);
+                        target.disabled = false;
+                        target.textContent = 'INICIAR JOGO';
+                        return;
+                    }
+                    window.location.href = `flight.html?mission_id=${encodeURIComponent(String(startMissionId))}`;
+                });
+            });
+
+            const activeFromList = sortedMissions.find((m: any) => m?.status === 'in_progress');
+            if (activeFromList && activeFromList.departure_lat != null && activeFromList.arrival_lat != null) {
                 this._activeMission = {
-                    departure_lat: Number(active.departure_lat),
-                    departure_lon: Number(active.departure_lon),
-                    arrival_lat: Number(active.arrival_lat),
-                    arrival_lon: Number(active.arrival_lon),
-                    departure_icao: active.departure_icao || '',
-                    arrival_icao: active.arrival_icao || '',
-                    mission_title: active.mission_title || '',
+                    departure_lat: Number(activeFromList.departure_lat),
+                    departure_lon: Number(activeFromList.departure_lon),
+                    arrival_lat: Number(activeFromList.arrival_lat),
+                    arrival_lon: Number(activeFromList.arrival_lon),
+                    departure_icao: activeFromList.departure_icao || '',
+                    arrival_icao: activeFromList.arrival_icao || '',
+                    mission_title: activeFromList.mission_title || '',
                 };
-                this._activeUserMissionId = active.id ?? null;
-                this._activeMissionId = active.mission_id ?? null;
-                const mi = active.mission || {};
-                this._missionWaypoints = Array.isArray(mi.waypoints) ? mi.waypoints : [];
+                this._activeUserMissionId = activeFromList.id ?? null;
+                this._activeMissionId = activeFromList.mission_id ?? null;
+                const ami = activeFromList.mission || {};
+                this._missionWaypoints = Array.isArray(ami.waypoints) ? ami.waypoints : [];
                 this._missionCurrentWpIndex = 0;
             } else {
                 this._activeMission = null;
+                this._activeUserMissionId = null;
+                this._activeMissionId = null;
+                this._missionWaypoints = [];
+                this._missionCurrentWpIndex = 0;
             }
         } catch (err) {
+            console.warn('[FlightScene] Missions panel load error:', err);
             listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
         }
     }
@@ -4508,7 +4592,7 @@ export class FlightSceneSimple extends Scene3D {
 
         const speed    = Math.round(this.velocity.length() * 3.6 * 0.539957);
         const pPos = this.planeRoot.position;
-        const altitude = Math.round(Math.max(0, this.refAlt + pPos.y));
+        const altitude = Math.round(Math.max(0, this.refAlt + pPos.y) * 3.28084);
         const ppd = 4;
 
         ctx.save();
@@ -4685,7 +4769,7 @@ export class FlightSceneSimple extends Scene3D {
         ctx.textAlign = 'right';
         ctx.fillText('kts', 54, cy - 2);
         ctx.textAlign = 'left';
-        ctx.fillText('m', W - 54, cy - 2);
+        ctx.fillText('ft', W - 54, cy - 2);
 
         ctx.strokeStyle = 'rgba(0,255,100,0.3)';
         ctx.lineWidth = 1;
@@ -4706,15 +4790,15 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         for (let i = -5; i <= 5; i++) {
-            const altMark = Math.round(altitude / 50) * 50 + i * 50;
+            const altMark = Math.round(altitude / 200) * 200 + i * 200;
             if (altMark < 0) continue;
-            const yOff = cy - 17 + (altitude - altMark) * 0.6;
+            const yOff = cy - 17 + (altitude - altMark) * 0.18;
             if (yOff < cy - 80 || yOff > cy + 50) continue;
             ctx.beginPath();
             ctx.moveTo(W - 66, yOff);
             ctx.lineTo(W - 60, yOff);
             ctx.stroke();
-            if (altMark % 100 === 0) {
+            if (altMark % 500 === 0) {
                 ctx.fillStyle = 'rgba(0,255,100,0.5)';
                 ctx.textAlign = 'left';
                 ctx.fillText(`${altMark}`, W - 58, yOff + 3);
