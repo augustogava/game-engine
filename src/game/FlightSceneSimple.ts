@@ -52,7 +52,7 @@ const FT_TO_M = 0.3048;
 const METERS_PER_DEG_LAT = 111320;
 const RUNWAY_DEFAULT_WIDTH_FT = 148;
 const RUNWAY_COLLIDER_RADIUS_KM = 10;
-const RUNWAY_COLLIDER_Y_BIAS_M = 1.5;
+const RUNWAY_COLLIDER_Y_BIAS_M = 0.1;
 const CAMERA_RADIUS_LENGTH_FACTOR = 3;
 const CAMERA_RADIUS_MIN_M = 15;
 const CAMERA_RADIUS_MAX_M = 65;
@@ -666,9 +666,8 @@ export class FlightSceneSimple extends Scene3D {
     private _missionCompletionInFlight = false;
     private static readonly WAYPOINT_REACH_NM = 0.3;
 
-    private _navLights: { light: BABYLON.PointLight; mesh: BABYLON.Mesh; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
+    private _navLights: { light: BABYLON.PointLight; core: BABYLON.Mesh; strobe: boolean; maxIntensity: number }[] = [];
     private _navGlowLayer: BABYLON.GlowLayer | null = null;
-    private _navGlowTex: BABYLON.DynamicTexture | null = null;
     private _navStrobeTimer = 0;
     private _runwayColliders: BABYLON.Mesh[] = [];
     private _runwayCollidersLoaded = false;
@@ -2250,15 +2249,10 @@ export class FlightSceneSimple extends Scene3D {
         const halfH = dims.height * 0.5;
         const wingY = cy - halfH * 0.5;
         const wingZ = cz - dims.halfLen * 0.25;
-        const tailZ = cz - dims.halfLen * 0.92;
-        const tailY = cy + halfH * 0.7;
-        const bellyY = cy - halfH * 0.6;
 
         const defs: { name: string; color: BABYLON.Color3; pos: BABYLON.Vector3; strobe: boolean; intensity: number; range: number; glowSize: number }[] = [
             { name: 'navPort',  color: new BABYLON.Color3(1, 0.05, 0.05), pos: new BABYLON.Vector3(cx - hs, wingY, wingZ),    strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
             { name: 'navStbd',  color: new BABYLON.Color3(0.05, 1, 0.05), pos: new BABYLON.Vector3(cx + hs, wingY, wingZ),    strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
-            { name: 'navTail',  color: new BABYLON.Color3(1, 1, 1),       pos: new BABYLON.Vector3(cx, tailY, tailZ),          strobe: false, intensity: 30, range: 120, glowSize: 2.5 },
-            { name: 'navBelly', color: new BABYLON.Color3(1, 0.1, 0.05),  pos: new BABYLON.Vector3(cx, bellyY, cz),            strobe: true,  intensity: 50, range: 250, glowSize: 4.0 },
         ];
 
         this._disposeNavLights();
@@ -2269,20 +2263,6 @@ export class FlightSceneSimple extends Scene3D {
         );
         const coreDiameter = NAV_LIGHT_CORE_DIAMETER_M * sizeScale;
         console.debug(`[NavLights] halfSpan=${dims.halfSpan.toFixed(2)}m sizeScale=${sizeScale.toFixed(2)} coreDiameter=${coreDiameter.toFixed(3)}m`);
-
-        const glowTex = new BABYLON.DynamicTexture('navGlowTex', 128, scene, false);
-        this._navGlowTex = glowTex;
-        const ctx = glowTex.getContext();
-        const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-        grad.addColorStop(0, 'rgba(255,255,255,1)');
-        grad.addColorStop(0.08, 'rgba(255,255,255,0.9)');
-        grad.addColorStop(0.2, 'rgba(255,255,255,0.4)');
-        grad.addColorStop(0.5, 'rgba(255,255,255,0.08)');
-        grad.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 128, 128);
-        glowTex.update();
-        glowTex.hasAlpha = true;
 
         for (const def of defs) {
             const light = new BABYLON.PointLight(def.name, def.pos.clone(), scene);
@@ -2301,40 +2281,24 @@ export class FlightSceneSimple extends Scene3D {
             coreMat.disableLighting = true;
             core.material = coreMat;
 
-            const halo = BABYLON.MeshBuilder.CreatePlane(def.name + 'Halo', { size: def.glowSize * sizeScale }, scene);
-            halo.parent = parent;
-            halo.position = def.pos.clone();
-            halo.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-            halo.isPickable = false;
-            const haloMat = new BABYLON.StandardMaterial(def.name + 'HaloMat', scene);
-            haloMat.emissiveColor = def.color.clone();
-            haloMat.opacityTexture = glowTex;
-            haloMat.disableLighting = true;
-            haloMat.backFaceCulling = false;
-            haloMat.alphaMode = BABYLON.Constants.ALPHA_ADD;
-            halo.material = haloMat;
-
-            this._navLights.push({ light, mesh: halo, core, strobe: def.strobe, maxIntensity: def.intensity });
+            this._navLights.push({ light, core, strobe: def.strobe, maxIntensity: def.intensity });
         }
 
         const gl = new BABYLON.GlowLayer('navGlow', scene, { blurKernelSize: 128 });
         gl.intensity = 2.0;
         this._navGlowLayer = gl;
         for (const nav of this._navLights) {
-            gl.addIncludedOnlyMesh(nav.core as BABYLON.Mesh);
-            gl.addIncludedOnlyMesh(nav.mesh as BABYLON.Mesh);
+            gl.addIncludedOnlyMesh(nav.core);
         }
     }
 
     private _disposeNavLights(): void {
         for (const nav of this._navLights) {
             nav.light.dispose();
-            nav.mesh.dispose();
             nav.core.dispose();
         }
         this._navLights = [];
         if (this._navGlowLayer) { this._navGlowLayer.dispose(); this._navGlowLayer = null; }
-        if (this._navGlowTex) { this._navGlowTex.dispose(); this._navGlowTex = null; }
     }
 
     private async _buildNearbyRunwayColliders(centerLat: number, centerLon: number): Promise<void> {
@@ -2441,7 +2405,6 @@ export class FlightSceneSimple extends Scene3D {
         for (const nav of this._navLights) {
             const on = nav.strobe ? strobeOn : true;
             nav.light.intensity = on ? nav.maxIntensity : 0;
-            nav.mesh.isVisible = on;
             nav.core.isVisible = on;
         }
     }
@@ -4012,6 +3975,7 @@ export class FlightSceneSimple extends Scene3D {
 
 .hud-ticker-box{position:absolute;left:-6px;right:-6px;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:18px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:0;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 3px;white-space:nowrap;overflow:visible;font-variant-numeric:tabular-nums}
 .hud-ticker-static{display:inline-block;line-height:1;width:.62em;text-align:center}
+.hud-ticker-static:empty{display:none}
 .hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;overflow:hidden;vertical-align:top}
 .hud-ticker-rolling-inner{position:absolute;left:0;top:0;display:flex;flex-direction:column;line-height:1;transition:transform .12s linear}
 .hud-ticker-rolling-inner span{display:block;height:1em;text-align:center;width:.62em}
