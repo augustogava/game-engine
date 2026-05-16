@@ -2363,15 +2363,19 @@ export class FlightSceneSimple extends Scene3D {
         const centerLat = hasHE ? (Number(r.le_latitude_deg) + Number(r.he_latitude_deg)) / 2 : Number(r.le_latitude_deg);
         const centerLon = hasHE ? (Number(r.le_longitude_deg) + Number(r.he_longitude_deg)) / 2 : Number(r.le_longitude_deg);
 
-        const elevationFt = (r.le_elevation_ft != null) ? Number(r.le_elevation_ft)
-            : (r.he_elevation_ft != null) ? Number(r.he_elevation_ft) : 0;
+        const leElevFt = r.le_elevation_ft != null ? Number(r.le_elevation_ft) : null;
+        const heElevFt = r.he_elevation_ft != null ? Number(r.he_elevation_ft) : null;
+        const elevationFt = (leElevFt != null && heElevFt != null) ? (leElevFt + heElevFt) / 2
+            : (leElevFt != null) ? leElevFt
+            : (heElevFt != null) ? heElevFt
+            : 0;
 
         const cosOriginLat = Math.cos(this.originLat * Math.PI / 180);
         const eastM = (centerLon - this.originLon) * METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
         const northM = (centerLat - this.originLat) * METERS_PER_DEG_LAT;
         const sceneX = eastM;
         const sceneZ = -northM;
-        const sceneY = GROUND_Y + (elevationFt * FT_TO_M - this.refAlt) + RUNWAY_COLLIDER_Y_BIAS_M;
+        const sceneY = (elevationFt * FT_TO_M - this.refAlt) + RUNWAY_COLLIDER_Y_BIAS_M;
 
         const name = `runway-collider-${icao}-${r.le_ident || ''}-${r.he_ident || ''}`;
         const mesh = BABYLON.MeshBuilder.CreatePlane(name, {
@@ -2386,6 +2390,8 @@ export class FlightSceneSimple extends Scene3D {
         mesh.isPickable = true;
         mesh.checkCollisions = false;
         mesh.metadata = { type: 'runway-collider', icao, leIdent: r.le_ident, heIdent: r.he_ident };
+        mesh.computeWorldMatrix(true);
+        mesh.freezeWorldMatrix();
 
         this._runwayColliders.push(mesh);
         return true;

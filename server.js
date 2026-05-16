@@ -1257,8 +1257,8 @@ const server = http.createServer(async (req, res) => {
                  WHERE is_active = 1
                    AND latitude BETWEEN ? AND ?
                    AND longitude BETWEEN ? AND ?
-                 LIMIT ?`,
-                [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta, NEARBY_MAX_AIRPORTS],
+                 LIMIT ${NEARBY_MAX_AIRPORTS}`,
+                [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta],
             );
             if (!airports.length) {
                 console.debug(`[API] GET /api/airports/nearby lat=${lat} lng=${lng} radius=${radiusKm}km matches=0`);
