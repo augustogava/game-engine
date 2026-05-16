@@ -48,6 +48,11 @@ const NAV_LIGHT_REFERENCE_HALF_SPAN_M = 22;
 const NAV_LIGHT_MIN_SCALE = 0.5;
 const NAV_LIGHT_MAX_SCALE = 1.5;
 const NAV_LIGHT_CORE_DIAMETER_M = 0.4;
+const FT_TO_M = 0.3048;
+const METERS_PER_DEG_LAT = 111320;
+const RUNWAY_DEFAULT_WIDTH_FT = 148;
+const RUNWAY_COLLIDER_RADIUS_KM = 10;
+const RUNWAY_COLLIDER_Y_BIAS_M = 0.05;
 const CAMERA_RADIUS_LENGTH_FACTOR = 3;
 const CAMERA_RADIUS_MIN_M = 15;
 const CAMERA_RADIUS_MAX_M = 65;
@@ -665,6 +670,8 @@ export class FlightSceneSimple extends Scene3D {
     private _navGlowLayer: BABYLON.GlowLayer | null = null;
     private _navGlowTex: BABYLON.DynamicTexture | null = null;
     private _navStrobeTimer = 0;
+    private _runwayColliders: BABYLON.Mesh[] = [];
+    private _runwayCollidersLoaded = false;
 
     private _hemiLight: BABYLON.HemisphericLight | null = null;
     private _sunLight: BABYLON.DirectionalLight | null = null;
@@ -889,6 +896,7 @@ export class FlightSceneSimple extends Scene3D {
         this.mpClient?.dispose();
         this._engineSound.dispose();
         this._disposeNavLights();
+        this._disposeRunwayColliders();
         if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
         if (this._ssao) { this._ssao.dispose(); this._ssao = null; }
         if (this._lensFlareSystem) { this._lensFlareSystem.dispose(); this._lensFlareSystem = null; }
@@ -1571,10 +1579,10 @@ export class FlightSceneSimple extends Scene3D {
             alt = (this._pendingMissionAltM || 0) + GROUND_Y;
             this.initialHeading = this._pendingMissionHdg || 0;
         } else {
-            lat = parseFloat(params.get('lat') || '-23.4354');
-            lon = parseFloat(params.get('lng') || '-46.4745');
+            lat = parseFloat(params.get('lat') || '-23.4341');
+            lon = parseFloat(params.get('lng') || '-46.4825');
             alt = parseFloat(params.get('alt') || '750');
-            this.initialHeading = parseFloat(params.get('hdg') || '75');
+            this.initialHeading = parseFloat(params.get('hdg') || '74');
         }
         const hasFlightPlanParam = params.has('flightPlanId');
         this.spawnAirborne = this._pendingMissionAirborne ? true : ((hasPlan || hasFlightPlanParam) ? false : params.has('lat'));
@@ -2317,6 +2325,97 @@ export class FlightSceneSimple extends Scene3D {
         this._navLights = [];
         if (this._navGlowLayer) { this._navGlowLayer.dispose(); this._navGlowLayer = null; }
         if (this._navGlowTex) { this._navGlowTex.dispose(); this._navGlowTex = null; }
+    }
+
+    private async _buildNearbyRunwayColliders(centerLat: number, centerLon: number): Promise<void> {
+        try {
+            const url = `/api/airports/nearby?lat=${centerLat}&lng=${centerLon}&radius_km=${RUNWAY_COLLIDER_RADIUS_KM}`;
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                console.warn(`[Runway] /api/airports/nearby returned HTTP ${resp.status}`);
+                return;
+            }
+            const json = await resp.json();
+            const airports: any[] = json?.data || [];
+            let count = 0;
+            for (const ap of airports) {
+                const runways: any[] = ap?.runways || [];
+                for (const r of runways) {
+                    if (this._buildRunwayCollider(r, ap.icao_code || ap.iata_code || `id${ap.id}`)) count++;
+                }
+            }
+            console.log(`[Runway] loaded ${count} collider(s) from ${airports.length} airport(s) near (${centerLat.toFixed(4)}, ${centerLon.toFixed(4)})`);
+        } catch (err) {
+            console.warn('[Runway] failed to load nearby runways:', err);
+        }
+    }
+
+    private _buildRunwayCollider(r: any, icao: string): boolean {
+        if (!r || r.le_latitude_deg == null || r.le_longitude_deg == null
+            || r.le_heading_deg_true == null || !r.length_ft || r.length_ft <= 0) {
+            return false;
+        }
+        const widthFt = (r.width_ft && r.width_ft > 0) ? r.width_ft : RUNWAY_DEFAULT_WIDTH_FT;
+        const widthM = widthFt * FT_TO_M;
+        const lengthM = r.length_ft * FT_TO_M;
+
+        const hasHE = r.he_latitude_deg != null && r.he_longitude_deg != null;
+        const centerLat = hasHE ? (Number(r.le_latitude_deg) + Number(r.he_latitude_deg)) / 2 : Number(r.le_latitude_deg);
+        const centerLon = hasHE ? (Number(r.le_longitude_deg) + Number(r.he_longitude_deg)) / 2 : Number(r.le_longitude_deg);
+
+        const elevationFt = (r.le_elevation_ft != null) ? Number(r.le_elevation_ft)
+            : (r.he_elevation_ft != null) ? Number(r.he_elevation_ft) : 0;
+
+        const cosOriginLat = Math.cos(this.originLat * Math.PI / 180);
+        const eastM = (centerLon - this.originLon) * METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
+        const northM = (centerLat - this.originLat) * METERS_PER_DEG_LAT;
+        const sceneX = eastM;
+        const sceneZ = -northM;
+        const sceneY = GROUND_Y + (elevationFt * FT_TO_M - this.refAlt) + RUNWAY_COLLIDER_Y_BIAS_M;
+
+        const name = `runway-collider-${icao}-${r.le_ident || ''}-${r.he_ident || ''}`;
+        const mesh = BABYLON.MeshBuilder.CreatePlane(name, {
+            width: widthM,
+            height: lengthM,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE,
+        }, this.scene);
+        mesh.position.set(sceneX, sceneY, sceneZ);
+        mesh.rotation.x = Math.PI / 2;
+        mesh.rotation.y = (180 - Number(r.le_heading_deg_true)) * Math.PI / 180;
+        mesh.isVisible = false;
+        mesh.isPickable = true;
+        mesh.checkCollisions = false;
+        mesh.metadata = { type: 'runway-collider', icao, leIdent: r.le_ident, heIdent: r.he_ident };
+
+        this._runwayColliders.push(mesh);
+        return true;
+    }
+
+    private _disposeRunwayColliders(): void {
+        for (const m of this._runwayColliders) {
+            try { m.dispose(); } catch { /* ignore */ }
+        }
+        this._runwayColliders = [];
+        this._runwayCollidersLoaded = false;
+    }
+
+    private _pickTerrainPreferRunway(ray: BABYLON.Ray): BABYLON.PickingInfo | null {
+        const predicate = (mesh: BABYLON.AbstractMesh) =>
+            mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground';
+        const hits = this.scene.multiPickWithRay(ray, predicate);
+        if (!hits || hits.length === 0) return null;
+        let bestRunway: BABYLON.PickingInfo | null = null;
+        let bestOther: BABYLON.PickingInfo | null = null;
+        for (const h of hits) {
+            if (!h?.hit || !h.pickedPoint) continue;
+            const isRunway = h.pickedMesh?.metadata?.type === 'runway-collider';
+            if (isRunway) {
+                if (!bestRunway || h.pickedPoint.y > bestRunway.pickedPoint!.y) bestRunway = h;
+            } else {
+                if (!bestOther || h.pickedPoint.y > bestOther.pickedPoint!.y) bestOther = h;
+            }
+        }
+        return bestRunway || bestOther;
     }
 
     private _updateNavLights(dt: number): void {
@@ -3063,9 +3162,7 @@ export class FlightSceneSimple extends Scene3D {
         const pos = this.planeRoot.position;
         this._worldReadyProbeRay.origin.set(pos.x, pos.y + WORLD_READY_PROBE_HEIGHT_M, pos.z);
         this._worldReadyProbeRay.length = WORLD_READY_PROBE_LENGTH_M;
-        const hit = this.scene.pickWithRay(this._worldReadyProbeRay, (mesh: BABYLON.AbstractMesh) =>
-            mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
-        );
+        const hit = this._pickTerrainPreferRunway(this._worldReadyProbeRay);
 
         if (hit?.hit && hit.pickedPoint) {
             this.terrainY = hit.pickedPoint.y;
@@ -3113,6 +3210,12 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
         this._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
+        if (!this._runwayCollidersLoaded && Number.isFinite(this.originLat) && Number.isFinite(this.originLon)) {
+            this._runwayCollidersLoaded = true;
+            this._buildNearbyRunwayColliders(this.originLat, this.originLon).catch((err) => {
+                console.warn('[Runway] background load failed:', err);
+            });
+        }
         this._maybeFireSpawned();
     }
 
@@ -3399,9 +3502,7 @@ export class FlightSceneSimple extends Scene3D {
             const rayLength = inSpawnWindow ? SPAWN_TERRAIN_RAY_LENGTH_M : TERRAIN_RAY_LENGTH_M;
             this._terrainRay.origin.set(pos.x, pos.y + rayHeight, pos.z);
             this._terrainRay.length = rayLength;
-            const hit = this.scene.pickWithRay(this._terrainRay, (mesh: BABYLON.AbstractMesh) =>
-                mesh.isPickable && !mesh.isDescendantOf(this.planeRoot) && mesh.name !== 'ground',
-            );
+            const hit = this._pickTerrainPreferRunway(this._terrainRay);
             const wasUnknown = this.terrainY === TERRAIN_UNKNOWN_Y;
             let resolvedTerrainY: number = TERRAIN_UNKNOWN_Y;
             if (hit?.hit && hit.pickedPoint) {

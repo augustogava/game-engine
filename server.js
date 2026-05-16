@@ -8,6 +8,23 @@ const jwt = require('jsonwebtoken');
 const PORT = process.env.PORT || 3000;
 const DIST_DIR = path.join(__dirname, 'dist');
 
+const NEARBY_DEFAULT_RADIUS_KM = 10;
+const NEARBY_MIN_RADIUS_KM = 0.5;
+const NEARBY_MAX_RADIUS_KM = 50;
+const NEARBY_KM_PER_DEG_LAT = 111.32;
+const NEARBY_MIN_COS_LAT = 0.01;
+const NEARBY_MAX_AIRPORTS = 50;
+const EARTH_RADIUS_KM = 6371;
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+    const toRad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+    return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
 // ── Env loader ───────────────────────────────────────────────────────────────
 function loadEnv() {
     const envPath = path.join(__dirname, '.env');
@@ -1214,6 +1231,94 @@ const server = http.createServer(async (req, res) => {
             return jsonResponse(res, 201, { message: 'Airport acquired' });
         } catch (err) {
             console.error('[API] POST /api/airports/:id/acquire error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/airports/nearby') {
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        try {
+            const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+            const latStr = urlObj.searchParams.get('lat');
+            const lngStr = urlObj.searchParams.get('lng');
+            const radiusStr = urlObj.searchParams.get('radius_km');
+            const lat = Number(latStr);
+            const lng = Number(lngStr);
+            const radiusKm = Math.min(Math.max(Number(radiusStr) || NEARBY_DEFAULT_RADIUS_KM, NEARBY_MIN_RADIUS_KM), NEARBY_MAX_RADIUS_KM);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                return jsonResponse(res, 400, { error: 'Invalid lat/lng query parameters' });
+            }
+            const latDelta = radiusKm / NEARBY_KM_PER_DEG_LAT;
+            const cosLat = Math.cos(lat * Math.PI / 180);
+            const lngDelta = radiusKm / (NEARBY_KM_PER_DEG_LAT * Math.max(cosLat, NEARBY_MIN_COS_LAT));
+            const [airports] = await dbPool.execute(
+                `SELECT id, icao_code, iata_code, name, latitude, longitude, elevation_ft
+                 FROM airports
+                 WHERE is_active = 1
+                   AND latitude BETWEEN ? AND ?
+                   AND longitude BETWEEN ? AND ?
+                 LIMIT ?`,
+                [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta, NEARBY_MAX_AIRPORTS],
+            );
+            if (!airports.length) {
+                console.debug(`[API] GET /api/airports/nearby lat=${lat} lng=${lng} radius=${radiusKm}km matches=0`);
+                return jsonResponse(res, 200, { data: [] });
+            }
+            const ids = airports.map((a) => a.id);
+            const placeholders = ids.map(() => '?').join(',');
+            const [runways] = await dbPool.execute(
+                `SELECT airport_id, length_ft, width_ft, surface, le_ident, le_latitude_deg, le_longitude_deg,
+                        le_elevation_ft, le_heading_deg_true, le_displaced_threshold_ft,
+                        he_ident, he_latitude_deg, he_longitude_deg, he_elevation_ft, he_heading_deg_true,
+                        he_displaced_threshold_ft
+                 FROM airport_runways
+                 WHERE closed = 0 AND airport_id IN (${placeholders})`,
+                ids,
+            );
+            const runwaysByAirport = new Map();
+            for (const r of runways) {
+                if (!runwaysByAirport.has(r.airport_id)) runwaysByAirport.set(r.airport_id, []);
+                runwaysByAirport.get(r.airport_id).push({
+                    length_ft: r.length_ft,
+                    width_ft: r.width_ft,
+                    surface: r.surface,
+                    le_ident: r.le_ident,
+                    le_latitude_deg: r.le_latitude_deg != null ? Number(r.le_latitude_deg) : null,
+                    le_longitude_deg: r.le_longitude_deg != null ? Number(r.le_longitude_deg) : null,
+                    le_elevation_ft: r.le_elevation_ft,
+                    le_heading_deg_true: r.le_heading_deg_true != null ? Number(r.le_heading_deg_true) : null,
+                    le_displaced_threshold_ft: r.le_displaced_threshold_ft,
+                    he_ident: r.he_ident,
+                    he_latitude_deg: r.he_latitude_deg != null ? Number(r.he_latitude_deg) : null,
+                    he_longitude_deg: r.he_longitude_deg != null ? Number(r.he_longitude_deg) : null,
+                    he_elevation_ft: r.he_elevation_ft,
+                    he_heading_deg_true: r.he_heading_deg_true != null ? Number(r.he_heading_deg_true) : null,
+                    he_displaced_threshold_ft: r.he_displaced_threshold_ft,
+                });
+            }
+            const data = [];
+            for (const a of airports) {
+                const aLat = Number(a.latitude);
+                const aLng = Number(a.longitude);
+                const distKm = haversineKm(lat, lng, aLat, aLng);
+                if (distKm > radiusKm) continue;
+                data.push({
+                    id: a.id,
+                    icao_code: a.icao_code,
+                    iata_code: a.iata_code,
+                    name: a.name,
+                    latitude: aLat,
+                    longitude: aLng,
+                    elevation_ft: a.elevation_ft,
+                    distance_km: Number(distKm.toFixed(3)),
+                    runways: runwaysByAirport.get(a.id) || [],
+                });
+            }
+            data.sort((a, b) => a.distance_km - b.distance_km);
+            console.debug(`[API] GET /api/airports/nearby lat=${lat} lng=${lng} radius=${radiusKm}km matches=${data.length}`);
+            return jsonResponse(res, 200, { data });
+        } catch (err) {
+            console.error('[API] GET /api/airports/nearby error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
         }
     }
