@@ -183,7 +183,11 @@ const MISSION_SELECT = `
     aa.name AS arrival_airport_name, aa.icao_code AS arrival_icao,
     aa.latitude AS arrival_lat, aa.longitude AS arrival_lon,
     dr.le_ident AS departure_runway_ident, dr.length_ft AS departure_runway_length_ft,
-    ar.le_ident AS arrival_runway_ident, ar.length_ft AS arrival_runway_length_ft`;
+    dr.le_latitude_deg AS dep_rwy_latitude, dr.le_longitude_deg AS dep_rwy_longitude,
+    dr.le_heading_deg_true AS dep_rwy_heading, dr.le_elevation_ft AS dep_rwy_elevation_ft,
+    ar.le_ident AS arrival_runway_ident, ar.length_ft AS arrival_runway_length_ft,
+    ar.le_latitude_deg AS arr_rwy_latitude, ar.le_longitude_deg AS arr_rwy_longitude,
+    ar.le_heading_deg_true AS arr_rwy_heading`;
 
 const MISSION_JOINS = `
     FROM missions m
@@ -458,7 +462,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
         try {
             if (status === 'landed') {
                 const [mRows] = await dbPool.execute(
-                    `SELECT arrival_airport_id FROM missions WHERE id = ?`, [entry.missionId]);
+                    `SELECT arrival_airport_id, reward_points, title FROM missions WHERE id = ?`, [entry.missionId]);
                 const mission = mRows.length ? mRows[0] : null;
                 const missionArrival = mission ? mission.arrival_airport_id : null;
                 if (!missionArrival || (arrivalAirportId && arrivalAirportId === missionArrival)) {
@@ -466,22 +470,58 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
                         `UPDATE user_missions SET status = 'completed', completed_at = NOW() WHERE id = ?`,
                         [entry.userMissionId]);
                     console.log(`[Mission] Completed: user ${userId}, userMission ${entry.userMissionId}`);
+                    if (mission) {
+                        await logPointsHistory(
+                            userId,
+                            Number(mission.reward_points) || 0,
+                            POINTS_SOURCE_MISSION,
+                            entry.userMissionId,
+                            `Mission completed: ${mission.title || `#${entry.missionId}`}`
+                        );
+                    }
                 } else {
                     await dbPool.execute(
                         `UPDATE user_missions SET status = 'failed' WHERE id = ?`,
                         [entry.userMissionId]);
                     console.log(`[Mission] Failed (wrong airport): user ${userId}, userMission ${entry.userMissionId}`);
+                    await logPointsHistory(
+                        userId,
+                        0,
+                        POINTS_SOURCE_MISSION_FAILED,
+                        entry.userMissionId,
+                        `Mission failed (wrong airport): ${mission && mission.title ? mission.title : `#${entry.missionId}`}`
+                    );
                 }
             } else if (status === 'crashed') {
                 await dbPool.execute(
                     `UPDATE user_missions SET status = 'failed' WHERE id = ?`,
                     [entry.userMissionId]);
                 console.log(`[Mission] Failed (${status}): user ${userId}, userMission ${entry.userMissionId}`);
+                await logPointsHistory(
+                    userId,
+                    0,
+                    POINTS_SOURCE_MISSION_FAILED,
+                    entry.userMissionId,
+                    `Mission failed (crashed): #${entry.missionId}`
+                );
             } else {
                 console.log(`[Mission] Kept in_progress (${status}): user ${userId}, userMission ${entry.userMissionId}`);
             }
         } catch (err) {
             console.error(`[DB] Mission auto-update error:`, err.message);
+        }
+    }
+
+    if (status === 'landed' && finalDistKm > 0) {
+        const flightPoints = Math.floor(finalDistKm * POINTS_PER_KM);
+        if (flightPoints > 0) {
+            await logPointsHistory(
+                userId,
+                flightPoints,
+                POINTS_SOURCE_FLIGHT,
+                flightLogId,
+                `Flight landed: ${finalDistKm}km`
+            );
         }
     }
 
@@ -519,6 +559,46 @@ function computePilotRank(hours, missionsCompleted) {
     if (hours >= 50   && missionsCompleted >= 10)  return 'commercial_pilot';
     if (hours >= 10   && missionsCompleted >= 2)   return 'private_pilot';
     return 'student';
+}
+
+// ── Audit-log a points award/event into user_points_log ──────────────────────
+const POINTS_SOURCE_FLIGHT = 'flight';
+const POINTS_SOURCE_MISSION = 'mission';
+const POINTS_SOURCE_MISSION_FAILED = 'mission_failed';
+const POINTS_LOG_DESC_MAX = 255;
+
+async function logPointsHistory(userId, points, sourceType, sourceId, description) {
+    if (!dbPool) return false;
+    if (!Number.isFinite(userId) || userId <= 0) {
+        console.warn('[Points] Skipping audit log: invalid userId', userId);
+        return false;
+    }
+    if (!Number.isFinite(points)) {
+        console.warn(`[Points] Skipping audit log: invalid points value for user ${userId}, source=${sourceType}`);
+        return false;
+    }
+    if (typeof sourceType !== 'string' || sourceType.length === 0) {
+        console.warn(`[Points] Skipping audit log: invalid sourceType for user ${userId}`);
+        return false;
+    }
+    const safePoints = Math.max(-2147483648, Math.min(2147483647, Math.trunc(points)));
+    const safeSourceType = sourceType.slice(0, 50);
+    const safeSourceId = Number.isFinite(sourceId) ? Math.trunc(sourceId) : null;
+    const safeDescription = (typeof description === 'string' && description.length > 0)
+        ? description.slice(0, POINTS_LOG_DESC_MAX)
+        : null;
+    try {
+        await dbPool.execute(
+            `INSERT INTO user_points_log (user_id, points, source_type, source_id, description, created_at)
+             VALUES (?, ?, ?, ?, ?, NOW())`,
+            [userId, safePoints, safeSourceType, safeSourceId, safeDescription]
+        );
+        console.debug(`[Points] Logged user=${userId} pts=${safePoints} source=${safeSourceType}${safeSourceId != null ? `#${safeSourceId}` : ''}`);
+        return true;
+    } catch (err) {
+        console.error(`[Points] Audit log INSERT failed user=${userId} source=${safeSourceType}:`, err.message);
+        return false;
+    }
 }
 
 // ── Recalculate full stats for a user ────────────────────────────────────────
@@ -584,10 +664,10 @@ async function recalculateStats(userId) {
                  favorite_airport_id, most_used_aircraft_id, pilot_rank, last_flight_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE
-                total_flights            = GREATEST(total_flights, VALUES(total_flights)),
-                total_flight_hours       = GREATEST(total_flight_hours, VALUES(total_flight_hours)),
-                total_distance_km        = GREATEST(total_distance_km, VALUES(total_distance_km)),
-                total_distance_nm        = GREATEST(total_distance_nm, VALUES(total_distance_nm)),
+                total_flights            = VALUES(total_flights),
+                total_flight_hours       = VALUES(total_flight_hours),
+                total_distance_km        = VALUES(total_distance_km),
+                total_distance_nm        = VALUES(total_distance_nm),
                 total_missions_completed = VALUES(total_missions_completed),
                 total_missions_failed    = VALUES(total_missions_failed),
                 total_reward_points      = VALUES(total_reward_points),
@@ -862,10 +942,22 @@ const server = http.createServer(async (req, res) => {
         const { id } = routeParams;
         try {
             const [rows] = await dbPool.execute(
-                `SELECT id FROM user_missions WHERE id = ? AND user_id = ?`, [id, user.id]);
+                `SELECT um.id, um.status, um.mission_id, m.reward_points, m.title
+                 FROM user_missions um JOIN missions m ON um.mission_id = m.id
+                 WHERE um.id = ? AND um.user_id = ?`, [id, user.id]);
             if (!rows.length) return jsonResponse(res, 404, { error: 'User mission not found' });
+            const wasAlreadyCompleted = rows[0].status === 'completed';
             await dbPool.execute(
                 `UPDATE user_missions SET status = 'completed', completed_at = NOW() WHERE id = ?`, [id]);
+            if (!wasAlreadyCompleted) {
+                await logPointsHistory(
+                    user.id,
+                    Number(rows[0].reward_points) || 0,
+                    POINTS_SOURCE_MISSION,
+                    Number(id),
+                    `Mission completed: ${rows[0].title || `#${rows[0].mission_id}`}`
+                );
+            }
             await recalculateStats(user.id);
             return jsonResponse(res, 200, { message: 'Mission completed' });
         } catch (err) {
@@ -887,7 +979,7 @@ const server = http.createServer(async (req, res) => {
         if (!body) return jsonResponse(res, 400, { error: 'Request body required' });
         try {
             const [rows] = await dbPool.execute(
-                `SELECT id FROM user_missions WHERE id = ? AND user_id = ?`, [id, user.id]);
+                `SELECT id, status FROM user_missions WHERE id = ? AND user_id = ?`, [id, user.id]);
             if (!rows.length) return jsonResponse(res, 404, { error: 'User mission not found' });
             const sets = []; const vals = [];
             if (body.status) { sets.push('status = ?'); vals.push(body.status); }
@@ -895,8 +987,32 @@ const server = http.createServer(async (req, res) => {
             if (body.notes !== undefined) { sets.push('notes = ?'); vals.push(body.notes); }
             if (body.status === 'completed') { sets.push('completed_at = NOW()'); }
             if (!sets.length) return jsonResponse(res, 400, { error: 'No fields to update' });
+            const previousStatus = rows[0].status;
+            const [missionInfoRows] = await dbPool.execute(
+                `SELECT um.mission_id, m.reward_points, m.title
+                 FROM user_missions um JOIN missions m ON um.mission_id = m.id
+                 WHERE um.id = ?`, [id]
+            );
+            const missionInfo = missionInfoRows.length ? missionInfoRows[0] : null;
             vals.push(id);
             await dbPool.execute(`UPDATE user_missions SET ${sets.join(', ')} WHERE id = ?`, vals);
+            if (body.status === 'completed' && previousStatus !== 'completed' && missionInfo) {
+                await logPointsHistory(
+                    user.id,
+                    Number(missionInfo.reward_points) || 0,
+                    POINTS_SOURCE_MISSION,
+                    Number(id),
+                    `Mission completed: ${missionInfo.title || `#${missionInfo.mission_id}`}`
+                );
+            } else if (body.status === 'failed' && previousStatus !== 'failed' && missionInfo) {
+                await logPointsHistory(
+                    user.id,
+                    0,
+                    POINTS_SOURCE_MISSION_FAILED,
+                    Number(id),
+                    `Mission failed: ${missionInfo.title || `#${missionInfo.mission_id}`}`
+                );
+            }
             if (body.status === 'completed' || body.status === 'failed') await recalculateStats(user.id);
             return jsonResponse(res, 200, { message: 'Mission progress updated' });
         } catch (err) {

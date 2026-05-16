@@ -52,6 +52,95 @@ function dismissLoading() {
     });
 }
 
+function renderMissionMapPreview(mission: any): void {
+    try {
+        const canvas = document.getElementById('loading-mission-map') as HTMLCanvasElement | null;
+        const titleEl = document.getElementById('loading-mission-title');
+        if (!canvas) {
+            console.warn('[flight-main] Mission preview canvas not found');
+            return;
+        }
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const points: Array<{ lat: number; lon: number; name: string; type: 'dep' | 'arr' | 'wp' | 'spawn' }> = [];
+        if (mission.departure_lat != null && mission.departure_lon != null) {
+            points.push({ lat: Number(mission.departure_lat), lon: Number(mission.departure_lon), name: mission.departure_icao || 'DEP', type: 'dep' });
+        } else if (mission.spawn_latitude != null && mission.spawn_longitude != null) {
+            points.push({ lat: Number(mission.spawn_latitude), lon: Number(mission.spawn_longitude), name: 'SPAWN', type: 'spawn' });
+        }
+        if (Array.isArray(mission.waypoints)) {
+            for (const wp of mission.waypoints) {
+                if (wp && wp.latitude != null && wp.longitude != null) {
+                    points.push({ lat: Number(wp.latitude), lon: Number(wp.longitude), name: wp.name || `WP${wp.order_index || ''}`, type: 'wp' });
+                }
+            }
+        }
+        if (mission.arrival_lat != null && mission.arrival_lon != null) {
+            points.push({ lat: Number(mission.arrival_lat), lon: Number(mission.arrival_lon), name: mission.arrival_icao || 'ARR', type: 'arr' });
+        }
+        if (points.length === 0) {
+            console.debug('[flight-main] Mission preview: no points to render');
+            return;
+        }
+
+        const W = canvas.width, H = canvas.height;
+        const PAD = 22;
+        let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+        for (const p of points) {
+            if (p.lat < minLat) minLat = p.lat;
+            if (p.lat > maxLat) maxLat = p.lat;
+            if (p.lon < minLon) minLon = p.lon;
+            if (p.lon > maxLon) maxLon = p.lon;
+        }
+        let dLat = maxLat - minLat;
+        let dLon = maxLon - minLon;
+        if (dLat < 0.01) dLat = 0.01;
+        if (dLon < 0.01) dLon = 0.01;
+        const project = (lat: number, lon: number): { x: number; y: number } => {
+            const x = PAD + ((lon - minLon) / dLon) * (W - 2 * PAD);
+            const y = H - PAD - ((lat - minLat) / dLat) * (H - 2 * PAD);
+            return { x, y };
+        };
+
+        ctx.fillStyle = 'rgba(0,16,12,0.9)';
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.strokeStyle = 'rgba(80,255,160,0.55)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        for (let i = 0; i < points.length; i++) {
+            const p = project(points[i].lat, points[i].lon);
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        for (let i = 0; i < points.length; i++) {
+            const p = project(points[i].lat, points[i].lon);
+            const isEndpoint = points[i].type === 'dep' || points[i].type === 'arr' || points[i].type === 'spawn';
+            ctx.fillStyle = isEndpoint ? 'rgba(125,249,200,0.95)' : 'rgba(255,200,80,0.85)';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, isEndpoint ? 5 : 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.font = '9px Inter, sans-serif';
+            ctx.fillText(points[i].name, p.x + 7, p.y - 3);
+        }
+
+        canvas.style.display = 'block';
+        if (titleEl) {
+            titleEl.textContent = mission.title || 'MISSION';
+            titleEl.style.display = 'block';
+        }
+        console.log(`[flight-main] Rendered mission preview with ${points.length} points`);
+    } catch (err) {
+        console.warn('[flight-main] Mission preview render failed:', err);
+    }
+}
+
 const game = new GameCore3D({ canvas, antialias: true });
 const scene = new FlightSceneSimple();
 
@@ -94,6 +183,7 @@ scene.onSpawned = () => {
             } else {
                 const mission = await detailRes.json();
                 console.log(`[flight-main] Mission ${missionId} loaded:`, { type: mission.type, departure_icao: mission.departure_icao, arrival_icao: mission.arrival_icao });
+                renderMissionMapPreview(mission);
 
                 const requiredAircraftId = mission?.required_aircraft_id != null
                     ? Number(mission.required_aircraft_id)

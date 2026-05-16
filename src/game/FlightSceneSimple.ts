@@ -7,6 +7,7 @@ import * as BABYLON from '@babylonjs/core';
 import '@babylonjs/loaders';
 import { SkyMaterial } from '@babylonjs/materials/sky';
 import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
+import { EngineSound } from './EngineSound.js';
 
 const BUILD_VERSION = 8;
 
@@ -71,6 +72,54 @@ const ISA_LAPSE_RATE_K_PER_M = 0.0065;
 const ISA_TROPOPAUSE_M = 11000;
 const CONTROL_Q_REFERENCE_PA = 5000;
 const SEA_LEVEL_AIR_DENSITY_KG_PER_M3 = 1.225;
+
+// ── Wind model (P2) ─────────────────────────────────────────────────────────
+const WIND_DEFAULT_DIRECTION_DEG = 270;
+const WIND_DEFAULT_SPEED_KT = 8;
+const WIND_ALTITUDE_GAIN_KT_PER_1000FT = 0.5;
+const WIND_MAX_SPEED_KT = 80;
+
+// ── Camera modes (P3) ───────────────────────────────────────────────────────
+const CAMERA_MODE_CHASE = 0;
+const CAMERA_MODE_COCKPIT = 1;
+const CAMERA_MODE_EXTERNAL_FIXED = 2;
+const CAMERA_MODE_FLYBY = 3;
+const CAMERA_MODE_COUNT = 4;
+
+// ── Over-G (P4) ─────────────────────────────────────────────────────────────
+const OVER_G_THRESHOLD = 4.0;
+const G_FORCE_SMOOTHING = 0.15;
+const HAPTIC_MIN_INTERVAL_MS = 2000;
+
+// ── Cinematic spawn (F14) ───────────────────────────────────────────────────
+const CINEMATIC_DURATION_MS = 3000;
+const CINEMATIC_INITIAL_RADIUS_M = 120;
+const HUD_FADE_IN_MS = 1000;
+const ENGINE_SOUND_FADE_IN_MS = 3000;
+
+// ── Joystick / mobile controls (F8/F9/F10) ─────────────────────────────────
+const JOYSTICK_DEFAULT_RADIUS_PX = 80;
+const JOYSTICK_DEFAULT_DEADZONE_NORM = 0.08;
+const JOYSTICK_DEFAULT_EXPO = 1.0;
+const JOYSTICK_MAX_RADIUS_PX = 160;
+const JOYSTICK_MIN_RADIUS_PX = 50;
+const JOYSTICK_MAX_DEADZONE_NORM = 0.30;
+const JOYSTICK_MAX_EXPO = 3.0;
+const JOYSTICK_MIN_EXPO = 1.0;
+
+// ── Multi-touch gestures (F11/F12) ─────────────────────────────────────────
+const PINCH_THROTTLE_PX_TO_DELTA = 0.005;
+const TWO_FINGER_SWIPE_MIN_PX = 50;
+const TWO_FINGER_DISTANCE_TOLERANCE_RATIO = 0.20;
+const CAMERA_CYCLE_COOLDOWN_MS = 600;
+
+// ── NAV HUD constants (F1-F6) ───────────────────────────────────────────────
+const MIN_GS_FOR_ETE_MS = 5;
+const HDG_DELTA_GREEN_DEG = 5;
+const HDG_DELTA_AMBER_DEG = 15;
+const ALT_BAND_GREEN_FT = 500;
+const ALT_BAND_AMBER_FT = 1000;
+const XTE_INDICATOR_MAX_NM = 2.0;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -372,6 +421,18 @@ export class FlightSceneSimple extends Scene3D {
     private angularVelocity = BABYLON.Vector3.Zero();
     private thrust   = 0.0;
     private spawned  = false;
+    public groundSpeed: number = 0;
+    private _gForce: number = 1;
+    private _cameraMode: number = CAMERA_MODE_CHASE;
+    private _cameraModeKeyLock = false;
+    private _cinematicActive = false;
+    private _cinematicStartMs = 0;
+    private _hudFadeStartMs = 0;
+    private _hudFadeActive = false;
+    private _lastHapticMs = 0;
+    private _lastStallState = false;
+    private _lastOverGState = false;
+    private _lastCameraCycleMs = 0;
     private camera!: BABYLON.ArcRotateCamera;
     private surfaces: AeroSurface[] = [];
     private ground!: BABYLON.Mesh;
@@ -405,6 +466,7 @@ export class FlightSceneSimple extends Scene3D {
     private static readonly MAP_ZOOM_MIN = 9;
     private static readonly MAP_ZOOM_MAX = 17;
     private _mapZoom = FlightSceneSimple.MAP_ZOOM_DEFAULT;
+    private _mapHeadingUp = false;
     private static readonly MAP_REQUEST_SIZE_PX = 256;
     private static readonly MAP_REFETCH_DRIFT_RATIO = 0.25;
     private static readonly MAP_REFETCH_INTERVAL_MS = 5000;
@@ -417,6 +479,19 @@ export class FlightSceneSimple extends Scene3D {
     private joystickTouchId: number | null = null;
     private joystickOrigin = { x: 0, y: 0 };
     private throttleTouchId: number | null = null;
+    private _controlSettings = {
+        radius: JOYSTICK_DEFAULT_RADIUS_PX,
+        deadzone: JOYSTICK_DEFAULT_DEADZONE_NORM,
+        expo: JOYSTICK_DEFAULT_EXPO,
+        pitchInvert: false,
+    };
+    private _twoFingerActive = false;
+    private _twoFingerInitialDist = 0;
+    private _twoFingerLastDist = 0;
+    private _twoFingerStartMidX = 0;
+    private _twoFingerStartMidY = 0;
+    private _twoFingerStartMs = 0;
+    private _twoFingerFiredCamera = false;
 
     private smoothedPitch = 0;
     private smoothedRoll = 0;
@@ -451,6 +526,7 @@ export class FlightSceneSimple extends Scene3D {
     private _pendingAirborneGearRetract = false;
 
     private mpClient: MultiplayerClient | null = null;
+    private _engineSound: EngineSound = new EngineSound();
     private remotePlayers = new Map<string, RemotePlayer>();
     private hudOnline!: HTMLElement;
     private dbgMpStatus!: HTMLElement;
@@ -788,6 +864,7 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('aircraft-panel')?.remove();
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         this.mpClient?.dispose();
+        this._engineSound.dispose();
         this._disposeNavLights();
         if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
         if (this._ssao) { this._ssao.dispose(); this._ssao = null; }
@@ -841,6 +918,23 @@ export class FlightSceneSimple extends Scene3D {
                 name: plan.name || '',
             };
         }
+
+        if (Array.isArray(plan.waypoints) && plan.waypoints.length > 0) {
+            this._missionWaypoints = plan.waypoints
+                .map((wp: any, i: number) => ({
+                    id: Number(wp.id ?? i),
+                    order_index: Number(wp.order_index ?? i + 1),
+                    name: wp.name ?? null,
+                    latitude: Number(wp.latitude ?? wp.lat),
+                    longitude: Number(wp.longitude ?? wp.lon),
+                    altitude_ft: wp.altitude_ft != null ? Number(wp.altitude_ft) : null,
+                }))
+                .filter((wp: { latitude: number; longitude: number }) => Number.isFinite(wp.latitude) && Number.isFinite(wp.longitude))
+                .sort((a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index);
+            this._missionCurrentWpIndex = 0;
+            console.log(`[FlightPlan] Loaded ${this._missionWaypoints.length} waypoints for plan ${this._activeFlightPlanId}`);
+        }
+
         console.log(`[FlightPlan] Active plan id=${this._activeFlightPlanId}, spawn lat=${spawnLat} lon=${spawnLon} hdg=${spawnHdg} (runway=${hasRunway})`);
     }
 
@@ -857,12 +951,20 @@ export class FlightSceneSimple extends Scene3D {
             this._pendingMissionAltM = mission.spawn_altitude_ft != null ? Number(mission.spawn_altitude_ft) * 0.3048 : 1000;
             this._pendingMissionHdg = 0;
             this._pendingMissionAirborne = true;
+        } else if (isRoute && mission.dep_rwy_latitude != null && mission.dep_rwy_longitude != null) {
+            this._pendingMissionLat = Number(mission.dep_rwy_latitude);
+            this._pendingMissionLon = Number(mission.dep_rwy_longitude);
+            this._pendingMissionHdg = mission.dep_rwy_heading != null ? Number(mission.dep_rwy_heading) : 0;
+            this._pendingMissionAltM = mission.dep_rwy_elevation_ft != null ? Number(mission.dep_rwy_elevation_ft) * 0.3048 : 0;
+            this._pendingMissionAirborne = false;
+            console.log(`[Mission] Spawning at runway centerline lat=${this._pendingMissionLat} lon=${this._pendingMissionLon} hdg=${this._pendingMissionHdg}`);
         } else if (isRoute && mission.departure_lat != null && mission.departure_lon != null) {
             this._pendingMissionLat = Number(mission.departure_lat);
             this._pendingMissionLon = Number(mission.departure_lon);
             this._pendingMissionHdg = 0;
             this._pendingMissionAltM = 0;
             this._pendingMissionAirborne = false;
+            console.warn('[Mission] Route mission has no runway centerline — falling back to airport center');
         } else {
             console.warn(`[Mission] Mission ${mission.id} has no spawn coordinates — skipping spawn override`);
             return;
@@ -1298,8 +1400,16 @@ export class FlightSceneSimple extends Scene3D {
             console.log(`[Mission] WP ${reachedNum}/${total} reached: order=${wp.order_index} name="${wp.name ?? 'unnamed'}" dist=${dist.toFixed(3)}nm reach=${FlightSceneSimple.WAYPOINT_REACH_NM}nm`);
             this._missionCurrentWpIndex++;
             if (this._missionCurrentWpIndex >= total) {
-                console.log(`[Mission] All ${total} waypoints reached, calling /complete for userMissionId=${this._activeUserMissionId}`);
-                this._completeActiveMission();
+                if (this._activeUserMissionId) {
+                    console.log(`[Mission] All ${total} waypoints reached, calling /complete for userMissionId=${this._activeUserMissionId}`);
+                    this._completeActiveMission();
+                } else if (this._activeFlightPlanId) {
+                    console.log(`[FlightPlan] All ${total} waypoints reached, marking plan ${this._activeFlightPlanId} as completed`);
+                    this._patchFlightPlanStatus(this._activeFlightPlanId, 'completed');
+                    this._activeFlightPlanId = null;
+                    this._missionWaypoints = [];
+                    this._missionCurrentWpIndex = 0;
+                }
             }
         }
     }
@@ -2344,6 +2454,12 @@ export class FlightSceneSimple extends Scene3D {
             }
             if (!p('KeyB')) this.brakeKeyLock = false;
 
+            if (p('KeyC') && !this._cameraModeKeyLock) {
+                this._cameraModeKeyLock = true;
+                this._cycleCameraMode();
+            }
+            if (!p('KeyC')) this._cameraModeKeyLock = false;
+
             const isJetAc = this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOFAN
                          || this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOJET;
             if (isJetAc && p('KeyG') && !this.gearKeyLockG) {
@@ -2435,12 +2551,15 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _setupTouchControls(): void {
+        this._loadControlSettings();
+
         const overlay = document.createElement('div');
         overlay.id = 'touch-overlay';
         overlay.innerHTML = `
 <style>
 #touch-overlay{position:fixed;inset:0;pointer-events:none;z-index:150}
 #touch-joy{position:absolute;width:120px;height:120px;border-radius:50%;border:none;background:none;display:none;pointer-events:none}
+#touch-joy-deadzone{position:absolute;top:50%;left:50%;border-radius:50%;border:2px dashed rgba(80,255,160,.0);pointer-events:none;transition:border-color .12s}
 #touch-joy-knob{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(0,255,128,.25);border:1px solid rgba(0,255,128,.15)}
 #touch-throttle{position:absolute;bottom:160px;left:10px;width:40px;height:150px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
@@ -2452,18 +2571,82 @@ export class FlightSceneSimple extends Scene3D {
 #touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
 #touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
 #touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
+#touch-controls-btn{position:absolute;bottom:6px;left:6px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+#touch-controls-panel{display:none;position:absolute;bottom:48px;left:6px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#touch-controls-panel label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+#touch-controls-panel input[type=range]{width:120px}
 </style>
-<div id="touch-joy"><div id="touch-joy-knob"></div></div>
+<div id="touch-joy"><div id="touch-joy-deadzone"></div><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
-<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button></div>`;
+<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button></div>
+<button id="touch-controls-btn" title="Controles">\u2699</button>
+<div id="touch-controls-panel">
+  <div style="font-family:'Orbitron',monospace;font-size:10px;color:#40ffaa;letter-spacing:.12em;margin-bottom:8px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:4px">CONTROLES</div>
+  <label>Raio<input id="ctl-radius" type="range" min="${JOYSTICK_MIN_RADIUS_PX}" max="${JOYSTICK_MAX_RADIUS_PX}" step="5"><span id="ctl-radius-v">\u2014</span></label>
+  <label>Zona morta<input id="ctl-deadzone" type="range" min="0" max="${JOYSTICK_MAX_DEADZONE_NORM}" step="0.01"><span id="ctl-deadzone-v">\u2014</span></label>
+  <label>Curva (expo)<input id="ctl-expo" type="range" min="${JOYSTICK_MIN_EXPO}" max="${JOYSTICK_MAX_EXPO}" step="0.1"><span id="ctl-expo-v">\u2014</span></label>
+  <label>Inverter pitch<input id="ctl-invert" type="checkbox"></label>
+</div>`;
         document.body.appendChild(overlay);
 
         const joyEl = document.getElementById('touch-joy')!;
         const knob = document.getElementById('touch-joy-knob')!;
+        const dzEl = document.getElementById('touch-joy-deadzone')!;
         const throttleEl = document.getElementById('touch-throttle')!;
         const thrFill = document.getElementById('touch-thr-fill')!;
         const thrKnob = document.getElementById('touch-thr-knob')!;
-        const maxDrag = 80;
+        const ctlBtn = document.getElementById('touch-controls-btn');
+        const ctlPanel = document.getElementById('touch-controls-panel');
+        const ctlRadius = document.getElementById('ctl-radius') as HTMLInputElement | null;
+        const ctlDz = document.getElementById('ctl-deadzone') as HTMLInputElement | null;
+        const ctlExpo = document.getElementById('ctl-expo') as HTMLInputElement | null;
+        const ctlInvert = document.getElementById('ctl-invert') as HTMLInputElement | null;
+        const ctlRadiusV = document.getElementById('ctl-radius-v');
+        const ctlDzV = document.getElementById('ctl-deadzone-v');
+        const ctlExpoV = document.getElementById('ctl-expo-v');
+
+        const updateDeadzoneVisual = () => {
+            const radius = this._controlSettings.radius;
+            const dz = this._controlSettings.deadzone;
+            const dzPx = 2 * dz * radius;
+            joyEl.style.width = `${radius * 1.5}px`;
+            joyEl.style.height = `${radius * 1.5}px`;
+            dzEl.style.width = `${dzPx}px`;
+            dzEl.style.height = `${dzPx}px`;
+            dzEl.style.marginLeft = `-${dzPx / 2}px`;
+            dzEl.style.marginTop = `-${dzPx / 2}px`;
+        };
+
+        const refreshCtlInputs = () => {
+            if (ctlRadius) ctlRadius.value = String(this._controlSettings.radius);
+            if (ctlDz) ctlDz.value = String(this._controlSettings.deadzone);
+            if (ctlExpo) ctlExpo.value = String(this._controlSettings.expo);
+            if (ctlInvert) ctlInvert.checked = this._controlSettings.pitchInvert;
+            if (ctlRadiusV) ctlRadiusV.textContent = `${this._controlSettings.radius}px`;
+            if (ctlDzV) ctlDzV.textContent = `${(this._controlSettings.deadzone * 100).toFixed(0)}%`;
+            if (ctlExpoV) ctlExpoV.textContent = this._controlSettings.expo.toFixed(1);
+        };
+        refreshCtlInputs();
+        updateDeadzoneVisual();
+
+        if (ctlBtn && ctlPanel) {
+            ctlBtn.addEventListener('click', () => {
+                ctlPanel.style.display = ctlPanel.style.display === 'none' || !ctlPanel.style.display ? 'block' : 'none';
+            });
+        }
+        const onCtlChange = () => {
+            if (ctlRadius) this._controlSettings.radius = Math.max(JOYSTICK_MIN_RADIUS_PX, Math.min(JOYSTICK_MAX_RADIUS_PX, Number(ctlRadius.value)));
+            if (ctlDz) this._controlSettings.deadzone = Math.max(0, Math.min(JOYSTICK_MAX_DEADZONE_NORM, Number(ctlDz.value)));
+            if (ctlExpo) this._controlSettings.expo = Math.max(JOYSTICK_MIN_EXPO, Math.min(JOYSTICK_MAX_EXPO, Number(ctlExpo.value)));
+            if (ctlInvert) this._controlSettings.pitchInvert = ctlInvert.checked;
+            this._persistControlSettings();
+            refreshCtlInputs();
+            updateDeadzoneVisual();
+        };
+        ctlRadius?.addEventListener('input', onCtlChange);
+        ctlDz?.addEventListener('input', onCtlChange);
+        ctlExpo?.addEventListener('input', onCtlChange);
+        ctlInvert?.addEventListener('change', onCtlChange);
 
         const updateThrVisual = () => {
             const pct = this.touchThrust * 100;
@@ -2496,36 +2679,132 @@ export class FlightSceneSimple extends Scene3D {
             return false;
         };
 
+        const applyExpoCurve = (input: number, expoFactor: number): number => {
+            if (!Number.isFinite(input)) return 0;
+            const sign = Math.sign(input);
+            const abs = Math.min(1, Math.abs(input));
+            return sign * Math.pow(abs, expoFactor);
+        };
+
+        const collectFreeTouches = (touchList: TouchList): Touch[] => {
+            const arr: Touch[] = [];
+            for (let i = 0; i < touchList.length; i++) {
+                const t = touchList[i];
+                if (isOnWidget(t)) continue;
+                if (isInDeadZone(t.clientX, t.clientY)) continue;
+                arr.push(t);
+            }
+            return arr;
+        };
+
+        const startTwoFinger = (touches: Touch[]): void => {
+            const a = touches[0], b = touches[1];
+            const dx = b.clientX - a.clientX;
+            const dy = b.clientY - a.clientY;
+            const dist = Math.hypot(dx, dy);
+            this._twoFingerActive = true;
+            this._twoFingerInitialDist = dist;
+            this._twoFingerLastDist = dist;
+            this._twoFingerStartMidX = (a.clientX + b.clientX) * 0.5;
+            this._twoFingerStartMidY = (a.clientY + b.clientY) * 0.5;
+            this._twoFingerStartMs = performance.now();
+            this._twoFingerFiredCamera = false;
+            if (this.joystickTouchId !== null) {
+                this.joystickTouchId = null;
+                this.touchPitchInput = 0;
+                this.touchRollInput = 0;
+                joyEl.style.display = 'none';
+            }
+        };
+
+        const endTwoFinger = (): void => {
+            this._twoFingerActive = false;
+            this._twoFingerInitialDist = 0;
+            this._twoFingerLastDist = 0;
+            this._twoFingerFiredCamera = false;
+        };
+
         canvas.addEventListener('touchstart', (e: TouchEvent) => {
+            const free = collectFreeTouches(e.touches);
+            if (free.length >= 2 && !this._twoFingerActive) {
+                startTwoFinger(free);
+                e.preventDefault();
+                return;
+            }
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const t = e.changedTouches[i];
                 if (isOnWidget(t)) continue;
                 if (isInDeadZone(t.clientX, t.clientY)) continue;
+                if (this._twoFingerActive) continue;
                 if (this.joystickTouchId !== null) continue;
                 this.joystickTouchId = t.identifier;
                 this.joystickOrigin = { x: t.clientX, y: t.clientY };
                 joyEl.style.display = 'block';
-                joyEl.style.left = `${t.clientX - 60}px`;
-                joyEl.style.top = `${t.clientY - 60}px`;
+                joyEl.style.left = `${t.clientX - this._controlSettings.radius * 0.75}px`;
+                joyEl.style.top = `${t.clientY - this._controlSettings.radius * 0.75}px`;
                 knob.style.left = '50%';
                 knob.style.top = '50%';
+                dzEl.style.borderColor = 'rgba(80,255,160,.4)';
                 e.preventDefault();
             }
         }, { passive: false });
 
         canvas.addEventListener('touchmove', (e: TouchEvent) => {
+            if (this._twoFingerActive && e.touches.length >= 2) {
+                const free = collectFreeTouches(e.touches);
+                if (free.length >= 2) {
+                    const a = free[0], b = free[1];
+                    const dx = b.clientX - a.clientX;
+                    const dy = b.clientY - a.clientY;
+                    const dist = Math.hypot(dx, dy);
+                    const distDelta = dist - this._twoFingerLastDist;
+                    this.touchThrust = Math.max(0, Math.min(1, this.touchThrust + distDelta * PINCH_THROTTLE_PX_TO_DELTA));
+                    this._twoFingerLastDist = dist;
+                    updateThrVisual();
+
+                    const midX = (a.clientX + b.clientX) * 0.5;
+                    const midY = (a.clientY + b.clientY) * 0.5;
+                    const swipeX = midX - this._twoFingerStartMidX;
+                    const swipeY = midY - this._twoFingerStartMidY;
+                    const swipeMag = Math.hypot(swipeX, swipeY);
+                    const distChangeRatio = Math.abs(dist - this._twoFingerInitialDist) / Math.max(1, this._twoFingerInitialDist);
+                    if (!this._twoFingerFiredCamera && swipeMag > TWO_FINGER_SWIPE_MIN_PX && distChangeRatio < TWO_FINGER_DISTANCE_TOLERANCE_RATIO) {
+                        this._twoFingerFiredCamera = true;
+                        this._cycleCameraMode();
+                    }
+                    e.preventDefault();
+                    return;
+                }
+            }
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const t = e.changedTouches[i];
                 if (t.identifier !== this.joystickTouchId) continue;
+                const radius = this._controlSettings.radius;
                 const dx = t.clientX - this.joystickOrigin.x;
                 const dy = t.clientY - this.joystickOrigin.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                const clamped = Math.min(dist, maxDrag);
+                const clamped = Math.min(dist, radius);
                 const angle = Math.atan2(dy, dx);
-                const nx = (clamped * Math.cos(angle)) / maxDrag;
-                const ny = (clamped * Math.sin(angle)) / maxDrag;
-                this.touchRollInput = -nx;
-                this.touchPitchInput = ny;
+                let nx = (clamped * Math.cos(angle)) / radius;
+                let ny = (clamped * Math.sin(angle)) / radius;
+                const magnitude = Math.hypot(nx, ny);
+                const dz = this._controlSettings.deadzone;
+                if (magnitude < dz) {
+                    nx = 0;
+                    ny = 0;
+                    dzEl.style.borderColor = 'rgba(255,204,85,.7)';
+                } else {
+                    const remap = (magnitude - dz) / (1 - dz);
+                    const k = remap / magnitude;
+                    nx *= k;
+                    ny *= k;
+                    dzEl.style.borderColor = 'rgba(80,255,160,.4)';
+                }
+                const expoNx = applyExpoCurve(nx, this._controlSettings.expo);
+                const expoNy = applyExpoCurve(ny, this._controlSettings.expo);
+                this.touchRollInput = -expoNx;
+                const pitchSign = this._controlSettings.pitchInvert ? -1 : 1;
+                this.touchPitchInput = pitchSign * expoNy;
                 knob.style.left = `${50 + nx * 35}%`;
                 knob.style.top = `${50 + ny * 35}%`;
             }
@@ -2542,6 +2821,9 @@ export class FlightSceneSimple extends Scene3D {
                     knob.style.left = '50%';
                     knob.style.top = '50%';
                 }
+            }
+            if (this._twoFingerActive && e.touches.length < 2) {
+                endTwoFinger();
             }
         };
         canvas.addEventListener('touchend', resetJoy);
@@ -2662,10 +2944,19 @@ export class FlightSceneSimple extends Scene3D {
                 const isAirborneMission = this._pendingMissionAirborne === true;
                 const minOffset = isAirborneMission ? AIRBORNE_MISSION_MIN_OFFSET_M : 100;
                 const altOffset = Math.max(minOffset, cfg.spawn_alt_offset_m);
-                this.planeRoot.position.y = this.terrainY + altOffset;
+                const desiredY = this.terrainY + altOffset;
+                const minSafeY = this.terrainY + altOffset;
+                if (this.planeRoot.position.y < minSafeY) {
+                    console.warn(`[Spawn] Clamped pos.y from ${this.planeRoot.position.y.toFixed(1)}m to ${minSafeY.toFixed(1)}m (below terrain+offset)`);
+                }
+                this.planeRoot.position.y = desiredY;
                 console.debug(`[WorldReady] Airborne spawn snapped to terrainY=${this.terrainY.toFixed(1)}m + offset=${altOffset.toFixed(1)}m -> pos.y=${this.planeRoot.position.y.toFixed(1)}m`);
             } else {
-                this.planeRoot.position.y = this.terrainY + gearHeight;
+                const desiredY = this.terrainY + gearHeight;
+                if (this.planeRoot.position.y < desiredY) {
+                    console.warn(`[Spawn] Clamped ground pos.y from ${this.planeRoot.position.y.toFixed(1)}m to ${desiredY.toFixed(1)}m (below terrain+gear)`);
+                }
+                this.planeRoot.position.y = desiredY;
                 this.velocity.set(0, 0, 0);
                 this.angularVelocity.set(0, 0, 0);
                 console.debug(`[WorldReady] Ground spawn snapped to terrainY=${this.terrainY.toFixed(1)}m + gearHeight=${gearHeight.toFixed(2)}m -> pos.y=${this.planeRoot.position.y.toFixed(1)}m`);
@@ -2679,7 +2970,33 @@ export class FlightSceneSimple extends Scene3D {
         if (this.spawned && this._worldReady && this.onSpawned) {
             const cb = this.onSpawned;
             this.onSpawned = null;
-            cb();
+            this._cinematicActive = true;
+            this._cinematicStartMs = performance.now();
+            console.log('[Cinematic] Starting spawn fly-in');
+            try {
+                this._engineSound.start();
+                this._engineSound.fadeIn(ENGINE_SOUND_FADE_IN_MS);
+            } catch (err) {
+                console.warn('[EngineSound] Init failed:', err);
+            }
+            const hudEl = document.getElementById('flight-hud');
+            if (hudEl) {
+                hudEl.style.opacity = '0';
+                hudEl.style.transition = `opacity ${HUD_FADE_IN_MS}ms ease`;
+            }
+            try {
+                cb();
+            } catch (err) {
+                console.warn('[Cinematic] onSpawned callback failed:', err);
+            }
+            setTimeout(() => {
+                this._cinematicActive = false;
+                this._setCameraMode(CAMERA_MODE_CHASE);
+                this._hudFadeStartMs = performance.now();
+                this._hudFadeActive = true;
+                if (hudEl) hudEl.style.opacity = '0.85';
+                console.log('[Cinematic] Completed, HUD fade-in started');
+            }, CINEMATIC_DURATION_MS);
         }
     }
 
@@ -2772,6 +3089,9 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _updateTapeMarks(speedKts: number, altitudeFt: number): void {
+        const TICKER_HALF_HEIGHT_PX = 20;
+        const MARK_SPACING_PX = 30;
+
         const spdStep = 20;
         const spdRange = 60;
         const spdCenter = Math.round(speedKts / spdStep) * spdStep;
@@ -2787,6 +3107,11 @@ export class FlightSceneSimple extends Scene3D {
                 const mark = this.spdMarkEls[i];
                 mark.el.style.transform = `translateY(${offset}px)`;
                 if (centerChanged) mark.valEl.textContent = String(val);
+                const naturalY = (i - 3) * MARK_SPACING_PX;
+                const visualY = naturalY + offset;
+                const inTickerZone = Math.abs(visualY) < TICKER_HALF_HEIGHT_PX;
+                const desiredOpacity = inTickerZone ? '0' : '1';
+                if (mark.el.style.opacity !== desiredOpacity) mark.el.style.opacity = desiredOpacity;
             }
             
             if (this.hudSpdTape) {
@@ -2810,6 +3135,11 @@ export class FlightSceneSimple extends Scene3D {
                 const mark = this.altMarkEls[i];
                 mark.el.style.transform = `translateY(${offset}px)`;
                 if (centerChanged) mark.valEl.textContent = String(val);
+                const naturalY = (i - 3) * MARK_SPACING_PX;
+                const visualY = naturalY + offset;
+                const inTickerZone = Math.abs(visualY) < TICKER_HALF_HEIGHT_PX;
+                const desiredOpacity = inTickerZone ? '0' : '1';
+                if (mark.el.style.opacity !== desiredOpacity) mark.el.style.opacity = desiredOpacity;
             }
             
             if (this.hudAltTape) {
@@ -3180,6 +3510,15 @@ export class FlightSceneSimple extends Scene3D {
         this.velocity.addInPlace(avgForce.scale(dt / MASS));
         pos.addInPlace(this.velocity.scale(dt));
 
+        this.groundSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+
+        const gravityAccel = 9.81;
+        const verticalAccel = avgForce.y / MASS;
+        const verticalGNow = (verticalAccel + gravityAccel) / gravityAccel;
+        const totalGNow = Math.max(0, Math.hypot(avgForce.x, avgForce.y + MASS * gravityAccel, avgForce.z) / (MASS * gravityAccel));
+        const gMeasured = Number.isFinite(totalGNow) && totalGNow > 0 ? totalGNow : Math.abs(verticalGNow);
+        this._gForce = this._gForce + (gMeasured - this._gForce) * G_FORCE_SMOOTHING;
+
         const Iw2   = new BABYLON.Vector3(cIxx * this.angularVelocity.x, cIyy * this.angularVelocity.y, cIzz * this.angularVelocity.z);
         const gyro2 = BABYLON.Vector3.Cross(this.angularVelocity, Iw2);
         const angAcc = new BABYLON.Vector3(
@@ -3299,14 +3638,33 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
 
-        this.camera.target.copyFrom(pos);
+        if (this._cinematicActive) {
+            const elapsed = performance.now() - this._cinematicStartMs;
+            const t = Math.max(0, Math.min(1, elapsed / CINEMATIC_DURATION_MS));
+            this.camera.target.copyFrom(pos);
+            this.camera.alpha = -Math.PI / 2 + t * Math.PI * 2;
+            const targetRadius = Math.max(CAMERA_RADIUS_MIN_M, Math.min(CAMERA_RADIUS_MAX_M, this.camera.radius || 35));
+            this.camera.radius = CINEMATIC_INITIAL_RADIUS_M + (targetRadius - CINEMATIC_INITIAL_RADIUS_M) * t;
+            this.camera.beta = 1.20 + (1.50 - 1.20) * t;
+        } else if (this._cameraMode === CAMERA_MODE_CHASE) {
+            this.camera.target.copyFrom(pos);
 
-        const wm = this.planeRoot.getWorldMatrix();
-        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
-        const targetAlpha = Math.atan2(-this._tmpFwd.z, -this._tmpFwd.x);
-        let da = targetAlpha - this.camera.alpha;
-        da = ((da + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-        this.camera.alpha += da * Math.min(1, 3 * dt);
+            const wm = this.planeRoot.getWorldMatrix();
+            BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
+            const targetAlpha = Math.atan2(-this._tmpFwd.z, -this._tmpFwd.x);
+            let da = targetAlpha - this.camera.alpha;
+            da = ((da + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+            this.camera.alpha += da * Math.min(1, 3 * dt);
+        } else if (this._cameraMode === CAMERA_MODE_COCKPIT) {
+            const wm = this.planeRoot.getWorldMatrix();
+            const cockpitOffset = BABYLON.Vector3.TransformCoordinates(new BABYLON.Vector3(0, 0.8, 0.5), wm);
+            this.camera.target.copyFrom(cockpitOffset);
+            BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this._tmpFwd);
+            const targetAlpha = Math.atan2(-this._tmpFwd.z, -this._tmpFwd.x);
+            this.camera.alpha = targetAlpha;
+        } else if (this._cameraMode === CAMERA_MODE_FLYBY) {
+            this.camera.target.copyFrom(pos);
+        }
 
         if (this.ground) {
             this.ground.position.x = pos.x;
@@ -3322,7 +3680,7 @@ export class FlightSceneSimple extends Scene3D {
         hud.innerHTML = `
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400&display=swap');
-#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;opacity:0.85; }
+#flight-hud { position:fixed;inset:0;pointer-events:none;z-index:100;font-family:'Orbitron',monospace;color:#fff;opacity:0;transition:opacity 1s ease; }
 .hp{position:absolute}
 #hfps{font-size:10px;color:rgba(100,240,180,.4);font-family:'Inter',sans-serif}
 #hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:stallPulse 1s ease-in-out infinite}
@@ -3349,12 +3707,12 @@ export class FlightSceneSimple extends Scene3D {
 .hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.65)}
 .hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.9);font-family:'Inter',sans-serif;font-weight:500;min-width:22px;text-align:right}
 
-.hud-ticker-box{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.82);border:1px solid rgba(255,255,255,.5);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:20px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);letter-spacing:.02em;pointer-events:none;z-index:2}
-.hud-ticker-static{display:inline-block}
-.hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.6em;overflow:hidden;vertical-align:bottom}
+.hud-ticker-box{position:absolute;left:-4px;right:-4px;top:50%;transform:translateY(-50%);height:34px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:22px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:.02em;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 2px;white-space:nowrap}
+.hud-ticker-static{display:inline-block;line-height:1}
+.hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;overflow:hidden;vertical-align:bottom}
 .hud-ticker-rolling-inner{position:absolute;left:0;top:0;display:flex;flex-direction:column;line-height:1;transition:transform .12s linear}
-.hud-ticker-rolling-inner span{display:block;height:1em;text-align:center}
-.hud-ticker-small{font-size:.7em;opacity:.85;margin-left:2px}
+.hud-ticker-rolling-inner span{display:block;height:1em;text-align:center;width:.62em}
+.hud-ticker-small{font-size:.7em;opacity:.9;margin-left:2px;display:inline-flex;align-items:baseline}
 
 .hud-value-row{display:flex;align-items:baseline;gap:2px;margin-top:3px}
 .hud-value-main{font-size:24px;font-weight:700;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 4px rgba(0,0,0,.9)}
@@ -3386,12 +3744,15 @@ export class FlightSceneSimple extends Scene3D {
 .hud-instr-col{display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding-bottom:4px}
 .hud-vs-row{display:flex;align-items:center;gap:4px}
 .hud-vs-header{font-size:8px;color:#fff;font-weight:600;letter-spacing:.05em}
-.hud-vs-val{font-size:13px;font-weight:700;color:#79e7ff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8);min-width:34px;text-align:right}
+.hud-vs-val{font-size:12px;font-weight:700;color:#79e7ff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8);min-width:34px;text-align:right;line-height:1}
 
-/* VS strip with numeric scale */
+/* VS strip with numeric scale - aligned so its zero-line matches the altitude ticker center */
+.hud-vs-col{display:flex;flex-direction:column;align-items:flex-start;padding-bottom:12px}
+.hud-vs-col-top{display:flex;align-items:center;justify-content:space-between;gap:4px;font-family:'Inter',sans-serif;height:14px;width:100%;margin-bottom:2px;padding-left:10px}
+.hud-vs-col-top .hud-vs-header{font-size:9px}
 .hud-vs-strip{position:relative;display:flex;align-items:stretch;height:180px;width:36px}
 .hud-vs-strip-bg{position:absolute;left:6px;top:0;bottom:0;width:1px;background:rgba(255,255,255,.25)}
-.hud-vs-strip-zero{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(255,255,255,.55)}
+.hud-vs-strip-zero{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(255,255,255,.55);z-index:1}
 .hud-vs-scale{position:relative;flex:1;display:flex;flex-direction:column;justify-content:space-between;font-size:9px;color:rgba(255,255,255,.65);font-family:'Inter',sans-serif;padding:0 2px 0 12px;line-height:1}
 .hud-vs-scale span{display:block}
 .hud-vs-pointer{position:absolute;left:-2px;top:50%;width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:9px solid #79e7ff;transform:translateY(-50%);transition:top .12s linear;filter:drop-shadow(0 0 2px rgba(0,0,0,.7));z-index:3}
@@ -3576,22 +3937,26 @@ export class FlightSceneSimple extends Scene3D {
       <span class="hud-value-main" id="bb-alt-v">0</span>
     </div>
   </div>
-  <div class="hud-vs-strip">
-    <div class="hud-vs-strip-bg"></div>
-    <div class="hud-vs-strip-zero"></div>
-    <div class="hud-vs-pointer" id="hud-vs-pointer"></div>
-    <div class="hud-vs-scale">
-      <span>6</span>
-      <span>4</span>
-      <span>2</span>
-      <span class="hud-vs-scale-zero" style="visibility:hidden">0</span>
-      <span>-2</span>
-      <span>-4</span>
-      <span>-6</span>
+  <div class="hud-vs-col">
+    <div class="hud-vs-col-top">
+      <span class="hud-vs-header">VS</span>
+      <span class="hud-vs-val" id="hud-vs-v">0</span>
     </div>
-    <div style="position:absolute;left:-2px;top:-14px;font-size:8px;color:#fff;font-weight:600;letter-spacing:.05em">VS</div>
-    <div class="hud-vs-val" id="hud-vs-v" style="position:absolute;right:-2px;bottom:-16px">0</div>
-    <div class="hud-vs-bar" style="display:none"><div class="hud-vs-bar-fill" id="hud-vs-bar" style="height:0;bottom:50%"></div></div>
+    <div class="hud-vs-strip">
+      <div class="hud-vs-strip-bg"></div>
+      <div class="hud-vs-strip-zero"></div>
+      <div class="hud-vs-pointer" id="hud-vs-pointer"></div>
+      <div class="hud-vs-scale">
+        <span>6</span>
+        <span>4</span>
+        <span>2</span>
+        <span class="hud-vs-scale-zero" style="visibility:hidden">0</span>
+        <span>-2</span>
+        <span>-4</span>
+        <span>-6</span>
+      </div>
+      <div class="hud-vs-bar" style="display:none"><div class="hud-vs-bar-fill" id="hud-vs-bar" style="height:0;bottom:50%"></div></div>
+    </div>
   </div>
 </div>
 
@@ -3604,6 +3969,7 @@ export class FlightSceneSimple extends Scene3D {
     <button id="gps-zoom-in" title="Aumentar zoom" type="button" style="width:18px;height:18px;padding:0;border:1px solid rgba(80,255,160,.45);background:rgba(2,10,20,.75);color:rgba(100,240,180,.95);font-family:'Orbitron',monospace;font-size:14px;line-height:1;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;user-select:none;touch-action:none">+</button>
     <button id="gps-zoom-out" title="Diminuir zoom" type="button" style="width:18px;height:18px;padding:0;border:1px solid rgba(80,255,160,.45);background:rgba(2,10,20,.75);color:rgba(100,240,180,.95);font-family:'Orbitron',monospace;font-size:14px;line-height:1;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;user-select:none;touch-action:none">&#8722;</button>
     <div id="gps-zoom-val" style="width:18px;text-align:center;font-size:8px;color:rgba(100,240,180,.7);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);user-select:none;pointer-events:none">12</div>
+    <button id="gps-mode-toggle" title="Alternar modo do mapa (Norte/Heading)" type="button" style="width:18px;height:18px;padding:0;margin-top:4px;border:1px solid rgba(80,255,160,.45);background:rgba(2,10,20,.75);color:rgba(100,240,180,.95);font-family:'Orbitron',monospace;font-size:9px;line-height:1;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;user-select:none;touch-action:none">N</button>
   </div>
   <div id="gps-coords" style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(100,240,180,.6);font-family:'Inter',sans-serif;text-shadow:0 0 4px rgba(0,0,0,.8);white-space:nowrap;pointer-events:none"></div>
 </div>
@@ -3612,34 +3978,95 @@ export class FlightSceneSimple extends Scene3D {
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="12,2 15,10 12,8 9,10"/><circle cx="12" cy="12" r="3"/></svg>
 </div>
 
-<div id="missions-panel" style="display:none;position:absolute;top:64px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
-  <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">MISSIONS</div>
-  <div id="missions-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+<div id="missions-panel" class="game-panel" style="display:none;position:absolute;top:64px;right:54px;width:320px;height:400px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="missions-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">MISSIONS</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="missions-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="missions-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="missions-panel" data-btn="missions-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-toolbar" style="display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid rgba(80,255,160,.08)">
+    <input id="missions-search" type="text" placeholder="Buscar..." style="flex:1;min-width:0;padding:3px 6px;font-size:10px;background:rgba(0,20,15,.5);border:1px solid rgba(80,255,160,.25);border-radius:3px;color:#fff;outline:none">
+    <select id="missions-sort" style="padding:3px 4px;font-size:10px;background:rgba(0,20,15,.5);border:1px solid rgba(80,255,160,.25);border-radius:3px;color:#fff;outline:none">
+      <option value="status">Status</option>
+      <option value="title">Nome</option>
+      <option value="difficulty">Dificuldade</option>
+      <option value="distance">Dist\u00E2ncia</option>
+    </select>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 78px)">
+    <div id="missions-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+  </div>
+  <div class="panel-resize" data-panel="missions-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
 <div id="aircraft-btn" style="position:absolute;top:112px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Aircraft">
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12l5-3v2h4l1-5h2l1 5h4v-2l5 3-5 3v-2h-4l-1 5h-2l-1-5H7v2z"/></svg>
 </div>
 
-<div id="aircraft-panel" style="display:none;position:absolute;top:102px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
-  <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">AIRCRAFT</div>
-  <div id="aircraft-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+<div id="aircraft-panel" class="game-panel" style="display:none;position:absolute;top:102px;right:54px;width:320px;height:400px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="aircraft-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">AIRCRAFT</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="aircraft-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="aircraft-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="aircraft-panel" data-btn="aircraft-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 36px)">
+    <div id="aircraft-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+  </div>
+  <div class="panel-resize" data-panel="aircraft-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
 <div id="flight-plans-btn" style="position:absolute;top:150px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Flight Plans">
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h4l3-4 4 4h7"/><path d="M3 17h4l3 4 4-4h7"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
 </div>
 
-<div id="flight-plans-panel" style="display:none;position:absolute;top:140px;right:54px;width:320px;max-height:400px;overflow-y:auto;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;padding:12px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
-  <div style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em;margin-bottom:10px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:6px">FLIGHT PLANS</div>
-  <div id="flight-plans-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+<div id="flight-plans-panel" class="game-panel" style="display:none;position:absolute;top:140px;right:54px;width:320px;height:400px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="flight-plans-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">FLIGHT PLANS</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="flight-plans-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="flight-plans-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="flight-plans-panel" data-btn="flight-plans-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 36px)">
+    <div id="flight-plans-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+  </div>
+  <div class="panel-resize" data-panel="flight-plans-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
-<div id="nav-info" style="display:none;position:absolute;top:190px;left:4px;width:180px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:6px;padding:6px 8px;font-family:'Inter',sans-serif;color:#fff;font-size:10px;pointer-events:none;box-shadow:0 0 12px rgba(0,255,128,.1)">
+<div id="nav-info" style="display:none;position:absolute;top:190px;left:4px;width:210px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:6px;padding:6px 8px;font-family:'Inter',sans-serif;color:#fff;font-size:10px;pointer-events:none;box-shadow:0 0 12px rgba(0,255,128,.1)">
   <div style="font-family:'Orbitron',monospace;font-size:8px;color:#40ffaa;letter-spacing:.15em;margin-bottom:3px">NAV</div>
+  <div id="nav-leg-block" style="display:none;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:3px;margin-bottom:3px">
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">WPT</span><span id="nav-wpt-name" style="color:#fff">\u2014</span></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">LEG</span><span id="nav-leg-idx" style="color:#fff">\u2014</span></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DIST</span><span id="nav-leg-dist" style="color:#40ffaa">\u2014 nm</span></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">BRG</span><span id="nav-leg-brg" style="color:#40ffaa">\u2014\u00B0</span></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">HDG\u0394</span><span id="nav-hdg-delta" style="color:#40ffaa">\u2014</span></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">XTE</span><span id="nav-xte-val" style="color:#40ffaa">\u2014</span></div>
+    <div id="nav-xte-bar-wrap" style="position:relative;height:5px;background:rgba(255,255,255,.08);border-radius:2px;margin:2px 0">
+      <div id="nav-xte-bar-mid" style="position:absolute;left:50%;top:-1px;width:1px;height:7px;background:rgba(255,255,255,.5)"></div>
+      <div id="nav-xte-bar-dot" style="position:absolute;left:50%;top:0;width:5px;height:5px;background:#40ffaa;border-radius:50%;transform:translateX(-2.5px);transition:left .15s linear"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">TGT</span><span id="nav-tgt-alt" style="color:#fff">\u2014</span></div>
+    <div id="nav-alt-band-wrap" style="display:none;position:relative;height:5px;background:rgba(255,255,255,.08);border-radius:2px;margin:2px 0">
+      <div id="nav-alt-band-mid" style="position:absolute;left:50%;top:-1px;width:1px;height:7px;background:rgba(255,255,255,.5)"></div>
+      <div id="nav-alt-band-dot" style="position:absolute;left:50%;top:0;width:5px;height:5px;background:#40ffaa;border-radius:50%;transform:translateX(-2.5px);transition:left .15s linear"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">ETE</span><span id="nav-ete" style="color:#fff">\u2014</span></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">ETA</span><span id="nav-eta" style="color:#fff">\u2014</span></div>
+  </div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DEST</span><span id="nav-dest" style="color:#fff">\u2014</span></div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">DIST</span><span id="nav-dist" style="color:#40ffaa">\u2014 km</span></div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">BRG</span><span id="nav-brg" style="color:#40ffaa">\u2014\u00B0</span></div>
+  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">TOTAL</span><span id="nav-total-dist" style="color:#40ffaa">\u2014</span></div>
+  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">WIND</span><span id="nav-wind" style="color:#40ffaa">\u2014</span></div>
+  <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">GS</span><span id="nav-gs" style="color:#40ffaa">\u2014 kt</span></div>
 </div>`;
         document.body.appendChild(hud);
         this.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
@@ -3709,6 +4136,8 @@ export class FlightSceneSimple extends Scene3D {
         this._flightPlansPanelEl = document.getElementById('flight-plans-panel');
         this._setupFlightPlansBtn();
 
+        this._setupPanelControls();
+
         this._navInfoEl = document.getElementById('nav-info');
         this._navDestEl = document.getElementById('nav-dest');
         this._navDistEl = document.getElementById('nav-dist');
@@ -3721,16 +4150,238 @@ export class FlightSceneSimple extends Scene3D {
 
     // ── Panel Management ────────────────────────────────────────────────────────
 
+    private _pinnedPanels = new Set<string>();
+    private _minimizedPanels = new Set<string>();
+    private _panelDragState: { panel: HTMLElement; offsetX: number; offsetY: number; pointerId: number } | null = null;
+    private _panelResizeState: { panel: HTMLElement; startW: number; startH: number; startX: number; startY: number; pointerId: number } | null = null;
+    private static readonly PANEL_STATE_STORAGE_KEY = 'flight_panels_v1';
+
     private _closeAllPanels(except?: HTMLElement | null): void {
         const panels = [this._missionPanelEl, this._aircraftPanelEl, this._flightPlansPanelEl];
         const btns = [this._missionBtnEl, this._aircraftBtnEl, this._flightPlansBtnEl];
         for (let i = 0; i < panels.length; i++) {
             const p = panels[i];
-            if (p && p !== except) {
-                p.style.display = 'none';
-                if (btns[i]) { btns[i]!.style.borderColor = 'rgba(80,255,160,.3)'; btns[i]!.style.boxShadow = 'none'; }
+            if (!p || p === except) continue;
+            if (p.id && this._pinnedPanels.has(p.id)) continue;
+            p.style.display = 'none';
+            if (btns[i]) { btns[i]!.style.borderColor = 'rgba(80,255,160,.3)'; btns[i]!.style.boxShadow = 'none'; }
+        }
+    }
+
+    private _persistPanelState(): void {
+        try {
+            const ids = ['missions-panel', 'aircraft-panel', 'flight-plans-panel'];
+            const state: Record<string, { x?: number; y?: number; w?: number; h?: number; minimized: boolean; pinned: boolean }> = {};
+            for (const id of ids) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                const entry: { x?: number; y?: number; w?: number; h?: number; minimized: boolean; pinned: boolean } = {
+                    minimized: this._minimizedPanels.has(id),
+                    pinned: this._pinnedPanels.has(id),
+                };
+                if (el.style.left) entry.x = parseInt(el.style.left, 10);
+                if (el.style.top) entry.y = parseInt(el.style.top, 10);
+                if (el.style.width) entry.w = parseInt(el.style.width, 10);
+                if (el.style.height && el.style.height !== 'auto') entry.h = parseInt(el.style.height, 10);
+                state[id] = entry;
+            }
+            localStorage.setItem(FlightSceneSimple.PANEL_STATE_STORAGE_KEY, JSON.stringify(state));
+        } catch (err) {
+            console.warn('[Panels] Failed to persist state:', err);
+        }
+    }
+
+    private _restorePanelState(): void {
+        try {
+            const raw = localStorage.getItem(FlightSceneSimple.PANEL_STATE_STORAGE_KEY);
+            if (!raw) return;
+            const state = JSON.parse(raw);
+            if (!state || typeof state !== 'object') return;
+            for (const id of Object.keys(state)) {
+                const el = document.getElementById(id);
+                const cfg = state[id];
+                if (!el || !cfg) continue;
+                const vw = window.innerWidth, vh = window.innerHeight;
+                if (Number.isFinite(cfg.x) && Number.isFinite(cfg.y)) {
+                    const x = Math.max(0, Math.min(vw - 100, Number(cfg.x)));
+                    const y = Math.max(0, Math.min(vh - 50, Number(cfg.y)));
+                    el.style.left = `${x}px`;
+                    el.style.top = `${y}px`;
+                    el.style.right = 'auto';
+                }
+                if (Number.isFinite(cfg.w) && Number.isFinite(cfg.h)) {
+                    el.style.width = `${Math.max(220, Number(cfg.w))}px`;
+                    el.style.height = `${Math.max(120, Number(cfg.h))}px`;
+                }
+                if (cfg.pinned) {
+                    this._pinnedPanels.add(id);
+                    const pinBtn = el.querySelector<HTMLButtonElement>('.panel-pin');
+                    if (pinBtn) { pinBtn.textContent = '\u25CF'; pinBtn.style.color = '#ffcc55'; }
+                }
+                if (cfg.minimized) {
+                    this._minimizedPanels.add(id);
+                    const body = el.querySelector<HTMLElement>('.panel-body');
+                    const tools = el.querySelector<HTMLElement>('.panel-toolbar');
+                    if (body) body.style.display = 'none';
+                    if (tools) tools.style.display = 'none';
+                    el.style.height = 'auto';
+                }
+            }
+        } catch (err) {
+            console.warn('[Panels] Failed to restore state:', err);
+        }
+    }
+
+    private _setupPanelControls(): void {
+        const panels = ['missions-panel', 'aircraft-panel', 'flight-plans-panel'];
+        for (const id of panels) {
+            const panel = document.getElementById(id);
+            if (!panel) continue;
+            const handle = panel.querySelector<HTMLElement>('.panel-handle');
+            if (handle) this._wirePanelDrag(panel, handle);
+            const resize = panel.querySelector<HTMLElement>('.panel-resize');
+            if (resize) this._wirePanelResize(panel, resize);
+            const minBtn = panel.querySelector<HTMLButtonElement>('.panel-min');
+            if (minBtn) {
+                minBtn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    this._togglePanelMinimize(id);
+                });
+            }
+            const pinBtn = panel.querySelector<HTMLButtonElement>('.panel-pin');
+            if (pinBtn) {
+                pinBtn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    this._togglePanelPin(id);
+                });
+            }
+            const closeBtn = panel.querySelector<HTMLButtonElement>('.panel-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    panel.style.display = 'none';
+                    const btnId = closeBtn.getAttribute('data-btn');
+                    if (btnId) {
+                        const btn = document.getElementById(btnId);
+                        if (btn) {
+                            btn.style.borderColor = 'rgba(80,255,160,.3)';
+                            btn.style.boxShadow = 'none';
+                        }
+                    }
+                });
             }
         }
+        this._restorePanelState();
+    }
+
+    private _wirePanelDrag(panel: HTMLElement, handle: HTMLElement): void {
+        handle.addEventListener('pointerdown', (ev: PointerEvent) => {
+            const target = ev.target as HTMLElement;
+            if (target && target.tagName === 'BUTTON') return;
+            ev.preventDefault();
+            const rect = panel.getBoundingClientRect();
+            this._panelDragState = {
+                panel,
+                offsetX: ev.clientX - rect.left,
+                offsetY: ev.clientY - rect.top,
+                pointerId: ev.pointerId,
+            };
+            handle.setPointerCapture(ev.pointerId);
+            handle.style.cursor = 'grabbing';
+        });
+        handle.addEventListener('pointermove', (ev: PointerEvent) => {
+            const st = this._panelDragState;
+            if (!st || st.pointerId !== ev.pointerId) return;
+            const vw = window.innerWidth, vh = window.innerHeight;
+            const newX = Math.max(0, Math.min(vw - 60, ev.clientX - st.offsetX));
+            const newY = Math.max(0, Math.min(vh - 30, ev.clientY - st.offsetY));
+            panel.style.left = `${newX}px`;
+            panel.style.top = `${newY}px`;
+            panel.style.right = 'auto';
+        });
+        const endDrag = (ev: PointerEvent) => {
+            const st = this._panelDragState;
+            if (!st || st.pointerId !== ev.pointerId) return;
+            this._panelDragState = null;
+            try { handle.releasePointerCapture(ev.pointerId); } catch (_e) { /* ignore */ }
+            handle.style.cursor = 'grab';
+            this._persistPanelState();
+        };
+        handle.addEventListener('pointerup', endDrag);
+        handle.addEventListener('pointercancel', endDrag);
+    }
+
+    private _wirePanelResize(panel: HTMLElement, handle: HTMLElement): void {
+        handle.addEventListener('pointerdown', (ev: PointerEvent) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const rect = panel.getBoundingClientRect();
+            this._panelResizeState = {
+                panel,
+                startW: rect.width,
+                startH: rect.height,
+                startX: ev.clientX,
+                startY: ev.clientY,
+                pointerId: ev.pointerId,
+            };
+            handle.setPointerCapture(ev.pointerId);
+        });
+        handle.addEventListener('pointermove', (ev: PointerEvent) => {
+            const st = this._panelResizeState;
+            if (!st || st.pointerId !== ev.pointerId) return;
+            const dx = ev.clientX - st.startX;
+            const dy = ev.clientY - st.startY;
+            panel.style.width = `${Math.max(220, st.startW + dx)}px`;
+            panel.style.height = `${Math.max(120, st.startH + dy)}px`;
+        });
+        const endResize = (ev: PointerEvent) => {
+            const st = this._panelResizeState;
+            if (!st || st.pointerId !== ev.pointerId) return;
+            this._panelResizeState = null;
+            try { handle.releasePointerCapture(ev.pointerId); } catch (_e) { /* ignore */ }
+            this._persistPanelState();
+        };
+        handle.addEventListener('pointerup', endResize);
+        handle.addEventListener('pointercancel', endResize);
+    }
+
+    private _togglePanelMinimize(id: string): void {
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const body = panel.querySelector<HTMLElement>('.panel-body');
+        const tools = panel.querySelector<HTMLElement>('.panel-toolbar');
+        const resize = panel.querySelector<HTMLElement>('.panel-resize');
+        const minBtn = panel.querySelector<HTMLButtonElement>('.panel-min');
+        if (this._minimizedPanels.has(id)) {
+            this._minimizedPanels.delete(id);
+            if (body) body.style.display = '';
+            if (tools) tools.style.display = '';
+            if (resize) resize.style.display = '';
+            if (minBtn) minBtn.textContent = '_';
+            panel.style.height = '400px';
+        } else {
+            this._minimizedPanels.add(id);
+            if (body) body.style.display = 'none';
+            if (tools) tools.style.display = 'none';
+            if (resize) resize.style.display = 'none';
+            if (minBtn) minBtn.textContent = '\u25A1';
+            panel.style.height = 'auto';
+        }
+        this._persistPanelState();
+    }
+
+    private _togglePanelPin(id: string): void {
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const pinBtn = panel.querySelector<HTMLButtonElement>('.panel-pin');
+        if (this._pinnedPanels.has(id)) {
+            this._pinnedPanels.delete(id);
+            if (pinBtn) { pinBtn.textContent = '\u25CB'; pinBtn.style.color = '#40ffaa'; }
+        } else {
+            this._pinnedPanels.add(id);
+            if (pinBtn) { pinBtn.textContent = '\u25CF'; pinBtn.style.color = '#ffcc55'; }
+        }
+        this._persistPanelState();
     }
 
     // ── Missions Button ─────────────────────────────────────────────────────────
@@ -3757,10 +4408,28 @@ export class FlightSceneSimple extends Scene3D {
         });
     }
 
+    private _missionsCache: any[] = [];
+    private _missionsSearchWired = false;
+
+    private _wireMissionsToolbar(): void {
+        if (this._missionsSearchWired) return;
+        const search = document.getElementById('missions-search') as HTMLInputElement | null;
+        const sort = document.getElementById('missions-sort') as HTMLSelectElement | null;
+        if (search) {
+            search.addEventListener('input', () => this._renderMissionsList());
+        }
+        if (sort) {
+            sort.addEventListener('change', () => this._renderMissionsList());
+        }
+        this._missionsSearchWired = true;
+    }
+
     private async _loadMissions(): Promise<void> {
         const listEl = document.getElementById('missions-list');
         if (!listEl) return;
         listEl.textContent = 'Loading...';
+
+        this._wireMissionsToolbar();
 
         const token = localStorage.getItem('auth_token') || '';
         if (!token) {
@@ -3780,6 +4449,8 @@ export class FlightSceneSimple extends Scene3D {
             const json = await res.json();
             const userMissions = Array.isArray(json?.data) ? json.data : [];
 
+            this._missionsCache = userMissions;
+
             if (!userMissions.length) {
                 listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No missions acquired</div>';
                 this._activeMission = null;
@@ -3790,15 +4461,77 @@ export class FlightSceneSimple extends Scene3D {
                 return;
             }
 
-            const sortedMissions = userMissions.slice().sort((a: any, b: any) => {
+            this._renderMissionsList();
+
+            const activeFromList = userMissions.find((m: any) => m?.status === 'in_progress');
+            if (activeFromList && activeFromList.departure_lat != null && activeFromList.arrival_lat != null) {
+                this._activeMission = {
+                    departure_lat: Number(activeFromList.departure_lat),
+                    departure_lon: Number(activeFromList.departure_lon),
+                    arrival_lat: Number(activeFromList.arrival_lat),
+                    arrival_lon: Number(activeFromList.arrival_lon),
+                    departure_icao: activeFromList.departure_icao || '',
+                    arrival_icao: activeFromList.arrival_icao || '',
+                    mission_title: activeFromList.mission_title || '',
+                };
+                this._activeUserMissionId = activeFromList.id ?? null;
+                this._activeMissionId = activeFromList.mission_id ?? null;
+                const ami = activeFromList.mission || {};
+                this._missionWaypoints = Array.isArray(ami.waypoints) ? ami.waypoints : [];
+                this._missionCurrentWpIndex = 0;
+            } else {
+                this._activeMission = null;
+                this._activeUserMissionId = null;
+                this._activeMissionId = null;
+                this._missionWaypoints = [];
+                this._missionCurrentWpIndex = 0;
+            }
+        } catch (err) {
+            console.warn('[FlightScene] Missions panel load error:', err);
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+        }
+    }
+
+    private _renderMissionsList(): void {
+        const listEl = document.getElementById('missions-list');
+        if (!listEl) return;
+        const search = (document.getElementById('missions-search') as HTMLInputElement | null)?.value?.trim().toLowerCase() ?? '';
+        const sortKey = (document.getElementById('missions-sort') as HTMLSelectElement | null)?.value ?? 'status';
+
+        try {
+            let visible = this._missionsCache.slice();
+            if (search) {
+                visible = visible.filter((um: any) => {
+                    const title = (um.mission_title || um.mission?.title || '').toLowerCase();
+                    const dep = (um.departure_icao || um.mission?.departure_icao || '').toLowerCase();
+                    const arr = (um.arrival_icao || um.mission?.arrival_icao || '').toLowerCase();
+                    const type = (um.mission_type || um.mission?.type || '').toLowerCase();
+                    return title.includes(search) || dep.includes(search) || arr.includes(search) || type.includes(search);
+                });
+            }
+            visible.sort((a: any, b: any) => {
+                if (sortKey === 'title') {
+                    return (a.mission_title || a.mission?.title || '').localeCompare(b.mission_title || b.mission?.title || '');
+                }
+                if (sortKey === 'difficulty') {
+                    return Number(a.mission_difficulty ?? a.mission?.difficulty ?? 0) - Number(b.mission_difficulty ?? b.mission?.difficulty ?? 0);
+                }
+                if (sortKey === 'distance') {
+                    return Number(a.mission_distance_nm ?? a.mission?.distance_nm ?? 0) - Number(b.mission_distance_nm ?? b.mission?.distance_nm ?? 0);
+                }
                 const aInProg = a?.status === 'in_progress' ? 0 : 1;
                 const bInProg = b?.status === 'in_progress' ? 0 : 1;
                 if (aInProg !== bInProg) return aInProg - bInProg;
                 return 0;
             });
 
+            if (!visible.length) {
+                listEl.innerHTML = `<div style="color:rgba(255,255,255,.4)">${search ? 'Nenhuma miss\u00e3o encontrada' : 'No missions acquired'}</div>`;
+                return;
+            }
+
             let html = '';
-            for (const um of sortedMissions) {
+            for (const um of visible) {
                 const mid = Number(um?.mission_id);
                 if (!Number.isFinite(mid) || mid <= 0) continue;
                 const mi = um.mission || {};
@@ -3899,33 +4632,9 @@ export class FlightSceneSimple extends Scene3D {
                     window.location.href = `flight.html?mission_id=${encodeURIComponent(String(startMissionId))}`;
                 });
             });
-
-            const activeFromList = sortedMissions.find((m: any) => m?.status === 'in_progress');
-            if (activeFromList && activeFromList.departure_lat != null && activeFromList.arrival_lat != null) {
-                this._activeMission = {
-                    departure_lat: Number(activeFromList.departure_lat),
-                    departure_lon: Number(activeFromList.departure_lon),
-                    arrival_lat: Number(activeFromList.arrival_lat),
-                    arrival_lon: Number(activeFromList.arrival_lon),
-                    departure_icao: activeFromList.departure_icao || '',
-                    arrival_icao: activeFromList.arrival_icao || '',
-                    mission_title: activeFromList.mission_title || '',
-                };
-                this._activeUserMissionId = activeFromList.id ?? null;
-                this._activeMissionId = activeFromList.mission_id ?? null;
-                const ami = activeFromList.mission || {};
-                this._missionWaypoints = Array.isArray(ami.waypoints) ? ami.waypoints : [];
-                this._missionCurrentWpIndex = 0;
-            } else {
-                this._activeMission = null;
-                this._activeUserMissionId = null;
-                this._activeMissionId = null;
-                this._missionWaypoints = [];
-                this._missionCurrentWpIndex = 0;
-            }
         } catch (err) {
-            console.warn('[FlightScene] Missions panel load error:', err);
-            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+            console.warn('[FlightScene] Render missions list error:', err);
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Render error</div>';
         }
     }
 
@@ -4357,6 +5066,144 @@ export class FlightSceneSimple extends Scene3D {
         return { departure_lat: m.departure_lat, departure_lon: m.departure_lon, arrival_lat: m.arrival_lat, arrival_lon: m.arrival_lon, departure_icao: m.departure_icao, arrival_icao: m.arrival_icao, name: m.mission_title };
     }
 
+    private _formatEteMin(eteMin: number): string {
+        if (!Number.isFinite(eteMin) || eteMin <= 0) return '--:--';
+        if (eteMin > 999) return '>999';
+        const h = Math.floor(eteMin / 60);
+        const m = Math.floor(eteMin % 60);
+        if (h > 0) return `${h}:${String(m).padStart(2, '0')}`;
+        const s = Math.floor((eteMin - m) * 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    private _formatEtaUtc(simTimeMs: number, eteMin: number): string {
+        if (!Number.isFinite(eteMin) || eteMin <= 0) return '--:--';
+        const eta = new Date(simTimeMs + eteMin * 60000);
+        const hh = String(eta.getUTCHours()).padStart(2, '0');
+        const mm = String(eta.getUTCMinutes()).padStart(2, '0');
+        return `${hh}:${mm}Z`;
+    }
+
+    private _setText(id: string, text: string): void {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    }
+
+    private _setHtml(id: string, html: string): void {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+    }
+
+    private _setStyle(id: string, prop: string, value: string): void {
+        const el = document.getElementById(id);
+        if (el) (el.style as unknown as Record<string, string>)[prop] = value;
+    }
+
+    private _updateNavInfo(lat: number, lon: number): void {
+        if (!this._navInfoEl) return;
+
+        const nav = this._activeFlightPlanNav ?? this._missionDestForNav();
+        if (!nav) {
+            this._navInfoEl.style.display = 'none';
+            return;
+        }
+
+        this._navInfoEl.style.display = 'block';
+
+        const totalDistNm = this._haversineNm(lat, lon, nav.arrival_lat, nav.arrival_lon);
+        const totalBrgDeg = this._initialBearingDeg(lat, lon, nav.arrival_lat, nav.arrival_lon);
+        if (this._navDestEl) this._navDestEl.textContent = nav.arrival_icao || '\u2014';
+        if (this._navDistEl) this._navDistEl.textContent = `${Math.round(totalDistNm * 1.852)} km`;
+        if (this._navBrgEl) this._navBrgEl.textContent = `${Math.round(totalBrgDeg)}\u00B0`;
+        this._setText('nav-total-dist', `${totalDistNm.toFixed(1)} nm`);
+
+        const gsKt = this.groundSpeed * 1.944;
+        this._setText('nav-gs', `${Math.round(gsKt)} kt`);
+
+        const altMslFt = this.planeRoot ? Math.max(0, (this.refAlt + this.planeRoot.position.y) * 3.28084) : 0;
+        const wind = this._getWindAtAltitude(altMslFt);
+
+        const trackDeg = this.groundSpeed > MIN_GS_FOR_ETE_MS && Number.isFinite(this.velocity.x) && Number.isFinite(this.velocity.z)
+            ? ((Math.atan2(this.velocity.x, this.velocity.z) * 180 / Math.PI) + 360) % 360
+            : totalBrgDeg;
+        const windAngleRad = (wind.dirDeg - trackDeg) * Math.PI / 180;
+        const headComp = -wind.speedKt * Math.cos(windAngleRad);
+        const crossComp = wind.speedKt * Math.sin(windAngleRad);
+        const headSign = headComp >= 0 ? 'H+' : 'H-';
+        const crossSign = crossComp >= 0 ? 'X+' : 'X-';
+        this._setText('nav-wind', `${String(Math.round(wind.dirDeg)).padStart(3, '0')}/${Math.round(wind.speedKt).toString().padStart(2, '0')} ${headSign}${Math.abs(headComp).toFixed(0)} ${crossSign}${Math.abs(crossComp).toFixed(0)}`);
+
+        const wpts = this._missionWaypoints;
+        const idx = this._missionCurrentWpIndex;
+        const legBlock = document.getElementById('nav-leg-block');
+        if (wpts.length > 0 && idx < wpts.length) {
+            if (legBlock) legBlock.style.display = 'block';
+            const wp = wpts[idx];
+            const wpLat = Number(wp.latitude);
+            const wpLon = Number(wp.longitude);
+            const legDistNm = this._haversineNm(lat, lon, wpLat, wpLon);
+            const legBrgDeg = this._initialBearingDeg(lat, lon, wpLat, wpLon);
+            this._setText('nav-wpt-name', wp.name || `WP ${wp.order_index}`);
+            this._setText('nav-leg-idx', `${idx + 1}/${wpts.length}`);
+            this._setText('nav-leg-dist', `${legDistNm.toFixed(1)} nm`);
+            this._setText('nav-leg-brg', `${Math.round(legBrgDeg)}\u00B0`);
+
+            const wm = this.planeRoot ? this.planeRoot.getWorldMatrix() : null;
+            const fwd = wm ? BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm) : null;
+            const currentHdgDeg = fwd ? (((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360) : 0;
+            const delta = ((legBrgDeg - currentHdgDeg + 540) % 360) - 180;
+            const absD = Math.abs(delta);
+            const arrow = delta > 1 ? '\u25B6' : delta < -1 ? '\u25C0' : '\u25B2';
+            const deltaColor = absD < HDG_DELTA_GREEN_DEG ? '#40ffaa' : absD < HDG_DELTA_AMBER_DEG ? '#ffcc55' : '#ff5566';
+            this._setHtml('nav-hdg-delta', `<span style="color:${deltaColor}">${arrow} ${Math.round(absD)}\u00B0</span>`);
+
+            let prevLat: number, prevLon: number;
+            if (idx === 0) {
+                prevLat = nav.departure_lat;
+                prevLon = nav.departure_lon;
+            } else {
+                prevLat = Number(wpts[idx - 1].latitude);
+                prevLon = Number(wpts[idx - 1].longitude);
+            }
+            const xteNm = this._computeXteNm(prevLat, prevLon, wpLat, wpLon, lat, lon);
+            const xteSide = xteNm >= 0 ? 'R' : 'L';
+            const xteAbs = Math.abs(xteNm);
+            const xteColor = xteAbs < 0.2 ? '#40ffaa' : xteAbs < 0.5 ? '#ffcc55' : '#ff5566';
+            this._setHtml('nav-xte-val', `<span style="color:${xteColor}">${xteAbs.toFixed(2)} nm ${xteSide}</span>`);
+            const xteFrac = Math.max(-1, Math.min(1, xteNm / XTE_INDICATOR_MAX_NM));
+            const xteLeftPct = 50 + xteFrac * 50;
+            this._setStyle('nav-xte-bar-dot', 'left', `${xteLeftPct}%`);
+
+            if (wp.altitude_ft != null) {
+                const tgtAlt = Number(wp.altitude_ft);
+                this._setText('nav-tgt-alt', `${tgtAlt} ft`);
+                const altDelta = altMslFt - tgtAlt;
+                const altAbs = Math.abs(altDelta);
+                const altColor = altAbs < ALT_BAND_GREEN_FT ? '#40ffaa' : altAbs < ALT_BAND_AMBER_FT ? '#ffcc55' : '#ff5566';
+                this._setStyle('nav-alt-band-wrap', 'display', 'block');
+                const altFrac = Math.max(-1, Math.min(1, altDelta / ALT_BAND_AMBER_FT));
+                const altLeftPct = 50 + altFrac * 50;
+                this._setStyle('nav-alt-band-dot', 'left', `${altLeftPct}%`);
+                this._setStyle('nav-alt-band-dot', 'background', altColor);
+            } else {
+                this._setText('nav-tgt-alt', '\u2014');
+                this._setStyle('nav-alt-band-wrap', 'display', 'none');
+            }
+
+            if (this.groundSpeed > MIN_GS_FOR_ETE_MS) {
+                const eteMin = (legDistNm / gsKt) * 60;
+                this._setText('nav-ete', this._formatEteMin(eteMin));
+                const simTimeMs = Date.now() + (this._simTimeOffsetMs || 0);
+                this._setText('nav-eta', this._formatEtaUtc(simTimeMs, eteMin));
+            } else {
+                this._setText('nav-ete', '--:--');
+                this._setText('nav-eta', '--:--');
+            }
+        } else {
+            if (legBlock) legBlock.style.display = 'none';
+        }
+    }
+
     private _haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
         const R_NM = 3440.065;
         const toRad = Math.PI / 180;
@@ -4375,6 +5222,109 @@ export class FlightSceneSimple extends Scene3D {
         return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
     }
 
+    private _getWindAtAltitude(altFt: number): { speedKt: number; dirDeg: number } {
+        const altSafe = Number.isFinite(altFt) && altFt > 0 ? altFt : 0;
+        const altGain = (altSafe / 1000) * WIND_ALTITUDE_GAIN_KT_PER_1000FT;
+        const speed = Math.min(WIND_MAX_SPEED_KT, WIND_DEFAULT_SPEED_KT + altGain);
+        return { speedKt: speed, dirDeg: WIND_DEFAULT_DIRECTION_DEG };
+    }
+
+    private _computeXteNm(prevLat: number, prevLon: number, nextLat: number, nextLon: number, curLat: number, curLon: number): number {
+        const R_NM = 3440.065;
+        const toRad = Math.PI / 180;
+        const d13 = this._haversineNm(prevLat, prevLon, curLat, curLon) / R_NM;
+        if (d13 < 1e-9) return 0;
+        const theta13 = this._initialBearingDeg(prevLat, prevLon, curLat, curLon) * toRad;
+        const theta12 = this._initialBearingDeg(prevLat, prevLon, nextLat, nextLon) * toRad;
+        const xte = Math.asin(Math.sin(d13) * Math.sin(theta13 - theta12)) * R_NM;
+        return xte;
+    }
+
+    private _setCameraMode(mode: number): void {
+        if (!this.camera || !this.planeRoot) return;
+        const safeMode = ((mode % CAMERA_MODE_COUNT) + CAMERA_MODE_COUNT) % CAMERA_MODE_COUNT;
+        this._cameraMode = safeMode;
+        const target = this.planeRoot.position.clone();
+        try {
+            switch (safeMode) {
+                case CAMERA_MODE_CHASE:
+                    this.camera.beta = 1.50;
+                    this.camera.radius = Math.max(CAMERA_RADIUS_MIN_M, Math.min(CAMERA_RADIUS_MAX_M, this.camera.radius || 35));
+                    this.camera.target.copyFrom(target);
+                    break;
+                case CAMERA_MODE_COCKPIT:
+                    this.camera.beta = Math.PI / 2;
+                    this.camera.radius = 0.5;
+                    this.camera.target.copyFrom(target);
+                    break;
+                case CAMERA_MODE_EXTERNAL_FIXED:
+                    this.camera.beta = 1.20;
+                    this.camera.radius = 50;
+                    break;
+                case CAMERA_MODE_FLYBY:
+                    this.camera.beta = 1.40;
+                    this.camera.radius = 80;
+                    break;
+            }
+            console.log(`[Camera] Mode changed to ${safeMode}`);
+        } catch (err) {
+            console.warn('[Camera] Failed to set mode:', err);
+        }
+    }
+
+    private _cycleCameraMode(): void {
+        const now = performance.now();
+        if (now - this._lastCameraCycleMs < CAMERA_CYCLE_COOLDOWN_MS) return;
+        this._lastCameraCycleMs = now;
+        this._setCameraMode((this._cameraMode + 1) % CAMERA_MODE_COUNT);
+    }
+
+    private static readonly CONTROL_SETTINGS_STORAGE_KEY = 'flight_controls_v1';
+
+    private _loadControlSettings(): void {
+        try {
+            const raw = localStorage.getItem(FlightSceneSimple.CONTROL_SETTINGS_STORAGE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return;
+            if (Number.isFinite(parsed.radius)) {
+                this._controlSettings.radius = Math.max(JOYSTICK_MIN_RADIUS_PX, Math.min(JOYSTICK_MAX_RADIUS_PX, Number(parsed.radius)));
+            }
+            if (Number.isFinite(parsed.deadzone)) {
+                this._controlSettings.deadzone = Math.max(0, Math.min(JOYSTICK_MAX_DEADZONE_NORM, Number(parsed.deadzone)));
+            }
+            if (Number.isFinite(parsed.expo)) {
+                this._controlSettings.expo = Math.max(JOYSTICK_MIN_EXPO, Math.min(JOYSTICK_MAX_EXPO, Number(parsed.expo)));
+            }
+            if (typeof parsed.pitchInvert === 'boolean') {
+                this._controlSettings.pitchInvert = parsed.pitchInvert;
+            }
+            console.log('[Controls] Loaded settings:', this._controlSettings);
+        } catch (err) {
+            console.warn('[Controls] Failed to load settings:', err);
+        }
+    }
+
+    private _persistControlSettings(): void {
+        try {
+            localStorage.setItem(FlightSceneSimple.CONTROL_SETTINGS_STORAGE_KEY, JSON.stringify(this._controlSettings));
+        } catch (err) {
+            console.warn('[Controls] Failed to persist settings:', err);
+        }
+    }
+
+    private _doHaptic(pattern: number | number[]): void {
+        if (typeof navigator === 'undefined' || !('vibrate' in navigator)) return;
+        const now = performance.now();
+        if (now - this._lastHapticMs < HAPTIC_MIN_INTERVAL_MS) return;
+        this._lastHapticMs = now;
+        try {
+            (navigator as Navigator).vibrate(pattern);
+        } catch (err) {
+            console.warn('[Haptic] vibrate failed:', err);
+        }
+    }
+
     private static readonly GPS_POS_STORAGE_KEY = 'gps-map-pos-v1';
     private static readonly GPS_DRAG_VIEWPORT_MARGIN_PX = 4;
 
@@ -4385,6 +5335,7 @@ export class FlightSceneSimple extends Scene3D {
                 left: Math.round(rect.left),
                 top: Math.round(rect.top),
                 zoom: this._mapZoom,
+                headingUp: this._mapHeadingUp,
             }));
         } catch (err) {
             console.warn('[GPS] Failed to save state:', err);
@@ -4400,6 +5351,21 @@ export class FlightSceneSimple extends Scene3D {
         if (outBtn) outBtn.disabled = this._mapZoom <= FlightSceneSimple.MAP_ZOOM_MIN;
         if (inBtn) inBtn.style.opacity = inBtn.disabled ? '0.4' : '1';
         if (outBtn) outBtn.style.opacity = outBtn.disabled ? '0.4' : '1';
+    }
+
+    private _updateMapModeIndicator(): void {
+        const btn = document.getElementById('gps-mode-toggle') as HTMLButtonElement | null;
+        if (!btn) return;
+        btn.textContent = this._mapHeadingUp ? 'H' : 'N';
+        btn.title = this._mapHeadingUp ? 'Modo: Heading-Up (clique para Norte)' : 'Modo: Norte-Up (clique para Heading)';
+    }
+
+    private _toggleMapHeadingUp(gps: HTMLElement): void {
+        this._mapHeadingUp = !this._mapHeadingUp;
+        console.log(`[GPS] Heading-up mode ${this._mapHeadingUp ? 'enabled' : 'disabled'}`);
+        if (this.mapImg) this.mapImg.style.transform = 'translate(0px, 0px)';
+        this._updateMapModeIndicator();
+        this._persistGpsState(gps);
     }
 
     private _changeMapZoom(delta: number, gps: HTMLElement): void {
@@ -4425,7 +5391,7 @@ export class FlightSceneSimple extends Scene3D {
         try {
             const saved = localStorage.getItem(FlightSceneSimple.GPS_POS_STORAGE_KEY);
             if (saved) {
-                const pos = JSON.parse(saved) as { left?: number; top?: number; zoom?: number };
+                const pos = JSON.parse(saved) as { left?: number; top?: number; zoom?: number; headingUp?: boolean };
                 if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
                     gps.style.left = `${this._clampGpsX(pos.left as number, gps)}px`;
                     gps.style.top = `${this._clampGpsY(pos.top as number, gps)}px`;
@@ -4434,6 +5400,9 @@ export class FlightSceneSimple extends Scene3D {
                     const z = Number(pos.zoom);
                     this._mapZoom = Math.min(FlightSceneSimple.MAP_ZOOM_MAX, Math.max(FlightSceneSimple.MAP_ZOOM_MIN, z));
                 }
+                if (pos && typeof pos.headingUp === 'boolean') {
+                    this._mapHeadingUp = pos.headingUp;
+                }
             }
         } catch (err) {
             console.warn('[GPS] Failed to read saved state:', err);
@@ -4441,6 +5410,7 @@ export class FlightSceneSimple extends Scene3D {
 
         const zoomInBtn = document.getElementById('gps-zoom-in') as HTMLButtonElement | null;
         const zoomOutBtn = document.getElementById('gps-zoom-out') as HTMLButtonElement | null;
+        const modeBtn = document.getElementById('gps-mode-toggle') as HTMLButtonElement | null;
         if (zoomInBtn) {
             zoomInBtn.addEventListener('click', (ev) => { ev.stopPropagation(); this._changeMapZoom(+1, gps); });
             zoomInBtn.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); });
@@ -4449,7 +5419,12 @@ export class FlightSceneSimple extends Scene3D {
             zoomOutBtn.addEventListener('click', (ev) => { ev.stopPropagation(); this._changeMapZoom(-1, gps); });
             zoomOutBtn.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); });
         }
+        if (modeBtn) {
+            modeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); this._toggleMapHeadingUp(gps); });
+            modeBtn.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); });
+        }
         this._updateZoomIndicator();
+        this._updateMapModeIndicator();
 
         let dragging = false;
         let pointerId = -1;
@@ -4536,6 +5511,14 @@ export class FlightSceneSimple extends Scene3D {
         const cx = cv.width / 2;
         const cy = cv.height / 2;
 
+        const hdgRad = (Number.isFinite(hdg) ? hdg : 0) * Math.PI / 180;
+        const headingUp = this._mapHeadingUp;
+        const cosH = headingUp ? Math.cos(hdgRad) : 1;
+        const sinH = headingUp ? Math.sin(hdgRad) : 0;
+        const rotXY = (px: number, py: number): { x: number; y: number } => headingUp
+            ? { x: cx + cosH * px + sinH * py, y: cy + -sinH * px + cosH * py }
+            : { x: cx + px, y: cy + py };
+
         let driftPx = 0;
         if (this._mapImgValid) {
             const drift = this._latLonToMapPx(lat, lon, this._mapImgLat, this._mapImgLon, cv.width);
@@ -4557,14 +5540,20 @@ export class FlightSceneSimple extends Scene3D {
 
         if (this._mapImgValid) {
             const drift = this._latLonToMapPx(lat, lon, this._mapImgLat, this._mapImgLon, cv.width);
-            this.mapImg.style.transform = `translate(${(-drift.x).toFixed(2)}px, ${(-drift.y).toFixed(2)}px)`;
+            if (headingUp) {
+                const rDx = cosH * drift.x + sinH * drift.y;
+                const rDy = -sinH * drift.x + cosH * drift.y;
+                this.mapImg.style.transform = `translate(${(-rDx).toFixed(2)}px, ${(-rDy).toFixed(2)}px) rotate(${(-hdg).toFixed(2)}deg)`;
+            } else {
+                this.mapImg.style.transform = `translate(${(-drift.x).toFixed(2)}px, ${(-drift.y).toFixed(2)}px)`;
+            }
         }
 
         ctx.clearRect(0, 0, cv.width, cv.height);
 
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(hdg * Math.PI / 180);
+        if (!headingUp) ctx.rotate(hdg * Math.PI / 180);
 
         ctx.fillStyle = 'rgba(0,255,128,0.9)';
         ctx.beginPath();
@@ -4601,8 +5590,9 @@ export class FlightSceneSimple extends Scene3D {
                 const wpLon = Number(wp.longitude);
                 if (!Number.isFinite(wpLat) || !Number.isFinite(wpLon)) continue;
                 const p = this._latLonToMapPx(wpLat, wpLon, lat, lon, cv.width);
-                const wpX = cx + p.x;
-                const wpY = cy + p.y;
+                const wpScreen = rotXY(p.x, p.y);
+                const wpX = wpScreen.x;
+                const wpY = wpScreen.y;
 
                 if (i < this._missionCurrentWpIndex) {
                     ctx.fillStyle = 'rgba(120,120,120,0.5)';
@@ -4641,10 +5631,12 @@ export class FlightSceneSimple extends Scene3D {
             if (Number.isFinite(m.departure_lat) && Number.isFinite(m.departure_lon) && Number.isFinite(m.arrival_lat) && Number.isFinite(m.arrival_lon)) {
                 const pDep = this._latLonToMapPx(m.departure_lat, m.departure_lon, lat, lon, cv.width);
                 const pArr = this._latLonToMapPx(m.arrival_lat, m.arrival_lon, lat, lon, cv.width);
-                const depX = cx + pDep.x;
-                const depY = cy + pDep.y;
-                const arrX = cx + pArr.x;
-                const arrY = cy + pArr.y;
+                const depScreen = rotXY(pDep.x, pDep.y);
+                const arrScreen = rotXY(pArr.x, pArr.y);
+                const depX = depScreen.x;
+                const depY = depScreen.y;
+                const arrX = arrScreen.x;
+                const arrY = arrScreen.y;
 
                 ctx.save();
                 ctx.setLineDash([4, 3]);
@@ -4679,10 +5671,12 @@ export class FlightSceneSimple extends Scene3D {
             if (Number.isFinite(fp.departure_lat) && Number.isFinite(fp.departure_lon) && Number.isFinite(fp.arrival_lat) && Number.isFinite(fp.arrival_lon)) {
                 const pDep = this._latLonToMapPx(fp.departure_lat, fp.departure_lon, lat, lon, cv.width);
                 const pArr = this._latLonToMapPx(fp.arrival_lat, fp.arrival_lon, lat, lon, cv.width);
-                const fpDepX = cx + pDep.x;
-                const fpDepY = cy + pDep.y;
-                const fpArrX = cx + pArr.x;
-                const fpArrY = cy + pArr.y;
+                const fpDepScreen = rotXY(pDep.x, pDep.y);
+                const fpArrScreen = rotXY(pArr.x, pArr.y);
+                const fpDepX = fpDepScreen.x;
+                const fpDepY = fpDepScreen.y;
+                const fpArrX = fpArrScreen.x;
+                const fpArrY = fpArrScreen.y;
 
                 ctx.save();
                 ctx.setLineDash([4, 3]);
@@ -4712,19 +5706,7 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
 
-        const nav = this._activeFlightPlanNav ?? this._missionDestForNav();
-        if (this._navInfoEl) {
-            if (nav) {
-                const distNm = this._haversineNm(lat, lon, nav.arrival_lat, nav.arrival_lon);
-                const brgDeg = this._initialBearingDeg(lat, lon, nav.arrival_lat, nav.arrival_lon);
-                if (this._navDestEl) this._navDestEl.textContent = nav.arrival_icao || '\u2014';
-                if (this._navDistEl) this._navDistEl.textContent = `${Math.round(distNm * 1.852)} km`;
-                if (this._navBrgEl)  this._navBrgEl.textContent  = `${Math.round(brgDeg)}\u00B0`;
-                this._navInfoEl.style.display = 'block';
-            } else {
-                this._navInfoEl.style.display = 'none';
-            }
-        }
+        this._updateNavInfo(lat, lon);
 
         const coordsEl = document.getElementById('gps-coords');
         if (coordsEl) coordsEl.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
@@ -4849,8 +5831,26 @@ export class FlightSceneSimple extends Scene3D {
             isOnGround         ? 'GROUND'   :
             pitchAngle > 0.08  ? 'CLIMB' :
             pitchAngle < -0.08 ? 'DESC'   : 'LEVEL';
-        this.hudWarning.style.display =
-            (this._spawnSnapFramesLeft <= 0 && speedKts < this.aircraftConfig.stall_speed_kts && aglM > STALL_WARNING_MIN_AGL_M) ? 'block' : 'none';
+        try {
+            this._engineSound.setThrottle(this.thrust);
+            this._engineSound.setRpm(this.engineRpm);
+            this._engineSound.update();
+        } catch (err) {
+            // EngineSound errors should not break HUD
+        }
+
+        const stallActive = this._spawnSnapFramesLeft <= 0 && speedKts < this.aircraftConfig.stall_speed_kts && aglM > STALL_WARNING_MIN_AGL_M;
+        this.hudWarning.style.display = stallActive ? 'block' : 'none';
+        if (stallActive && !this._lastStallState) {
+            this._doHaptic([100, 50, 100]);
+        }
+        this._lastStallState = stallActive;
+        const overGActive = this._gForce > OVER_G_THRESHOLD;
+        if (overGActive && !this._lastOverGState) {
+            this._doHaptic([200, 100, 200, 100, 200]);
+            console.warn(`[Physics] Over-G detected: ${this._gForce.toFixed(2)}g`);
+        }
+        this._lastOverGState = overGActive;
 
         this.hudFps.textContent =
             `${this.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;
