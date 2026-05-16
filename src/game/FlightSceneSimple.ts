@@ -200,6 +200,14 @@ interface AircraftConfig {
     fuselage_side_area: number;
     fuselage_cn_beta: number;
     gear_drag_cd?: number;
+    afterburner_thrust_mult?: number;
+    afterburner_fuel_mult?: number;
+    wave_drag_coef?: number;
+    wave_drag_peak_mach?: number | null;
+    wave_drag_decay_k?: number;
+    mach_lapse_coef?: number;
+    mach_lapse_floor?: number;
+    transonic_cd0_factor?: number;
 }
 
 const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
@@ -567,6 +575,7 @@ export class FlightSceneSimple extends Scene3D {
 
     private hudThrottle!: HTMLElement;
     private hudThrPct!: HTMLElement;
+    private hudAbTag: HTMLElement | null = null;
     private hudAttitude!: HTMLElement;
     private hudWarning!:  HTMLElement;
     private hudFps!:      HTMLElement;
@@ -716,6 +725,13 @@ export class FlightSceneSimple extends Scene3D {
         if (!cfg.gear_positions || !cfg.gear_positions.length) cfg.gear_positions = DEFAULT_AIRCRAFT_CONFIG.gear_positions;
         if (cfg.fuselage_side_area == null) cfg.fuselage_side_area = DEFAULT_AIRCRAFT_CONFIG.fuselage_side_area;
         if (cfg.fuselage_cn_beta == null) cfg.fuselage_cn_beta = DEFAULT_AIRCRAFT_CONFIG.fuselage_cn_beta;
+        if (cfg.afterburner_thrust_mult == null) cfg.afterburner_thrust_mult = 1.0;
+        if (cfg.afterburner_fuel_mult   == null) cfg.afterburner_fuel_mult   = 1.0;
+        if (cfg.wave_drag_coef          == null) cfg.wave_drag_coef          = MACH_DRAG_RISE_COEF;
+        if (cfg.wave_drag_decay_k       == null) cfg.wave_drag_decay_k       = 0.0;
+        if (cfg.mach_lapse_coef         == null) cfg.mach_lapse_coef         = JET_THRUST_MACH_LAPSE_COEF;
+        if (cfg.mach_lapse_floor        == null) cfg.mach_lapse_floor        = JET_THRUST_MACH_MIN_FACTOR;
+        if (cfg.transonic_cd0_factor    == null) cfg.transonic_cd0_factor    = 1.0;
         this.aircraftConfig = cfg;
         this.FLAP_STEPS = cfg.flap_steps_json || DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
         this.baseZeroLiftAoA = cfg.base_zero_lift_aoa;
@@ -2701,7 +2717,7 @@ export class FlightSceneSimple extends Scene3D {
         } else {
             const p = (code: string) => this.input.isKeyDown(code);
 
-            if (p('KeyW')) this.thrust = Math.min(1, this.thrust + _dt * this.aircraftConfig.throttle_up_rate);
+            if (p('KeyW')) this.thrust = Math.min(this.aircraftConfig.afterburner_thrust_mult ?? 1.0, this.thrust + _dt * this.aircraftConfig.throttle_up_rate);
             if (p('KeyS')) this.thrust = Math.max(0, this.thrust - _dt * this.aircraftConfig.throttle_down_rate);
 
             targetPitch = (p('ArrowUp') ? -1 : p('ArrowDown') ? 1 : 0) * KEY_PITCH_MAGNITUDE;
@@ -3619,9 +3635,11 @@ export class FlightSceneSimple extends Scene3D {
                 : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
             const speedOfSoundEng = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempKEng);
             const machNow = this.velocity.length() / Math.max(1, speedOfSoundEng);
+            const machLapseFloor = cfg.mach_lapse_floor ?? JET_THRUST_MACH_MIN_FACTOR;
+            const machLapseCoef = cfg.mach_lapse_coef ?? JET_THRUST_MACH_LAPSE_COEF;
             const thrustMachLapse = Math.max(
-                JET_THRUST_MACH_MIN_FACTOR,
-                1.0 - JET_THRUST_MACH_LAPSE_COEF * machNow,
+                machLapseFloor,
+                1.0 - machLapseCoef * machNow,
             );
             effectiveThrust = this.thrust * thrustAltitudeLapse * thrustMachLapse;
             this.enginePower = this.thrust;
@@ -3636,8 +3654,18 @@ export class FlightSceneSimple extends Scene3D {
         // ── Fuel burn (after engine model so piston uses actual output) ──────
         if (this.fuelRemaining > 0 && cfg.fuel_capacity_kg > 0) {
             const burnFraction = isPiston ? this.enginePower : this.thrust;
-            const burnRate = cfg.fuel_burn_rate_kg_per_s_idle +
-                (cfg.fuel_burn_rate_kg_per_s_max - cfg.fuel_burn_rate_kg_per_s_idle) * burnFraction;
+            const burnIdle = cfg.fuel_burn_rate_kg_per_s_idle;
+            const burnMax  = cfg.fuel_burn_rate_kg_per_s_max;
+            let burnRate: number;
+            if (burnFraction <= 1.0) {
+                burnRate = burnIdle + (burnMax - burnIdle) * burnFraction;
+            } else {
+                const abMaxThr = cfg.afterburner_thrust_mult ?? 1.0;
+                const abFuelMult = cfg.afterburner_fuel_mult ?? 1.0;
+                const span = Math.max(1e-3, abMaxThr - 1.0);
+                const t = Math.min(1.0, (burnFraction - 1.0) / span);
+                burnRate = burnMax + burnMax * (abFuelMult - 1.0) * t;
+            }
             this.fuelRemaining = Math.max(0, this.fuelRemaining - burnRate * dt);
         }
         const MASS = cfg.fuel_capacity_kg > 0
@@ -3718,14 +3746,26 @@ export class FlightSceneSimple extends Scene3D {
             // Fuselage parasite drag (+ gear drag when deployed)
             const spd = vel.length();
             if (spd >= 1.0) {
-                const effectiveCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0);
+                const baseCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0);
                 const tempK = altitude > ISA_TROPOPAUSE_M
                     ? ISA_TROPOPAUSE_TEMP_K
                     : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
                 const speedOfSound = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempK);
                 const machNumber = spd / Math.max(1, speedOfSound);
                 const machExcess = Math.max(0, machNumber - MACH_DRAG_RISE_START);
-                const machDragMult = 1.0 + machExcess * machExcess * MACH_DRAG_RISE_COEF;
+                const waveCoef = cfg.wave_drag_coef ?? MACH_DRAG_RISE_COEF;
+                const wavePeak = cfg.wave_drag_peak_mach ?? null;
+                const waveDecayK = cfg.wave_drag_decay_k ?? 0;
+                let machDragMult: number;
+                if (wavePeak != null && machNumber > wavePeak) {
+                    const peakExcess = Math.max(0, wavePeak - MACH_DRAG_RISE_START);
+                    const peakDragMult = 1.0 + peakExcess * peakExcess * waveCoef;
+                    machDragMult = 1.0 + (peakDragMult - 1.0) * Math.exp(-waveDecayK * (machNumber - wavePeak));
+                } else {
+                    machDragMult = 1.0 + machExcess * machExcess * waveCoef;
+                }
+                const transFactor = cfg.transonic_cd0_factor ?? 1.0;
+                const effectiveCd0 = baseCd0 * (machExcess > 0 ? transFactor : 1.0);
                 const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area * machDragMult;
                 totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
 
@@ -4225,7 +4265,7 @@ export class FlightSceneSimple extends Scene3D {
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-brk">OFF</span><span class="hud-instr-lbl">BRK</span></div>
       <div class="hud-instr-item" id="hud-gear-row" style="display:none"><span class="hud-instr-val" id="hud-gear-state">DOWN</span><span class="hud-instr-lbl">GEAR</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="hud-trim-v">0</span><span class="hud-instr-lbl">TRIM</span></div>
-      <div class="hud-instr-item"><span class="hud-instr-val" id="hud-thr-pct" style="min-width:22px">0%</span><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span></div>
+      <div class="hud-instr-item"><span class="hud-instr-val" id="hud-thr-pct" style="min-width:22px">0%</span><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span><span class="hud-instr-ab" id="hud-ab-tag" style="display:none;margin-left:4px;padding:1px 4px;border:1px solid #ff5a00;color:#ff5a00;font-weight:bold;border-radius:3px;font-size:.85em">AB</span></div>
     </div>
     <div class="hud-bottom-row">
       <div class="hud-bottom-item"><span class="hud-bottom-val" id="hud-hdg-v">0&deg;</span><span class="hud-bottom-lbl">HDG</span></div>
@@ -4391,6 +4431,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudAltVal   = document.getElementById('bb-alt-v')!;
         this.hudThrottle = document.getElementById('bb-thr')!;
         this.hudThrPct   = document.getElementById('hud-thr-pct')!;
+        this.hudAbTag    = document.getElementById('hud-ab-tag');
         this.hudAttitude = document.getElementById('bb-att')!;
         this.hudWarning  = document.getElementById('hw')!;
         this._crashOverlayEl = document.getElementById('crash-overlay');
@@ -6146,10 +6187,14 @@ export class FlightSceneSimple extends Scene3D {
         const altitudeMslFt = Math.round(Math.max(0, this.refAlt + pos.y) * 3.28084);
         this.hudSpeedVal.textContent = String(speedKts);
         this.hudAltVal.textContent   = String(altitudeMslFt);
-        this.hudThrottle.style.width = `${pct}%`;
+        const barPct = Math.min(100, pct);
+        this.hudThrottle.style.width = `${barPct}%`;
         if (this.hudThrPct) this.hudThrPct.textContent = `${pct}%`;
         if (this.hudEng1Pct) this.hudEng1Pct.textContent = `${pct}%`;
         if (this.hudEng2Pct) this.hudEng2Pct.textContent = `${pct}%`;
+        if (this.hudAbTag) {
+            this.hudAbTag.style.display = this.thrust > 1.0 ? '' : 'none';
+        }
 
         const spdAbs = Math.max(0, Number.isFinite(speedKts) ? speedKts : 0);
         const spdHund = Math.floor(spdAbs / 100) % 10;

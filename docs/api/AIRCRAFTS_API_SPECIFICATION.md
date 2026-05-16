@@ -103,6 +103,16 @@ CREATE TABLE IF NOT EXISTS aircrafts (
     gear_spring_k             DOUBLE NULL COMMENT 'Spring constant per gear leg (N/m). Dimensioned for aircraft mass.',
     gear_damping_c            DOUBLE NULL COMMENT 'Damping coefficient per gear leg (N·s/m). Dimensioned for aircraft mass.',
 
+    -- Supersonic / Afterburner (all default to legacy subsonic behaviour)
+    afterburner_thrust_mult   DECIMAL(4,2) NOT NULL DEFAULT 1.00 COMMENT 'Max throttle setting. 1.00 = no afterburner. >1.00 enables reheat zone (e.g. 1.50 = +50% thrust at full AB).',
+    afterburner_fuel_mult     DECIMAL(4,2) NOT NULL DEFAULT 1.00 COMMENT 'Fuel-burn multiplier at full afterburner. Linear ramp from 1.0 at thrust=1.0 to this value at thrust=afterburner_thrust_mult.',
+    wave_drag_coef            DECIMAL(6,3) NOT NULL DEFAULT 18.000 COMMENT 'Coefficient k in the transonic wave-drag rise: machDragMult = 1 + (M - 0.78)^2 * k. Default 18 matches the global MACH_DRAG_RISE_COEF.',
+    wave_drag_peak_mach       DECIMAL(4,2) NULL DEFAULT NULL COMMENT 'Mach number where wave drag peaks. NULL = legacy monotonic rise (no decay). For supersonic aircraft, typical 1.10-1.20.',
+    wave_drag_decay_k         DECIMAL(4,2) NOT NULL DEFAULT 0.00 COMMENT 'Exponential decay rate of wave drag above wave_drag_peak_mach. 0 = no decay; typical 0.8-1.5 for supersonic.',
+    mach_lapse_coef           DECIMAL(4,2) NOT NULL DEFAULT 0.60 COMMENT 'Per-aircraft Mach lapse: thrustMachLapse = max(floor, 1 - coef * M). Default 0.60 matches JET_THRUST_MACH_LAPSE_COEF.',
+    mach_lapse_floor          DECIMAL(4,2) NOT NULL DEFAULT 0.40 COMMENT 'Floor for Mach lapse factor. Default 0.40 matches JET_THRUST_MACH_MIN_FACTOR. Supersonic turbojets with ram recovery may use 0.7-0.9.',
+    transonic_cd0_factor      DECIMAL(4,2) NOT NULL DEFAULT 1.00 COMMENT 'Multiplier applied to fuselage_cd0 once the aircraft enters the transonic regime (M > MACH_DRAG_RISE_START). <1.0 models an area-ruled fuselage (e.g. 0.80 for Concorde).',
+
     -- Marketplace / Unlocking
     price                     INT NOT NULL DEFAULT 0 COMMENT 'Price in reward points. 0 = free/starter aircraft',
     min_pilot_rank            VARCHAR(30) NOT NULL DEFAULT 'student' COMMENT 'Minimum pilot rank required to unlock. Values: student, private_pilot, commercial_pilot, airline_pilot, captain, senior_captain',
@@ -289,6 +299,39 @@ WHERE ufs.most_used_aircraft IS NOT NULL AND ufs.most_used_aircraft_id IS NULL;
 
 Audit all tables for columns referencing aircraft by string (`aircraft_type`, `aircraft_name`, `aircraft_code`, etc.) and migrate them to INT FK -> `aircrafts.id`.
 
+### Supersonic / Afterburner Columns (additive migration)
+
+The eight supersonic columns are additive and default to legacy subsonic behaviour, so existing aircraft rows do not need to be touched.
+
+```sql
+ALTER TABLE aircrafts
+    ADD COLUMN afterburner_thrust_mult DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+    ADD COLUMN afterburner_fuel_mult   DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+    ADD COLUMN wave_drag_coef          DECIMAL(6,3) NOT NULL DEFAULT 18.000,
+    ADD COLUMN wave_drag_peak_mach     DECIMAL(4,2) NULL     DEFAULT NULL,
+    ADD COLUMN wave_drag_decay_k       DECIMAL(4,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN mach_lapse_coef         DECIMAL(4,2) NOT NULL DEFAULT 0.60,
+    ADD COLUMN mach_lapse_floor        DECIMAL(4,2) NOT NULL DEFAULT 0.40,
+    ADD COLUMN transonic_cd0_factor    DECIMAL(4,2) NOT NULL DEFAULT 1.00;
+```
+
+To enable supersonic flight for an existing Concorde row (`code = 'concorde'`):
+
+```sql
+UPDATE aircrafts SET
+    afterburner_thrust_mult = 1.50,
+    afterburner_fuel_mult   = 2.40,
+    wave_drag_coef          = 9.000,
+    wave_drag_peak_mach     = 1.10,
+    wave_drag_decay_k       = 1.20,
+    mach_lapse_coef         = 0.20,
+    mach_lapse_floor        = 0.85,
+    transonic_cd0_factor    = 0.80
+WHERE code = 'concorde';
+```
+
+The `/api/aircrafts` and `/api/aircrafts/:id` endpoints MUST include all eight columns in their `SELECT` lists so the values reach the client.
+
 ---
 
 ## API Contract
@@ -351,6 +394,14 @@ List all active aircrafts with their surfaces.
             "spawn_airborne_speed_ms": 100.0,
             "gear_spring_k": 200000,
             "gear_damping_c": 50000,
+            "afterburner_thrust_mult": 1.00,
+            "afterburner_fuel_mult": 1.00,
+            "wave_drag_coef": 18.000,
+            "wave_drag_peak_mach": null,
+            "wave_drag_decay_k": 0.00,
+            "mach_lapse_coef": 0.60,
+            "mach_lapse_floor": 0.40,
+            "transonic_cd0_factor": 1.00,
             "price": 0,
             "min_pilot_rank": "student",
             "is_default": 1,
@@ -552,3 +603,11 @@ Acquire/unlock an aircraft. `:id` is the `aircraft_id`.
 | `fuel_burn_rate_kg_per_s_idle` | Per-second fuel mass drained at idle. Lower bound for fuel burn interpolation. |
 | `gear_spring_k` | Spring constant per gear leg (N/m). Used in gear oleo: `F = k * compression + c * compressionRate`. When `null`, client uses hardcoded default (200000). |
 | `gear_damping_c` | Damping coefficient per gear leg (N·s/m). Used in gear oleo force. When `null`, client uses hardcoded default (50000). |
+| `afterburner_thrust_mult` | Maximum value the throttle (`W` key / mobile slider) can reach. `1.00` = legacy behaviour (military power). Values above `1.00` open the reheat band; net thrust = `throttle * max_thrust_n` so a setting of `1.50` produces 150% of dry thrust. |
+| `afterburner_fuel_mult` | Fuel-burn multiplier at full reheat. Below `thrust=1.0` the legacy idle→max linear ramp is used; between `1.0` and `afterburner_thrust_mult` the burn ramps linearly from `fuel_burn_rate_kg_per_s_max` to `fuel_burn_rate_kg_per_s_max * afterburner_fuel_mult`. |
+| `wave_drag_coef` | Coefficient k in the transonic rise `machDragMult = 1 + (M − 0.78)² · k`. Tunes how steep the drag spike is between Mach 0.78 and the peak. |
+| `wave_drag_peak_mach` | Mach number at which the wave-drag spike peaks. When `null`, the legacy monotonic rise is used (no decay above the peak). |
+| `wave_drag_decay_k` | Decay rate for wave drag above `wave_drag_peak_mach`: `machDragMult = 1 + (peakMult − 1) · exp(−wave_drag_decay_k · (M − peakMach))`. Ignored when `wave_drag_peak_mach IS NULL`. |
+| `mach_lapse_coef` | Per-aircraft Mach lapse coefficient used in `thrustMachLapse = max(mach_lapse_floor, 1 − mach_lapse_coef · M)`. Defaults to the legacy 0.60. |
+| `mach_lapse_floor` | Lower bound on `thrustMachLapse`. Defaults to the legacy 0.40. Supersonic turbojets with strong ram recovery use 0.7–0.9 to preserve thrust at high Mach. |
+| `transonic_cd0_factor` | Multiplier applied to `fuselage_cd0` once the aircraft passes `MACH_DRAG_RISE_START` (0.78). `1.0` is the legacy no-op; `< 1.0` models an area-ruled fuselage (e.g. Concorde). |
