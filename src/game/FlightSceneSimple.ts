@@ -52,7 +52,7 @@ const FT_TO_M = 0.3048;
 const METERS_PER_DEG_LAT = 111320;
 const RUNWAY_DEFAULT_WIDTH_FT = 148;
 const RUNWAY_COLLIDER_RADIUS_KM = 10;
-const RUNWAY_COLLIDER_Y_BIAS_M = 0.05;
+const RUNWAY_COLLIDER_Y_BIAS_M = 1.5;
 const CAMERA_RADIUS_LENGTH_FACTOR = 3;
 const CAMERA_RADIUS_MIN_M = 15;
 const CAMERA_RADIUS_MAX_M = 65;
@@ -2127,29 +2127,39 @@ export class FlightSceneSimple extends Scene3D {
                     if (shadow) shadow.addShadowCaster(m, true);
                 });
 
+                const savedPlaneQuat = this.planeRoot.rotationQuaternion?.clone() || null;
+                const savedPlaneRot = this.planeRoot.rotation.clone();
+                this.planeRoot.rotationQuaternion = BABYLON.Quaternion.Identity();
+                this.planeRoot.rotation = BABYLON.Vector3.Zero();
+                this.planeRoot.computeWorldMatrix(true);
                 modelPivot.computeWorldMatrix(true);
                 root.computeWorldMatrix(true);
                 meshes.forEach((m) => m.computeWorldMatrix(true));
+
                 const worldBB = root.getHierarchyBoundingVectors(true);
-                const planeRootMat = this.planeRoot.computeWorldMatrix(true);
-                const planeRootInv = BABYLON.Matrix.Invert(planeRootMat);
-                const bbCorners = [
-                    new BABYLON.Vector3(worldBB.min.x, worldBB.min.y, worldBB.min.z),
-                    new BABYLON.Vector3(worldBB.max.x, worldBB.min.y, worldBB.min.z),
-                    new BABYLON.Vector3(worldBB.min.x, worldBB.max.y, worldBB.min.z),
-                    new BABYLON.Vector3(worldBB.max.x, worldBB.max.y, worldBB.min.z),
-                    new BABYLON.Vector3(worldBB.min.x, worldBB.min.y, worldBB.max.z),
-                    new BABYLON.Vector3(worldBB.max.x, worldBB.min.y, worldBB.max.z),
-                    new BABYLON.Vector3(worldBB.min.x, worldBB.max.y, worldBB.max.z),
-                    new BABYLON.Vector3(worldBB.max.x, worldBB.max.y, worldBB.max.z),
-                ];
-                let localMin = BABYLON.Vector3.TransformCoordinates(bbCorners[0], planeRootInv).clone();
-                let localMax = localMin.clone();
-                for (let i = 1; i < bbCorners.length; i++) {
-                    const lc = BABYLON.Vector3.TransformCoordinates(bbCorners[i], planeRootInv);
-                    localMin = BABYLON.Vector3.Minimize(localMin, lc);
-                    localMax = BABYLON.Vector3.Maximize(localMax, lc);
+                const planePos = this.planeRoot.position;
+                const localMin = new BABYLON.Vector3(
+                    worldBB.min.x - planePos.x,
+                    worldBB.min.y - planePos.y,
+                    worldBB.min.z - planePos.z,
+                );
+                const localMax = new BABYLON.Vector3(
+                    worldBB.max.x - planePos.x,
+                    worldBB.max.y - planePos.y,
+                    worldBB.max.z - planePos.z,
+                );
+
+                if (savedPlaneQuat) {
+                    this.planeRoot.rotationQuaternion = savedPlaneQuat;
+                } else {
+                    this.planeRoot.rotationQuaternion = null;
+                    this.planeRoot.rotation = savedPlaneRot;
                 }
+                this.planeRoot.computeWorldMatrix(true);
+                modelPivot.computeWorldMatrix(true);
+                root.computeWorldMatrix(true);
+                meshes.forEach((m) => m.computeWorldMatrix(true));
+
                 const localCenter = localMin.add(localMax).scale(0.5);
                 const bbW = Math.abs(localMax.x - localMin.x);
                 const bbH = Math.abs(localMax.y - localMin.y);

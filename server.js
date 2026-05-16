@@ -1318,8 +1318,13 @@ const server = http.createServer(async (req, res) => {
             console.debug(`[API] GET /api/airports/nearby lat=${lat} lng=${lng} radius=${radiusKm}km matches=${data.length}`);
             return jsonResponse(res, 200, { data });
         } catch (err) {
-            console.error('[API] GET /api/airports/nearby error:', err.message);
-            return jsonResponse(res, 500, { error: 'Internal server error' });
+            console.error('[API] GET /api/airports/nearby error:', err.code || '', err.message);
+            if (err.stack) console.error(err.stack);
+            return jsonResponse(res, 500, {
+                error: 'Internal server error',
+                detail: err.message,
+                code: err.code || null,
+            });
         }
     }
 
