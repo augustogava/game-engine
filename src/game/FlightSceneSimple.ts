@@ -507,6 +507,21 @@ export class FlightSceneSimple extends Scene3D {
     private hudSpdMarks!:  HTMLElement;
     private hudAltMarks!:  HTMLElement;
     private hudVsBar!:     HTMLElement;
+    private hudSpdH:    HTMLElement | null = null;
+    private hudSpdT:    HTMLElement | null = null;
+    private hudSpdUInner: HTMLElement | null = null;
+    private hudAltH:    HTMLElement | null = null;
+    private hudAltT:    HTMLElement | null = null;
+    private hudAltU:    HTMLElement | null = null;
+    private hudAltTens: HTMLElement | null = null;
+    private hudAltUnitsInner: HTMLElement | null = null;
+    private hudAltSel:  HTMLElement | null = null;
+    private hudVsPointer: HTMLElement | null = null;
+    private hudEngine2Col: HTMLElement | null = null;
+    private hudRpmVal2:    HTMLElement | null = null;
+    private hudRpmNeedle2: HTMLElement | null = null;
+    private hudEng1Pct:    HTMLElement | null = null;
+    private hudEng2Pct:    HTMLElement | null = null;
     private spdMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
     private altMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
     private lastSpdCenter = -1;
@@ -2430,14 +2445,17 @@ export class FlightSceneSimple extends Scene3D {
 #touch-throttle{position:absolute;bottom:160px;left:10px;width:40px;height:150px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
 #touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:36px;height:12px;border-radius:6px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:340px;left:8px;display:flex;flex-direction:column;gap:6px;pointer-events:auto}
-#touch-flap-btns button{width:52px;height:34px;border-radius:8px;border:1px solid rgba(80,255,160,.4);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;touch-action:manipulation;transition:transform .1s,background .1s}
-#touch-flap-btns button:active{transform:scale(.92);background:rgba(0,40,25,.7)}
-#touch-brk.active{background:rgba(255,40,40,.4);border-color:rgba(255,80,80,.6);color:#ff6060}
+#touch-flap-btns{position:absolute;bottom:340px;left:6px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
+#touch-flap-btns button{width:38px;height:26px;padding:0;border-radius:5px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.04em;cursor:pointer;touch-action:manipulation;transition:transform .1s,background .1s,border-color .1s;backdrop-filter:blur(2px)}
+#touch-flap-btns button:active{transform:scale(.92);background:rgba(0,40,25,.55);border-color:rgba(80,255,160,.45)}
+#touch-brk.active{background:rgba(255,40,40,.32);border-color:rgba(255,80,80,.5);color:#ff6060}
+#touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
+#touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
+#touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
 </style>
 <div id="touch-joy"><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
-<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-brk">BRK</button></div>`;
+<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button></div>`;
         document.body.appendChild(overlay);
 
         const joyEl = document.getElementById('touch-joy')!;
@@ -2568,6 +2586,15 @@ export class FlightSceneSimple extends Scene3D {
             this.brakesOn = !this.brakesOn;
             brkBtn.classList.toggle('active', this.brakesOn);
         });
+        const gearBtn = document.getElementById('touch-gear');
+        if (gearBtn) {
+            gearBtn.addEventListener('touchstart', (ev: TouchEvent) => {
+                ev.preventDefault();
+                this._toggleGear();
+            }, { passive: false });
+        } else {
+            console.warn('[Touch] #touch-gear element not found');
+        }
     }
 
     private _triggerCrash(): void {
@@ -2718,12 +2745,12 @@ export class FlightSceneSimple extends Scene3D {
             for (let i = 0; i < 7; i++) {
                 const el = document.createElement('div');
                 el.className = 'hud-tape-mark';
-                const line = document.createElement('div');
-                line.className = 'hud-tape-mark-line';
                 const valEl = document.createElement('span');
                 valEl.className = 'hud-tape-mark-val';
-                el.appendChild(line);
+                const line = document.createElement('div');
+                line.className = 'hud-tape-mark-line';
                 el.appendChild(valEl);
+                el.appendChild(line);
                 this.hudSpdMarks.appendChild(el);
                 this.spdMarkEls.push({ el, valEl });
             }
@@ -3308,18 +3335,26 @@ export class FlightSceneSimple extends Scene3D {
 .hud-tape-col{display:flex;flex-direction:column}
 .hud-header{font-size:9px;letter-spacing:.1em;color:#fff;margin-bottom:2px;font-weight:400;opacity:.8}
 .hud-header-sub{font-size:7px;color:rgba(255,255,255,.4);margin-left:2px}
+.hud-cyan{color:#79e7ff!important}
+.hud-alt-sel{font-size:14px;font-weight:700;color:#79e7ff;font-family:'Orbitron',monospace;letter-spacing:.05em;text-align:right;margin-bottom:2px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
 
-.hud-tape-section{display:flex;align-items:stretch;overflow:hidden}
-.hud-tape-wrapper{position:relative;display:flex;height:180px;overflow:hidden}
-.hud-tape{position:relative;width:8px;height:100%;background:linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,.5));overflow:hidden}
+.hud-tape-section{display:flex;align-items:stretch;overflow:visible;position:relative}
+.hud-tape-wrapper{position:relative;display:block;height:180px;overflow:visible;width:64px;background:linear-gradient(to right,rgba(0,0,0,.55),rgba(0,0,0,.35));border:1px solid rgba(255,255,255,.12)}
+.hud-tape{position:absolute;right:0;top:0;bottom:0;width:6px;background:linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,.5));overflow:hidden}
 .hud-tape-fill-spd{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#c8a030,#e8c860);transition:height .15s}
 .hud-tape-fill-alt{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#3090c8,#50b0e8);transition:height .15s}
-.hud-tape-marks{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:18px;pointer-events:none}
-.hud-tape-marks-left{left:12px;align-items:flex-start}
-.hud-tape-marks-right{right:12px;align-items:flex-end}
-.hud-tape-mark{display:flex;align-items:center;gap:2px}
-.hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.5)}
-.hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.85);font-family:'Inter',sans-serif;font-weight:500;min-width:24px}
+.hud-tape-marks{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:18px;pointer-events:none;left:4px;right:8px;align-items:flex-end}
+.hud-tape-marks-left,.hud-tape-marks-right{left:4px;right:8px;align-items:flex-end}
+.hud-tape-mark{display:flex;align-items:center;gap:3px;justify-content:flex-end}
+.hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.65)}
+.hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.9);font-family:'Inter',sans-serif;font-weight:500;min-width:22px;text-align:right}
+
+.hud-ticker-box{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.82);border:1px solid rgba(255,255,255,.5);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:20px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);letter-spacing:.02em;pointer-events:none;z-index:2}
+.hud-ticker-static{display:inline-block}
+.hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.6em;overflow:hidden;vertical-align:bottom}
+.hud-ticker-rolling-inner{position:absolute;left:0;top:0;display:flex;flex-direction:column;line-height:1;transition:transform .12s linear}
+.hud-ticker-rolling-inner span{display:block;height:1em;text-align:center}
+.hud-ticker-small{font-size:.7em;opacity:.85;margin-left:2px}
 
 .hud-value-row{display:flex;align-items:baseline;gap:2px;margin-top:3px}
 .hud-value-main{font-size:24px;font-weight:700;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 4px rgba(0,0,0,.9)}
@@ -3327,17 +3362,21 @@ export class FlightSceneSimple extends Scene3D {
 
 .hud-sub-row{display:flex;align-items:center;gap:4px;margin-top:1px}
 .hud-sub-label{font-size:8px;color:rgba(255,255,255,.5)}
-.hud-sub-val{font-size:11px;color:#fff;font-family:'Orbitron',monospace}
+.hud-sub-val{font-size:11px;color:#79e7ff;font-family:'Orbitron',monospace;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.8)}
 
 /* Engine Section - Side by side */
 .hud-engine-col{display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:4px}
-.hud-engine-title{font-size:8px;letter-spacing:.08em;color:rgba(255,255,255,.4);margin-bottom:2px}
+.hud-engine-title{font-size:8px;letter-spacing:.08em;color:#fff;margin-bottom:2px;font-weight:600}
 .hud-engine-content{display:flex;flex-direction:column;gap:4px}
 .hud-rpm-gauge{position:relative;width:56px;height:56px}
 .hud-rpm-bg{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle,rgba(20,20,20,.9),rgba(10,10,10,.95));border:1px solid rgba(80,255,160,.25)}
 .hud-rpm-needle{position:absolute;bottom:50%;left:50%;width:2px;height:22px;background:linear-gradient(to top,#50ff80,#80ffa0);transform-origin:bottom center;transform:rotate(-120deg);border-radius:1px;box-shadow:0 0 4px rgba(80,255,128,.5)}
 .hud-rpm-center{position:absolute;top:50%;left:50%;width:6px;height:6px;background:#222;border:1px solid rgba(80,255,160,.3);border-radius:50%;transform:translate(-50%,-50%)}
-.hud-rpm-label{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-size:7px;color:#50ff80;letter-spacing:.03em}
+.hud-rpm-label{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:7px;color:#79e7ff;letter-spacing:.04em;font-weight:700;line-height:1;text-align:center;white-space:nowrap}
+.hud-rpm-end{position:absolute;font-size:6px;color:rgba(255,255,255,.55);font-family:'Inter',sans-serif}
+.hud-rpm-end-min{bottom:6px;left:4px}
+.hud-rpm-end-max{bottom:6px;right:4px}
+.hud-engine-thr{font-size:11px;font-weight:700;color:#fff;font-family:'Orbitron',monospace;text-align:center;margin:1px 0;text-shadow:0 1px 3px rgba(0,0,0,.8)}
 .hud-engine-vals{display:flex;flex-direction:column;gap:0}
 .hud-engine-val{display:flex;align-items:baseline;gap:3px}
 .hud-engine-val-num{font-size:11px;font-weight:600;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8)}
@@ -3346,9 +3385,18 @@ export class FlightSceneSimple extends Scene3D {
 /* Right Panel - Instruments side by side */
 .hud-instr-col{display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding-bottom:4px}
 .hud-vs-row{display:flex;align-items:center;gap:4px}
-.hud-vs-header{font-size:8px;color:rgba(255,255,255,.5)}
-.hud-vs-val{font-size:14px;font-weight:600;color:#fff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8)}
-.hud-vs-bar{width:20px;height:80px;background:rgba(0,0,0,.5);position:relative}
+.hud-vs-header{font-size:8px;color:#fff;font-weight:600;letter-spacing:.05em}
+.hud-vs-val{font-size:13px;font-weight:700;color:#79e7ff;font-family:'Orbitron',monospace;text-shadow:0 1px 3px rgba(0,0,0,.8);min-width:34px;text-align:right}
+
+/* VS strip with numeric scale */
+.hud-vs-strip{position:relative;display:flex;align-items:stretch;height:180px;width:36px}
+.hud-vs-strip-bg{position:absolute;left:6px;top:0;bottom:0;width:1px;background:rgba(255,255,255,.25)}
+.hud-vs-strip-zero{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(255,255,255,.55)}
+.hud-vs-scale{position:relative;flex:1;display:flex;flex-direction:column;justify-content:space-between;font-size:9px;color:rgba(255,255,255,.65);font-family:'Inter',sans-serif;padding:0 2px 0 12px;line-height:1}
+.hud-vs-scale span{display:block}
+.hud-vs-pointer{position:absolute;left:-2px;top:50%;width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:9px solid #79e7ff;transform:translateY(-50%);transition:top .12s linear;filter:drop-shadow(0 0 2px rgba(0,0,0,.7));z-index:3}
+
+.hud-vs-bar{width:20px;height:80px;background:rgba(0,0,0,.5);position:relative;display:none}
 .hud-vs-bar-fill{position:absolute;left:2px;right:2px;background:linear-gradient(to top,#50c878,#80ee90);transition:height .12s,bottom .12s,background .3s}
 .hud-vs-bar-zero{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(255,255,255,.25)}
 .hud-vs-bar-marks{position:absolute;right:-10px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:space-between;font-size:7px;color:rgba(255,255,255,.4)}
@@ -3370,11 +3418,15 @@ export class FlightSceneSimple extends Scene3D {
 #hud-utc{font-size:8px!important;letter-spacing:.08em!important}
 #flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
 #gps-map{width:168px!important;height:168px!important;top:2px!important;left:2px!important}
-.hud-panel-left{left:6px!important;bottom:6px!important;transform:scale(.8);transform-origin:bottom left}
-.hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.8);transform-origin:bottom right}
-.hud-tape{height:140px!important}
+.hud-panel-left{left:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom left}
+.hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom right}
+.hud-tape-wrapper{height:140px!important;width:60px!important}
+.hud-vs-strip{height:140px!important}
+.hud-ticker-box{height:26px!important;font-size:17px!important}
 .hud-value-main{font-size:18px!important}
-.hud-engine-col{display:none!important}
+.hud-rpm-gauge{width:48px!important;height:48px!important}
+.hud-rpm-needle{height:18px!important}
+.hud-vs-scale{font-size:8px!important}
 #missions-btn{top:22px!important;right:10px!important}
 #aircraft-btn{top:60px!important;right:10px!important}
 #flight-plans-btn{top:98px!important;right:10px!important}
@@ -3387,12 +3439,13 @@ export class FlightSceneSimple extends Scene3D {
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
 #flight-pfd{top:22%!important;width:200px!important;height:140px!important}
 #gps-map{width:132px!important;height:132px!important;top:4px!important;left:2px!important}
-.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom left}
-.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.65);transform-origin:bottom right}
-.hud-tape{height:110px!important}
+.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom left}
+.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom right}
+.hud-tape-wrapper{height:110px!important;width:56px!important}
+.hud-vs-strip{height:110px!important;width:30px!important}
+.hud-ticker-box{height:22px!important;font-size:14px!important}
 .hud-value-main{font-size:16px!important}
-.hud-engine-col{display:none!important}
-.hud-instr-col{display:none!important}
+.hud-vs-scale span:not(.hud-vs-scale-zero){visibility:hidden}
 #h-online{display:none!important}
 #missions-btn{top:6px!important;right:6px!important;width:28px!important;height:28px!important}
 #aircraft-btn{top:40px!important;right:6px!important;width:28px!important;height:28px!important}
@@ -3406,8 +3459,8 @@ export class FlightSceneSimple extends Scene3D {
 #flight-pfd{top:30%!important;width:220px!important;height:150px!important}
 #gps-map{width:120px!important;height:120px!important;top:2px!important;left:2px!important}
 #hud-utc{font-size:7px!important}
-.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.7);transform-origin:bottom left}
-.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.7);transform-origin:bottom right}
+.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom left}
+.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom right}
 }
 
 </style>
@@ -3429,16 +3482,19 @@ export class FlightSceneSimple extends Scene3D {
 <!-- Left Panel - Airspeed & Engine side by side -->
 <div class="hud-panel-left">
   <div class="hud-tape-col">
-    <div class="hud-header">AIRSPEED<span class="hud-header-sub">KTS</span></div>
+    <div class="hud-header hud-cyan">IRSPD<span class="hud-header-sub hud-cyan" style="opacity:.85">KTS</span></div>
     <div class="hud-tape-section">
       <div class="hud-tape-wrapper">
         <div class="hud-tape">
           <div class="hud-tape-fill-spd" id="hud-spd-tape" style="height:50%"></div>
         </div>
         <div class="hud-tape-marks hud-tape-marks-left" id="hud-spd-marks"></div>
+        <div class="hud-ticker-box" id="hud-spd-ticker">
+          <span class="hud-ticker-static" id="hud-spd-h">0</span><span class="hud-ticker-static" id="hud-spd-t">0</span><span class="hud-ticker-rolling"><span class="hud-ticker-rolling-inner" id="hud-spd-u-inner"><span>0</span><span>1</span></span></span>
+        </div>
       </div>
     </div>
-    <div class="hud-value-row">
+    <div class="hud-value-row" style="display:none">
       <span class="hud-value-main" id="bb-spd-v">0</span>
     </div>
     <div class="hud-sub-row">
@@ -3446,19 +3502,39 @@ export class FlightSceneSimple extends Scene3D {
       <span class="hud-sub-val"><span id="hud-tas-v">0</span>KT</span>
     </div>
   </div>
-  <div class="hud-engine-col">
+  <div class="hud-engine-col" id="hud-engine1-col">
     <div class="hud-engine-title">ENGINE #1</div>
     <div class="hud-engine-content">
       <div class="hud-rpm-gauge">
         <div class="hud-rpm-bg"></div>
         <div class="hud-rpm-needle" id="hud-rpm-needle"></div>
         <div class="hud-rpm-center"></div>
-        <div class="hud-rpm-label">RPM</div>
+        <div class="hud-rpm-label">LVR<br>A/THR</div>
+        <div class="hud-rpm-end hud-rpm-end-min">0</div>
+        <div class="hud-rpm-end hud-rpm-end-max">110</div>
       </div>
+      <div class="hud-engine-thr" id="hud-eng1-pct">0%</div>
       <div class="hud-engine-vals">
         <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-rpm-v">0</span><span class="hud-engine-val-lbl">RPM</span></div>
         <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-fuel-v">100%</span><span class="hud-engine-val-lbl">FUEL</span></div>
         <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-aoa-v">0&deg;</span><span class="hud-engine-val-lbl">AOA</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="hud-engine-col" id="hud-engine2-col" style="display:none">
+    <div class="hud-engine-title">ENGINE #2</div>
+    <div class="hud-engine-content">
+      <div class="hud-rpm-gauge">
+        <div class="hud-rpm-bg"></div>
+        <div class="hud-rpm-needle" id="hud-rpm-needle2"></div>
+        <div class="hud-rpm-center"></div>
+        <div class="hud-rpm-label">LVR<br>A/THR</div>
+        <div class="hud-rpm-end hud-rpm-end-min">0</div>
+        <div class="hud-rpm-end hud-rpm-end-max">110</div>
+      </div>
+      <div class="hud-engine-thr" id="hud-eng2-pct">0%</div>
+      <div class="hud-engine-vals">
+        <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-rpm2-v">0</span><span class="hud-engine-val-lbl">RPM</span></div>
       </div>
     </div>
   </div>
@@ -3467,16 +3543,6 @@ export class FlightSceneSimple extends Scene3D {
 <!-- Right Panel - Altitude & Instruments side by side -->
 <div class="hud-panel-right">
   <div class="hud-instr-col">
-    <div class="hud-vs-row">
-      <div class="hud-vs-bar">
-        <div class="hud-vs-bar-zero"></div>
-        <div class="hud-vs-bar-fill" id="hud-vs-bar" style="height:0;bottom:50%"></div>
-      </div>
-      <div>
-        <div class="hud-vs-header">VS</div>
-        <div class="hud-vs-val" id="hud-vs-v">0</div>
-      </div>
-    </div>
     <div class="hud-instr-group">
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-flp">OFF</span><span class="hud-instr-lbl">FLAPS</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="bb-brk">OFF</span><span class="hud-instr-lbl">BRK</span></div>
@@ -3486,23 +3552,46 @@ export class FlightSceneSimple extends Scene3D {
     </div>
     <div class="hud-bottom-row">
       <div class="hud-bottom-item"><span class="hud-bottom-val" id="hud-hdg-v">0&deg;</span><span class="hud-bottom-lbl">HDG</span></div>
-      <div class="hud-bottom-item"><span class="hud-bottom-val" id="hud-baro-v">29.92</span><span class="hud-bottom-lbl">IN</span></div>
       <div class="hud-bottom-item"><span class="hud-bottom-val" id="bb-att">LEVEL</span><span class="hud-bottom-lbl">ATT</span></div>
     </div>
   </div>
   <div class="hud-tape-col">
-    <div class="hud-header" style="text-align:right">ALTITUDE</div>
+    <div class="hud-header hud-cyan" style="text-align:right">ALTITUDE</div>
+    <div class="hud-alt-sel" id="hud-alt-sel">5000</div>
     <div class="hud-tape-section">
       <div class="hud-tape-wrapper">
-        <div class="hud-tape-marks hud-tape-marks-right" id="hud-alt-marks" style="right:auto;left:-32px"></div>
         <div class="hud-tape">
           <div class="hud-tape-fill-alt" id="hud-alt-tape" style="height:50%"></div>
         </div>
+        <div class="hud-tape-marks hud-tape-marks-right" id="hud-alt-marks"></div>
+        <div class="hud-ticker-box" id="hud-alt-ticker">
+          <span class="hud-ticker-static" id="hud-alt-h">0</span><span class="hud-ticker-static" id="hud-alt-t">0</span><span class="hud-ticker-static" id="hud-alt-u">0</span><span class="hud-ticker-small"><span class="hud-ticker-static" id="hud-alt-tens">0</span><span class="hud-ticker-rolling"><span class="hud-ticker-rolling-inner" id="hud-alt-units-inner"><span>0</span><span>1</span></span></span></span>
+        </div>
       </div>
     </div>
-    <div class="hud-value-row" style="justify-content:flex-end">
+    <div class="hud-sub-row" style="justify-content:flex-end">
+      <span class="hud-sub-val"><span id="hud-baro-v">29.92</span> IN</span>
+    </div>
+    <div class="hud-value-row" style="justify-content:flex-end;display:none">
       <span class="hud-value-main" id="bb-alt-v">0</span>
     </div>
+  </div>
+  <div class="hud-vs-strip">
+    <div class="hud-vs-strip-bg"></div>
+    <div class="hud-vs-strip-zero"></div>
+    <div class="hud-vs-pointer" id="hud-vs-pointer"></div>
+    <div class="hud-vs-scale">
+      <span>6</span>
+      <span>4</span>
+      <span>2</span>
+      <span class="hud-vs-scale-zero" style="visibility:hidden">0</span>
+      <span>-2</span>
+      <span>-4</span>
+      <span>-6</span>
+    </div>
+    <div style="position:absolute;left:-2px;top:-14px;font-size:8px;color:#fff;font-weight:600;letter-spacing:.05em">VS</div>
+    <div class="hud-vs-val" id="hud-vs-v" style="position:absolute;right:-2px;bottom:-16px">0</div>
+    <div class="hud-vs-bar" style="display:none"><div class="hud-vs-bar-fill" id="hud-vs-bar" style="height:0;bottom:50%"></div></div>
   </div>
 </div>
 
@@ -3583,6 +3672,25 @@ export class FlightSceneSimple extends Scene3D {
         this.hudSpdMarks = document.getElementById('hud-spd-marks')!;
         this.hudAltMarks = document.getElementById('hud-alt-marks')!;
         this.hudVsBar    = document.getElementById('hud-vs-bar')!;
+        this.hudSpdH        = document.getElementById('hud-spd-h');
+        this.hudSpdT        = document.getElementById('hud-spd-t');
+        this.hudSpdUInner   = document.getElementById('hud-spd-u-inner');
+        this.hudAltH        = document.getElementById('hud-alt-h');
+        this.hudAltT        = document.getElementById('hud-alt-t');
+        this.hudAltU        = document.getElementById('hud-alt-u');
+        this.hudAltTens     = document.getElementById('hud-alt-tens');
+        this.hudAltUnitsInner = document.getElementById('hud-alt-units-inner');
+        this.hudAltSel      = document.getElementById('hud-alt-sel');
+        this.hudVsPointer   = document.getElementById('hud-vs-pointer');
+        this.hudEngine2Col  = document.getElementById('hud-engine2-col');
+        this.hudRpmVal2     = document.getElementById('hud-rpm2-v');
+        this.hudRpmNeedle2  = document.getElementById('hud-rpm-needle2');
+        this.hudEng1Pct     = document.getElementById('hud-eng1-pct');
+        this.hudEng2Pct     = document.getElementById('hud-eng2-pct');
+        if (this.hudEngine2Col) {
+            const engineCount = this.aircraftConfig?.engine_count ?? 1;
+            this.hudEngine2Col.style.display = engineCount >= 2 ? '' : 'none';
+        }
         this.hudUtc      = document.getElementById('hud-utc')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
@@ -4645,6 +4753,50 @@ export class FlightSceneSimple extends Scene3D {
         this.hudAltVal.textContent   = String(altitudeMslFt);
         this.hudThrottle.style.width = `${pct}%`;
         if (this.hudThrPct) this.hudThrPct.textContent = `${pct}%`;
+        if (this.hudEng1Pct) this.hudEng1Pct.textContent = `${pct}%`;
+        if (this.hudEng2Pct) this.hudEng2Pct.textContent = `${pct}%`;
+
+        const spdAbs = Math.max(0, Number.isFinite(speedKts) ? speedKts : 0);
+        const spdHund = Math.floor(spdAbs / 100) % 10;
+        const spdTen  = Math.floor(spdAbs / 10) % 10;
+        const spdOne  = spdAbs % 10;
+        if (this.hudSpdH) this.hudSpdH.textContent = spdAbs >= 100 ? String(spdHund) : '';
+        if (this.hudSpdT) this.hudSpdT.textContent = spdAbs >= 10  ? String(spdTen)  : '0';
+        if (this.hudSpdUInner) {
+            const nextOne = (spdOne + 1) % 10;
+            const inner = this.hudSpdUInner;
+            if (inner.dataset.cur !== String(spdOne)) {
+                inner.innerHTML = `<span>${spdOne}</span><span>${nextOne}</span>`;
+                inner.dataset.cur = String(spdOne);
+            }
+        }
+
+        const altAbs = Math.max(0, Number.isFinite(altitudeMslFt) ? altitudeMslFt : 0);
+        const altDH    = Math.floor(altAbs / 10000) % 10;
+        const altDT    = Math.floor(altAbs / 1000)  % 10;
+        const altDU    = Math.floor(altAbs / 100)   % 10;
+        const altDTens = Math.floor(altAbs / 10)    % 10;
+        const altDOne  = altAbs % 10;
+        if (this.hudAltH) this.hudAltH.textContent = altAbs >= 10000 ? String(altDH) : '';
+        if (this.hudAltT) this.hudAltT.textContent = altAbs >= 1000  ? String(altDT) : '';
+        if (this.hudAltU) this.hudAltU.textContent = String(altDU);
+        if (this.hudAltTens) this.hudAltTens.textContent = String(altDTens);
+        if (this.hudAltUnitsInner) {
+            const nextOne = (altDOne + 1) % 10;
+            const inner = this.hudAltUnitsInner;
+            if (inner.dataset.cur !== String(altDOne)) {
+                inner.innerHTML = `<span>${altDOne}</span><span>${nextOne}</span>`;
+                inner.dataset.cur = String(altDOne);
+            }
+        }
+
+        if (this.hudAltSel) {
+            const presetFt = this._pendingMissionAltM != null && Number.isFinite(this._pendingMissionAltM)
+                ? Math.max(0, Math.round((this._pendingMissionAltM as number) * 3.28084 / 100) * 100)
+                : 5000;
+            const presetText = String(presetFt);
+            if (this.hudAltSel.textContent !== presetText) this.hudAltSel.textContent = presetText;
+        }
 
         const flapDeg = this.FLAP_STEPS[this.flapIndex];
         this.hudFlapVal.textContent = flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF';
@@ -4663,6 +4815,23 @@ export class FlightSceneSimple extends Scene3D {
                 : '#ffcc00';
             this.hudGearState.textContent = label;
             this.hudGearState.style.color = color;
+            if (this.isMobile) {
+                const gearBtn = document.getElementById('touch-gear');
+                if (gearBtn) {
+                    const btnLabel = gs === GEAR_STATE_DOWN ? 'GR\u25BC'
+                        : gs === GEAR_STATE_UP ? 'GR\u25B2'
+                        : gs === GEAR_STATE_RETRACTING ? 'GR\u2191'
+                        : 'GR\u2193';
+                    if (gearBtn.textContent !== btnLabel) gearBtn.textContent = btnLabel;
+                    const stateClass = (gs === GEAR_STATE_RETRACTING || gs === GEAR_STATE_EXTENDING)
+                        ? 'transit'
+                        : (gs === GEAR_STATE_UP ? 'up' : 'down');
+                    if (!gearBtn.classList.contains(stateClass)) {
+                        gearBtn.classList.remove('up', 'down', 'transit');
+                        gearBtn.classList.add(stateClass);
+                    }
+                }
+            }
         }
 
         const wm = this.planeRoot.getWorldMatrix();
@@ -4689,16 +4858,20 @@ export class FlightSceneSimple extends Scene3D {
         if (this.hudTasVal) this.hudTasVal.textContent = String(speedKts);
 
         if (this.hudRpmVal) this.hudRpmVal.textContent = String(Math.round(this.engineRpm));
+        const _engineEt = this.aircraftConfig.engine_type;
+        const _engineIsProp = _engineEt === ENGINE_TYPE_PISTON || _engineEt === ENGINE_TYPE_TURBOPROP;
+        const _engineRpmMax = this.aircraftConfig.prop_rpm_max || 2700;
+        const _engineFrac = _engineIsProp
+            ? (_engineRpmMax > 0 ? this.engineRpm / _engineRpmMax : 0)
+            : this.enginePower;
+        const _engineClamped = Math.max(0, Math.min(1, Number.isFinite(_engineFrac) ? _engineFrac : 0));
+        const _engineRpmAngle = -120 + _engineClamped * 240;
         if (this.hudRpmNeedle) {
-            const et = this.aircraftConfig.engine_type;
-            const isProp = et === ENGINE_TYPE_PISTON || et === ENGINE_TYPE_TURBOPROP;
-            const rpmMax = this.aircraftConfig.prop_rpm_max || 2700;
-            const fraction = isProp
-                ? (rpmMax > 0 ? this.engineRpm / rpmMax : 0)
-                : this.enginePower;
-            const clamped = Math.max(0, Math.min(1, fraction));
-            const rpmAngle = -120 + clamped * 240;
-            this.hudRpmNeedle.style.transform = `rotate(${rpmAngle}deg)`;
+            this.hudRpmNeedle.style.transform = `rotate(${_engineRpmAngle}deg)`;
+        }
+        if (this.hudEngine2Col && (this.aircraftConfig?.engine_count ?? 1) >= 2) {
+            if (this.hudRpmVal2) this.hudRpmVal2.textContent = String(Math.round(this.engineRpm));
+            if (this.hudRpmNeedle2) this.hudRpmNeedle2.style.transform = `rotate(${_engineRpmAngle}deg)`;
         }
 
         const fuelPct = this.aircraftConfig.fuel_capacity_kg > 0
@@ -4712,6 +4885,13 @@ export class FlightSceneSimple extends Scene3D {
         const vsFpm = Math.round(this.velocity.y * 196.85);
         if (this.hudVsVal) this.hudVsVal.textContent = String(vsFpm);
 
+        if (this.hudVsPointer) {
+            const vsForPointer = Number.isFinite(vsFpm) ? vsFpm : 0;
+            const vsRangeFpm = 6000;
+            const vsClamped = Math.max(-vsRangeFpm, Math.min(vsRangeFpm, vsForPointer));
+            const vsTopPct = 50 - (vsClamped / vsRangeFpm) * 50;
+            this.hudVsPointer.style.top = `${vsTopPct}%`;
+        }
         if (this.hudVsBar) {
             const vsClamp = Math.max(-1000, Math.min(1000, vsFpm));
             const vsHeight = Math.abs(vsClamp) / 1000 * 50;
