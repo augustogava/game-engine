@@ -51,6 +51,10 @@ const NAV_LIGHT_CORE_DIAMETER_M = 0.4;
 const CAMERA_RADIUS_LENGTH_FACTOR = 3;
 const CAMERA_RADIUS_MIN_M = 15;
 const CAMERA_RADIUS_MAX_M = 65;
+const CAMERA_LOWER_RADIUS_LIMIT_M = 0.5;
+const CAMERA_UPPER_RADIUS_LIMIT_M = 500;
+const CAMERA_GROUND_CLEARANCE_M = 1.0;
+const CAMERA_BETA_SAFETY_EPSILON = 0.001;
 const ON_GROUND_AGL_M = 5;
 const STALL_WARNING_MIN_AGL_M = 20;
 const BANK_COMP_MIN_SIN = 0.174;
@@ -462,12 +466,17 @@ export class FlightSceneSimple extends Scene3D {
     private _mapImgLat = 0;
     private _mapImgLon = 0;
     private _mapImgValid = false;
+    private _mapImgPendingLat = 0;
+    private _mapImgPendingLon = 0;
+    private _mapImgPending = false;
+    private _mapImgListenersAttached = false;
     private static readonly MAP_ZOOM_DEFAULT = 12;
     private static readonly MAP_ZOOM_MIN = 9;
     private static readonly MAP_ZOOM_MAX = 17;
     private _mapZoom = FlightSceneSimple.MAP_ZOOM_DEFAULT;
-    private _mapHeadingUp = false;
+    private _mapHeadingUp = true;
     private static readonly MAP_REQUEST_SIZE_PX = 256;
+    private static readonly MAP_REQUEST_SCALE = 2;
     private static readonly MAP_REFETCH_DRIFT_RATIO = 0.25;
     private static readonly MAP_REFETCH_INTERVAL_MS = 5000;
     private static readonly MAP_IMG_UPSCALE = 2.0;
@@ -2197,8 +2206,8 @@ export class FlightSceneSimple extends Scene3D {
 
         this.camera.minZ = 0.5;
         this.camera.maxZ = this.tiles ? 100000 : 60000;
-        this.camera.lowerRadiusLimit = 10;
-        this.camera.upperRadiusLimit = 500;
+        this.camera.lowerRadiusLimit = CAMERA_LOWER_RADIUS_LIMIT_M;
+        this.camera.upperRadiusLimit = CAMERA_UPPER_RADIUS_LIMIT_M;
         this.camera.inertia = 0.8;
         this.camera.panningSensibility = 0;
         this.camera.wheelPrecision = 10;
@@ -3091,6 +3100,7 @@ export class FlightSceneSimple extends Scene3D {
     private _updateTapeMarks(speedKts: number, altitudeFt: number): void {
         const TICKER_HALF_HEIGHT_PX = 20;
         const MARK_SPACING_PX = 30;
+        const MARK_HALF_HEIGHT_PX = 7;
 
         const spdStep = 20;
         const spdRange = 60;
@@ -3099,6 +3109,8 @@ export class FlightSceneSimple extends Scene3D {
         if (this.spdMarkEls.length > 0) {
             const centerChanged = spdCenter !== this.lastSpdCenter;
             this.lastSpdCenter = spdCenter;
+            const spdHalfWrapper = (this.hudSpdMarks?.offsetHeight ?? 180) / 2;
+            const spdMaxAbsY = spdHalfWrapper - MARK_HALF_HEIGHT_PX;
             
             for (let i = 0; i < 7; i++) {
                 const idx = 3 - i;
@@ -3110,7 +3122,8 @@ export class FlightSceneSimple extends Scene3D {
                 const naturalY = (i - 3) * MARK_SPACING_PX;
                 const visualY = naturalY + offset;
                 const inTickerZone = Math.abs(visualY) < TICKER_HALF_HEIGHT_PX;
-                const desiredOpacity = inTickerZone ? '0' : '1';
+                const outsideWrapper = Math.abs(visualY) > spdMaxAbsY;
+                const desiredOpacity = (inTickerZone || outsideWrapper) ? '0' : '1';
                 if (mark.el.style.opacity !== desiredOpacity) mark.el.style.opacity = desiredOpacity;
             }
             
@@ -3127,6 +3140,8 @@ export class FlightSceneSimple extends Scene3D {
         if (this.altMarkEls.length > 0) {
             const centerChanged = altCenter !== this.lastAltCenter;
             this.lastAltCenter = altCenter;
+            const altHalfWrapper = (this.hudAltMarks?.offsetHeight ?? 180) / 2;
+            const altMaxAbsY = altHalfWrapper - MARK_HALF_HEIGHT_PX;
             
             for (let i = 0; i < 7; i++) {
                 const idx = 3 - i;
@@ -3138,7 +3153,8 @@ export class FlightSceneSimple extends Scene3D {
                 const naturalY = (i - 3) * MARK_SPACING_PX;
                 const visualY = naturalY + offset;
                 const inTickerZone = Math.abs(visualY) < TICKER_HALF_HEIGHT_PX;
-                const desiredOpacity = inTickerZone ? '0' : '1';
+                const outsideWrapper = Math.abs(visualY) > altMaxAbsY;
+                const desiredOpacity = (inTickerZone || outsideWrapper) ? '0' : '1';
                 if (mark.el.style.opacity !== desiredOpacity) mark.el.style.opacity = desiredOpacity;
             }
             
@@ -3666,9 +3682,38 @@ export class FlightSceneSimple extends Scene3D {
             this.camera.target.copyFrom(pos);
         }
 
+        this._clampCameraAboveGround();
+
         if (this.ground) {
             this.ground.position.x = pos.x;
             this.ground.position.z = pos.z;
+        }
+    }
+
+    private _clampCameraAboveGround(): void {
+        if (!this.camera) return;
+        try {
+            const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
+            if (!Number.isFinite(groundLevel)) return;
+            const minCameraY = groundLevel + CAMERA_GROUND_CLEARANCE_M;
+            const radius = this.camera.radius;
+            if (!(radius > 0)) return;
+            const dy = this.camera.target.y - minCameraY;
+            let upperBeta: number;
+            const ratio = -dy / radius;
+            if (ratio <= -1) {
+                upperBeta = Math.PI - CAMERA_BETA_SAFETY_EPSILON;
+            } else if (ratio >= 1) {
+                upperBeta = CAMERA_BETA_SAFETY_EPSILON;
+            } else {
+                upperBeta = Math.acos(ratio);
+            }
+            this.camera.upperBetaLimit = upperBeta;
+            if (this.camera.beta > upperBeta) {
+                this.camera.beta = upperBeta;
+            }
+        } catch (err) {
+            console.warn('[Camera] Ground clamp failed:', err);
         }
     }
 
@@ -3701,13 +3746,13 @@ export class FlightSceneSimple extends Scene3D {
 .hud-tape{position:absolute;right:0;top:0;bottom:0;width:6px;background:linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,.5));overflow:hidden}
 .hud-tape-fill-spd{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#c8a030,#e8c860);transition:height .15s}
 .hud-tape-fill-alt{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#3090c8,#50b0e8);transition:height .15s}
-.hud-tape-marks{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:18px;pointer-events:none;left:4px;right:8px;align-items:flex-end}
-.hud-tape-marks-left,.hud-tape-marks-right{left:4px;right:8px;align-items:flex-end}
-.hud-tape-mark{display:flex;align-items:center;gap:3px;justify-content:flex-end}
-.hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.65)}
-.hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.9);font-family:'Inter',sans-serif;font-weight:500;min-width:22px;text-align:right}
+.hud-tape-marks{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:18px;pointer-events:none;left:0;right:8px;align-items:flex-end;overflow:visible}
+.hud-tape-marks-left,.hud-tape-marks-right{left:0;right:8px;align-items:flex-end}
+.hud-tape-mark{display:flex;align-items:center;gap:3px;justify-content:flex-end;white-space:nowrap}
+.hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.65);flex-shrink:0}
+.hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.9);font-family:'Inter',sans-serif;font-weight:500;min-width:34px;text-align:right;letter-spacing:.5px}
 
-.hud-ticker-box{position:absolute;left:-4px;right:-4px;top:50%;transform:translateY(-50%);height:34px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:22px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:.02em;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 2px;white-space:nowrap}
+.hud-ticker-box{position:absolute;left:-14px;right:-14px;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:18px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:0;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 3px;white-space:nowrap;overflow:hidden}
 .hud-ticker-static{display:inline-block;line-height:1}
 .hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;overflow:hidden;vertical-align:bottom}
 .hud-ticker-rolling-inner{position:absolute;left:0;top:0;display:flex;flex-direction:column;line-height:1;transition:transform .12s linear}
@@ -3783,7 +3828,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom right}
 .hud-tape-wrapper{height:140px!important;width:60px!important}
 .hud-vs-strip{height:140px!important}
-.hud-ticker-box{height:26px!important;font-size:17px!important}
+.hud-ticker-box{height:26px!important;font-size:15px!important;left:-12px!important;right:-12px!important}
 .hud-value-main{font-size:18px!important}
 .hud-rpm-gauge{width:48px!important;height:48px!important}
 .hud-rpm-needle{height:18px!important}
@@ -3804,7 +3849,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom right}
 .hud-tape-wrapper{height:110px!important;width:56px!important}
 .hud-vs-strip{height:110px!important;width:30px!important}
-.hud-ticker-box{height:22px!important;font-size:14px!important}
+.hud-ticker-box{height:22px!important;font-size:13px!important;left:-10px!important;right:-10px!important}
 .hud-value-main{font-size:16px!important}
 .hud-vs-scale span:not(.hud-vs-scale-zero){visibility:hidden}
 #h-online{display:none!important}
@@ -5373,6 +5418,7 @@ export class FlightSceneSimple extends Scene3D {
         if (next === this._mapZoom) return;
         this._mapZoom = next;
         this._mapImgValid = false;
+        this._mapImgPending = false;
         this.mapLastUpdate = 0;
         if (this.mapImg) this.mapImg.style.transform = 'translate(0px, 0px)';
         console.log(`[GPS] Zoom set to ${this._mapZoom}`);
@@ -5399,9 +5445,6 @@ export class FlightSceneSimple extends Scene3D {
                 if (pos && Number.isFinite(pos.zoom)) {
                     const z = Number(pos.zoom);
                     this._mapZoom = Math.min(FlightSceneSimple.MAP_ZOOM_MAX, Math.max(FlightSceneSimple.MAP_ZOOM_MIN, z));
-                }
-                if (pos && typeof pos.headingUp === 'boolean') {
-                    this._mapHeadingUp = pos.headingUp;
                 }
             }
         } catch (err) {
@@ -5500,8 +5543,31 @@ export class FlightSceneSimple extends Scene3D {
         return { x, y, pxPerDegLon: onScreenPxPerDegLon, pxPerDegLat: onScreenPxPerDegLat };
     }
 
+    private _ensureMapImgListeners(): void {
+        if (this._mapImgListenersAttached || !this.mapImg) return;
+        this._mapImgListenersAttached = true;
+        try {
+            this.mapImg.addEventListener('load', () => {
+                if (!this._mapImgPending) return;
+                this._mapImgLat = this._mapImgPendingLat;
+                this._mapImgLon = this._mapImgPendingLon;
+                this._mapImgValid = true;
+                this._mapImgPending = false;
+            });
+            this.mapImg.addEventListener('error', (ev) => {
+                if (!this._mapImgPending) return;
+                this._mapImgPending = false;
+                this.mapLastUpdate = 0;
+                console.warn('[GPS] Map tile load failed; will retry on next update', ev);
+            });
+        } catch (err) {
+            console.warn('[GPS] Failed to attach map image listeners:', err);
+        }
+    }
+
     private _updateMap(): void {
         if (!this.mapImg) return;
+        this._ensureMapImgListeners();
         const now = performance.now();
         const { lat, lon, hdg } = this._getCurrentLatLon();
 
@@ -5530,12 +5596,12 @@ export class FlightSceneSimple extends Scene3D {
             || driftPx > driftLimitPx
             || timeSinceFetch > FlightSceneSimple.MAP_REFETCH_INTERVAL_MS;
 
-        if (this.mapApiKey && needFetch) {
+        if (this.mapApiKey && needFetch && !this._mapImgPending) {
             this.mapLastUpdate = now;
-            this._mapImgLat = lat;
-            this._mapImgLon = lon;
-            this._mapImgValid = true;
-            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(5)},${lon.toFixed(5)}&zoom=${this._mapZoom}&size=${FlightSceneSimple.MAP_REQUEST_SIZE_PX}x${FlightSceneSimple.MAP_REQUEST_SIZE_PX}&scale=1&maptype=satellite&key=${this.mapApiKey}`;
+            this._mapImgPending = true;
+            this._mapImgPendingLat = lat;
+            this._mapImgPendingLon = lon;
+            this.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(5)},${lon.toFixed(5)}&zoom=${this._mapZoom}&size=${FlightSceneSimple.MAP_REQUEST_SIZE_PX}x${FlightSceneSimple.MAP_REQUEST_SIZE_PX}&scale=${FlightSceneSimple.MAP_REQUEST_SCALE}&maptype=satellite&key=${this.mapApiKey}`;
         }
 
         if (this._mapImgValid) {
