@@ -450,6 +450,8 @@ export class FlightSceneSimple extends Scene3D {
     private _lastHapticMs = 0;
     private _lastStallState = false;
     private _lastOverGState = false;
+    private _userGestureSeen = false;
+    private _userGestureListener: (() => void) | null = null;
     private _lastCameraCycleMs = 0;
     private camera!: BABYLON.ArcRotateCamera;
     private surfaces: AeroSurface[] = [];
@@ -895,6 +897,7 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('aircraft-panel')?.remove();
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         this.mpClient?.dispose();
+        this._removeUserGestureListener();
         this._engineSound.dispose();
         this._disposeNavLights();
         this._disposeRunwayColliders();
@@ -2362,10 +2365,10 @@ export class FlightSceneSimple extends Scene3D {
         mesh.position.set(sceneX, sceneY, sceneZ);
         mesh.rotation.x = Math.PI / 2;
         mesh.rotation.y = (180 - Number(r.le_heading_deg_true)) * Math.PI / 180;
-        mesh.isVisible = true;
+        mesh.isVisible = false;
         mesh.isPickable = true;
         mesh.checkCollisions = false;
-        mesh.receiveShadows = true;
+        mesh.receiveShadows = false;
         mesh.metadata = { type: 'runway-collider', icao, leIdent: r.le_ident, heIdent: r.he_ident };
 
         const mat = new BABYLON.StandardMaterial(name + 'Mat', this.scene);
@@ -3989,7 +3992,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-ticker-box{position:absolute;left:-6px;right:-6px;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:18px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:0;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 3px;white-space:nowrap;overflow:visible;font-variant-numeric:tabular-nums}
 .hud-ticker-static{display:inline-block;line-height:1;width:.62em;text-align:center}
 .hud-ticker-static:empty{display:none}
-.hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;overflow:hidden;vertical-align:top}
+.hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;vertical-align:top;clip-path:inset(0 -100px 0 -100px)}
 .hud-ticker-rolling-inner{position:absolute;left:0;top:0;display:flex;flex-direction:column;line-height:1;transition:transform .12s linear}
 .hud-ticker-rolling-inner span{display:block;height:1em;text-align:center;width:.62em}
 .hud-ticker-small{font-size:.7em;opacity:.9;margin-left:2px;display:inline-flex;align-items:baseline}
@@ -5583,6 +5586,10 @@ export class FlightSceneSimple extends Scene3D {
 
     private _doHaptic(pattern: number | number[]): void {
         if (typeof navigator === 'undefined' || !('vibrate' in navigator)) return;
+        if (!this._userGestureSeen) {
+            this._installUserGestureListener();
+            return;
+        }
         const now = performance.now();
         if (now - this._lastHapticMs < HAPTIC_MIN_INTERVAL_MS) return;
         this._lastHapticMs = now;
@@ -5591,6 +5598,34 @@ export class FlightSceneSimple extends Scene3D {
         } catch (err) {
             console.warn('[Haptic] vibrate failed:', err);
         }
+    }
+
+    private _installUserGestureListener(): void {
+        if (this._userGestureSeen || this._userGestureListener) return;
+        const events: Array<keyof DocumentEventMap> = ['pointerdown', 'keydown', 'touchstart', 'mousedown'];
+        const listener = () => {
+            this._userGestureSeen = true;
+            this._removeUserGestureListener();
+            console.debug('[Haptic] User gesture detected; haptics enabled');
+        };
+        this._userGestureListener = listener;
+        for (const ev of events) {
+            try {
+                document.addEventListener(ev, listener, { once: false, capture: true, passive: true });
+            } catch (err) {
+                console.warn('[Haptic] addEventListener failed for', ev, err);
+            }
+        }
+    }
+
+    private _removeUserGestureListener(): void {
+        const listener = this._userGestureListener;
+        if (!listener) return;
+        const events: Array<keyof DocumentEventMap> = ['pointerdown', 'keydown', 'touchstart', 'mousedown'];
+        for (const ev of events) {
+            try { document.removeEventListener(ev, listener, true); } catch (_) { /* ignore */ }
+        }
+        this._userGestureListener = null;
     }
 
     private static readonly GPS_POS_STORAGE_KEY = 'gps-map-pos-v1';

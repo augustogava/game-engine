@@ -33,6 +33,7 @@ export class EngineSound {
     private _fadeDurationMs = 0;
     private _fadeActive = false;
     private _disposed = false;
+    private _resumeListener: (() => void) | null = null;
 
     public start(): void {
         if (this._running || this._disposed) return;
@@ -108,12 +109,51 @@ export class EngineSound {
             this._running = true;
             if (ctx.state === 'suspended') {
                 ctx.resume().catch(err => console.warn('[EngineSound] Resume failed:', err));
+                this._installResumeOnGesture();
             }
             console.log('[EngineSound] Started (sawtooth + harmonic + rumble noise)');
         } catch (err) {
             console.warn('[EngineSound] Start failed:', err);
             this._running = false;
         }
+    }
+
+    private _installResumeOnGesture(): void {
+        if (this._resumeListener) return;
+        const events: Array<keyof DocumentEventMap> = ['pointerdown', 'keydown', 'touchstart', 'mousedown'];
+        const listener = () => {
+            try {
+                const ctx = this._ctx;
+                if (!ctx) return;
+                if (ctx.state === 'suspended') {
+                    ctx.resume()
+                        .then(() => console.log('[EngineSound] AudioContext resumed by user gesture'))
+                        .catch(err => console.warn('[EngineSound] Resume on gesture failed:', err));
+                }
+            } catch (err) {
+                console.warn('[EngineSound] Resume listener failed:', err);
+            } finally {
+                this._removeResumeListener();
+            }
+        };
+        this._resumeListener = listener;
+        for (const ev of events) {
+            try {
+                document.addEventListener(ev, listener, { once: false, capture: true, passive: true });
+            } catch (err) {
+                console.warn('[EngineSound] addEventListener failed for', ev, err);
+            }
+        }
+    }
+
+    private _removeResumeListener(): void {
+        const listener = this._resumeListener;
+        if (!listener) return;
+        const events: Array<keyof DocumentEventMap> = ['pointerdown', 'keydown', 'touchstart', 'mousedown'];
+        for (const ev of events) {
+            try { document.removeEventListener(ev, listener, true); } catch (_) { /* ignore */ }
+        }
+        this._resumeListener = null;
     }
 
     public stop(): void {
@@ -177,6 +217,7 @@ export class EngineSound {
     public dispose(): void {
         if (this._disposed) return;
         this._disposed = true;
+        this._removeResumeListener();
         this.stop();
         try {
             this._masterGain?.disconnect();
