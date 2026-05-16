@@ -516,17 +516,6 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
                 flightLogId,
                 `Flight landed: ${finalDistKm}km`
             );
-            try {
-                await dbPool.execute(
-                    `INSERT INTO user_flight_stats (user_id, total_reward_points)
-                     VALUES (?, ?)
-                     ON DUPLICATE KEY UPDATE total_reward_points = total_reward_points + VALUES(total_reward_points)`,
-                    [userId, flightPoints]
-                );
-                console.log(`[Points] Flight pts +${flightPoints} added to user ${userId} (current + new)`);
-            } catch (err) {
-                console.error(`[DB] Flight reward points increment error for user ${userId}:`, err.message);
-            }
         }
     }
 
@@ -1451,7 +1440,7 @@ wss.on('connection', (ws) => {
                                    total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                                    total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                                    total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                                   total_reward_points = GREATEST(total_reward_points, FLOOR(total_distance_km * ?)),
+                                   total_reward_points = total_reward_points + FLOOR(VALUES(total_distance_km) * ?),
                                    last_flight_at = NOW()`,
                                 [playerId, hi, distNm, dk, dk, POINTS_PER_KM, POINTS_PER_KM]
                             ).catch(err => console.error('[DB] Existing-session stats persist error:', err.message));
@@ -1807,7 +1796,7 @@ wss.on('connection', (ws) => {
                            total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                            total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                            total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                           total_reward_points = GREATEST(total_reward_points, FLOOR(total_distance_km * ?)),
+                           total_reward_points = total_reward_points + FLOOR(VALUES(total_distance_km) * ?),
                            last_flight_at = NOW()`,
                         [playerId, hoursIncrement, distNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
                     );
@@ -1891,7 +1880,7 @@ setInterval(async () => {
                    total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                    total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                    total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                   total_reward_points = GREATEST(total_reward_points, FLOOR(total_distance_km * ?)),
+                   total_reward_points = total_reward_points + FLOOR(VALUES(total_distance_km) * ?),
                    last_flight_at = NOW()`,
                 [userId, hoursIncrement, distNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
             );
@@ -2002,7 +1991,7 @@ async function gracefulShutdown() {
                            total_flight_hours = total_flight_hours + VALUES(total_flight_hours),
                            total_distance_nm  = total_distance_nm  + VALUES(total_distance_nm),
                            total_distance_km  = total_distance_km  + VALUES(total_distance_km),
-                           total_reward_points = GREATEST(total_reward_points, FLOOR(total_distance_km * ?)),
+                           total_reward_points = total_reward_points + FLOOR(VALUES(total_distance_km) * ?),
                            last_flight_at = NOW()`,
                         [userId, hoursIncrement, distNm, distKm, distKm, POINTS_PER_KM, POINTS_PER_KM]
                     );
