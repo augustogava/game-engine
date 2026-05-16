@@ -51,8 +51,11 @@ const NAV_LIGHT_CORE_DIAMETER_M = 0.4;
 const CAMERA_RADIUS_LENGTH_FACTOR = 3;
 const CAMERA_RADIUS_MIN_M = 15;
 const CAMERA_RADIUS_MAX_M = 65;
-const CAMERA_LOWER_RADIUS_LIMIT_M = 0.5;
+const CAMERA_LOWER_RADIUS_LIMIT_M = 8;
 const CAMERA_UPPER_RADIUS_LIMIT_M = 500;
+const CAMERA_LOWER_RADIUS_AIRCRAFT_FACTOR = 0.55;
+const CAMERA_LOWER_RADIUS_HEIGHT_FACTOR = 0.8;
+const CAMERA_LOWER_RADIUS_FALLBACK_M = 8;
 const CAMERA_GROUND_CLEARANCE_M = 1.0;
 const CAMERA_BETA_SAFETY_EPSILON = 0.001;
 const ON_GROUND_AGL_M = 5;
@@ -2124,7 +2127,21 @@ export class FlightSceneSimple extends Scene3D {
                         Math.min(CAMERA_RADIUS_MAX_M, bbD * CAMERA_RADIUS_LENGTH_FACTOR),
                     );
                     this.camera.radius = initialRadius;
-                    console.debug(`[Camera] Initial radius set to ${initialRadius.toFixed(1)}m for ${cfg.code} (length=${bbD.toFixed(1)}m)`);
+
+                    const safeW = Number.isFinite(bbW) && bbW > 0 ? bbW : 0;
+                    const safeH = Number.isFinite(bbH) && bbH > 0 ? bbH : 0;
+                    const safeD = Number.isFinite(bbD) && bbD > 0 ? bbD : 0;
+                    const aircraftMinRadius = Math.max(
+                        safeW * CAMERA_LOWER_RADIUS_AIRCRAFT_FACTOR,
+                        safeD * CAMERA_LOWER_RADIUS_AIRCRAFT_FACTOR,
+                        safeH * CAMERA_LOWER_RADIUS_HEIGHT_FACTOR,
+                        CAMERA_LOWER_RADIUS_FALLBACK_M,
+                    );
+                    this.camera.lowerRadiusLimit = aircraftMinRadius;
+                    if (this.camera.radius < aircraftMinRadius) {
+                        this.camera.radius = aircraftMinRadius;
+                    }
+                    console.debug(`[Camera] Initial radius set to ${initialRadius.toFixed(1)}m, lowerRadiusLimit=${aircraftMinRadius.toFixed(1)}m for ${cfg.code} (W=${safeW.toFixed(1)}m, H=${safeH.toFixed(1)}m, L=${safeD.toFixed(1)}m)`);
                 }
 
                 this.spawned = true;
@@ -3838,7 +3855,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.65);flex-shrink:0}
 .hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.9);font-family:'Inter',sans-serif;font-weight:500;min-width:34px;text-align:right;letter-spacing:.5px}
 
-.hud-ticker-box{position:absolute;left:-14px;right:-14px;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:18px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:0;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 3px;white-space:nowrap;overflow:hidden}
+.hud-ticker-box{position:absolute;left:-18px;right:-18px;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:18px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:0;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 4px;white-space:nowrap;overflow:visible}
 .hud-ticker-static{display:inline-block;line-height:1}
 .hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;overflow:hidden;vertical-align:bottom}
 .hud-ticker-rolling-inner{position:absolute;left:0;top:0;display:flex;flex-direction:column;line-height:1;transition:transform .12s linear}
@@ -3914,7 +3931,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom right}
 .hud-tape-wrapper{height:140px!important;width:60px!important}
 .hud-vs-strip{height:140px!important}
-.hud-ticker-box{height:26px!important;font-size:15px!important;left:-12px!important;right:-12px!important}
+.hud-ticker-box{height:26px!important;font-size:15px!important;left:-16px!important;right:-16px!important}
 .hud-value-main{font-size:18px!important}
 .hud-rpm-gauge{width:48px!important;height:48px!important}
 .hud-rpm-needle{height:18px!important}
@@ -3935,7 +3952,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom right}
 .hud-tape-wrapper{height:110px!important;width:56px!important}
 .hud-vs-strip{height:110px!important;width:30px!important}
-.hud-ticker-box{height:22px!important;font-size:13px!important;left:-10px!important;right:-10px!important}
+.hud-ticker-box{height:22px!important;font-size:13px!important;left:-14px!important;right:-14px!important}
 .hud-value-main{font-size:16px!important}
 .hud-vs-scale span:not(.hud-vs-scale-zero){visibility:hidden}
 #h-online{display:none!important}

@@ -139,6 +139,7 @@ const NEAREST_AIRPORT_RADIUS_NM = 5;
 const NEAREST_AIRPORT_FALLBACK_NM = 15;
 const PERIODIC_FLUSH_MS = 30000;
 const PERIODIC_MIN_SESSION_MIN = 0.5;
+const MISSION_WAYPOINT_REACH_NM = 2.0;
 
 // ── HTTP infrastructure helpers ──────────────────────────────────────────────
 function parseBody(req) {
@@ -316,6 +317,40 @@ async function proxyToMainApi(apiPath, req, res, body) {
     }
 }
 
+async function callExternalMissionComplete(userMissionId, authToken) {
+    if (!MAIN_API_URL) {
+        console.warn(`[Mission] External /complete skipped: MAIN_API_URL not configured (userMission=${userMissionId})`);
+        return false;
+    }
+    if (!Number.isFinite(Number(userMissionId)) || Number(userMissionId) <= 0) {
+        console.warn(`[Mission] External /complete skipped: invalid userMissionId=${userMissionId}`);
+        return false;
+    }
+    if (!authToken) {
+        console.warn(`[Mission] External /complete skipped: missing auth token (userMission=${userMissionId})`);
+        return false;
+    }
+    try {
+        const url = `${MAIN_API_URL}/api/user-missions/${userMissionId}/complete`;
+        const resp = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`,
+            },
+        });
+        if (!resp.ok) {
+            console.warn(`[Mission] External /complete failed: HTTP ${resp.status} (userMission=${userMissionId})`);
+            return false;
+        }
+        console.log(`[Mission] External /complete OK (userMission=${userMissionId})`);
+        return true;
+    } catch (err) {
+        console.error(`[Mission] External /complete error (userMission=${userMissionId}):`, err.message);
+        return false;
+    }
+}
+
 function matchRoute(method, urlPath, pattern) {
     const parts = urlPath.split('/');
     const patParts = pattern.split('/');
@@ -458,57 +493,16 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
         console.error(`[DB] Flight log finalize error (log ${flightLogId}, user ${userId}):`, err.message);
     }
 
-    if (entry.userMissionId && entry.missionId) {
-        try {
-            if (status === 'landed') {
-                const [mRows] = await dbPool.execute(
-                    `SELECT arrival_airport_id, reward_points, title FROM missions WHERE id = ?`, [entry.missionId]);
-                const mission = mRows.length ? mRows[0] : null;
-                const missionArrival = mission ? mission.arrival_airport_id : null;
-                if (!missionArrival || (arrivalAirportId && arrivalAirportId === missionArrival)) {
-                    await dbPool.execute(
-                        `UPDATE user_missions SET status = 'completed', completed_at = NOW() WHERE id = ?`,
-                        [entry.userMissionId]);
-                    console.log(`[Mission] Completed: user ${userId}, userMission ${entry.userMissionId}`);
-                    if (mission) {
-                        await logPointsHistory(
-                            userId,
-                            Number(mission.reward_points) || 0,
-                            POINTS_SOURCE_MISSION,
-                            entry.userMissionId,
-                            `Mission completed: ${mission.title || `#${entry.missionId}`}`
-                        );
-                    }
-                } else {
-                    await dbPool.execute(
-                        `UPDATE user_missions SET status = 'failed' WHERE id = ?`,
-                        [entry.userMissionId]);
-                    console.log(`[Mission] Failed (wrong airport): user ${userId}, userMission ${entry.userMissionId}`);
-                    await logPointsHistory(
-                        userId,
-                        0,
-                        POINTS_SOURCE_MISSION_FAILED,
-                        entry.userMissionId,
-                        `Mission failed (wrong airport): ${mission && mission.title ? mission.title : `#${entry.missionId}`}`
-                    );
-                }
-            } else if (status === 'crashed') {
-                await dbPool.execute(
-                    `UPDATE user_missions SET status = 'failed' WHERE id = ?`,
-                    [entry.userMissionId]);
-                console.log(`[Mission] Failed (${status}): user ${userId}, userMission ${entry.userMissionId}`);
-                await logPointsHistory(
-                    userId,
-                    0,
-                    POINTS_SOURCE_MISSION_FAILED,
-                    entry.userMissionId,
-                    `Mission failed (crashed): #${entry.missionId}`
-                );
-            } else {
-                console.log(`[Mission] Kept in_progress (${status}): user ${userId}, userMission ${entry.userMissionId}`);
-            }
-        } catch (err) {
-            console.error(`[DB] Mission auto-update error:`, err.message);
+    if (status === 'landed' && entry.userMissionId && !entry.missionExternalCompleteSent) {
+        const hasWaypoints = Array.isArray(entry.missionWaypoints) && entry.missionWaypoints.length > 0;
+        const wpsOk = !hasWaypoints || entry.missionAllWpReached === true;
+        const requiredAirportId = entry.missionArrivalAirportId || null;
+        const airportOk = !requiredAirportId || (arrivalAirportId && Number(arrivalAirportId) === Number(requiredAirportId));
+        if (wpsOk && airportOk) {
+            entry.missionExternalCompleteSent = true;
+            await callExternalMissionComplete(entry.userMissionId, entry.authToken);
+        } else {
+            console.log(`[Mission] Auto /complete skipped: user=${userId} userMission=${entry.userMissionId} waypointsOk=${wpsOk} airportOk=${airportOk} arrivalAirportId=${arrivalAirportId} requiredAirportId=${requiredAirportId}`);
         }
     }
 
@@ -522,6 +516,17 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
                 flightLogId,
                 `Flight landed: ${finalDistKm}km`
             );
+            try {
+                await dbPool.execute(
+                    `INSERT INTO user_flight_stats (user_id, total_reward_points)
+                     VALUES (?, ?)
+                     ON DUPLICATE KEY UPDATE total_reward_points = total_reward_points + VALUES(total_reward_points)`,
+                    [userId, flightPoints]
+                );
+                console.log(`[Points] Flight pts +${flightPoints} added to user ${userId} (current + new)`);
+            } catch (err) {
+                console.error(`[DB] Flight reward points increment error for user ${userId}:`, err.message);
+            }
         }
     }
 
@@ -543,6 +548,11 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     entry.flightStartTime = null;
     entry.missionId = null;
     entry.userMissionId = null;
+    entry.missionArrivalAirportId = null;
+    entry.missionWaypoints = null;
+    entry.missionNextWpIndex = 0;
+    entry.missionAllWpReached = false;
+    entry.missionExternalCompleteSent = false;
     entry.aircraftRegistration = null;
     entry.aircraftType = null;
     entry.prevAlt = undefined;
@@ -624,17 +634,7 @@ async function recalculateStats(userId) {
             [userId]
         );
 
-        const [[missionPts]] = await dbPool.execute(
-            `SELECT COALESCE(SUM(m.reward_points), 0) AS pts
-             FROM user_missions um JOIN missions m ON um.mission_id = m.id
-             WHERE um.user_id = ? AND um.status = 'completed'`,
-            [userId]
-        );
-
         const flightCount = Number(flightAgg.cnt) || 0;
-        const distancePoints = Math.floor((flightAgg.dist_km || 0) * POINTS_PER_KM);
-        const landingPoints = flightCount * POINTS_PER_LANDING;
-        const totalPoints = (missionPts.pts || 0) + distancePoints + landingPoints;
 
         let favAirportId = null;
         const [favRows] = await dbPool.execute(
@@ -659,10 +659,10 @@ async function recalculateStats(userId) {
         await dbPool.execute(
             `INSERT INTO user_flight_stats
                 (user_id, total_flights, total_flight_hours, total_distance_km, total_distance_nm,
-                 total_missions_completed, total_missions_failed, total_reward_points,
+                 total_missions_completed, total_missions_failed,
                  best_landing_rate_fpm, avg_landing_rate_fpm,
                  favorite_airport_id, most_used_aircraft_id, pilot_rank, last_flight_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE
                 total_flights            = VALUES(total_flights),
                 total_flight_hours       = VALUES(total_flight_hours),
@@ -670,7 +670,6 @@ async function recalculateStats(userId) {
                 total_distance_nm        = VALUES(total_distance_nm),
                 total_missions_completed = VALUES(total_missions_completed),
                 total_missions_failed    = VALUES(total_missions_failed),
-                total_reward_points      = VALUES(total_reward_points),
                 best_landing_rate_fpm    = VALUES(best_landing_rate_fpm),
                 avg_landing_rate_fpm     = VALUES(avg_landing_rate_fpm),
                 favorite_airport_id      = VALUES(favorite_airport_id),
@@ -685,7 +684,6 @@ async function recalculateStats(userId) {
                 Math.round((flightAgg.dist_nm || 0) * 100) / 100,
                 missionAgg.completed || 0,
                 missionAgg.failed || 0,
-                totalPoints,
                 flightAgg.best_lr != null ? Math.round(flightAgg.best_lr * 100) / 100 : null,
                 flightAgg.avg_lr != null ? Math.round(flightAgg.avg_lr * 100) / 100 : null,
                 favAirportId,
@@ -693,7 +691,7 @@ async function recalculateStats(userId) {
                 rank,
             ]
         );
-        console.log(`[Stats] Recalculated for user ${userId}: ${flightCount} flights, rank=${rank}, pts=${totalPoints}`);
+        console.log(`[Stats] Recalculated for user ${userId}: ${flightCount} flights, rank=${rank}`);
         return true;
     } catch (err) {
         console.error(`[DB] recalculateStats error for user ${userId}:`, err.message);
@@ -936,34 +934,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/complete'))) {
-        const user = authenticateRequest(req);
-        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
-        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
-        const { id } = routeParams;
-        try {
-            const [rows] = await dbPool.execute(
-                `SELECT um.id, um.status, um.mission_id, m.reward_points, m.title
-                 FROM user_missions um JOIN missions m ON um.mission_id = m.id
-                 WHERE um.id = ? AND um.user_id = ?`, [id, user.id]);
-            if (!rows.length) return jsonResponse(res, 404, { error: 'User mission not found' });
-            const wasAlreadyCompleted = rows[0].status === 'completed';
-            await dbPool.execute(
-                `UPDATE user_missions SET status = 'completed', completed_at = NOW() WHERE id = ?`, [id]);
-            if (!wasAlreadyCompleted) {
-                await logPointsHistory(
-                    user.id,
-                    Number(rows[0].reward_points) || 0,
-                    POINTS_SOURCE_MISSION,
-                    Number(id),
-                    `Mission completed: ${rows[0].title || `#${rows[0].mission_id}`}`
-                );
-            }
-            await recalculateStats(user.id);
-            return jsonResponse(res, 200, { message: 'Mission completed' });
-        } catch (err) {
-            console.error('[API] PUT /api/user-missions/:id/complete error:', err.message);
-            return jsonResponse(res, 500, { error: 'Internal server error' });
-        }
+        return proxyToMainApi(`/api/user-missions/${routeParams.id}/complete`, req, res);
     }
 
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/start'))) {
@@ -1527,6 +1498,12 @@ wss.on('connection', (ws) => {
                     lastVerticalFpm: reuseFlight ? existing.lastVerticalFpm : 0,
                     missionId: reuseFlight ? existing.missionId : null,
                     userMissionId: reuseFlight ? existing.userMissionId : null,
+                    missionArrivalAirportId: reuseFlight ? existing.missionArrivalAirportId : null,
+                    missionWaypoints: reuseFlight ? existing.missionWaypoints : null,
+                    missionNextWpIndex: reuseFlight ? existing.missionNextWpIndex : 0,
+                    missionAllWpReached: reuseFlight ? existing.missionAllWpReached : false,
+                    missionExternalCompleteSent: reuseFlight ? existing.missionExternalCompleteSent : false,
+                    authToken: msg.token,
                     aircraftRegistration: reuseFlight ? existing.aircraftRegistration : null,
                     aircraftType: reuseFlight ? existing.aircraftType : null,
                     statsRecalculated: false,
@@ -1595,6 +1572,36 @@ wss.on('connection', (ws) => {
                     entry.prevLat = lat;
                     entry.prevLon = lon;
 
+                    if (
+                        entry.userMissionId &&
+                        Array.isArray(entry.missionWaypoints) &&
+                        entry.missionWaypoints.length > 0 &&
+                        !entry.missionAllWpReached
+                    ) {
+                        try {
+                            const nextIdx = entry.missionNextWpIndex || 0;
+                            if (nextIdx < entry.missionWaypoints.length) {
+                                const wp = entry.missionWaypoints[nextIdx];
+                                const distToWp = haversineNm(lat, lon, wp.lat, wp.lon);
+                                if (distToWp <= MISSION_WAYPOINT_REACH_NM) {
+                                    console.log(`[Mission] Waypoint ${nextIdx + 1}/${entry.missionWaypoints.length} reached: user=${playerId} mission=${entry.missionId} name="${wp.name || 'unnamed'}" dist=${distToWp.toFixed(2)}nm`);
+                                    entry.missionNextWpIndex = nextIdx + 1;
+                                    if (entry.missionNextWpIndex >= entry.missionWaypoints.length) {
+                                        entry.missionAllWpReached = true;
+                                        console.log(`[Mission] All waypoints reached: user=${playerId} mission=${entry.missionId} userMission=${entry.userMissionId}`);
+                                        if (!entry.missionArrivalAirportId && !entry.missionExternalCompleteSent) {
+                                            entry.missionExternalCompleteSent = true;
+                                            callExternalMissionComplete(entry.userMissionId, entry.authToken)
+                                                .catch(err => console.error(`[Mission] Inflight external /complete error: ${err.message}`));
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            console.error(`[Mission] Waypoint check error for user ${playerId}:`, err.message);
+                        }
+                    }
+
                     const nowMs = Date.now();
                     if (entry.prevAlt !== undefined && entry.lastUpdateTime) {
                         const dtSeconds = Math.max(0.01, (nowMs - entry.lastUpdateTime) / 1000);
@@ -1646,6 +1653,31 @@ wss.on('connection', (ws) => {
                                     }
                                 } catch (err) {
                                     console.error(`[DB] User mission lookup error for user ${playerId}:`, err.message);
+                                }
+
+                                try {
+                                    const [missionRows] = await dbPool.execute(
+                                        `SELECT arrival_airport_id FROM missions WHERE id = ?`,
+                                        [entry.missionId]
+                                    );
+                                    entry.missionArrivalAirportId = missionRows.length ? missionRows[0].arrival_airport_id : null;
+                                    const wpsByMission = await loadWaypointsForMissionIds([entry.missionId]);
+                                    const wps = wpsByMission.get(entry.missionId) || [];
+                                    entry.missionWaypoints = wps
+                                        .map(wp => ({
+                                            id: wp.id,
+                                            order_index: wp.order_index,
+                                            name: wp.name,
+                                            lat: Number(wp.latitude),
+                                            lon: Number(wp.longitude),
+                                        }))
+                                        .filter(wp => Number.isFinite(wp.lat) && Number.isFinite(wp.lon));
+                                    entry.missionNextWpIndex = 0;
+                                    entry.missionAllWpReached = entry.missionWaypoints.length === 0;
+                                    entry.missionExternalCompleteSent = false;
+                                    console.log(`[Mission] Tracking mission ${entry.missionId} for user ${playerId}: waypoints=${entry.missionWaypoints.length}, requiredArrivalAirportId=${entry.missionArrivalAirportId || 'none'}`);
+                                } catch (err) {
+                                    console.error(`[Mission] Tracking setup error for user ${playerId}, mission=${entry.missionId}:`, err.message);
                                 }
                             }
 
