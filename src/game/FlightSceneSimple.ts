@@ -2119,13 +2119,39 @@ export class FlightSceneSimple extends Scene3D {
                     if (shadow) shadow.addShadowCaster(m, true);
                 });
 
-                const bbW = (bb.max.x - bb.min.x) * scaleFactor;
-                const bbH = (bb.max.y - bb.min.y) * scaleFactor;
-                const bbD = (bb.max.z - bb.min.z) * scaleFactor;
+                modelPivot.computeWorldMatrix(true);
+                root.computeWorldMatrix(true);
+                meshes.forEach((m) => m.computeWorldMatrix(true));
+                const worldBB = root.getHierarchyBoundingVectors(true);
+                const planeRootMat = this.planeRoot.computeWorldMatrix(true);
+                const planeRootInv = BABYLON.Matrix.Invert(planeRootMat);
+                const bbCorners = [
+                    new BABYLON.Vector3(worldBB.min.x, worldBB.min.y, worldBB.min.z),
+                    new BABYLON.Vector3(worldBB.max.x, worldBB.min.y, worldBB.min.z),
+                    new BABYLON.Vector3(worldBB.min.x, worldBB.max.y, worldBB.min.z),
+                    new BABYLON.Vector3(worldBB.max.x, worldBB.max.y, worldBB.min.z),
+                    new BABYLON.Vector3(worldBB.min.x, worldBB.min.y, worldBB.max.z),
+                    new BABYLON.Vector3(worldBB.max.x, worldBB.min.y, worldBB.max.z),
+                    new BABYLON.Vector3(worldBB.min.x, worldBB.max.y, worldBB.max.z),
+                    new BABYLON.Vector3(worldBB.max.x, worldBB.max.y, worldBB.max.z),
+                ];
+                let localMin = BABYLON.Vector3.TransformCoordinates(bbCorners[0], planeRootInv).clone();
+                let localMax = localMin.clone();
+                for (let i = 1; i < bbCorners.length; i++) {
+                    const lc = BABYLON.Vector3.TransformCoordinates(bbCorners[i], planeRootInv);
+                    localMin = BABYLON.Vector3.Minimize(localMin, lc);
+                    localMax = BABYLON.Vector3.Maximize(localMax, lc);
+                }
+                const localCenter = localMin.add(localMax).scale(0.5);
+                const bbW = Math.abs(localMax.x - localMin.x);
+                const bbH = Math.abs(localMax.y - localMin.y);
+                const bbD = Math.abs(localMax.z - localMin.z);
+                console.debug(`[NavLights] ${cfg.code}: planeRoot-local bbox W=${bbW.toFixed(2)}m H=${bbH.toFixed(2)}m D=${bbD.toFixed(2)}m center=(${localCenter.x.toFixed(2)},${localCenter.y.toFixed(2)},${localCenter.z.toFixed(2)}) rotY=${cfg.model_rotation_y.toFixed(3)}`);
                 this._buildNavLights(scene, this.planeRoot, {
                     halfSpan: bbW / 2,
                     height: bbH,
                     halfLen: bbD / 2,
+                    center: localCenter,
                 });
 
                 if (this.camera) {
@@ -2197,19 +2223,24 @@ export class FlightSceneSimple extends Scene3D {
     private _buildNavLights(
         scene: BABYLON.Scene,
         parent: BABYLON.TransformNode,
-        dims: { halfSpan: number; height: number; halfLen: number },
+        dims: { halfSpan: number; height: number; halfLen: number; center?: BABYLON.Vector3 },
     ): void {
         const hs = dims.halfSpan * 0.97;
-        const wingY = dims.height * 0.25;
-        const wingZ = -dims.halfLen * 0.25;
-        const tailZ = -dims.halfLen * 0.92;
-        const tailY = dims.height * 0.85;
+        const cx = dims.center?.x ?? 0;
+        const cy = dims.center?.y ?? 0;
+        const cz = dims.center?.z ?? 0;
+        const halfH = dims.height * 0.5;
+        const wingY = cy - halfH * 0.5;
+        const wingZ = cz - dims.halfLen * 0.25;
+        const tailZ = cz - dims.halfLen * 0.92;
+        const tailY = cy + halfH * 0.7;
+        const bellyY = cy - halfH * 0.6;
 
         const defs: { name: string; color: BABYLON.Color3; pos: BABYLON.Vector3; strobe: boolean; intensity: number; range: number; glowSize: number }[] = [
-            { name: 'navPort',  color: new BABYLON.Color3(1, 0.05, 0.05), pos: new BABYLON.Vector3(-hs, wingY, wingZ),       strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
-            { name: 'navStbd',  color: new BABYLON.Color3(0.05, 1, 0.05), pos: new BABYLON.Vector3(hs, wingY, wingZ),        strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
-            { name: 'navTail',  color: new BABYLON.Color3(1, 1, 1),       pos: new BABYLON.Vector3(0, tailY, tailZ),          strobe: false, intensity: 30, range: 120, glowSize: 2.5 },
-            { name: 'navBelly', color: new BABYLON.Color3(1, 0.1, 0.05),  pos: new BABYLON.Vector3(0, -0.3, 0),              strobe: true,  intensity: 50, range: 250, glowSize: 4.0 },
+            { name: 'navPort',  color: new BABYLON.Color3(1, 0.05, 0.05), pos: new BABYLON.Vector3(cx - hs, wingY, wingZ),    strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
+            { name: 'navStbd',  color: new BABYLON.Color3(0.05, 1, 0.05), pos: new BABYLON.Vector3(cx + hs, wingY, wingZ),    strobe: false, intensity: 40, range: 200, glowSize: 3.5 },
+            { name: 'navTail',  color: new BABYLON.Color3(1, 1, 1),       pos: new BABYLON.Vector3(cx, tailY, tailZ),          strobe: false, intensity: 30, range: 120, glowSize: 2.5 },
+            { name: 'navBelly', color: new BABYLON.Color3(1, 0.1, 0.05),  pos: new BABYLON.Vector3(cx, bellyY, cz),            strobe: true,  intensity: 50, range: 250, glowSize: 4.0 },
         ];
 
         this._disposeNavLights();
