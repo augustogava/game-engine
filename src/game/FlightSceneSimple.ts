@@ -705,6 +705,13 @@ export class FlightSceneSimple extends Scene3D {
         this.baseZeroLiftAoA = cfg.base_zero_lift_aoa;
         this.fuelRemaining = cfg.fuel_capacity_kg;
         this.gearCompression = new Array(cfg.gear_positions.length).fill(0);
+        this._updateEngineColumnsVisibility();
+    }
+
+    private _updateEngineColumnsVisibility(): void {
+        if (!this.hudEngine2Col) return;
+        const engineCount = this.aircraftConfig?.engine_count ?? 1;
+        this.hudEngine2Col.style.display = engineCount >= 2 ? '' : 'none';
     }
 
     onCreate(scene: any, _input: InputManager): void {
@@ -3855,9 +3862,9 @@ export class FlightSceneSimple extends Scene3D {
 .hud-tape-mark-line{width:5px;height:1px;background:rgba(255,255,255,.65);flex-shrink:0}
 .hud-tape-mark-val{font-size:10px;color:rgba(255,255,255,.9);font-family:'Inter',sans-serif;font-weight:500;min-width:34px;text-align:right;letter-spacing:.5px}
 
-.hud-ticker-box{position:absolute;left:-18px;right:-18px;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:18px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:0;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 4px;white-space:nowrap;overflow:visible}
-.hud-ticker-static{display:inline-block;line-height:1}
-.hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;overflow:hidden;vertical-align:bottom}
+.hud-ticker-box{position:absolute;left:-6px;right:-6px;top:50%;transform:translateY(-50%);height:30px;background:rgba(0,0,0,.92);border:1px solid rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-family:'Orbitron',monospace;font-weight:700;font-size:18px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);letter-spacing:0;pointer-events:none;z-index:5;box-shadow:0 0 6px rgba(0,0,0,.6);line-height:1;padding:0 3px;white-space:nowrap;overflow:visible;font-variant-numeric:tabular-nums}
+.hud-ticker-static{display:inline-block;line-height:1;width:.62em;text-align:center}
+.hud-ticker-rolling{position:relative;display:inline-block;height:1em;width:.62em;overflow:hidden;vertical-align:top}
 .hud-ticker-rolling-inner{position:absolute;left:0;top:0;display:flex;flex-direction:column;line-height:1;transition:transform .12s linear}
 .hud-ticker-rolling-inner span{display:block;height:1em;text-align:center;width:.62em}
 .hud-ticker-small{font-size:.7em;opacity:.9;margin-left:2px;display:inline-flex;align-items:baseline}
@@ -3931,7 +3938,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom right}
 .hud-tape-wrapper{height:140px!important;width:60px!important}
 .hud-vs-strip{height:140px!important}
-.hud-ticker-box{height:26px!important;font-size:15px!important;left:-16px!important;right:-16px!important}
+.hud-ticker-box{height:26px!important;font-size:15px!important;left:-6px!important;right:-6px!important}
 .hud-value-main{font-size:18px!important}
 .hud-rpm-gauge{width:48px!important;height:48px!important}
 .hud-rpm-needle{height:18px!important}
@@ -3952,7 +3959,7 @@ export class FlightSceneSimple extends Scene3D {
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom right}
 .hud-tape-wrapper{height:110px!important;width:56px!important}
 .hud-vs-strip{height:110px!important;width:30px!important}
-.hud-ticker-box{height:22px!important;font-size:13px!important;left:-14px!important;right:-14px!important}
+.hud-ticker-box{height:22px!important;font-size:13px!important;left:-4px!important;right:-4px!important}
 .hud-value-main{font-size:16px!important}
 .hud-vs-scale span:not(.hud-vs-scale-zero){visibility:hidden}
 #h-online{display:none!important}
@@ -4262,10 +4269,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudRpmNeedle2  = document.getElementById('hud-rpm-needle2');
         this.hudEng1Pct     = document.getElementById('hud-eng1-pct');
         this.hudEng2Pct     = document.getElementById('hud-eng2-pct');
-        if (this.hudEngine2Col) {
-            const engineCount = this.aircraftConfig?.engine_count ?? 1;
-            this.hudEngine2Col.style.display = engineCount >= 2 ? '' : 'none';
-        }
+        this._updateEngineColumnsVisibility();
         this.hudUtc      = document.getElementById('hud-utc')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
         this.mapHeadingCanvas = document.getElementById('gps-map-hdg') as HTMLCanvasElement;
@@ -4947,7 +4951,7 @@ export class FlightSceneSimple extends Scene3D {
                 const borderColor = selected ? 'rgba(80,255,160,.6)' : owned ? 'rgba(80,255,160,.25)' : 'rgba(255,255,255,.1)';
                 const bg = selected ? 'rgba(0,40,30,.6)' : 'rgba(0,20,15,.4)';
                 const catLabel = categories[ac.category] || 'UNKNOWN';
-                const priceLabel = ac.price > 0 ? `${ac.price} pts` : 'FREE';
+                const priceLabel = ac.price > 0 ? `$${ac.price}` : 'FREE';
                 const actionBtn = selected
                     ? '<span style="color:#40ffaa;font-size:9px;letter-spacing:.1em">SELECTED</span>'
                     : owned
@@ -4972,22 +4976,13 @@ export class FlightSceneSimple extends Scene3D {
             });
 
             listEl.querySelectorAll('[data-acquire-aircraft]').forEach((el) => {
-                el.addEventListener('click', async (e) => {
-                    const aircraftId = Number((e.currentTarget as HTMLElement).getAttribute('data-acquire-aircraft'));
+                el.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     try {
-                        const resp = await fetch(`/api/user-aircrafts/${aircraftId}/acquire`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ payment_method: 'points' }),
-                        });
-                        if (resp.ok) {
-                            this._loadAircraftList();
-                        } else {
-                            const err = await resp.json();
-                            console.error('[Aircraft] Acquire failed:', err.error);
-                        }
+                        window.open('https://simflightpro.com/aircrafts', '_blank', 'noopener,noreferrer');
                     } catch (err) {
-                        console.error('[Aircraft] Acquire error:', err);
+                        console.error('[Aircraft] Failed to open store URL', err);
                     }
                 });
             });
