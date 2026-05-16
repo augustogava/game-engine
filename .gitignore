@@ -42,6 +42,10 @@ desktop.ini
 .cache/
 .temp/
 *.map
+
+# ---- Blender ----
+*.blend
+*.blend1
 assets/Aircraft-Physics-master.zip
 assets/Aircraft-Physics-master/.gitattributes
 assets/Aircraft-Physics-master/.gitignore
