@@ -60,6 +60,11 @@ export class ShooterScene extends Scene {
     private bgMid: { w: number, h: number, type: number }[] = [];
     private stars: { x: number, y: number, r: number }[] = [];
 
+    override onExit(): void {
+        super.onExit();
+        try { this.sfx.dispose(); } catch (err) { console.warn('[ShooterScene] sfx dispose failed:', err); }
+    }
+
     override onEnter(ctx: SceneContext): void {
         super.onEnter(ctx);
 

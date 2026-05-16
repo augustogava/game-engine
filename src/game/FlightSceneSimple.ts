@@ -301,6 +301,7 @@ interface RemotePlayer {
 }
 
 const G_ACCEL          = 9.81;
+const GEAR_SPRING_K_MIN_N_PER_M = 1000;
 const ANGULAR_DAMPING  = 0.5;
 const GROUND_Y         = 6;
 const CRASH_VS_THRESHOLD_MS = -12;
@@ -452,6 +453,11 @@ export class FlightSceneSimple extends Scene3D {
     private _lastOverGState = false;
     private _userGestureSeen = false;
     private _userGestureListener: (() => void) | null = null;
+    private _disposed = false;
+    private _pendingTimeouts = new Set<number>();
+    private _dbgKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
+    private _mapImgLoadHandler: (() => void) | null = null;
+    private _mapImgErrorHandler: ((ev: Event) => void) | null = null;
     private _lastCameraCycleMs = 0;
     private camera!: BABYLON.ArcRotateCamera;
     private surfaces: AeroSurface[] = [];
@@ -741,6 +747,10 @@ export class FlightSceneSimple extends Scene3D {
         const initialModelFile = DEFAULT_AIRCRAFT_CONFIG.model_file;
 
         fetchSelectedAircraftConfig().then((cfg) => {
+            if (this._disposed || !this.scene) {
+                console.debug('[Aircraft] Discarding async config fetch — scene disposed');
+                return;
+            }
             this._applyAircraftConfig(cfg);
             this._initSurfaces();
             if (cfg.model_file !== initialModelFile && this.planeRoot) {
@@ -765,6 +775,8 @@ export class FlightSceneSimple extends Scene3D {
                 console.log(`[FlightSimple] Initial spawn re-applied with active config (${cfg.code}) after async fetch`);
             }
             console.log(`[Aircraft] Loaded: ${cfg.name} (${cfg.code})`);
+        }).catch((err) => {
+            console.warn('[Aircraft] fetchSelectedAircraftConfig failed:', err);
         });
 
         this._initSurfaces();
@@ -889,6 +901,13 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     onDispose(): void {
+        this._disposed = true;
+        this._clearAllPendingTimeouts();
+        if (this._dbgKeydownHandler) {
+            try { window.removeEventListener('keydown', this._dbgKeydownHandler); } catch (_) { /* ignore */ }
+            this._dbgKeydownHandler = null;
+        }
+        this._removeMapImgListeners();
         document.getElementById('flight-hud')?.remove();
         document.getElementById('dbg-panel')?.remove();
         
@@ -1541,14 +1560,16 @@ export class FlightSceneSimple extends Scene3D {
             document.body.appendChild(toast);
 
             requestAnimationFrame(() => {
+                if (this._disposed || !toast.isConnected) return;
                 toast.style.opacity = '1';
                 toast.style.transform = 'translateX(-50%) translateY(0)';
             });
 
-            window.setTimeout(() => {
+            this._safeSetTimeout(() => {
+                if (!toast.isConnected) return;
                 toast.style.opacity = '0';
                 toast.style.transform = 'translateX(-50%) translateY(-12px)';
-                window.setTimeout(() => {
+                this._safeSetTimeout(() => {
                     if (toast.parentElement) toast.parentElement.removeChild(toast);
                 }, MISSION_TOAST_FADE_MS);
             }, MISSION_TOAST_VISIBLE_MS);
@@ -2044,6 +2065,14 @@ export class FlightSceneSimple extends Scene3D {
             '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[], _ps: BABYLON.IParticleSystem[], _sk: BABYLON.Skeleton[], animationGroups: BABYLON.AnimationGroup[]) => {
                 if (!meshes.length) return;
+                if (this._disposed || !this.scene || !this.planeRoot) {
+                    console.log(`[FlightSimple] Discarding model load (${cfg.code}) — scene disposed.`);
+                    meshes.forEach((m) => { try { m.dispose(); } catch (_) { /* ignore */ } });
+                    if (animationGroups && animationGroups.length) {
+                        animationGroups.forEach((g) => { try { g.dispose(); } catch (_) { /* ignore */ } });
+                    }
+                    return;
+                }
                 if (myVersion !== this._modelLoadVersion) {
                     console.log(`[FlightSimple] Discarding stale model load (${cfg.code}) — newer load in progress.`);
                     meshes.forEach((m) => m.dispose());
@@ -2116,7 +2145,8 @@ export class FlightSceneSimple extends Scene3D {
                     : 0;
                 const nGears = Math.max(1, cfg.gear_positions.length);
                 const sitMass = cfg.mass_kg + (cfg.fuel_capacity_kg || 0);
-                const staticGearComp = (sitMass * G_ACCEL) / (nGears * cfg.gear_spring_k);
+                const safeSpringK = Math.max(GEAR_SPRING_K_MIN_N_PER_M, Number.isFinite(cfg.gear_spring_k) ? cfg.gear_spring_k : 0);
+                const staticGearComp = (sitMass * G_ACCEL) / (nGears * safeSpringK);
                 const offset = center.negate();
                 offset.y = -bb.min.y + (gearMinY + staticGearComp) / scaleFactor;
                 root.position = offset;
@@ -2633,7 +2663,7 @@ export class FlightSceneSimple extends Scene3D {
             if (cfg.renderScale !== undefined) setVal('gfx-render-scale', Math.round(cfg.renderScale * 100));
             setVal('gfx-fps-limit', cfg.fpsLimit);
             if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
-            setTimeout(() => applySettings(), 100);
+            this._safeSetTimeout(() => applySettings(), 100);
         }
 
         const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit'];
@@ -3131,7 +3161,8 @@ export class FlightSceneSimple extends Scene3D {
         if (this._crashOverlayEl) this._crashOverlayEl.style.display = 'block';
         console.log('[Crash] Ground impact detected — respawning in 3s');
         const RESPAWN_DELAY_MS = 3000;
-        setTimeout(() => {
+        this._safeSetTimeout(() => {
+            if (!this.planeRoot) return;
             if (this._crashOverlayEl) this._crashOverlayEl.style.display = 'none';
             this._crashed = false;
             this._spawnPlane();
@@ -3237,12 +3268,13 @@ export class FlightSceneSimple extends Scene3D {
             } catch (err) {
                 console.warn('[Cinematic] onSpawned callback failed:', err);
             }
-            setTimeout(() => {
+            this._safeSetTimeout(() => {
                 this._cinematicActive = false;
                 this._setCameraMode(CAMERA_MODE_CHASE);
                 this._hudFadeStartMs = performance.now();
                 this._hudFadeActive = true;
-                if (hudEl) hudEl.style.opacity = '0.85';
+                const liveHudEl = document.getElementById('flight-hud');
+                if (liveHudEl) liveHudEl.style.opacity = '0.85';
                 console.log('[Cinematic] Completed, HUD fade-in started');
             }, CINEMATIC_DURATION_MS);
         }
@@ -3549,9 +3581,10 @@ export class FlightSceneSimple extends Scene3D {
                 if (maxBury > GEAR_MAX_TRAVEL_M) {
                     const nGearsSnap = Math.max(1, cfg.gear_positions.length);
                     const sitMassSnap = cfg.mass_kg + (this.fuelRemaining || 0);
+                    const safeSpringKSnap = Math.max(GEAR_SPRING_K_MIN_N_PER_M, Number.isFinite(cfg.gear_spring_k) ? cfg.gear_spring_k : 0);
                     const eqComp = Math.min(
                         GEAR_MAX_TRAVEL_M * 0.5,
-                        (sitMassSnap * G_ACCEL) / (nGearsSnap * cfg.gear_spring_k),
+                        (sitMassSnap * G_ACCEL) / (nGearsSnap * safeSpringKSnap),
                     );
                     pos.y += (maxBury - eqComp);
                     if (this.velocity.y < 0) this.velocity.y = 0;
@@ -5262,20 +5295,33 @@ export class FlightSceneSimple extends Scene3D {
 
         panel.classList.add('hidden');
 
-        window.addEventListener('keydown', (e: KeyboardEvent) => {
-            if (e.shiftKey && e.code === 'KeyD') {
-                panel.classList.toggle('hidden');
-            }
-        });
+        if (!this._dbgKeydownHandler) {
+            this._dbgKeydownHandler = (e: KeyboardEvent) => {
+                if (this._disposed) return;
+                if (e.shiftKey && e.code === 'KeyD') {
+                    panel.classList.toggle('hidden');
+                }
+            };
+            window.addEventListener('keydown', this._dbgKeydownHandler);
+        }
 
         document.getElementById('dbg-cr')!.addEventListener('input', (e: any) => {
             const v = parseFloat(e.target.value);
+            if (!Number.isFinite(v)) {
+                console.warn('[Debug] dbg-cr ignored: non-finite value');
+                return;
+            }
             if (this.camera) this.camera.radius = v;
             document.getElementById('dbg-crv')!.textContent = String(v);
         });
 
         document.getElementById('dbg-cb')!.addEventListener('input', (e: any) => {
-            const v = parseFloat(e.target.value) / 100;
+            const raw = parseFloat(e.target.value);
+            if (!Number.isFinite(raw)) {
+                console.warn('[Debug] dbg-cb ignored: non-finite value');
+                return;
+            }
+            const v = raw / 100;
             if (this.camera) this.camera.beta = v;
             document.getElementById('dbg-cbv')!.textContent = v.toFixed(2);
         });
@@ -5321,7 +5367,8 @@ export class FlightSceneSimple extends Scene3D {
     private _getCurrentLatLon(): { lat: number; lon: number; hdg: number } {
         const pos = this.planeRoot.position;
         const metersPerDegLat = 111320;
-        const metersPerDegLon = 111320 * Math.cos(this.originLat * Math.PI / 180);
+        const cosLatClamped = Math.max(0.001, Math.abs(Math.cos(this.originLat * Math.PI / 180)));
+        const metersPerDegLon = 111320 * cosLatClamped;
         const lat = this.originLat - pos.z / metersPerDegLat;
         const lon = this.originLon + pos.x / metersPerDegLon;
 
@@ -5628,6 +5675,28 @@ export class FlightSceneSimple extends Scene3D {
         this._userGestureListener = null;
     }
 
+    private _safeSetTimeout(cb: () => void, ms: number): number {
+        if (this._disposed) return 0;
+        const id = window.setTimeout(() => {
+            this._pendingTimeouts.delete(id);
+            if (this._disposed) return;
+            try {
+                cb();
+            } catch (err) {
+                console.warn('[Timer] Scheduled callback failed:', err);
+            }
+        }, ms);
+        this._pendingTimeouts.add(id);
+        return id;
+    }
+
+    private _clearAllPendingTimeouts(): void {
+        for (const id of this._pendingTimeouts) {
+            try { window.clearTimeout(id); } catch (_) { /* ignore */ }
+        }
+        this._pendingTimeouts.clear();
+    }
+
     private static readonly GPS_POS_STORAGE_KEY = 'gps-map-pos-v1';
     private static readonly GPS_DRAG_VIEWPORT_MARGIN_PX = 4;
 
@@ -5805,22 +5874,42 @@ export class FlightSceneSimple extends Scene3D {
         if (this._mapImgListenersAttached || !this.mapImg) return;
         this._mapImgListenersAttached = true;
         try {
-            this.mapImg.addEventListener('load', () => {
+            this._mapImgLoadHandler = () => {
+                if (this._disposed) return;
                 if (!this._mapImgPending) return;
                 this._mapImgLat = this._mapImgPendingLat;
                 this._mapImgLon = this._mapImgPendingLon;
                 this._mapImgValid = true;
                 this._mapImgPending = false;
-            });
-            this.mapImg.addEventListener('error', (ev) => {
+            };
+            this._mapImgErrorHandler = (ev: Event) => {
+                if (this._disposed) return;
                 if (!this._mapImgPending) return;
                 this._mapImgPending = false;
                 this.mapLastUpdate = 0;
                 console.warn('[GPS] Map tile load failed; will retry on next update', ev);
-            });
+            };
+            this.mapImg.addEventListener('load', this._mapImgLoadHandler);
+            this.mapImg.addEventListener('error', this._mapImgErrorHandler);
         } catch (err) {
             console.warn('[GPS] Failed to attach map image listeners:', err);
         }
+    }
+
+    private _removeMapImgListeners(): void {
+        try {
+            if (this.mapImg && this._mapImgLoadHandler) {
+                this.mapImg.removeEventListener('load', this._mapImgLoadHandler);
+            }
+            if (this.mapImg && this._mapImgErrorHandler) {
+                this.mapImg.removeEventListener('error', this._mapImgErrorHandler);
+            }
+        } catch (err) {
+            console.warn('[GPS] Failed to remove map image listeners:', err);
+        }
+        this._mapImgLoadHandler = null;
+        this._mapImgErrorHandler = null;
+        this._mapImgListenersAttached = false;
     }
 
     private _updateMap(): void {

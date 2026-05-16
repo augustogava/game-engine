@@ -5,21 +5,49 @@
 export class AudioSynthesizer {
     private ctx: AudioContext | null = null;
     private enabled = false;
+    private initAudioHandler: (() => void) | null = null;
+    private disposed = false;
 
     constructor() {
-        // Init AudioContext on first interaction
         const initAudio = () => {
-            if (!this.ctx) {
-                this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-                this.enabled = true;
-            } else if (this.ctx.state === 'suspended') {
-                this.ctx.resume();
+            if (this.disposed) return;
+            try {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                    this.enabled = true;
+                } else if (this.ctx.state === 'suspended') {
+                    this.ctx.resume().catch((err) => console.warn('[AudioSynthesizer] resume failed:', err));
+                }
+            } catch (err) {
+                console.warn('[AudioSynthesizer] initAudio failed:', err);
             }
-            window.removeEventListener('click', initAudio);
-            window.removeEventListener('keydown', initAudio);
+            this.removeInitListeners();
         };
+        this.initAudioHandler = initAudio;
         window.addEventListener('click', initAudio);
         window.addEventListener('keydown', initAudio);
+    }
+
+    private removeInitListeners() {
+        if (!this.initAudioHandler) return;
+        try { window.removeEventListener('click', this.initAudioHandler); } catch (_) { /* ignore */ }
+        try { window.removeEventListener('keydown', this.initAudioHandler); } catch (_) { /* ignore */ }
+        this.initAudioHandler = null;
+    }
+
+    public dispose() {
+        if (this.disposed) return;
+        this.disposed = true;
+        this.removeInitListeners();
+        try {
+            if (this.ctx && this.ctx.state !== 'closed') {
+                this.ctx.close().catch((err) => console.warn('[AudioSynthesizer] close failed:', err));
+            }
+        } catch (err) {
+            console.warn('[AudioSynthesizer] dispose failed:', err);
+        }
+        this.ctx = null;
+        this.enabled = false;
     }
 
     public playShoot() {
