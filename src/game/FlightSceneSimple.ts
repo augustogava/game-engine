@@ -208,6 +208,7 @@ interface AircraftConfig {
     mach_lapse_coef?: number;
     mach_lapse_floor?: number;
     transonic_cd0_factor?: number;
+    control_q_reference_pa?: number | null;
 }
 
 const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
@@ -2821,8 +2822,11 @@ export class FlightSceneSimple extends Scene3D {
                 const altitudeForQ = this.planeRoot.position.y;
                 const airDensityHere = getAirDensity(altitudeForQ);
                 const dynamicPressure = 0.5 * airDensityHere * speedSq;
-                if (dynamicPressure > CONTROL_Q_REFERENCE_PA) {
-                    const qScale = Math.sqrt(CONTROL_Q_REFERENCE_PA / dynamicPressure);
+                const qRef = (this.aircraftConfig.control_q_reference_pa != null && this.aircraftConfig.control_q_reference_pa > 0)
+                    ? this.aircraftConfig.control_q_reference_pa
+                    : CONTROL_Q_REFERENCE_PA;
+                if (dynamicPressure > qRef) {
+                    const qScale = Math.sqrt(qRef / dynamicPressure);
                     this.surfaces[0].controlInput *= qScale;
                     this.surfaces[1].controlInput *= qScale;
                     this.surfaces[2].controlInput *= qScale;
