@@ -101,6 +101,10 @@ const CINEMATIC_INITIAL_RADIUS_M = 120;
 const HUD_FADE_IN_MS = 1000;
 const ENGINE_SOUND_FADE_IN_MS = 3000;
 
+// ── Mission-complete toast ──────────────────────────────────────────────────
+const MISSION_TOAST_VISIBLE_MS = 5000;
+const MISSION_TOAST_FADE_MS = 400;
+
 // ── Joystick / mobile controls (F8/F9/F10) ─────────────────────────────────
 const JOYSTICK_DEFAULT_RADIUS_PX = 80;
 const JOYSTICK_DEFAULT_DEADZONE_NORM = 0.08;
@@ -1427,6 +1431,7 @@ export class FlightSceneSimple extends Scene3D {
         const umId = this._activeUserMissionId;
         if (!umId || this._completedUserMissionIds.has(umId) || this._missionCompletionInFlight) return;
         this._missionCompletionInFlight = true;
+        const completedTitle = this._activeMission?.mission_title || '';
         try {
             const token = localStorage.getItem('auth_token') || '';
             const res = await fetch(`/api/user-missions/${umId}/complete`, {
@@ -1440,6 +1445,7 @@ export class FlightSceneSimple extends Scene3D {
                 this._activeUserMissionId = null;
                 this._activeMission = null;
                 this._missionWaypoints = [];
+                this._showMissionCompleteToast(completedTitle);
                 this._loadMissions();
             } else {
                 console.warn(`[Mission] Complete failed: HTTP ${res.status}`);
@@ -1448,6 +1454,86 @@ export class FlightSceneSimple extends Scene3D {
             console.error('[Mission] Complete error:', err);
         } finally {
             this._missionCompletionInFlight = false;
+        }
+    }
+
+    private _showMissionCompleteToast(missionTitle: string): void {
+        try {
+            if (typeof document === 'undefined' || !document.body) {
+                console.warn('[Mission] Toast skipped: document or body unavailable');
+                return;
+            }
+            const existing = document.getElementById('mission-complete-toast');
+            if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
+
+            const toast = document.createElement('div');
+            toast.id = 'mission-complete-toast';
+            const safeTitle = String(missionTitle ?? '').replace(/[<>&"']/g, (ch) => ({
+                '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
+            } as Record<string, string>)[ch] || ch);
+            toast.innerHTML = `
+                <div class="mct-card">
+                    <div class="mct-title">MISSÃO CONCLUÍDA</div>
+                    ${safeTitle ? `<div class="mct-sub">${safeTitle}</div>` : ''}
+                </div>
+            `;
+            toast.style.cssText = [
+                'position:fixed',
+                'top:80px',
+                'left:50%',
+                'transform:translateX(-50%) translateY(-12px)',
+                'z-index:10000',
+                'pointer-events:none',
+                'opacity:0',
+                `transition:opacity ${MISSION_TOAST_FADE_MS}ms ease, transform ${MISSION_TOAST_FADE_MS}ms ease`,
+                'font-family:Orbitron,monospace',
+            ].join(';');
+
+            const style = document.createElement('style');
+            style.textContent = `
+                #mission-complete-toast .mct-card {
+                    background: linear-gradient(180deg, rgba(0,40,20,0.92), rgba(0,20,10,0.92));
+                    border: 1px solid rgba(0,255,128,0.7);
+                    border-radius: 8px;
+                    padding: 14px 28px;
+                    color: #79ffaa;
+                    text-align: center;
+                    box-shadow: 0 4px 24px rgba(0,255,128,0.25), 0 0 40px rgba(0,255,128,0.15);
+                    min-width: 240px;
+                }
+                #mission-complete-toast .mct-title {
+                    font-size: 18px;
+                    font-weight: 700;
+                    letter-spacing: 0.18em;
+                    text-shadow: 0 0 10px rgba(0,255,128,0.6);
+                }
+                #mission-complete-toast .mct-sub {
+                    font-family: Inter, sans-serif;
+                    font-size: 12px;
+                    color: rgba(255,255,255,0.85);
+                    margin-top: 6px;
+                    letter-spacing: 0.04em;
+                }
+            `;
+            toast.appendChild(style);
+            document.body.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateX(-50%) translateY(0)';
+            });
+
+            window.setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(-12px)';
+                window.setTimeout(() => {
+                    if (toast.parentElement) toast.parentElement.removeChild(toast);
+                }, MISSION_TOAST_FADE_MS);
+            }, MISSION_TOAST_VISIBLE_MS);
+
+            try { this._doHaptic([60, 60, 120]); } catch { /* ignore */ }
+        } catch (err) {
+            console.warn('[Mission] Failed to show completion toast:', err);
         }
     }
 
