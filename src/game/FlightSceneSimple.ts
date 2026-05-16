@@ -52,7 +52,9 @@ const FT_TO_M = 0.3048;
 const METERS_PER_DEG_LAT = 111320;
 const RUNWAY_DEFAULT_WIDTH_FT = 148;
 const RUNWAY_COLLIDER_RADIUS_KM = 10;
-const RUNWAY_COLLIDER_Y_BIAS_M = 0.1;
+const RUNWAY_COLLIDER_Y_BIAS_M = 0.5;
+const RUNWAY_COLLIDER_ALPHA = 0.85;
+const RUNWAY_COLLIDER_DIFFUSE = { r: 0.12, g: 0.12, b: 0.13 };
 const CAMERA_RADIUS_LENGTH_FACTOR = 3;
 const CAMERA_RADIUS_MIN_M = 15;
 const CAMERA_RADIUS_MAX_M = 65;
@@ -2360,10 +2362,21 @@ export class FlightSceneSimple extends Scene3D {
         mesh.position.set(sceneX, sceneY, sceneZ);
         mesh.rotation.x = Math.PI / 2;
         mesh.rotation.y = (180 - Number(r.le_heading_deg_true)) * Math.PI / 180;
-        mesh.isVisible = false;
+        mesh.isVisible = true;
         mesh.isPickable = true;
         mesh.checkCollisions = false;
+        mesh.receiveShadows = true;
         mesh.metadata = { type: 'runway-collider', icao, leIdent: r.le_ident, heIdent: r.he_ident };
+
+        const mat = new BABYLON.StandardMaterial(name + 'Mat', this.scene);
+        mat.diffuseColor = new BABYLON.Color3(RUNWAY_COLLIDER_DIFFUSE.r, RUNWAY_COLLIDER_DIFFUSE.g, RUNWAY_COLLIDER_DIFFUSE.b);
+        mat.specularColor = BABYLON.Color3.Black();
+        mat.emissiveColor = BABYLON.Color3.Black();
+        mat.alpha = RUNWAY_COLLIDER_ALPHA;
+        mat.backFaceCulling = false;
+        mat.freeze();
+        mesh.material = mat;
+
         mesh.computeWorldMatrix(true);
         mesh.freezeWorldMatrix();
 
