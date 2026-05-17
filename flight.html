@@ -743,7 +743,9 @@
         window.addEventListener('keydown', onFirstInput, true);
 
         window.addEventListener('keydown', (e) => {
-            if (e.code === 'KeyH' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+            const isToggleKey = (e.code === 'KeyH' || e.code === 'Slash')
+                && !e.shiftKey && !e.ctrlKey && !e.altKey;
+            if (isToggleKey) {
                 toggleKeysHelper();
             }
         });

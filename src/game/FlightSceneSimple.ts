@@ -77,9 +77,19 @@ const NAV_ANTICOL_PERIOD_S       = 0.7;
 const NAV_ANTICOL_ON_FRAC        = 0.10;
 const FT_TO_M = 0.3048;
 const METERS_PER_DEG_LAT = 111320;
+
+// Magnetic variation polynomial approximation (Bowditch-like, ~ ±2 deg accuracy)
+// East-positive: trueHdg = magHdg + magVar
+const MAGVAR_C0 = -1.3;
+const MAGVAR_C_LON  = 0.10;
+const MAGVAR_C_LAT  = 0.04;
+const MAGVAR_C_LON2 = -0.0008;
+const MAGVAR_C_LAT2 = -0.0004;
+const MAGVAR_C_LONLAT = 0.0005;
 const RUNWAY_DEFAULT_WIDTH_FT = 148;
 const RUNWAY_COLLIDER_RADIUS_KM = 10;
 const RUNWAY_COLLIDER_Y_BIAS_M = 0.5;
+const RUNWAY_RENDERING_GROUP_ID = 1;
 const RUNWAY_COLLIDER_ALPHA = 0.85;
 const RUNWAY_COLLIDER_DIFFUSE = { r: 0.12, g: 0.12, b: 0.13 };
 const CAMERA_RADIUS_LENGTH_FACTOR = 3;
@@ -123,6 +133,12 @@ const KT_TO_MS = 0.514444;
 const MS_TO_KT = 1.943844;
 const STALL_AOA_WARNING_FRACTION = 0.9;
 
+// Spoilers / speedbrakes
+const SPOILER_DEFAULT_DRAG_CD = 0.06;
+const SPOILER_DEFAULT_LIFT_LOSS = 0.35;
+const SPOILER_DEPLOY_RATE_PER_S = 1.5;
+const SPOILER_RETRACT_RATE_PER_S = 2.5;
+
 // Wind turbulence (Dryden-lite, altitude-faded)
 const TURB_FULL_AGL_M = 200;
 const TURB_FADE_AGL_M = 3000;
@@ -138,6 +154,19 @@ const SPOOL_TAU_JET_S = 4.0;
 // Vne / overspeed
 const VNE_FALLBACK_MULT_OF_STALL = 4.0;
 const OVERSPEED_CLACKER_INTERVAL_MS = 250;
+const AIRCRAFT_CATEGORY_LIGHT = 0;
+const AIRCRAFT_CATEGORY_TURBOPROP = 1;
+const AIRCRAFT_CATEGORY_JET = 2;
+const AIRCRAFT_CATEGORY_HEAVY_JET = 3;
+const AIRCRAFT_CATEGORY_MILITARY = 4;
+const MMO_FALLBACK_BY_CATEGORY: Record<number, number> = {
+    [AIRCRAFT_CATEGORY_LIGHT]: 0.32,
+    [AIRCRAFT_CATEGORY_TURBOPROP]: 0.55,
+    [AIRCRAFT_CATEGORY_JET]: 0.82,
+    [AIRCRAFT_CATEGORY_HEAVY_JET]: 0.86,
+    [AIRCRAFT_CATEGORY_MILITARY]: 0.92,
+};
+const MMO_FALLBACK_DEFAULT = 0.85;
 
 // GPWS callouts (descending only, in ft)
 const GPWS_CALLOUT_FT = [500, 200, 100, 50, 40, 30, 20, 10];
@@ -149,6 +178,30 @@ const GPWS_ALERT_DURATION_MS = 1500;
 const GPWS_ALERT_TYPE_CALLOUT = 1;
 const GPWS_ALERT_TYPE_SINK = 2;
 const GPWS_ALERT_TYPE_PULL_UP = 3;
+
+// Vapor cone / heat haze / motion blur / lens flare occlusion
+const VAPOR_CONE_MACH_MIN = 0.95;
+const VAPOR_CONE_MACH_MAX = 1.05;
+const VAPOR_CONE_MAX_RATE = 400;
+const HEAT_HAZE_MAX_RATE  = 60;
+const FLARE_OCCLUSION_CHECK_INTERVAL_MS = 100;
+const FLARE_OCCLUSION_SUN_DISTANCE_M = 5000;
+const MOTION_BLUR_TRIGGER_G = 2.0;
+const MOTION_BLUR_MAX_STRENGTH = 1.0;
+const MOTION_BLUR_SAMPLES = 16;
+const COLOR_GRADE_NIGHT_TINT_R = 0.85;
+const COLOR_GRADE_NIGHT_TINT_G = 0.92;
+const COLOR_GRADE_NIGHT_TINT_B = 1.05;
+const COLOR_GRADE_SUNSET_TINT_R = 1.10;
+const COLOR_GRADE_SUNSET_TINT_G = 0.96;
+const COLOR_GRADE_SUNSET_TINT_B = 0.82;
+const COLOR_GRADE_DAY_TINT_R = 1.0;
+const COLOR_GRADE_DAY_TINT_G = 1.0;
+const COLOR_GRADE_DAY_TINT_B = 1.0;
+const COLOR_GRADE_CONTRAST_NIGHT = 1.15;
+const COLOR_GRADE_CONTRAST_DAY   = 1.08;
+const COLOR_GRADE_SATURATION_NIGHT = 0.85;
+const COLOR_GRADE_SATURATION_DAY   = 1.05;
 
 // Water
 const WATER_PLANE_SIZE_M = 200_000;
@@ -164,6 +217,8 @@ const WATER_COLOR_G = 0.20;
 const WATER_COLOR_B = 0.32;
 const WATER_COLOR_BLEND = 0.4;
 
+const AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS = 4;
+
 // Autopilot
 const AP_HDG_MAX_BANK_DEG = 25;
 const AP_HDG_BANK_GAIN = 0.06;
@@ -171,6 +226,13 @@ const AP_HDG_ROLL_RATE_GAIN = 0.6;
 const AP_ALT_PITCH_GAIN = 0.0009;
 const AP_ALT_PITCH_MAX = 0.18;
 const AP_ALT_VS_DAMP_GAIN = 0.00015;
+const AP_VS_PITCH_GAIN = 0.0006;
+const AP_VS_PITCH_MAX = 0.18;
+const AP_VS_DEFAULT_FPM = 500;
+const AP_NAV_XTE_DEG_PER_NM = 6;
+const AP_NAV_MAX_INTERCEPT_DEG = 45;
+const AP_APR_GLIDESLOPE_DEG = 3;
+const AP_APR_MIN_ALT_FT = 0;
 const AP_INPUT_DISENGAGE_THRESHOLD = 0.25;
 
 // ── Camera modes (P3) ───────────────────────────────────────────────────────
@@ -274,6 +336,8 @@ const CLOUD_DENSITY_MULT_LOW = 0.5;
 const CLOUD_DENSITY_MULT_MEDIUM = 1.0;
 const CLOUD_DENSITY_MULT_HIGH = 2.0;
 const CLOUD_DENSITY_MULT_ULTRA = 3.0;
+const CLOUD_VOLUMETRIC_PUFFS_PER_CLUSTER = 5;
+const CLOUD_VOLUMETRIC_PUFF_JITTER = 0.35;
 const OVERCAST_DECK_Y_M = 7500;
 const OVERCAST_DECK_SIZE_M = 60000;
 const OVERCAST_DECK_ALPHA = 0.55;
@@ -361,6 +425,10 @@ interface AircraftConfig {
     control_input_magnitude?: number | null;
     control_smoothing_rate?: number | null;
     vne_kts?: number | null;
+    mmo?: number | null;
+    spoiler_drag_cd?: number | null;
+    spoiler_lift_loss?: number | null;
+    ground_spoilers_auto?: boolean | null;
 }
 
 const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
@@ -865,11 +933,27 @@ export class FlightSceneSimple extends Scene3D {
     private _autopilotMaster: boolean = false;
     private _autopilotHdgHold: boolean = false;
     private _autopilotAltHold: boolean = false;
+    private _autopilotVsHold:  boolean = false;
+    private _autopilotNavHold: boolean = false;
+    private _autopilotAprHold: boolean = false;
     private _autopilotTargetHdgDeg: number = 0;
     private _autopilotTargetAltFt: number = 0;
+    private _autopilotTargetVsFpm:  number = 0;
     private _apKeyLockMaster = false;
     private _apKeyLockHdg = false;
     private _apKeyLockAlt = false;
+    private _apKeyLockVs  = false;
+    private _apKeyLockNav = false;
+    private _apKeyLockApr = false;
+    private _spoilerTarget: number = 0;
+    private _spoilerDeflection: number = 0;
+    private _spoilerKeyLock = false;
+    private _spoilerArmed = false;
+    private _engineAlive: boolean[] = [];
+    private _killEngineKeyLock: boolean[] = [false, false, false, false];
+    private _trimWheelTarget: number = 0;
+    private _trimKeyLockPgUp = false;
+    private _trimKeyLockPgDn = false;
     private _terrainRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), 1000);
     private _mapHdgCtx: CanvasRenderingContext2D | null = null;
     private _missionPanelEl: HTMLElement | null = null;
@@ -928,6 +1012,15 @@ export class FlightSceneSimple extends Scene3D {
     private _contrailEmitterLeft:  BABYLON.TransformNode | null = null;
     private _contrailEmitterRight: BABYLON.TransformNode | null = null;
     private _contrailHalfSpan: number = 8;
+    private _lastMach: number = 0;
+    private _vaporConePS: BABYLON.ParticleSystem | null = null;
+    private _vaporConeEmitter: BABYLON.TransformNode | null = null;
+    private _heatHazePS: BABYLON.ParticleSystem | null = null;
+    private _heatHazeEmitter: BABYLON.TransformNode | null = null;
+    private _flareOccluded: boolean = false;
+    private _flareCheckTimerMs: number = 0;
+    private _motionBlurPP: BABYLON.MotionBlurPostProcess | null = null;
+    private _dofEnabledInCockpit: boolean = false;
     private _runwayColliders: BABYLON.Mesh[] = [];
     private _runwayCollidersLoaded = false;
 
@@ -955,6 +1048,7 @@ export class FlightSceneSimple extends Scene3D {
     private _overcastMat: BABYLON.StandardMaterial | null = null;
     private _milkyWayRoot: BABYLON.TransformNode | null = null;
     private _cloudDensityMult = CLOUD_DENSITY_MULT_MEDIUM;
+    private _cloudVolumetric = false;
     private _lensFlareSystem: BABYLON.LensFlareSystem | null = null;
     private _sunUpdateTimer = 0;
     private _sunElevation = 45;
@@ -1151,6 +1245,10 @@ export class FlightSceneSimple extends Scene3D {
         this._updateControlSurfaceAnim();
         this._updateGearState();
         this._updateContrails(dt);
+        this._updateVaporCone();
+        this._updateHeatHaze();
+        this._updateLensFlareOcclusion(dt * 1000);
+        this._updateMotionBlurAndDof();
         this._updateHUD();
         this._sendOwnState();
         this._updateRemotePlayers();
@@ -1423,7 +1521,10 @@ export class FlightSceneSimple extends Scene3D {
         this._disposeNavLights();
         this._disposeRunwayColliders();
         this._disposeContrails();
+        this._disposeVaporCone();
+        this._disposeHeatHaze();
         this._disposeWater();
+        this._ensureMotionBlur(false);
         if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
         if (this._ssao) { this._ssao.dispose(); this._ssao = null; }
         if (this._lensFlareSystem) { this._lensFlareSystem.dispose(); this._lensFlareSystem = null; }
@@ -2572,8 +2673,9 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         if (this._lensFlareSystem) {
-            this._lensFlareSystem.isEnabled = elevation > 1;
+            this._lensFlareSystem.isEnabled = elevation > 1 && !this._flareOccluded;
         }
+        this._updateColorGrading(elevation);
 
         if (this._skyMaterial) {
             this._skyMaterial.sunPosition = new BABYLON.Vector3(sunPosX * 1000, sunPosY * 1000, sunPosZ * 1000);
@@ -2723,17 +2825,27 @@ export class FlightSceneSimple extends Scene3D {
             tpl.material = mat;
 
             const effectiveCount = Math.max(1, Math.round(layer.count * this._cloudDensityMult));
+            const puffPerCluster = this._cloudVolumetric ? CLOUD_VOLUMETRIC_PUFFS_PER_CLUSTER : 1;
             for (let i = 0; i < effectiveCount; i++) {
-                const ci = tpl.createInstance(`c_${layer.yMin}_${i}`);
                 const ox = (Math.random() - 0.5) * layer.spread;
                 const oz = (Math.random() - 0.5) * layer.spread;
                 const oy = layer.yMin + Math.random() * layer.yRange;
-                ci.position.set(ox, oy, oz);
-                const s = 0.5 + Math.random() * 2.0;
-                ci.scaling.set(s, s * layer.aspectY, 1);
-                ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
-                ci.isPickable = false;
-                this.cloudInstances.push({ mesh: ci, yBase: oy, spread: layer.spread, windMult: layer.windMult });
+                const clusterScale = 0.5 + Math.random() * 2.0;
+                for (let j = 0; j < puffPerCluster; j++) {
+                    const ci = tpl.createInstance(`c_${layer.yMin}_${i}_${j}`);
+                    const jitter = this._cloudVolumetric ? layer.sizeBase * CLOUD_VOLUMETRIC_PUFF_JITTER : 0;
+                    const jx = (Math.random() - 0.5) * jitter * 2;
+                    const jy = (Math.random() - 0.5) * jitter * layer.aspectY;
+                    const jz = (Math.random() - 0.5) * jitter * 2;
+                    ci.position.set(ox + jx, oy + jy, oz + jz);
+                    const subScale = this._cloudVolumetric
+                        ? clusterScale * (0.6 + Math.random() * 0.7)
+                        : clusterScale;
+                    ci.scaling.set(subScale, subScale * layer.aspectY, 1);
+                    ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
+                    ci.isPickable = false;
+                    this.cloudInstances.push({ mesh: ci, yBase: oy + jy, spread: layer.spread, windMult: layer.windMult });
+                }
             }
         }
     }
@@ -3000,6 +3112,24 @@ export class FlightSceneSimple extends Scene3D {
                     return;
                 }
                 this._loadedModelMeshes = meshes;
+                try {
+                    const seenMats = new Set<BABYLON.Material>();
+                    let cappedCount = 0;
+                    for (const m of meshes) {
+                        const mat = m.material;
+                        if (!mat || seenMats.has(mat)) continue;
+                        seenMats.add(mat);
+                        if (mat instanceof BABYLON.PBRBaseMaterial) {
+                            (mat as BABYLON.PBRMaterial).maxSimultaneousLights = AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
+                            cappedCount++;
+                        }
+                    }
+                    if (cappedCount > 0) {
+                        console.debug(`[FlightSimple] Capped maxSimultaneousLights=${AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS} on ${cappedCount} PBR material(s) of ${cfg.code}`);
+                    }
+                } catch (err) {
+                    console.warn('[FlightSimple] Failed to cap maxSimultaneousLights on aircraft PBR materials:', err);
+                }
                 this._loadedAnimGroups = animationGroups || [];
                 this._propellerAnimGroup = null;
                 this._gearUpAnimGroup = null;
@@ -3125,6 +3255,8 @@ export class FlightSceneSimple extends Scene3D {
                 });
                 this._detectControlSurfaceNodes(meshes);
                 this._buildContrails(scene, bbW / 2);
+                this._buildVaporCone(scene);
+                this._buildHeatHaze(scene);
 
                 if (this.camera) {
                     const initialRadius = Math.max(
@@ -3189,6 +3321,8 @@ export class FlightSceneSimple extends Scene3D {
             halfLen: 5.5,
         });
         this._buildContrails(scene, 8);
+        this._buildVaporCone(scene);
+        this._buildHeatHaze(scene);
         this.spawned = true;
         this._maybeFireSpawned();
     }
@@ -3343,6 +3477,7 @@ export class FlightSceneSimple extends Scene3D {
         mesh.checkCollisions = false;
         mesh.receiveShadows = false;
         mesh.metadata = { type: 'runway-collider', icao, leIdent: r.le_ident, heIdent: r.he_ident };
+        mesh.renderingGroupId = RUNWAY_RENDERING_GROUP_ID;
 
         const mat = new BABYLON.StandardMaterial(name + 'Mat', this.scene);
         mat.diffuseColor = new BABYLON.Color3(RUNWAY_COLLIDER_DIFFUSE.r, RUNWAY_COLLIDER_DIFFUSE.g, RUNWAY_COLLIDER_DIFFUSE.b);
@@ -3529,6 +3664,210 @@ export class FlightSceneSimple extends Scene3D {
         this._contrailEmitterRight = null;
     }
 
+    private _buildVaporCone(scene: BABYLON.Scene): void {
+        this._disposeVaporCone();
+        try {
+            const em = new BABYLON.TransformNode('vaporConeEm', scene);
+            em.parent = this.planeRoot;
+            em.position.set(0, 0, -1.5);
+            this._vaporConeEmitter = em;
+            const ps = new BABYLON.ParticleSystem('vaporCone', 600, scene);
+            try { ps.particleTexture = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { /* ignore */ }
+            ps.emitter = em as unknown as BABYLON.AbstractMesh;
+            const r = Math.max(2, this._contrailHalfSpan * 0.35);
+            ps.createCylinderEmitter(r, 0.6, 1, 0);
+            ps.color1 = new BABYLON.Color4(1, 1, 1, 0.85);
+            ps.color2 = new BABYLON.Color4(0.95, 0.97, 1, 0.55);
+            ps.colorDead = new BABYLON.Color4(0.9, 0.92, 1, 0);
+            ps.minSize = 0.8;
+            ps.maxSize = 2.5;
+            ps.minLifeTime = 0.10;
+            ps.maxLifeTime = 0.35;
+            ps.emitRate = 0;
+            ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+            ps.gravity = new BABYLON.Vector3(0, 0, 0);
+            ps.minEmitPower = 0;
+            ps.maxEmitPower = 0;
+            ps.updateSpeed = 0.01;
+            ps.start();
+            this._vaporConePS = ps;
+        } catch (err) {
+            console.warn('[VaporCone] build failed:', err);
+        }
+    }
+
+    private _disposeVaporCone(): void {
+        if (this._vaporConePS)     { try { this._vaporConePS.dispose();     } catch (_) { /* ignore */ } this._vaporConePS = null; }
+        if (this._vaporConeEmitter){ try { this._vaporConeEmitter.dispose();} catch (_) { /* ignore */ } this._vaporConeEmitter = null; }
+    }
+
+    private _updateVaporCone(): void {
+        if (!this._vaporConePS) return;
+        const mach = Number.isFinite(this._lastMach) ? this._lastMach : 0;
+        const target = (mach > VAPOR_CONE_MACH_MIN && mach < VAPOR_CONE_MACH_MAX)
+            ? VAPOR_CONE_MAX_RATE * (1 - Math.abs(mach - 1.0) / Math.max(0.01, VAPOR_CONE_MACH_MAX - 1.0))
+            : 0;
+        const cur = this._vaporConePS.emitRate || 0;
+        this._vaporConePS.emitRate = cur + (target - cur) * 0.2;
+    }
+
+    private _buildHeatHaze(scene: BABYLON.Scene): void {
+        this._disposeHeatHaze();
+        const cfg = this.aircraftConfig;
+        const isJet = cfg.engine_type === ENGINE_TYPE_TURBOFAN || cfg.engine_type === ENGINE_TYPE_TURBOJET;
+        if (!isJet) return;
+        try {
+            const em = new BABYLON.TransformNode('heatHazeEm', scene);
+            em.parent = this.planeRoot;
+            em.position.set(0, 0, -this._contrailHalfSpan * 0.6);
+            this._heatHazeEmitter = em;
+            const ps = new BABYLON.ParticleSystem('heatHaze', 200, scene);
+            try { ps.particleTexture = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { /* ignore */ }
+            ps.emitter = em as unknown as BABYLON.AbstractMesh;
+            ps.minEmitBox = new BABYLON.Vector3(-0.5, -0.3, -0.2);
+            ps.maxEmitBox = new BABYLON.Vector3( 0.5,  0.3,  0.2);
+            ps.color1 = new BABYLON.Color4(1, 1, 1, 0.05);
+            ps.color2 = new BABYLON.Color4(1, 1, 1, 0.08);
+            ps.colorDead = new BABYLON.Color4(1, 1, 1, 0);
+            ps.minSize = 0.4;
+            ps.maxSize = 1.2;
+            ps.minLifeTime = 0.3;
+            ps.maxLifeTime = 0.9;
+            ps.emitRate = 0;
+            ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+            ps.gravity = new BABYLON.Vector3(0, 0, 0);
+            ps.direction1 = new BABYLON.Vector3(0, 0, -1);
+            ps.direction2 = new BABYLON.Vector3(0, 0, -1);
+            ps.minEmitPower = 2;
+            ps.maxEmitPower = 5;
+            ps.updateSpeed = 0.015;
+            ps.start();
+            this._heatHazePS = ps;
+        } catch (err) {
+            console.warn('[HeatHaze] build failed:', err);
+        }
+    }
+
+    private _disposeHeatHaze(): void {
+        if (this._heatHazePS)     { try { this._heatHazePS.dispose();     } catch (_) { /* ignore */ } this._heatHazePS = null; }
+        if (this._heatHazeEmitter){ try { this._heatHazeEmitter.dispose();} catch (_) { /* ignore */ } this._heatHazeEmitter = null; }
+    }
+
+    private _updateHeatHaze(): void {
+        if (!this._heatHazePS) return;
+        const n1 = Math.max(0, Math.min(1.5, this._engineN1));
+        const tasMs = Number.isFinite(this._lastTasMs) ? this._lastTasMs : 0;
+        const speedScale = Math.max(0, 1 - tasMs / 120);
+        const target = HEAT_HAZE_MAX_RATE * n1 * speedScale;
+        const cur = this._heatHazePS.emitRate || 0;
+        this._heatHazePS.emitRate = cur + (target - cur) * 0.1;
+    }
+
+    private _updateLensFlareOcclusion(dtMs: number): void {
+        if (!this._lensFlareSystem || !this.scene || !this.camera) return;
+        this._flareCheckTimerMs += dtMs;
+        if (this._flareCheckTimerMs < FLARE_OCCLUSION_CHECK_INTERVAL_MS) return;
+        this._flareCheckTimerMs = 0;
+        const sunMesh = this.scene.getMeshByName('sunMesh');
+        const sunLight = this.scene.getLightByName('sun') as BABYLON.DirectionalLight | null;
+        let sunWorld: BABYLON.Vector3 | null = null;
+        if (sunMesh) sunWorld = sunMesh.getAbsolutePosition();
+        else if (sunLight) {
+            const dir = sunLight.direction;
+            const dirN = dir.normalizeToNew().scaleInPlace(-FLARE_OCCLUSION_SUN_DISTANCE_M);
+            sunWorld = this.camera.position.add(dirN);
+        }
+        if (!sunWorld) return;
+        const camPos = this.camera.position;
+        const toSun = sunWorld.subtract(camPos);
+        const distToSun = toSun.length();
+        if (distToSun < 1) return;
+        const dir = toSun.scale(1 / distToSun);
+        const ray = new BABYLON.Ray(camPos, dir, distToSun);
+        const planeRoot = this.planeRoot;
+        const pick = this.scene.pickWithRay(ray, (m) => {
+            if (!m || !m.isEnabled() || !m.isVisible || m.isPickable === false) return false;
+            if (m.name === 'sunMesh' || m.name === 'sunHalo' || m.name === 'moonMesh' || m.name === 'moonHalo') return false;
+            if (m.name === 'skyBox') return false;
+            if (planeRoot && m.isDescendantOf(planeRoot)) return true;
+            return true;
+        });
+        const occluded = !!(pick && pick.hit);
+        this._flareOccluded = occluded;
+    }
+
+    private _updateColorGrading(elevationDeg: number): void {
+        if (!this._pipeline) return;
+        const ip = this._pipeline.imageProcessing;
+        if (!ip) return;
+        const dayT = Math.max(0, Math.min(1, (elevationDeg + 6) / 30));
+        const sunsetT = Math.max(0, Math.min(1, 1.0 - Math.abs(elevationDeg) / 10));
+        const nightT = Math.max(0, Math.min(1, -elevationDeg / 10));
+        let r = COLOR_GRADE_DAY_TINT_R * dayT
+              + COLOR_GRADE_SUNSET_TINT_R * sunsetT
+              + COLOR_GRADE_NIGHT_TINT_R * nightT;
+        let g = COLOR_GRADE_DAY_TINT_G * dayT
+              + COLOR_GRADE_SUNSET_TINT_G * sunsetT
+              + COLOR_GRADE_NIGHT_TINT_G * nightT;
+        let b = COLOR_GRADE_DAY_TINT_B * dayT
+              + COLOR_GRADE_SUNSET_TINT_B * sunsetT
+              + COLOR_GRADE_NIGHT_TINT_B * nightT;
+        const norm = Math.max(0.001, dayT + sunsetT + nightT);
+        r /= norm; g /= norm; b /= norm;
+        ip.colorCurvesEnabled = true;
+        if (!ip.colorCurves) ip.colorCurves = new BABYLON.ColorCurves();
+        const cc = ip.colorCurves;
+        const tintH = ((Math.atan2(g - b, r - g) * 180 / Math.PI) + 360) % 360;
+        const tintAmp = Math.min(40, Math.abs((r - 1.0) + (b - 1.0)) * 60);
+        cc.globalHue = tintH;
+        cc.globalDensity = tintAmp;
+        ip.contrast = COLOR_GRADE_CONTRAST_DAY * dayT + COLOR_GRADE_CONTRAST_NIGHT * (sunsetT + nightT) / Math.max(0.001, sunsetT + nightT + dayT);
+        ip.colorGradingEnabled = false;
+    }
+
+    private _ensureMotionBlur(active: boolean): void {
+        if (!this.scene || !this.camera) return;
+        if (active) {
+            if (this._motionBlurPP) return;
+            try {
+                const cam = this.camera;
+                const mb = new BABYLON.MotionBlurPostProcess('motionBlur', this.scene, 1.0, cam);
+                mb.motionStrength = MOTION_BLUR_MAX_STRENGTH;
+                mb.motionBlurSamples = MOTION_BLUR_SAMPLES;
+                this._motionBlurPP = mb;
+            } catch (err) {
+                console.warn('[MotionBlur] init failed:', err);
+            }
+            return;
+        }
+        if (this._motionBlurPP) {
+            try { this._motionBlurPP.dispose(this.camera); } catch (_) { /* ignore */ }
+            this._motionBlurPP = null;
+        }
+    }
+
+    private _updateMotionBlurAndDof(): void {
+        const gAbs = Math.abs(Number.isFinite(this._gForce) ? this._gForce : 1);
+        const wantMb = gAbs > MOTION_BLUR_TRIGGER_G;
+        this._ensureMotionBlur(wantMb);
+        if (this._pipeline) {
+            const isCockpit = this._cameraMode === CAMERA_MODE_COCKPIT;
+            if (isCockpit !== this._dofEnabledInCockpit) {
+                this._dofEnabledInCockpit = isCockpit;
+                try {
+                    this._pipeline.depthOfFieldEnabled = isCockpit;
+                    if (isCockpit) {
+                        this._pipeline.depthOfField.focalLength = 50;
+                        this._pipeline.depthOfField.fStop = 1.8;
+                        this._pipeline.depthOfField.focusDistance = 800;
+                    }
+                } catch (err) {
+                    console.warn('[DOF] toggle failed:', err);
+                }
+            }
+        }
+    }
+
     private _updateContrails(_dt: number): void {
         if (!this._contrailPSLeft || !this._contrailPSRight) return;
         const altM = this.planeRoot ? Math.max(0, this.refAlt + this.planeRoot.position.y) : 0;
@@ -3569,12 +3908,22 @@ export class FlightSceneSimple extends Scene3D {
         }
     }
 
-    private _updateOverspeed(speedKtsIas: number): void {
+    private _resolveMmo(): number {
+        const cfg = this.aircraftConfig;
+        if (cfg.mmo != null && Number.isFinite(cfg.mmo) && cfg.mmo > 0) return cfg.mmo;
+        const fromCategory = MMO_FALLBACK_BY_CATEGORY[cfg.category];
+        return (fromCategory != null && fromCategory > 0) ? fromCategory : MMO_FALLBACK_DEFAULT;
+    }
+
+    private _updateOverspeed(speedKtsIas: number, mach: number): void {
         const cfg = this.aircraftConfig;
         const vne = (cfg.vne_kts && cfg.vne_kts > 0)
             ? cfg.vne_kts
             : Math.max(1, cfg.stall_speed_kts) * VNE_FALLBACK_MULT_OF_STALL;
-        const active = Number.isFinite(speedKtsIas) && speedKtsIas > vne;
+        const mmo = this._resolveMmo();
+        const overByIas = Number.isFinite(speedKtsIas) && speedKtsIas > vne;
+        const overByMach = Number.isFinite(mach) && mach > mmo;
+        const active = overByIas || overByMach;
         this._overspeedActive = active;
         if (!active) return;
         const nowMs = performance.now();
@@ -3627,14 +3976,76 @@ export class FlightSceneSimple extends Scene3D {
         }
     }
 
+    private _apCurrentNavTarget(): { lat: number; lon: number } | null {
+        const wpts = this._missionWaypoints;
+        const wpIdx = this._missionCurrentWpIndex;
+        if (wpts && wpts.length > 0 && wpIdx >= 0 && wpIdx < wpts.length) {
+            const wp = wpts[wpIdx];
+            if (Number.isFinite(Number(wp.latitude)) && Number.isFinite(Number(wp.longitude))) {
+                return { lat: Number(wp.latitude), lon: Number(wp.longitude) };
+            }
+        }
+        const fp = this._activeFlightPlanNav ?? this._missionDestForNav();
+        if (fp && Number.isFinite(fp.arrival_lat) && Number.isFinite(fp.arrival_lon)) {
+            return { lat: fp.arrival_lat, lon: fp.arrival_lon };
+        }
+        return null;
+    }
+
+    private _magneticVariationDeg(lat: number, lon: number): number {
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return 0;
+        const safeLat = Math.max(-85, Math.min(85, lat));
+        let lonAdj = lon;
+        while (lonAdj > 180) lonAdj -= 360;
+        while (lonAdj < -180) lonAdj += 360;
+        const variation = MAGVAR_C0
+            + MAGVAR_C_LON  * lonAdj
+            + MAGVAR_C_LAT  * safeLat
+            + MAGVAR_C_LON2 * lonAdj * lonAdj
+            + MAGVAR_C_LAT2 * safeLat * safeLat
+            + MAGVAR_C_LONLAT * lonAdj * safeLat;
+        return Math.max(-30, Math.min(30, variation));
+    }
+
+    private _apCurrentLatLon(): { lat: number; lon: number } | null {
+        if (!this.planeRoot) return null;
+        const cosOriginLat = Math.cos(this.originLat * Math.PI / 180);
+        const eastM = this.planeRoot.position.x;
+        const northM = -this.planeRoot.position.z;
+        const lat = this.originLat + (northM / METERS_PER_DEG_LAT);
+        const lon = this.originLon + (eastM / (METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01)));
+        return { lat, lon };
+    }
+
     private _updateAutopilot(dt: number): void {
         if (!this._autopilotMaster || !this.planeRoot || !this.planeRoot.rotationQuaternion) return;
         const stepDt = Math.max(0.001, Math.min(0.1, dt));
         const wm = this.planeRoot.getWorldMatrix();
         const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
         const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm);
-        if (this._autopilotHdgHold && this.surfaces.length >= 2) {
-            const curHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
+        const curHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
+
+        if ((this._autopilotNavHold || this._autopilotAprHold) && this.surfaces.length >= 4) {
+            const target = this._apCurrentNavTarget();
+            const here = this._apCurrentLatLon();
+            if (target && here) {
+                const desiredBrg = this._initialBearingDeg(here.lat, here.lon, target.lat, target.lon);
+                const trackDeg = (this.groundSpeed > MIN_GS_FOR_ETE_MS
+                    && Number.isFinite(this.velocity.x) && Number.isFinite(this.velocity.z))
+                    ? ((Math.atan2(this.velocity.x, this.velocity.z) * 180 / Math.PI) + 360) % 360
+                    : curHdgDeg;
+                const trackErrDeg = ((desiredBrg - trackDeg + 540) % 360) - 180;
+                const distNm = this._haversineNm(here.lat, here.lon, target.lat, target.lon);
+                const xteNm = Math.sin(trackErrDeg * Math.PI / 180) * Math.max(0.1, distNm);
+                const intercept = Math.max(
+                    -AP_NAV_MAX_INTERCEPT_DEG,
+                    Math.min(AP_NAV_MAX_INTERCEPT_DEG, xteNm * AP_NAV_XTE_DEG_PER_NM + trackErrDeg * 0.5),
+                );
+                this._autopilotTargetHdgDeg = ((desiredBrg + intercept) + 360) % 360;
+            }
+        }
+
+        if ((this._autopilotHdgHold || this._autopilotNavHold || this._autopilotAprHold) && this.surfaces.length >= 2) {
             const delta = ((this._autopilotTargetHdgDeg - curHdgDeg + 540) % 360) - 180;
             const targetBank = Math.max(-AP_HDG_MAX_BANK_DEG, Math.min(AP_HDG_MAX_BANK_DEG, delta * AP_HDG_BANK_GAIN * AP_HDG_MAX_BANK_DEG));
             const sinBank = Math.max(-1, Math.min(1, right.y));
@@ -3644,7 +4055,27 @@ export class FlightSceneSimple extends Scene3D {
             this.surfaces[0].controlInput =  rollCmd;
             this.surfaces[1].controlInput = -rollCmd;
         }
-        if (this._autopilotAltHold && this.surfaces.length >= 3) {
+
+        if (this._autopilotAprHold && this.surfaces.length >= 3) {
+            const target = this._apCurrentNavTarget();
+            const here = this._apCurrentLatLon();
+            if (target && here) {
+                const distNm = this._haversineNm(here.lat, here.lon, target.lat, target.lon);
+                const distFt = distNm * 6076.12;
+                const glideAltFt = Math.max(AP_APR_MIN_ALT_FT, distFt * Math.tan(AP_APR_GLIDESLOPE_DEG * Math.PI / 180));
+                const altMslFt = Math.max(0, (this.refAlt + this.planeRoot.position.y)) * 3.28084;
+                const errFt = glideAltFt - altMslFt;
+                const vsFpm = this.velocity.y * 196.85;
+                const pitchCmd = Math.max(-AP_ALT_PITCH_MAX, Math.min(AP_ALT_PITCH_MAX,
+                    errFt * AP_ALT_PITCH_GAIN - vsFpm * AP_ALT_VS_DAMP_GAIN));
+                this.surfaces[2].controlInput = -pitchCmd;
+            }
+        } else if (this._autopilotVsHold && this.surfaces.length >= 3) {
+            const vsFpm = this.velocity.y * 196.85;
+            const errFpm = this._autopilotTargetVsFpm - vsFpm;
+            const pitchCmd = Math.max(-AP_VS_PITCH_MAX, Math.min(AP_VS_PITCH_MAX, errFpm * AP_VS_PITCH_GAIN));
+            this.surfaces[2].controlInput = -pitchCmd;
+        } else if (this._autopilotAltHold && this.surfaces.length >= 3) {
             const altMslFt = Math.max(0, (this.refAlt + this.planeRoot.position.y)) * 3.28084;
             const errFt = this._autopilotTargetAltFt - altMslFt;
             const vsFpm = this.velocity.y * 196.85;
@@ -3664,6 +4095,9 @@ export class FlightSceneSimple extends Scene3D {
         } else {
             this._autopilotHdgHold = false;
             this._autopilotAltHold = false;
+            this._autopilotVsHold = false;
+            this._autopilotNavHold = false;
+            this._autopilotAprHold = false;
             console.log('[AP] Master OFF');
         }
     }
@@ -3671,19 +4105,122 @@ export class FlightSceneSimple extends Scene3D {
     private _engageAutopilotHdgHold(forceOn: boolean = false): void {
         const newState = forceOn ? true : !this._autopilotHdgHold;
         this._autopilotHdgHold = newState;
-        if (newState && this.planeRoot) {
-            const wm = this.planeRoot.getWorldMatrix();
-            const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
-            this._autopilotTargetHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
+        if (newState) {
+            this._autopilotNavHold = false;
+            this._autopilotAprHold = false;
+            if (this.planeRoot) {
+                const wm = this.planeRoot.getWorldMatrix();
+                const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
+                this._autopilotTargetHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
+            }
         }
     }
 
     private _engageAutopilotAltHold(forceOn: boolean = false): void {
         const newState = forceOn ? true : !this._autopilotAltHold;
         this._autopilotAltHold = newState;
-        if (newState && this.planeRoot) {
-            this._autopilotTargetAltFt = Math.max(0, (this.refAlt + this.planeRoot.position.y)) * 3.28084;
+        if (newState) {
+            this._autopilotVsHold = false;
+            this._autopilotAprHold = false;
+            if (this.planeRoot) {
+                this._autopilotTargetAltFt = Math.max(0, (this.refAlt + this.planeRoot.position.y)) * 3.28084;
+            }
         }
+    }
+
+    private _engageAutopilotVsHold(forceOn: boolean = false): void {
+        const newState = forceOn ? true : !this._autopilotVsHold;
+        this._autopilotVsHold = newState;
+        if (newState) {
+            this._autopilotAltHold = false;
+            this._autopilotAprHold = false;
+            const vsFpm = this.velocity.y * 196.85;
+            this._autopilotTargetVsFpm = Math.round(vsFpm / 100) * 100;
+            if (Math.abs(this._autopilotTargetVsFpm) < 50) {
+                this._autopilotTargetVsFpm = vsFpm >= 0 ? AP_VS_DEFAULT_FPM : -AP_VS_DEFAULT_FPM;
+            }
+        }
+    }
+
+    private _engageAutopilotNavHold(forceOn: boolean = false): void {
+        const newState = forceOn ? true : !this._autopilotNavHold;
+        if (newState && !this._apCurrentNavTarget()) {
+            console.warn('[AP] NAV armed but no waypoint/destination available');
+            return;
+        }
+        this._autopilotNavHold = newState;
+        if (newState) {
+            this._autopilotHdgHold = false;
+            this._autopilotAprHold = false;
+        }
+    }
+
+    private _engageAutopilotAprHold(forceOn: boolean = false): void {
+        const newState = forceOn ? true : !this._autopilotAprHold;
+        if (newState && !this._apCurrentNavTarget()) {
+            console.warn('[AP] APR armed but no destination available');
+            return;
+        }
+        this._autopilotAprHold = newState;
+        if (newState) {
+            this._autopilotHdgHold = false;
+            this._autopilotAltHold = false;
+            this._autopilotVsHold = false;
+            this._autopilotNavHold = false;
+        }
+    }
+
+    private _adjustAutopilotVsTarget(deltaFpm: number): void {
+        this._autopilotTargetVsFpm = Math.max(-3000, Math.min(3000, this._autopilotTargetVsFpm + deltaFpm));
+    }
+
+    private _adjustAutopilotAltTarget(deltaFt: number): void {
+        this._autopilotTargetAltFt = Math.max(0, Math.min(50000, this._autopilotTargetAltFt + deltaFt));
+    }
+
+    private _adjustAutopilotHdgTarget(deltaDeg: number): void {
+        this._autopilotTargetHdgDeg = (this._autopilotTargetHdgDeg + deltaDeg + 360) % 360;
+    }
+
+    private _wireAutopilotPanel(): void {
+        const wire = (id: string, fn: () => void) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                fn();
+                this._cockpitClick();
+            });
+        };
+        wire('ap-btn-ap',  () => this._engageAutopilotMaster());
+        wire('ap-btn-hdg', () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotHdgHold(); });
+        wire('ap-btn-alt', () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotAltHold(); });
+        wire('ap-btn-vs',  () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotVsHold(); });
+        wire('ap-btn-nav', () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotNavHold(); });
+        wire('ap-btn-apr', () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotAprHold(); });
+    }
+
+    private _updateAutopilotPanel(): void {
+        const setBtn = (id: string, active: boolean) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.style.background = active ? '#1a4830' : '#222';
+            el.style.color      = active ? '#40ff80' : '#aaa';
+            el.style.borderColor = active ? '#40ff80' : '#555';
+        };
+        setBtn('ap-btn-ap',  this._autopilotMaster);
+        setBtn('ap-btn-hdg', this._autopilotHdgHold);
+        setBtn('ap-btn-alt', this._autopilotAltHold);
+        setBtn('ap-btn-vs',  this._autopilotVsHold);
+        setBtn('ap-btn-nav', this._autopilotNavHold);
+        setBtn('ap-btn-apr', this._autopilotAprHold);
+        const hdgEl = document.getElementById('ap-tgt-hdg');
+        const altEl = document.getElementById('ap-tgt-alt');
+        const vsEl  = document.getElementById('ap-tgt-vs');
+        if (hdgEl) hdgEl.textContent = String(Math.round(this._autopilotTargetHdgDeg)).padStart(3, '0');
+        if (altEl) altEl.textContent = String(Math.round(this._autopilotTargetAltFt)).padStart(5, '0');
+        if (vsEl)  vsEl.textContent  = `${this._autopilotTargetVsFpm >= 0 ? '+' : ''}${Math.round(this._autopilotTargetVsFpm)}`;
     }
 
     private _maybeDisengageAutopilotByInput(): void {
@@ -3697,6 +4234,9 @@ export class FlightSceneSimple extends Scene3D {
             this._autopilotMaster = false;
             this._autopilotHdgHold = false;
             this._autopilotAltHold = false;
+            this._autopilotVsHold = false;
+            this._autopilotNavHold = false;
+            this._autopilotAprHold = false;
             console.log('[AP] Disengaged by stick input');
         }
     }
@@ -4095,10 +4635,13 @@ export class FlightSceneSimple extends Scene3D {
             ['Roll', [b.rollLeft, b.rollRight]],
             ['Yaw', [b.yawLeft, b.yawRight]],
             ['Flaps', [b.flapDown, b.flapUp]],
+            ['Spoilers', ['Backslash']],
             ['Trim Pitch', [b.trimPitchDown, b.trimPitchUp]],
             ['Trim Yaw', [b.trimYawLeft, b.trimYawRight]],
+            ['Trim Wheel', ['PageUp', 'PageDown']],
             ['Brake', [b.brakeToggle]],
             ['Gear', [b.gearToggle]],
+            ['Lights', ['KeyL']],
             ['Camera', [b.cameraCycle]],
             ['Tower', [b.towerCamera]],
             ['Pause', [b.pauseToggle]],
@@ -4108,6 +4651,14 @@ export class FlightSceneSimple extends Scene3D {
             ['Replay', [b.replayToggle]],
             ['Screenshot', [b.screenshot]],
             ['Respawn', [b.respawn]],
+            ['AP Master', ['KeyZ']],
+            ['AP HDG', ['KeyF']],
+            ['AP ALT', ['KeyJ']],
+            ['AP VS',  ['KeyK']],
+            ['AP NAV', ['KeyU']],
+            ['AP APR', ['KeyI']],
+            ['Kill Eng', ['Digit1', 'Digit2', 'Digit3', 'Digit4']],
+            ['Helper', ['KeyH', 'Slash']],
         ];
         const friendly = (code: string): string => {
             if (code.startsWith('Key')) return code.slice(3);
@@ -4122,6 +4673,10 @@ export class FlightSceneSimple extends Scene3D {
             if (code === 'BracketRight') return ']';
             if (code === 'Equal') return '=';
             if (code === 'Minus') return '-';
+            if (code === 'Slash') return '/';
+            if (code === 'Backslash') return '\\';
+            if (code === 'PageUp') return 'PgUp';
+            if (code === 'PageDown') return 'PgDn';
             return code;
         };
         helper.innerHTML = groups.map(([label, codes]) =>
@@ -4248,6 +4803,9 @@ export class FlightSceneSimple extends Scene3D {
         const saved = localStorage.getItem('gfx_settings');
         let cfg: Record<string, any> = {};
         if (saved) { try { cfg = JSON.parse(saved); } catch (_) { /* ignore */ } }
+        if (typeof cfg.cloudDensity === 'string' && cfg.cloudDensity === 'ultra') {
+            this._cloudVolumetric = true;
+        }
 
         const saveSettings = () => {
             const s: Record<string, any> = {};
@@ -4344,8 +4902,10 @@ export class FlightSceneSimple extends Scene3D {
                     const cloudDensityEl = document.getElementById('gfx-cloud-density') as HTMLSelectElement | null;
                     if (cloudDensityEl) {
                         const newMult = cloudDensityFromLabel(cloudDensityEl.value);
-                        if (newMult !== this._cloudDensityMult) {
+                        const newVolumetric = cloudDensityEl.value === 'ultra';
+                        if (newMult !== this._cloudDensityMult || newVolumetric !== this._cloudVolumetric) {
                             this._cloudDensityMult = newMult;
+                            this._cloudVolumetric = newVolumetric;
                             this._rebuildClouds(scene);
                         }
                     }
@@ -4537,18 +5097,67 @@ export class FlightSceneSimple extends Scene3D {
                 this._cockpitClick();
             }
             if (!p('KeyZ')) this._apKeyLockMaster = false;
-            if (p('KeyH') && !this._apKeyLockHdg) {
+            if (p('KeyF') && !this._apKeyLockHdg) {
                 this._apKeyLockHdg = true;
                 this._engageAutopilotHdgHold();
                 this._cockpitClick();
             }
-            if (!p('KeyH')) this._apKeyLockHdg = false;
+            if (!p('KeyF')) this._apKeyLockHdg = false;
             if (p('KeyJ') && !this._apKeyLockAlt) {
                 this._apKeyLockAlt = true;
                 this._engageAutopilotAltHold();
                 this._cockpitClick();
             }
             if (!p('KeyJ')) this._apKeyLockAlt = false;
+            if (p('KeyK') && !this._apKeyLockVs) {
+                this._apKeyLockVs = true;
+                this._engageAutopilotVsHold();
+                this._cockpitClick();
+            }
+            if (!p('KeyK')) this._apKeyLockVs = false;
+            if (p('KeyU') && !this._apKeyLockNav) {
+                this._apKeyLockNav = true;
+                this._engageAutopilotNavHold();
+                this._cockpitClick();
+            }
+            if (!p('KeyU')) this._apKeyLockNav = false;
+            if (p('KeyI') && !this._apKeyLockApr) {
+                this._apKeyLockApr = true;
+                this._engageAutopilotAprHold();
+                this._cockpitClick();
+            }
+            if (!p('KeyI')) this._apKeyLockApr = false;
+
+            if (p('Backslash') && !this._spoilerKeyLock) {
+                this._spoilerKeyLock = true;
+                if (p('ShiftLeft') || p('ShiftRight')) this._armGroundSpoilers();
+                else this._toggleSpoilers();
+                this._cockpitClick();
+            }
+            if (!p('Backslash')) this._spoilerKeyLock = false;
+
+            for (let i = 0; i < 4; i++) {
+                const code = `Digit${i + 1}`;
+                if (p(code) && !this._killEngineKeyLock[i]) {
+                    this._killEngineKeyLock[i] = true;
+                    this._killEngine(i);
+                    this._cockpitClick();
+                }
+                if (!p(code)) this._killEngineKeyLock[i] = false;
+            }
+
+            if (p('PageUp') && !this._trimKeyLockPgUp) {
+                this._trimKeyLockPgUp = true;
+                this.trimPitch = Math.min(0.15, this.trimPitch + 0.01);
+                this._cockpitClick(2200);
+            }
+            if (!p('PageUp')) this._trimKeyLockPgUp = false;
+            if (p('PageDown') && !this._trimKeyLockPgDn) {
+                this._trimKeyLockPgDn = true;
+                this.trimPitch = Math.max(-0.15, this.trimPitch - 0.01);
+                this._cockpitClick(2200);
+            }
+            if (!p('PageDown')) this._trimKeyLockPgDn = false;
 
             const isJetAc = this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOFAN
                          || this.aircraftConfig.engine_type === ENGINE_TYPE_TURBOJET;
@@ -4711,6 +5320,7 @@ export class FlightSceneSimple extends Scene3D {
         this._updateAutopilot(_dt);
 
         this._applyFlaps(_dt);
+        this._applySpoilers(_dt, this.isOnGround);
     }
 
     private _setupTouchControls(): void {
@@ -5328,6 +5938,44 @@ export class FlightSceneSimple extends Scene3D {
     private _initFlapBar(): void {}
     private _updateFlapDisplay(): void {}
 
+    private _applySpoilers(dt: number, gearOnGround: boolean): void {
+        const cfg = this.aircraftConfig;
+        if (cfg.ground_spoilers_auto && this._spoilerArmed && gearOnGround && this._spoilerTarget < 1) {
+            this._spoilerTarget = 1;
+        }
+        const stepDt = Number.isFinite(dt) && dt > 0 ? dt : this.FIXED_DT;
+        if (this._spoilerDeflection < this._spoilerTarget) {
+            this._spoilerDeflection = Math.min(this._spoilerTarget, this._spoilerDeflection + SPOILER_DEPLOY_RATE_PER_S * stepDt);
+        } else if (this._spoilerDeflection > this._spoilerTarget) {
+            this._spoilerDeflection = Math.max(this._spoilerTarget, this._spoilerDeflection - SPOILER_RETRACT_RATE_PER_S * stepDt);
+        }
+    }
+
+    private _toggleSpoilers(): void {
+        if (this._spoilerTarget > 0) {
+            this._spoilerTarget = 0;
+            this._spoilerArmed = false;
+        } else {
+            this._spoilerTarget = 1;
+        }
+    }
+
+    private _armGroundSpoilers(): void {
+        this._spoilerArmed = !this._spoilerArmed;
+    }
+
+    private _killEngine(engineIdx: number): void {
+        if (!Array.isArray(this._engineAlive) || engineIdx < 0 || engineIdx >= this._engineAlive.length) return;
+        this._engineAlive[engineIdx] = !this._engineAlive[engineIdx];
+        const aliveCount = this._engineAlive.filter(Boolean).length;
+        console.log(`[Engine] Toggled #${engineIdx + 1} -> ${this._engineAlive[engineIdx] ? 'ALIVE' : 'DEAD'} (alive ${aliveCount}/${this._engineAlive.length})`);
+    }
+
+    private _resetEngines(): void {
+        const cnt = Math.max(1, this.aircraftConfig?.engine_count ?? 1);
+        this._engineAlive = new Array(cnt).fill(true);
+    }
+
     private _applyFlaps(dt: number): void {
         if (!this.FLAP_STEPS || !this.FLAP_STEPS.length) return;
         if (this.flapIndex >= this.FLAP_STEPS.length) this.flapIndex = this.FLAP_STEPS.length - 1;
@@ -5560,8 +6208,12 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         // ── Fuel burn (after engine model so piston uses actual output) ──────
-        if (this.fuelRemaining > 0 && cfg.fuel_capacity_kg > 0) {
-            const burnFraction = isPiston ? this.enginePower : n1;
+        const engineCountForBurn = Math.max(1, cfg.engine_count ?? 1);
+        const aliveForBurnRatio = Array.isArray(this._engineAlive)
+            ? this._engineAlive.filter(Boolean).length / engineCountForBurn
+            : 1;
+        if (this.fuelRemaining > 0 && cfg.fuel_capacity_kg > 0 && aliveForBurnRatio > 0) {
+            const burnFraction = (isPiston ? this.enginePower : n1) * aliveForBurnRatio;
             const burnIdle = cfg.fuel_burn_rate_kg_per_s_idle;
             const burnMax  = cfg.fuel_burn_rate_kg_per_s_max;
             let burnRate: number;
@@ -5584,8 +6236,28 @@ export class FlightSceneSimple extends Scene3D {
         const cIzz = cfg.inertia_zz;
 
         const engineCountTotal = Math.max(1, cfg.engine_count ?? 1);
+        if (!Array.isArray(this._engineAlive) || this._engineAlive.length !== engineCountTotal) {
+            this._engineAlive = new Array(engineCountTotal).fill(true);
+        }
+        let aliveCount = 0;
+        for (let e = 0; e < engineCountTotal; e++) if (this._engineAlive[e]) aliveCount++;
         const thrustVec = this._tmpFwd;
-        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * engineCountTotal);
+        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * aliveCount);
+
+        let asymYawTorqueBody = 0;
+        if (aliveCount > 0 && aliveCount < engineCountTotal) {
+            const halfSpanForEngines = (this.wingSpan || 16) * 0.5;
+            const enginePositions: number[] = [];
+            if (engineCountTotal === 2)      enginePositions.push(-halfSpanForEngines * 0.45,  halfSpanForEngines * 0.45);
+            else if (engineCountTotal === 3) enginePositions.push(-halfSpanForEngines * 0.55, 0, halfSpanForEngines * 0.55);
+            else if (engineCountTotal === 4) enginePositions.push(-halfSpanForEngines * 0.70, -halfSpanForEngines * 0.30, halfSpanForEngines * 0.30, halfSpanForEngines * 0.70);
+            else enginePositions.push(0);
+            const thrustPerEngine = effectiveThrust * cfg.max_thrust_n;
+            for (let e = 0; e < engineCountTotal && e < enginePositions.length; e++) {
+                if (!this._engineAlive[e]) continue;
+                asymYawTorqueBody += enginePositions[e] * thrustPerEngine;
+            }
+        }
 
         // ── Ground effect ────────────────────────────────────────────────────
         const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
@@ -5654,6 +6326,12 @@ export class FlightSceneSimple extends Scene3D {
                 const { force, torque } = computeSurfaceForces(
                     surface, pointVel, airDensity, groundEffectFactor, cfg.flap_type, pwBoost,
                 );
+                if ((si === 0 || si === 1) && this._spoilerDeflection > 0) {
+                    const liftLoss = (cfg.spoiler_lift_loss ?? SPOILER_DEFAULT_LIFT_LOSS) * this._spoilerDeflection;
+                    const scale = Math.max(0, 1.0 - liftLoss);
+                    force.scaleInPlace(scale);
+                    torque.scaleInPlace(scale);
+                }
                 totalForce.addInPlace(toWorld(force));
                 totalTorque.addInPlace(torque);
                 if (si === 0 && pointVel.lengthSquared() > 1.0) {
@@ -5664,10 +6342,11 @@ export class FlightSceneSimple extends Scene3D {
             }
             this._lastAoaRad = primaryAlpha;
 
-            // Fuselage parasite drag (+ gear drag when deployed) — air-relative
+            // Fuselage parasite drag (+ gear drag when deployed, + spoilers) — air-relative
             const spd = airVelWorld.length();
             if (spd >= 1.0) {
-                const baseCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0);
+                const spoilerCd = (cfg.spoiler_drag_cd ?? SPOILER_DEFAULT_DRAG_CD) * this._spoilerDeflection;
+                const baseCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0) + spoilerCd;
                 const tempK = altitude > ISA_TROPOPAUSE_M
                     ? ISA_TROPOPAUSE_TEMP_K
                     : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
@@ -5730,6 +6409,7 @@ export class FlightSceneSimple extends Scene3D {
             // Gear oleo
             totalForce.addInPlace(gearForce);
             totalTorque.addInPlace(gearTorque);
+            totalTorque.y += asymYawTorqueBody;
 
             return { force: totalForce, torque: totalTorque };
         };
@@ -6130,6 +6810,21 @@ export class FlightSceneSimple extends Scene3D {
 </div>
 <div id="hud-utc" style="position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
+<div id="ap-panel" style="position:absolute;top:38px;right:8px;display:flex;flex-direction:column;gap:3px;font-family:'Orbitron',monospace;font-size:10px;color:#aac;background:rgba(0,8,16,.55);padding:4px 5px;border:1px solid rgba(80,180,255,.25);border-radius:4px;z-index:50;pointer-events:auto">
+  <div style="display:flex;gap:3px;justify-content:center">
+    <button id="ap-btn-ap"  type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">AP</button>
+    <button id="ap-btn-hdg" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">HDG</button>
+    <button id="ap-btn-alt" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">ALT</button>
+    <button id="ap-btn-vs"  type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">VS</button>
+    <button id="ap-btn-nav" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">NAV</button>
+    <button id="ap-btn-apr" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">APR</button>
+  </div>
+  <div style="display:flex;gap:6px;justify-content:space-between;font-size:9px;color:#9cf;padding:0 2px">
+    <span>HDG <span id="ap-tgt-hdg">---</span></span>
+    <span>ALT <span id="ap-tgt-alt">-----</span></span>
+    <span>VS <span id="ap-tgt-vs">----</span></span>
+  </div>
+</div>
 <div id="crash-overlay" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(180,0,0,.35);z-index:500;pointer-events:none">
   <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
     <div style="font-family:'Orbitron',monospace;font-size:36px;color:#ff2200;letter-spacing:.3em;text-shadow:0 0 30px rgba(255,0,0,.8);animation:stallPulse 0.8s ease-in-out infinite">CRASHED</div>
@@ -6396,6 +7091,7 @@ export class FlightSceneSimple extends Scene3D {
         this.hudGsVal    = document.getElementById('hud-gs-v');
         this.hudIasVal   = document.getElementById('hud-ias-v');
         this.hudApState  = document.getElementById('hud-ap-state');
+        this._wireAutopilotPanel();
         this.hudRpmVal   = document.getElementById('hud-rpm-v')!;
         this.hudRpmNeedle = document.getElementById('hud-rpm-needle')!;
         this.hudFuelVal  = document.getElementById('hud-fuel-v')!;
@@ -7424,9 +8120,11 @@ export class FlightSceneSimple extends Scene3D {
 
         const totalDistNm = this._haversineNm(lat, lon, nav.arrival_lat, nav.arrival_lon);
         const totalBrgDeg = this._initialBearingDeg(lat, lon, nav.arrival_lat, nav.arrival_lon);
+        const magVarHere = this._magneticVariationDeg(lat, lon);
+        const totalBrgMag = ((totalBrgDeg - magVarHere) + 360) % 360;
         if (this._navDestEl) this._navDestEl.textContent = nav.arrival_icao || '\u2014';
         if (this._navDistEl) this._navDistEl.textContent = `${Math.round(totalDistNm * 1.852)} km`;
-        if (this._navBrgEl) this._navBrgEl.textContent = `${Math.round(totalBrgDeg)}\u00B0`;
+        if (this._navBrgEl) this._navBrgEl.textContent = `${Math.round(totalBrgMag)}\u00B0M`;
         this._setText('nav-total-dist', `${totalDistNm.toFixed(1)} nm`);
 
         const gsKt = this.groundSpeed * 1.944;
@@ -7458,7 +8156,8 @@ export class FlightSceneSimple extends Scene3D {
             this._setText('nav-wpt-name', wp.name || `WP ${wp.order_index}`);
             this._setText('nav-leg-idx', `${idx + 1}/${wpts.length}`);
             this._setText('nav-leg-dist', `${legDistNm.toFixed(1)} nm`);
-            this._setText('nav-leg-brg', `${Math.round(legBrgDeg)}\u00B0`);
+            const legBrgMag = ((legBrgDeg - magVarHere) + 360) % 360;
+            this._setText('nav-leg-brg', `${Math.round(legBrgMag)}\u00B0M`);
 
             const wm = this.planeRoot ? this.planeRoot.getWorldMatrix() : null;
             const fwd = wm ? BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm) : null;
@@ -8320,7 +9019,21 @@ export class FlightSceneSimple extends Scene3D {
         const stallActive = this._spawnSnapFramesLeft <= 0
             && aglM > STALL_WARNING_MIN_AGL_M
             && (stallByIas || stallByAoa);
-        this._updateOverspeed(speedKtsIas);
+
+        let currentMach = 0;
+        try {
+            const altForMach = Math.max(0, pos.y);
+            const tempK = altForMach > ISA_TROPOPAUSE_M
+                ? ISA_TROPOPAUSE_TEMP_K
+                : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * altForMach;
+            const speedOfSound = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempK);
+            currentMach = speedOfSound > 0 ? tasMs / speedOfSound : 0;
+            this._lastMach = currentMach;
+        } catch (err) {
+            console.warn('[Physics] Mach computation failed:', err);
+        }
+
+        this._updateOverspeed(speedKtsIas, currentMach);
         const aglFtForGpws = aglM * 3.28084;
         const vsFpmForGpws = Math.round(this.velocity.y * 196.85);
         this._updateGPWS(aglFtForGpws, vsFpmForGpws);
@@ -8339,15 +9052,11 @@ export class FlightSceneSimple extends Scene3D {
         this._lastStallState = stallActive;
 
         try {
-            const altForMach = Math.max(0, pos.y);
-            const tempK = altForMach > ISA_TROPOPAUSE_M
-                ? ISA_TROPOPAUSE_TEMP_K
-                : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * altForMach;
-            const speedOfSound = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempK);
-            const mach = speedOfSound > 0 ? tasMs / speedOfSound : 0;
-            const vneMach = this.aircraftConfig.wave_drag_peak_mach ?? null;
-            this._flightAudio.maybeOverspeedFromMach(mach, vneMach);
-        } catch (_) { /* ignore */ }
+            const mmoForAudio = this._resolveMmo();
+            this._flightAudio.maybeOverspeedFromMach(currentMach, mmoForAudio);
+        } catch (err) {
+            console.warn('[Audio] Mach overspeed update failed:', err);
+        }
 
         try {
             const vsFpm = this.velocity.y * 196.85;
@@ -8372,8 +9081,11 @@ export class FlightSceneSimple extends Scene3D {
         if (this.hudApState) {
             if (this._autopilotMaster) {
                 const parts: string[] = [];
-                if (this._autopilotHdgHold) parts.push(`HDG ${Math.round(this._autopilotTargetHdgDeg).toString().padStart(3, '0')}`);
-                if (this._autopilotAltHold) parts.push(`ALT ${Math.round(this._autopilotTargetAltFt)}`);
+                if (this._autopilotNavHold) parts.push('NAV');
+                else if (this._autopilotHdgHold) parts.push(`HDG ${Math.round(this._autopilotTargetHdgDeg).toString().padStart(3, '0')}`);
+                if (this._autopilotAprHold) parts.push('APR');
+                else if (this._autopilotVsHold) parts.push(`VS ${this._autopilotTargetVsFpm >= 0 ? '+' : ''}${Math.round(this._autopilotTargetVsFpm)}`);
+                else if (this._autopilotAltHold) parts.push(`ALT ${Math.round(this._autopilotTargetAltFt)}`);
                 this.hudApState.textContent = parts.length ? parts.join(' / ') : 'ON';
                 this.hudApState.style.color = '#40ff80';
             } else {
@@ -8381,6 +9093,7 @@ export class FlightSceneSimple extends Scene3D {
                 this.hudApState.style.color = '#888';
             }
         }
+        this._updateAutopilotPanel();
 
         if (this.hudRpmVal) this.hudRpmVal.textContent = String(Math.round(this.engineRpm));
         const _engineEt = this.aircraftConfig.engine_type;
@@ -8438,8 +9151,11 @@ export class FlightSceneSimple extends Scene3D {
                 BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
                 BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, 1)),
             );
-            const hdgDeg = Math.round(((hdgRad * 180 / Math.PI) + 360) % 360);
-            this.hudHdgVal.textContent = `${hdgDeg}\u00B0`;
+            const hdgTrueDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
+            const here = this._apCurrentLatLon();
+            const magVar = here ? this._magneticVariationDeg(here.lat, here.lon) : 0;
+            const hdgMagDeg = Math.round(((hdgTrueDeg - magVar) + 360) % 360);
+            this.hudHdgVal.textContent = `${hdgMagDeg}\u00B0M`;
         }
 
         this._updateTapeMarks(speedKts, altitudeFt);

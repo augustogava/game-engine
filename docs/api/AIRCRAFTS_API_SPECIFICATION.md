@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS aircrafts (
     fuselage_cd0              DECIMAL(6,4) NOT NULL COMMENT 'Fuselage parasitic drag coefficient. Added as extra drag independent of wings',
     fuselage_ref_area         DECIMAL(8,2) NOT NULL COMMENT 'Fuselage reference area in m². Multiplied by fuselage_cd0 for drag force',
     stall_speed_kts           DECIMAL(6,1) NOT NULL COMMENT 'Stall speed in knots for HUD warning display only (not physics)',
+    vne_kts                   DECIMAL(6,1) NULL DEFAULT NULL COMMENT 'Velocity never exceed in knots IAS. Triggers OVERSPEED warning when current IAS > vne_kts. When NULL, client falls back to stall_speed_kts * 4.0.',
+    mmo                       DECIMAL(4,2) NULL DEFAULT NULL COMMENT 'Maximum operating Mach number (Mmo). Triggers OVERSPEED warning when current Mach > mmo. Independent of wave_drag_peak_mach (which is an aerodynamic parameter). When NULL, client uses a category-based fallback.',
     base_zero_lift_aoa        DECIMAL(8,5) NOT NULL COMMENT 'Base zero-lift angle of attack in radians. Wing produces no lift at this AoA',
 
     -- Flaps
@@ -332,6 +334,54 @@ WHERE code = 'concorde';
 
 The `/api/aircrafts` and `/api/aircrafts/:id` endpoints MUST include all eight columns in their `SELECT` lists so the values reach the client.
 
+### Vne / Mmo Overspeed Columns (additive migration)
+
+The `vne_kts` and `mmo` columns are additive and nullable: existing aircraft rows do not need to be touched. They model the two real-world speed limits independently — `vne_kts` dominates at low altitude (dynamic pressure / structural), `mmo` dominates at high altitude (compressibility). The overspeed warning fires when either limit is exceeded.
+
+When `vne_kts` is `NULL`, the client uses the legacy fallback `Vne = stall_speed_kts * 4.0`. When `mmo` is `NULL`, the client uses a category-based fallback.
+
+```sql
+ALTER TABLE aircrafts
+    ADD COLUMN vne_kts DECIMAL(6,1) NULL DEFAULT NULL
+        COMMENT 'Velocity never exceed in knots IAS. NULL = client fallback stall_speed_kts * 4.'
+        AFTER stall_speed_kts,
+    ADD COLUMN mmo DECIMAL(4,2) NULL DEFAULT NULL
+        COMMENT 'Maximum operating Mach number. Independent of wave_drag_peak_mach. NULL = client category-based fallback.'
+        AFTER vne_kts;
+```
+
+Seed values for the existing fleet:
+
+```sql
+UPDATE aircrafts SET vne_kts = CASE code
+    WHEN 'f22'       THEN 800.0
+    WHEN 'concorde'  THEN 530.0
+    WHEN 'a380'      THEN 340.0
+    WHEN 'b737_900'  THEN 340.0
+    WHEN 'dc8'       THEN 350.0
+    WHEN 'learjet45' THEN 330.0
+    WHEN 'kc390'     THEN 320.0
+    WHEN 'a29'       THEN 320.0
+    WHEN 'c172'      THEN 163.0
+    ELSE vne_kts END
+WHERE code IN ('f22','concorde','a380','b737_900','dc8','learjet45','kc390','a29','c172');
+
+UPDATE aircrafts SET mmo = CASE code
+    WHEN 'f22'       THEN 2.25
+    WHEN 'concorde'  THEN 2.04
+    WHEN 'a380'      THEN 0.89
+    WHEN 'b737_900'  THEN 0.82
+    WHEN 'dc8'       THEN 0.88
+    WHEN 'learjet45' THEN 0.81
+    WHEN 'kc390'     THEN 0.80
+    WHEN 'a29'       THEN 0.65
+    WHEN 'c172'      THEN 0.32
+    ELSE mmo END
+WHERE code IN ('f22','concorde','a380','b737_900','dc8','learjet45','kc390','a29','c172');
+```
+
+The `/api/aircrafts` and `/api/aircrafts/:id` endpoints MUST include both `vne_kts` and `mmo` in their `SELECT` lists so the values reach the client.
+
 ---
 
 ## API Contract
@@ -380,6 +430,8 @@ List all active aircrafts with their surfaces.
             "fuselage_cd0": 0.0400,
             "fuselage_ref_area": 45.00,
             "stall_speed_kts": 25.0,
+            "vne_kts": null,
+            "mmo": null,
             "base_zero_lift_aoa": -0.03500,
             "flap_steps_json": [0, 5, 15, 25, 30, 40],
             "default_flap_index_ground": 2,
@@ -578,6 +630,8 @@ Acquire/unlock an aircraft. `:id` is the `aircraft_id`.
 | `oswald_efficiency` | Induced drag: `CD_induced = CL² / (π * AR * oswald_efficiency)` |
 | `fuselage_cd0` | Extra parasitic drag: `F_fuselage = 0.5 * ρ * V² * fuselage_cd0 * fuselage_ref_area` |
 | `stall_speed_kts` | HUD shows "STALL" warning when speed < this value and altitude > 20m |
+| `vne_kts` | HUD shows "OVERSPEED" warning when IAS > this value. When `null`, fallback `Vne = stall_speed_kts * 4.0` is used. |
+| `mmo` | HUD shows "OVERSPEED" warning when current Mach > this value. Independent of `wave_drag_peak_mach` (aerodynamic parameter). When `null`, client uses a category-based fallback. |
 | `base_zero_lift_aoa` | Wing zero-lift AoA. Shifted by flaps: `zeroLift = base + (-flapRad * 0.04)` |
 | `flap_steps_json` | Array of flap angles in degrees. User cycles through with keys 5/6. |
 | `throttle_up/down_rate` | `thrust += rate * dt` when W/S keys pressed |
