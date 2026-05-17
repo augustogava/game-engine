@@ -234,6 +234,9 @@ const AP_NAV_MAX_INTERCEPT_DEG = 45;
 const AP_APR_GLIDESLOPE_DEG = 3;
 const AP_APR_MIN_ALT_FT = 0;
 const AP_INPUT_DISENGAGE_THRESHOLD = 0.25;
+const AUTOTRIM_RATE_PER_S = 0.04;
+const AUTOTRIM_MAX = 0.15;
+const AUTOTRIM_DEADBAND = 0.01;
 
 // ── Camera modes (P3) ───────────────────────────────────────────────────────
 const CAMERA_MODE_CHASE = 0;
@@ -877,6 +880,8 @@ export class FlightSceneSimple extends Scene3D {
     private hudGsVal:      HTMLElement | null = null;
     private hudIasVal:     HTMLElement | null = null;
     private hudApState:    HTMLElement | null = null;
+    private hudSpoilerState: HTMLElement | null = null;
+    private hudEngsState:    HTMLElement | null = null;
     private hudRpmVal!:    HTMLElement;
     private hudRpmNeedle!: HTMLElement;
     private hudFuelVal!:   HTMLElement;
@@ -4083,7 +4088,15 @@ export class FlightSceneSimple extends Scene3D {
                 errFt * AP_ALT_PITCH_GAIN - vsFpm * AP_ALT_VS_DAMP_GAIN));
             this.surfaces[2].controlInput = -pitchCmd;
         }
-        void stepDt;
+
+        if ((this._autopilotAltHold || this._autopilotVsHold || this._autopilotAprHold) && this.surfaces.length >= 3) {
+            const elevatorCmd = this.surfaces[2].controlInput;
+            if (Math.abs(elevatorCmd) > AUTOTRIM_DEADBAND) {
+                const trimDir = -Math.sign(elevatorCmd);
+                this.trimPitch = Math.max(-AUTOTRIM_MAX, Math.min(AUTOTRIM_MAX,
+                    this.trimPitch + trimDir * AUTOTRIM_RATE_PER_S * stepDt));
+            }
+        }
     }
 
     private _engageAutopilotMaster(): void {
@@ -6911,6 +6924,8 @@ export class FlightSceneSimple extends Scene3D {
       <div class="hud-instr-item"><span class="hud-instr-val" id="hud-trim-v">0</span><span class="hud-instr-lbl">TRIM</span></div>
       <div class="hud-instr-item"><span class="hud-instr-val" id="hud-thr-pct" style="min-width:22px">0%</span><div class="hud-instr-bar"><div class="hud-instr-bar-fill" id="bb-thr" style="width:0%"></div></div><span class="hud-instr-lbl">THR</span><span class="hud-instr-ab" id="hud-ab-tag" style="display:none;margin-left:4px;padding:1px 4px;border:1px solid #ff5a00;color:#ff5a00;font-weight:bold;border-radius:3px;font-size:.85em">AB</span></div>
       <div class="hud-instr-item" id="hud-ap-row"><span class="hud-instr-val" id="hud-ap-state" style="color:#888">OFF</span><span class="hud-instr-lbl">AP</span></div>
+      <div class="hud-instr-item" id="hud-spoiler-row"><span class="hud-instr-val" id="hud-spoiler-state" style="color:#888">--</span><span class="hud-instr-lbl">SPL</span></div>
+      <div class="hud-instr-item" id="hud-engs-row"><span class="hud-instr-val" id="hud-engs-state" style="color:#40ff80">OK</span><span class="hud-instr-lbl">ENG</span></div>
     </div>
     <div class="hud-bottom-row">
       <div class="hud-bottom-item"><span class="hud-bottom-val" id="hud-hdg-v">0&deg;</span><span class="hud-bottom-lbl">HDG</span></div>
@@ -7091,6 +7106,8 @@ export class FlightSceneSimple extends Scene3D {
         this.hudGsVal    = document.getElementById('hud-gs-v');
         this.hudIasVal   = document.getElementById('hud-ias-v');
         this.hudApState  = document.getElementById('hud-ap-state');
+        this.hudSpoilerState = document.getElementById('hud-spoiler-state');
+        this.hudEngsState    = document.getElementById('hud-engs-state');
         this._wireAutopilotPanel();
         this.hudRpmVal   = document.getElementById('hud-rpm-v')!;
         this.hudRpmNeedle = document.getElementById('hud-rpm-needle')!;
@@ -9094,6 +9111,34 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
         this._updateAutopilotPanel();
+
+        if (this.hudSpoilerState) {
+            const pct = Math.round(this._spoilerDeflection * 100);
+            if (this._spoilerArmed && pct === 0) {
+                this.hudSpoilerState.textContent = 'ARM';
+                this.hudSpoilerState.style.color = '#ffcc55';
+            } else if (pct > 0) {
+                this.hudSpoilerState.textContent = `${pct}%`;
+                this.hudSpoilerState.style.color = '#40ff80';
+            } else {
+                this.hudSpoilerState.textContent = '--';
+                this.hudSpoilerState.style.color = '#888';
+            }
+        }
+        if (this.hudEngsState) {
+            const total = Math.max(1, this.aircraftConfig.engine_count ?? 1);
+            const alive = Array.isArray(this._engineAlive) ? this._engineAlive.filter(Boolean).length : total;
+            if (alive === total) {
+                this.hudEngsState.textContent = 'OK';
+                this.hudEngsState.style.color = '#40ff80';
+            } else if (alive === 0) {
+                this.hudEngsState.textContent = 'OUT';
+                this.hudEngsState.style.color = '#ff4040';
+            } else {
+                this.hudEngsState.textContent = `${alive}/${total}`;
+                this.hudEngsState.style.color = '#ffcc55';
+            }
+        }
 
         if (this.hudRpmVal) this.hudRpmVal.textContent = String(Math.round(this.engineRpm));
         const _engineEt = this.aircraftConfig.engine_type;
