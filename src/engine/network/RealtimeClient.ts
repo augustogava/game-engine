@@ -24,6 +24,10 @@ export class RealtimeClient {
     private connectionListeners: ConnectionCallback[] = [];
     private closeListeners: CloseCallback[] = [];
     private _connected = false;
+    private _lastMessageMs = 0;
+    private _recentMessageTimestamps: number[] = [];
+    private _messagesReceived = 0;
+    private _malformedReceived = 0;
 
     constructor(config: RealtimeClientConfig = {}) {
         this.path = config.path ?? '/ws';
@@ -54,10 +58,22 @@ export class RealtimeClient {
         };
 
         this.ws.onmessage = (ev) => {
+            const now = performance.now();
+            this._lastMessageMs = now;
+            this._messagesReceived++;
+            this._recentMessageTimestamps.push(now);
+            const cutoff = now - 5000;
+            while (this._recentMessageTimestamps.length > 0 && this._recentMessageTimestamps[0] < cutoff) {
+                this._recentMessageTimestamps.shift();
+            }
             try {
                 const msg = JSON.parse(ev.data);
                 for (const cb of this.messageListeners) cb(msg);
-            } catch (e) { /* ignore malformed */ }
+            } catch (e) {
+                this._malformedReceived++;
+                const preview = typeof ev.data === 'string' ? ev.data.slice(0, 64) : '<binary>';
+                console.warn(`[RealtimeClient] malformed message (preview): ${preview}`);
+            }
         };
 
         this.ws.onclose = (ev) => {
@@ -96,6 +112,23 @@ export class RealtimeClient {
 
     onClose(cb: CloseCallback): void {
         this.closeListeners.push(cb);
+    }
+
+    getLastMessageAgeMs(): number {
+        if (this._lastMessageMs <= 0) return -1;
+        return performance.now() - this._lastMessageMs;
+    }
+
+    getRecentMessageRateHz(): number {
+        return this._recentMessageTimestamps.length / 5;
+    }
+
+    getMalformedCount(): number {
+        return this._malformedReceived;
+    }
+
+    getMessagesReceived(): number {
+        return this._messagesReceived;
     }
 
     dispose(): void {

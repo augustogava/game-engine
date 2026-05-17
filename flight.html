@@ -251,6 +251,18 @@
         }
         @media(max-width:768px){ #keys-helper{display:none!important} }
 
+        /* ── Accessibility (color-blind, font scale, contrast) ─── */
+        :root { --font-scale: 1.0; }
+        body.a11y-contrast {
+            filter: contrast(1.18) saturate(1.1);
+        }
+        body.a11y-cb-protan #game-canvas { filter: url(#a11y-protan); }
+        body.a11y-cb-deutan #game-canvas { filter: url(#a11y-deutan); }
+        body.a11y-cb-tritan #game-canvas { filter: url(#a11y-tritan); }
+        #flight-hud, #ux-checklist, #ux-fps-latency, #keys-helper, #debug-ui {
+            font-size: calc(1em * var(--font-scale));
+        }
+
     </style>
 </head>
 
@@ -273,6 +285,15 @@
     <!-- BabylonJS renders into this canvas -->
     <canvas id="game-canvas"></canvas>
 
+    <!-- Accessibility color-blind SVG filters -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <defs>
+            <filter id="a11y-protan"><feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0"/></filter>
+            <filter id="a11y-deutan"><feColorMatrix type="matrix" values="0.625 0.375 0 0 0  0.7 0.3 0 0 0  0 0.3 0.7 0 0  0 0 0 1 0"/></filter>
+            <filter id="a11y-tritan"><feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0"/></filter>
+        </defs>
+    </svg>
+
     <!-- Keys helper overlay (visible until first input) -->
     <div id="keys-helper" aria-hidden="true">
         <div class="kh-group"><span class="kh-label">Throttle</span><kbd>W</kbd><kbd>S</kbd></div>
@@ -284,6 +305,14 @@
         <div class="kh-group"><span class="kh-label">Trim Yaw</span><kbd>9</kbd><kbd>0</kbd></div>
         <div class="kh-group"><span class="kh-label">Brake</span><kbd>B</kbd></div>
         <div class="kh-group"><span class="kh-label">Gear</span><kbd>G</kbd></div>
+        <div class="kh-group"><span class="kh-label">Camera</span><kbd>C</kbd></div>
+        <div class="kh-group"><span class="kh-label">Tower</span><kbd>T</kbd></div>
+        <div class="kh-group"><span class="kh-label">Pause</span><kbd>P</kbd></div>
+        <div class="kh-group"><span class="kh-label">Speed</span><kbd>[</kbd><kbd>]</kbd></div>
+        <div class="kh-group"><span class="kh-label">Easy</span><kbd>M</kbd></div>
+        <div class="kh-group"><span class="kh-label">Yoke</span><kbd>Y</kbd></div>
+        <div class="kh-group"><span class="kh-label">Replay</span><kbd>V</kbd></div>
+        <div class="kh-group"><span class="kh-label">Screenshot</span><kbd>F12</kbd></div>
         <div class="kh-group"><span class="kh-label">Respawn</span><kbd>R</kbd></div>
     </div>
 
@@ -459,6 +488,107 @@
                     <label style="flex:1;margin:0;font-size:11px">Click</label>
                     <input type="range" id="aud-click" min="0" max="100" value="60" style="width:100px">
                     <span id="aud-click-val" style="font-size:10px;color:#40ffaa;min-width:30px">60%</span>
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top:1px solid rgba(64,255,170,.15);margin-top:12px;padding-top:12px">
+            <header style="cursor:pointer;user-select:none" id="ux-header">
+                <h3 style="font-family:'Orbitron',monospace;font-size:12px;color:#40ffaa;margin:0">UX &#9662;</h3>
+            </header>
+            <div id="ux-settings" class="debug-form" style="margin-top:8px">
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Idioma / Language</label>
+                    <select id="ux-language" style="font-size:11px">
+                        <option value="pt">Portugues</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Unidades / Units</label>
+                    <select id="ux-units" style="font-size:11px">
+                        <option value="imperial">Imperial (kt/ft/nm)</option>
+                        <option value="metric">Metrica (km/h/m/km)</option>
+                    </select>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Mouse como manche</label>
+                    <input type="checkbox" id="ux-mouse-yoke">
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Modo Iniciante</label>
+                    <input type="checkbox" id="ux-easy-mode">
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Auto-throttle (kt)</label>
+                    <input type="number" id="ux-auto-thr" min="60" max="600" value="250" style="width:80px;font-size:11px">
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Habilitar Gamepad</label>
+                    <input type="checkbox" id="ux-gamepad" checked>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Curva (expo)</label>
+                    <input type="range" id="ux-expo" min="1" max="4" step="0.1" value="1.5" style="width:100px">
+                    <span id="ux-expo-val" style="font-size:10px;color:#40ffaa;min-width:30px">1.5x</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Zona morta</label>
+                    <input type="range" id="ux-deadzone" min="0" max="40" value="5" style="width:100px">
+                    <span id="ux-deadzone-val" style="font-size:10px;color:#40ffaa;min-width:30px">5%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Sensibilidade</label>
+                    <input type="range" id="ux-sensitivity" min="30" max="300" value="100" style="width:100px">
+                    <span id="ux-sensitivity-val" style="font-size:10px;color:#40ffaa;min-width:30px">100%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Checklist por fase</label>
+                    <input type="checkbox" id="ux-checklist">
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">FPS overlay</label>
+                    <input type="checkbox" id="ux-fps-overlay" checked>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Latencia overlay</label>
+                    <input type="checkbox" id="ux-latency-overlay" checked>
+                </div>
+
+                <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15)">
+                    <div style="font-family:'Orbitron',monospace;font-size:10px;color:rgba(125,249,200,.7);margin-bottom:4px">ACESSIBILIDADE</div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:11px">Daltonismo</label>
+                        <select id="ux-colorblind" style="font-size:11px">
+                            <option value="none">Nenhum</option>
+                            <option value="protanopia">Protanopia</option>
+                            <option value="deuteranopia">Deuteranopia</option>
+                            <option value="tritanopia">Tritanopia</option>
+                        </select>
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:11px">Tamanho fonte</label>
+                        <input type="range" id="ux-font-scale" min="70" max="160" value="100" style="width:100px">
+                        <span id="ux-font-scale-val" style="font-size:10px;color:#40ffaa;min-width:30px">100%</span>
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:11px">Alto contraste</label>
+                        <input type="checkbox" id="ux-contrast">
+                    </div>
+                </div>
+
+                <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15);display:flex;flex-wrap:wrap;gap:6px">
+                    <button id="ux-replay-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">REPLAY 60s</button>
+                    <button id="ux-tower-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">CAM TORRE</button>
+                    <button id="ux-screenshot-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">SCREENSHOT</button>
+                </div>
+
+                <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15)">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                        <span style="font-family:'Orbitron',monospace;font-size:10px;color:rgba(125,249,200,.7)">TECLAS</span>
+                        <button id="ux-keys-reset" class="debug-btn" style="font-size:9px;padding:3px 8px">RESET</button>
+                    </div>
+                    <div id="ux-keymap-list" style="max-height:200px;overflow-y:auto"></div>
                 </div>
             </div>
         </div>

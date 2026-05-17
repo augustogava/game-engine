@@ -124,6 +124,22 @@ export class MultiplayerClient {
         this._onFlightLogEndedCb = cb;
     }
 
+    getLastMessageAgeMs(): number {
+        return this.rt.getLastMessageAgeMs();
+    }
+
+    getRecentMessageRateHz(): number {
+        return this.rt.getRecentMessageRateHz();
+    }
+
+    getMalformedCount(): number {
+        return this.rt.getMalformedCount();
+    }
+
+    getMessagesReceived(): number {
+        return this.rt.getMessagesReceived();
+    }
+
     dispose(): void {
         this.rt.dispose();
     }
