@@ -92,6 +92,9 @@ const WIND_DEFAULT_DIRECTION_DEG = 270;
 const WIND_DEFAULT_SPEED_KT = 8;
 const WIND_ALTITUDE_GAIN_KT_PER_1000FT = 0.5;
 const WIND_MAX_SPEED_KT = 80;
+const KT_TO_MS = 0.514444;
+const MS_TO_KT = 1.943844;
+const STALL_AOA_WARNING_FRACTION = 0.9;
 
 // ── Camera modes (P3) ───────────────────────────────────────────────────────
 const CAMERA_MODE_CHASE = 0;
@@ -138,6 +141,71 @@ const HDG_DELTA_AMBER_DEG = 15;
 const ALT_BAND_GREEN_FT = 500;
 const ALT_BAND_AMBER_FT = 1000;
 const XTE_INDICATOR_MAX_NM = 2.0;
+
+// ── Sky objects (sun / moon visual) ─────────────────────────────────────────
+const SUN_TEXTURE_PATH = 'src/game/assets/sun.png';
+const MOON_TEXTURE_PATH = 'src/game/assets/moon.png';
+const SUN_DIAMETER = 600;
+const SUN_HALO_SIZE = 2400;
+const SUN_DISTANCE = 10000;
+const SUN_ROTATION_RAD_PER_S = 0.02;
+const SUN_FADE_START_ELEV_DEG = 0;
+const SUN_FADE_END_ELEV_DEG = -5;
+const MOON_DIAMETER = 350;
+const MOON_HALO_SIZE = 800;
+const MOON_DISTANCE = 10000;
+const MOON_FADE_ELEV_DEG = 8;
+const MOON_HALO_FADE_BAND_DEG = 10;
+const MOON_HALO_FADE_OFFSET_DEG = 2;
+const SUN_HALO_TEX_SIZE = 256;
+const MOON_HALO_TEX_SIZE = 256;
+
+// ── Sky polish ──────────────────────────────────────────────────────────────
+const SKY_LUMINANCE_MAX = 1.0;
+const SKY_MIE_G_LOW_HORIZON = 0.92;
+const SKY_MIE_G_HIGH_SUN = 0.78;
+const SKY_MIE_G_TRANSITION_DEG = 25;
+const NIGHT_HORIZON_GLOW_R = 0.03;
+const NIGHT_HORIZON_GLOW_G = 0.05;
+const NIGHT_HORIZON_GLOW_B = 0.12;
+const NIGHT_HORIZON_GLOW_FADE_BAND_DEG = 12;
+const NIGHT_HORIZON_GLOW_OFFSET_DEG = -5;
+
+// ── Clouds ──────────────────────────────────────────────────────────────────
+const CLOUD_TEXTURE_URL = 'https://assets.babylonjs.com/textures/cloud.png';
+const CLOUD_WIND_HIGH_ELEV_DEG = 25;
+const CLOUD_KT_TO_MS = 0.514444;
+const CLOUD_DAY_COLOR_R = 1.00;
+const CLOUD_DAY_COLOR_G = 1.00;
+const CLOUD_DAY_COLOR_B = 1.00;
+const CLOUD_SUNSET_COLOR_R = 1.00;
+const CLOUD_SUNSET_COLOR_G = 0.65;
+const CLOUD_SUNSET_COLOR_B = 0.45;
+const CLOUD_NIGHT_COLOR_R = 0.22;
+const CLOUD_NIGHT_COLOR_G = 0.26;
+const CLOUD_NIGHT_COLOR_B = 0.38;
+const CLOUD_SUNSET_FADE_BAND_DEG = 25;
+const CLOUD_NIGHT_FADE_BAND_DEG = 10;
+const CLOUD_NIGHT_FADE_OFFSET_DEG = 0;
+const CLOUD_ALPHA_MIN = 0.55;
+const CLOUD_ALPHA_MAX = 0.92;
+const CLOUD_DENSITY_MULT_LOW = 0.5;
+const CLOUD_DENSITY_MULT_MEDIUM = 1.0;
+const CLOUD_DENSITY_MULT_HIGH = 2.0;
+const CLOUD_DENSITY_MULT_ULTRA = 3.0;
+const OVERCAST_DECK_Y_M = 7500;
+const OVERCAST_DECK_SIZE_M = 60000;
+const OVERCAST_DECK_ALPHA = 0.55;
+const MILKY_WAY_BAND_COUNT = 120;
+const MILKY_WAY_BAND_DIST = 50000;
+const MILKY_WAY_BAND_HALF_WIDTH_DEG = 7;
+const MILKY_WAY_BAND_TILT_DEG = 60;
+
+// ── Bright stars / planets ──────────────────────────────────────────────────
+const BRIGHT_STAR_COUNT = 25;
+const BRIGHT_STAR_BASE_SIZE = 110;
+const BRIGHT_STAR_SIZE_RANDOM = 70;
+const BRIGHT_STAR_TWINKLE_AMOUNT = 0.45;
 
 interface AircraftSurfaceConfig {
     surface_index: number;
@@ -613,6 +681,8 @@ export class FlightSceneSimple extends Scene3D {
     private hudSpeedVal!:  HTMLElement;
     private hudAltVal!:    HTMLElement;
     private hudTasVal!:    HTMLElement;
+    private hudGsVal:      HTMLElement | null = null;
+    private hudIasVal:     HTMLElement | null = null;
     private hudRpmVal!:    HTMLElement;
     private hudRpmNeedle!: HTMLElement;
     private hudFuelVal!:   HTMLElement;
@@ -651,6 +721,11 @@ export class FlightSceneSimple extends Scene3D {
     private _tmpFwd   = BABYLON.Vector3.Zero();
     private _tmpRight = BABYLON.Vector3.Zero();
     private _tmpUp    = new BABYLON.Vector3(0, 1, 0);
+    private _tmpWindWorld = BABYLON.Vector3.Zero();
+    private _tmpAirVel    = BABYLON.Vector3.Zero();
+    private _lastAoaRad: number = 0;
+    private _lastTasMs:  number = 0;
+    private _lastIasMs:  number = 0;
     private _terrainRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), 1000);
     private _mapHdgCtx: CanvasRenderingContext2D | null = null;
     private _missionPanelEl: HTMLElement | null = null;
@@ -699,6 +774,8 @@ export class FlightSceneSimple extends Scene3D {
     private _fillLight: BABYLON.DirectionalLight | null = null;
     private _sunMesh: BABYLON.Mesh | null = null;
     private _sunMeshMat: BABYLON.StandardMaterial | null = null;
+    private _sunHaloMesh: BABYLON.Mesh | null = null;
+    private _sunHaloMat: BABYLON.StandardMaterial | null = null;
     private _skyMaterial: SkyMaterial | null = null;
     private _skyboxMesh: BABYLON.Mesh | null = null;
     private _starRoot: BABYLON.TransformNode | null = null;
@@ -708,6 +785,12 @@ export class FlightSceneSimple extends Scene3D {
     private _starTime = 0;
     private _moonMesh: BABYLON.Mesh | null = null;
     private _moonMat: BABYLON.StandardMaterial | null = null;
+    private _moonHaloMesh: BABYLON.Mesh | null = null;
+    private _moonHaloMat: BABYLON.StandardMaterial | null = null;
+    private _overcastMesh: BABYLON.Mesh | null = null;
+    private _overcastMat: BABYLON.StandardMaterial | null = null;
+    private _milkyWayRoot: BABYLON.TransformNode | null = null;
+    private _cloudDensityMult = CLOUD_DENSITY_MULT_MEDIUM;
     private _lensFlareSystem: BABYLON.LensFlareSystem | null = null;
     private _sunUpdateTimer = 0;
     private _sunElevation = 45;
@@ -852,7 +935,7 @@ export class FlightSceneSimple extends Scene3D {
         }
         this._updateStarTwinkle(dt);
         this._updateNavLights(dt);
-        this._updateClouds();
+        this._updateClouds(dt);
         this._updatePropellerAnim();
         this._updateGearState();
         this._updateHUD();
@@ -942,6 +1025,15 @@ export class FlightSceneSimple extends Scene3D {
         if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
         if (this._ssao) { this._ssao.dispose(); this._ssao = null; }
         if (this._lensFlareSystem) { this._lensFlareSystem.dispose(); this._lensFlareSystem = null; }
+        if (this._sunHaloMat) { try { this._sunHaloMat.dispose(true, true); } catch (_) { /* ignore */ } this._sunHaloMat = null; }
+        if (this._sunHaloMesh) { try { this._sunHaloMesh.dispose(); } catch (_) { /* ignore */ } this._sunHaloMesh = null; }
+        if (this._moonHaloMat) { try { this._moonHaloMat.dispose(true, true); } catch (_) { /* ignore */ } this._moonHaloMat = null; }
+        if (this._moonHaloMesh) { try { this._moonHaloMesh.dispose(); } catch (_) { /* ignore */ } this._moonHaloMesh = null; }
+        for (const mat of this._cloudMats) { try { mat.dispose(true, true); } catch (_) { /* ignore */ } }
+        this._cloudMats = [];
+        if (this._overcastMat) { try { this._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this._overcastMat = null; }
+        if (this._overcastMesh) { try { this._overcastMesh.dispose(); } catch (_) { /* ignore */ } this._overcastMesh = null; }
+        if (this._milkyWayRoot) { try { this._milkyWayRoot.dispose(); } catch (_) { /* ignore */ } this._milkyWayRoot = null; }
         if (this._shadowGen) { this._shadowGen.dispose(); this._shadowGen = null; }
         if (this.camera) this.camera.detachControl();
     }
@@ -1723,15 +1815,68 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _buildSunMesh(scene: BABYLON.Scene): void {
-        this._sunMesh = BABYLON.MeshBuilder.CreateSphere('sunMesh', { diameter: 800, segments: 16 }, scene);
+        this._sunMesh = BABYLON.MeshBuilder.CreateSphere('sunMesh', { diameter: SUN_DIAMETER, segments: 32 }, scene);
         this._sunMesh.isPickable = false;
         this._sunMesh.infiniteDistance = true;
+        this._sunMesh.applyFog = false;
+        this._sunMesh.renderingGroupId = 0;
 
         this._sunMeshMat = new BABYLON.StandardMaterial('sunMeshMat', scene);
-        this._sunMeshMat.emissiveColor = new BABYLON.Color3(1.0, 0.95, 0.7);
+        try {
+            const tex = new BABYLON.Texture(SUN_TEXTURE_PATH, scene);
+            tex.hasAlpha = false;
+            this._sunMeshMat.emissiveTexture = tex;
+            this._sunMeshMat.diffuseTexture = tex;
+        } catch (err) {
+            console.warn('[Sky] Failed to load sun texture, falling back to plain emissive', err);
+        }
+        this._sunMeshMat.emissiveColor = new BABYLON.Color3(1.0, 0.95, 0.85);
+        this._sunMeshMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        this._sunMeshMat.specularColor = new BABYLON.Color3(0, 0, 0);
         this._sunMeshMat.disableLighting = true;
-        this._sunMeshMat.backFaceCulling = false;
+        this._sunMeshMat.backFaceCulling = true;
         this._sunMesh.material = this._sunMeshMat;
+
+        this._buildSunHalo(scene);
+    }
+
+    private _buildSunHalo(scene: BABYLON.Scene): void {
+        const halo = BABYLON.MeshBuilder.CreatePlane('sunHalo', { size: SUN_HALO_SIZE }, scene);
+        halo.isPickable = false;
+        halo.infiniteDistance = true;
+        halo.applyFog = false;
+        halo.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+        halo.renderingGroupId = 0;
+
+        const haloTex = new BABYLON.DynamicTexture('sunHaloTex', { width: SUN_HALO_TEX_SIZE, height: SUN_HALO_TEX_SIZE }, scene, true);
+        const ctx = haloTex.getContext() as CanvasRenderingContext2D;
+        const cx = SUN_HALO_TEX_SIZE / 2;
+        const cy = SUN_HALO_TEX_SIZE / 2;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cx);
+        grad.addColorStop(0.00, 'rgba(255, 240, 200, 1.00)');
+        grad.addColorStop(0.18, 'rgba(255, 215, 140, 0.65)');
+        grad.addColorStop(0.45, 'rgba(255, 180, 120, 0.22)');
+        grad.addColorStop(1.00, 'rgba(255, 160,  90, 0.00)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, SUN_HALO_TEX_SIZE, SUN_HALO_TEX_SIZE);
+        haloTex.hasAlpha = true;
+        haloTex.update();
+
+        const mat = new BABYLON.StandardMaterial('sunHaloMat', scene);
+        mat.emissiveTexture = haloTex;
+        mat.opacityTexture = haloTex;
+        mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+        mat.specularColor = new BABYLON.Color3(0, 0, 0);
+        mat.disableLighting = true;
+        mat.backFaceCulling = false;
+        mat.disableDepthWrite = true;
+        mat.alphaMode = BABYLON.Engine.ALPHA_ADD;
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        halo.material = mat;
+
+        this._sunHaloMesh = halo;
+        this._sunHaloMat = mat;
     }
 
     private _buildStars(scene: BABYLON.Scene): void {
@@ -1794,20 +1939,117 @@ export class FlightSceneSimple extends Scene3D {
             this._starPhases.push(Math.random() * Math.PI * 2);
             this._starBaseScales.push(sz);
         }
+
+        const brightColors = [
+            new BABYLON.Color3(1.00, 0.98, 0.95),
+            new BABYLON.Color3(1.00, 0.85, 0.55),
+            new BABYLON.Color3(0.80, 0.90, 1.00),
+            new BABYLON.Color3(1.00, 0.55, 0.40),
+            new BABYLON.Color3(1.00, 1.00, 0.75),
+        ];
+        const brightMats = brightColors.map((c, i) => {
+            const m = new BABYLON.StandardMaterial(`brightStarMat${i}`, scene);
+            m.emissiveColor = c;
+            m.disableLighting = true;
+            m.diffuseColor = new BABYLON.Color3(0, 0, 0);
+            m.specularColor = new BABYLON.Color3(0, 0, 0);
+            return m;
+        });
+        const brightBases: BABYLON.Mesh[] = brightMats.map((mat, i) => {
+            const b = BABYLON.MeshBuilder.CreatePlane(`brightStarBase${i}`, { size: 1 }, scene);
+            b.material = mat;
+            b.isVisible = false;
+            b.parent = this._starRoot;
+            return b;
+        });
+
+        for (let i = 0; i < BRIGHT_STAR_COUNT; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const cosP = Math.abs(Math.cos(phi));
+            if (cosP < 0.05) continue;
+            const x = starDist * Math.sin(phi) * Math.cos(theta);
+            const y = starDist * cosP;
+            const z = starDist * Math.sin(phi) * Math.sin(theta);
+            const matIdx = Math.floor(Math.random() * brightBases.length);
+            const inst = brightBases[matIdx].createInstance('brightStar_' + i);
+            inst.position.set(x, y, z);
+            const sz = BRIGHT_STAR_BASE_SIZE + Math.random() * BRIGHT_STAR_SIZE_RANDOM;
+            inst.scaling.setAll(sz);
+            inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+            inst.isPickable = false;
+            this._starInstances.push(inst);
+            this._starPhases.push(Math.random() * Math.PI * 2);
+            this._starBaseScales.push(sz);
+        }
+
         this._starRoot.setEnabled(false);
     }
 
     private _buildMoon(scene: BABYLON.Scene): void {
-        this._moonMesh = BABYLON.MeshBuilder.CreateSphere('moonMesh', { diameter: 300, segments: 16 }, scene);
+        this._moonMesh = BABYLON.MeshBuilder.CreateSphere('moonMesh', { diameter: MOON_DIAMETER, segments: 32 }, scene);
         this._moonMesh.isPickable = false;
         this._moonMesh.infiniteDistance = true;
+        this._moonMesh.applyFog = false;
+        this._moonMesh.renderingGroupId = 0;
+
         this._moonMat = new BABYLON.StandardMaterial('moonMat', scene);
+        try {
+            const tex = new BABYLON.Texture(MOON_TEXTURE_PATH, scene);
+            tex.hasAlpha = false;
+            this._moonMat.diffuseTexture = tex;
+            this._moonMat.emissiveTexture = tex;
+        } catch (err) {
+            console.warn('[Sky] Failed to load moon texture, falling back to plain emissive', err);
+        }
         this._moonMat.emissiveColor = new BABYLON.Color3(0.75, 0.78, 0.85);
-        this._moonMat.diffuseColor = new BABYLON.Color3(0.2, 0.22, 0.28);
+        this._moonMat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.08);
+        this._moonMat.specularColor = new BABYLON.Color3(0, 0, 0);
         this._moonMat.disableLighting = true;
-        this._moonMat.backFaceCulling = false;
+        this._moonMat.backFaceCulling = true;
         this._moonMesh.material = this._moonMat;
         this._moonMesh.isVisible = false;
+
+        this._buildMoonHalo(scene);
+    }
+
+    private _buildMoonHalo(scene: BABYLON.Scene): void {
+        const halo = BABYLON.MeshBuilder.CreatePlane('moonHalo', { size: MOON_HALO_SIZE }, scene);
+        halo.isPickable = false;
+        halo.infiniteDistance = true;
+        halo.applyFog = false;
+        halo.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+        halo.renderingGroupId = 0;
+
+        const haloTex = new BABYLON.DynamicTexture('moonHaloTex', { width: MOON_HALO_TEX_SIZE, height: MOON_HALO_TEX_SIZE }, scene, true);
+        const ctx = haloTex.getContext() as CanvasRenderingContext2D;
+        const cx = MOON_HALO_TEX_SIZE / 2;
+        const cy = MOON_HALO_TEX_SIZE / 2;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cx);
+        grad.addColorStop(0.00, 'rgba(190, 210, 235, 0.70)');
+        grad.addColorStop(0.30, 'rgba(140, 170, 220, 0.25)');
+        grad.addColorStop(1.00, 'rgba( 80, 100, 160, 0.00)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, MOON_HALO_TEX_SIZE, MOON_HALO_TEX_SIZE);
+        haloTex.hasAlpha = true;
+        haloTex.update();
+
+        const mat = new BABYLON.StandardMaterial('moonHaloMat', scene);
+        mat.emissiveTexture = haloTex;
+        mat.opacityTexture = haloTex;
+        mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+        mat.specularColor = new BABYLON.Color3(0, 0, 0);
+        mat.disableLighting = true;
+        mat.backFaceCulling = false;
+        mat.disableDepthWrite = true;
+        mat.alphaMode = BABYLON.Engine.ALPHA_ADD;
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        halo.material = mat;
+        halo.isVisible = false;
+
+        this._moonHaloMesh = halo;
+        this._moonHaloMat = mat;
     }
 
     private _updateStarTwinkle(dt: number): void {
@@ -1847,9 +2089,26 @@ export class FlightSceneSimple extends Scene3D {
             this._sunLight.position = sunDir.scale(-1200);
         }
 
+        const sunWorldPos = sunDir.scale(-SUN_DISTANCE);
         if (this._sunMesh) {
-            this._sunMesh.position = sunDir.scale(-10000);
-            this._sunMesh.isVisible = elevation > -2;
+            this._sunMesh.position = sunWorldPos;
+            const fadeRange = (SUN_FADE_START_ELEV_DEG - SUN_FADE_END_ELEV_DEG) || 1;
+            const sunVisFade = Math.max(0, Math.min(1, (elevation - SUN_FADE_END_ELEV_DEG) / fadeRange));
+            this._sunMesh.visibility = sunVisFade;
+            this._sunMesh.isVisible = sunVisFade > 0.01;
+        }
+
+        if (this._sunHaloMesh && this._sunHaloMat) {
+            this._sunHaloMesh.position = sunWorldPos.clone();
+            const horizonT = 1.0 - Math.max(0, Math.min(1, elevation / 30));
+            const baseFade = Math.max(0, Math.min(1, (elevation + 4) / 10));
+            const haloAlpha = baseFade * (0.55 + horizonT * 0.40);
+            this._sunHaloMat.alpha = haloAlpha;
+            const haloR = 1.0;
+            const haloG = 0.95 - horizonT * 0.45;
+            const haloB = 0.85 - horizonT * 0.65;
+            this._sunHaloMat.emissiveColor.set(haloR, Math.max(haloG, 0.2), Math.max(haloB, 0.1));
+            this._sunHaloMesh.isVisible = haloAlpha > 0.02;
         }
 
         if (this._lensFlareSystem) {
@@ -1859,12 +2118,14 @@ export class FlightSceneSimple extends Scene3D {
         if (this._skyMaterial) {
             this._skyMaterial.sunPosition = new BABYLON.Vector3(sunPosX * 1000, sunPosY * 1000, sunPosZ * 1000);
             const lumT = Math.max(0, Math.min(1, (elevation + 5) / 20));
-            this._skyMaterial.luminance = 0.01 + lumT * 1.19;
+            this._skyMaterial.luminance = Math.min(SKY_LUMINANCE_MAX, 0.01 + lumT * 1.19);
             const sunsetT = 1.0 - Math.max(0, Math.min(1, Math.abs(elevation) / 10));
             this._skyMaterial.turbidity = 8 + sunsetT * 6;
             this._skyMaterial.rayleigh = 1.5 + lumT * 1.5;
             this._skyMaterial.mieCoefficient = 0.005 + sunsetT * 0.015;
-            this._skyMaterial.mieDirectionalG = 0.8;
+            const elevForG = Math.max(0, Math.min(SKY_MIE_G_TRANSITION_DEG, elevation));
+            const gT = elevForG / SKY_MIE_G_TRANSITION_DEG;
+            this._skyMaterial.mieDirectionalG = SKY_MIE_G_LOW_HORIZON + (SKY_MIE_G_HIGH_SUN - SKY_MIE_G_LOW_HORIZON) * gT;
         }
 
         const t = Math.max(0, Math.min(1, (elevation + 6) / 30));
@@ -1898,7 +2159,11 @@ export class FlightSceneSimple extends Scene3D {
         const fogB = 0.06 + t * 0.89;
         scene.fogColor.set(fogR, fogG, fogB);
 
-        scene.clearColor.set(fogR * 0.5, fogG * 0.5, fogB * 0.6, 1);
+        const nightGlowT = Math.max(0, Math.min(1, (NIGHT_HORIZON_GLOW_OFFSET_DEG - elevation) / NIGHT_HORIZON_GLOW_FADE_BAND_DEG));
+        const clearR = fogR * 0.5 + NIGHT_HORIZON_GLOW_R * nightGlowT;
+        const clearG = fogG * 0.5 + NIGHT_HORIZON_GLOW_G * nightGlowT;
+        const clearB = fogB * 0.6 + NIGHT_HORIZON_GLOW_B * nightGlowT;
+        scene.clearColor.set(clearR, clearG, clearB, 1);
 
         scene.environmentIntensity = 0.15 + t * 1.15;
 
@@ -1908,18 +2173,32 @@ export class FlightSceneSimple extends Scene3D {
 
         if (this._moonMesh) {
             const moonY = -sunPosY;
-            this._moonMesh.position.set(-sunPosX * 10000, Math.max(moonY * 10000, 500), -sunPosZ * 10000);
-            this._moonMesh.isVisible = elevation < 8 && moonY > -0.05;
+            const moonPosX = -sunPosX * MOON_DISTANCE;
+            const moonPosY = Math.max(moonY * MOON_DISTANCE, 500);
+            const moonPosZ = -sunPosZ * MOON_DISTANCE;
+            this._moonMesh.position.set(moonPosX, moonPosY, moonPosZ);
+            const moonVisible = elevation < MOON_FADE_ELEV_DEG && moonY > -0.05;
+            this._moonMesh.isVisible = moonVisible;
             if (this._moonMat) {
-                const moonBright = Math.max(0, Math.min(1, (8 - elevation) / 15));
+                const moonBright = Math.max(0, Math.min(1, (MOON_FADE_ELEV_DEG - elevation) / 15));
                 this._moonMat.emissiveColor.set(0.75 * moonBright, 0.78 * moonBright, 0.85 * moonBright);
+            }
+            if (this._moonHaloMesh && this._moonHaloMat) {
+                this._moonHaloMesh.position.set(moonPosX, moonPosY, moonPosZ);
+                const haloAlpha = Math.max(0, Math.min(1, (-elevation - MOON_HALO_FADE_OFFSET_DEG) / MOON_HALO_FADE_BAND_DEG)) * 0.7;
+                this._moonHaloMat.alpha = haloAlpha;
+                this._moonHaloMesh.isVisible = moonVisible && haloAlpha > 0.02;
             }
         }
 
         if (this._starRoot) {
             const starFade = Math.max(0, Math.min(1, (-elevation + 5) / 12));
-            this._starRoot.setEnabled(starFade > 0.05);
+            const starsActive = starFade > 0.05;
+            this._starRoot.setEnabled(starsActive);
+            if (this._milkyWayRoot) this._milkyWayRoot.setEnabled(starsActive);
         }
+
+        this._applyCloudTint(elevation);
     }
 
     // ── Skybox ────────────────────────────────────────────────────────────────
@@ -1951,61 +2230,188 @@ export class FlightSceneSimple extends Scene3D {
 
     // ── Clouds ─────────────────────────────────────────────────────────────────
 
-    private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number }[] = [];
+    private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number; windMult: number }[] = [];
+    private _cloudMats: BABYLON.StandardMaterial[] = [];
 
     private _buildClouds(scene: BABYLON.Scene): void {
-        const mat = new BABYLON.StandardMaterial('cloudMat', scene);
-        const tex = new BABYLON.Texture('https://assets.babylonjs.com/textures/cloud.png', scene);
+        const tex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
         tex.hasAlpha = true;
-        mat.diffuseTexture             = tex;
-        mat.backFaceCulling            = false;
-        mat.useAlphaFromDiffuseTexture = true;
-        mat.opacityTexture             = tex;
-        mat.transparencyMode           = BABYLON.StandardMaterial.MATERIAL_ALPHABLEND;
-        mat.alpha                      = 0.85;
-        mat.emissiveColor              = new BABYLON.Color3(1.0, 1.0, 1.0);
-        mat.disableLighting            = true;
 
-        const layers = [
-            { count: 40, yMin: 600,  yRange: 800,  spread: 15000, sizeBase: 700 },
-            { count: 50, yMin: 1800, yRange: 1200, spread: 20000, sizeBase: 1000 },
-            { count: 35, yMin: 4000, yRange: 2500, spread: 25000, sizeBase: 1500 },
+        const layers: { count: number; yMin: number; yRange: number; spread: number; sizeBase: number; aspectY: number; windMult: number }[] = [
+            { count: 40, yMin: 600,  yRange: 800,  spread: 15000, sizeBase: 700,  aspectY: 0.60, windMult: 1.0 },
+            { count: 50, yMin: 1800, yRange: 1200, spread: 20000, sizeBase: 1000, aspectY: 0.50, windMult: 1.6 },
+            { count: 35, yMin: 4000, yRange: 2500, spread: 25000, sizeBase: 1500, aspectY: 0.25, windMult: 3.0 },
         ];
 
         for (const layer of layers) {
+            const mat = new BABYLON.StandardMaterial(`cloudMat_${layer.yMin}`, scene);
+            mat.diffuseTexture             = tex;
+            mat.backFaceCulling            = false;
+            mat.useAlphaFromDiffuseTexture = true;
+            mat.opacityTexture             = tex;
+            mat.transparencyMode           = BABYLON.StandardMaterial.MATERIAL_ALPHABLEND;
+            mat.alpha                      = 0.85;
+            mat.emissiveColor              = new BABYLON.Color3(CLOUD_DAY_COLOR_R, CLOUD_DAY_COLOR_G, CLOUD_DAY_COLOR_B);
+            mat.diffuseColor               = new BABYLON.Color3(0, 0, 0);
+            mat.specularColor              = new BABYLON.Color3(0, 0, 0);
+            mat.disableLighting            = true;
+            this._cloudMats.push(mat);
+
             const tpl = BABYLON.MeshBuilder.CreatePlane(`cloudTpl_${layer.yMin}`, { size: layer.sizeBase }, scene);
             tpl.isVisible = false;
             tpl.isPickable = false;
             tpl.material = mat;
 
-            for (let i = 0; i < layer.count; i++) {
+            const effectiveCount = Math.max(1, Math.round(layer.count * this._cloudDensityMult));
+            for (let i = 0; i < effectiveCount; i++) {
                 const ci = tpl.createInstance(`c_${layer.yMin}_${i}`);
                 const ox = (Math.random() - 0.5) * layer.spread;
                 const oz = (Math.random() - 0.5) * layer.spread;
                 const oy = layer.yMin + Math.random() * layer.yRange;
                 ci.position.set(ox, oy, oz);
                 const s = 0.5 + Math.random() * 2.0;
-                ci.scaling.set(s, s * 0.25, 1);
-                ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+                ci.scaling.set(s, s * layer.aspectY, 1);
+                ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
                 ci.isPickable = false;
-                this.cloudInstances.push({ mesh: ci, yBase: oy, spread: layer.spread });
+                this.cloudInstances.push({ mesh: ci, yBase: oy, spread: layer.spread, windMult: layer.windMult });
             }
         }
     }
 
-    private _updateClouds(): void {
+    private _rebuildClouds(scene: BABYLON.Scene): void {
+        for (const c of this.cloudInstances) { try { c.mesh.dispose(); } catch (_) { /* ignore */ } }
+        this.cloudInstances = [];
+        for (const m of this._cloudMats) { try { m.dispose(true, true); } catch (_) { /* ignore */ } }
+        this._cloudMats = [];
+        this._buildClouds(scene);
+    }
+
+    private _setOvercast(scene: BABYLON.Scene, enabled: boolean): void {
+        if (enabled) {
+            if (this._overcastMesh) {
+                this._overcastMesh.isVisible = true;
+                return;
+            }
+            const deck = BABYLON.MeshBuilder.CreateGround('overcastDeck', { width: OVERCAST_DECK_SIZE_M, height: OVERCAST_DECK_SIZE_M, subdivisions: 1 }, scene);
+            deck.position.y = OVERCAST_DECK_Y_M;
+            deck.isPickable = false;
+            deck.applyFog = true;
+
+            const mat = new BABYLON.StandardMaterial('overcastMat', scene);
+            const tex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
+            tex.hasAlpha = true;
+            tex.uScale = 30;
+            tex.vScale = 30;
+            mat.diffuseTexture = tex;
+            mat.opacityTexture = tex;
+            mat.useAlphaFromDiffuseTexture = true;
+            mat.emissiveColor = new BABYLON.Color3(0.85, 0.85, 0.9);
+            mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+            mat.specularColor = new BABYLON.Color3(0, 0, 0);
+            mat.disableLighting = true;
+            mat.backFaceCulling = false;
+            mat.alpha = OVERCAST_DECK_ALPHA;
+            mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+            deck.material = mat;
+
+            this._overcastMesh = deck;
+            this._overcastMat = mat;
+        } else {
+            if (this._overcastMesh) { try { this._overcastMesh.dispose(); } catch (_) { /* ignore */ } this._overcastMesh = null; }
+            if (this._overcastMat) { try { this._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this._overcastMat = null; }
+        }
+    }
+
+    private _setMilkyWay(scene: BABYLON.Scene, enabled: boolean): void {
+        if (enabled) {
+            if (this._milkyWayRoot) {
+                this._milkyWayRoot.setEnabled(true);
+                return;
+            }
+            const root = new BABYLON.TransformNode('milkyWayRoot', scene);
+
+            const mat = new BABYLON.StandardMaterial('milkyWayMat', scene);
+            mat.emissiveColor = new BABYLON.Color3(0.55, 0.55, 0.75);
+            mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+            mat.specularColor = new BABYLON.Color3(0, 0, 0);
+            mat.disableLighting = true;
+            mat.backFaceCulling = false;
+            mat.alpha = 0.18;
+            mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+            mat.disableDepthWrite = true;
+
+            const tilt = (MILKY_WAY_BAND_TILT_DEG * Math.PI) / 180;
+            const halfWidthRad = (MILKY_WAY_BAND_HALF_WIDTH_DEG * Math.PI) / 180;
+            for (let i = 0; i < MILKY_WAY_BAND_COUNT; i++) {
+                const theta = (i / MILKY_WAY_BAND_COUNT) * Math.PI * 2;
+                const lat = (Math.random() - 0.5) * 2 * halfWidthRad;
+                const cosLat = Math.cos(lat);
+                const x0 = Math.cos(theta) * cosLat;
+                const y0 = Math.sin(lat);
+                const z0 = Math.sin(theta) * cosLat;
+                const ct = Math.cos(tilt);
+                const st = Math.sin(tilt);
+                const yT = y0 * ct - z0 * st;
+                const zT = y0 * st + z0 * ct;
+                if (yT < 0) continue;
+                const quad = BABYLON.MeshBuilder.CreatePlane(`mw_${i}`, { size: 1500 + Math.random() * 1200 }, scene);
+                quad.position.set(x0 * MILKY_WAY_BAND_DIST, yT * MILKY_WAY_BAND_DIST, zT * MILKY_WAY_BAND_DIST);
+                quad.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+                quad.isPickable = false;
+                quad.infiniteDistance = true;
+                quad.applyFog = false;
+                quad.material = mat;
+                quad.parent = root;
+            }
+            this._milkyWayRoot = root;
+        } else {
+            if (this._milkyWayRoot) {
+                this._milkyWayRoot.setEnabled(false);
+            }
+        }
+    }
+
+    private _updateClouds(dt: number): void {
         if (!this.spawned || this.cloudInstances.length === 0) return;
         const px = this.planeRoot.position.x;
         const pz = this.planeRoot.position.z;
 
+        const windRefFt = 5000;
+        const windRef = this._getWindAtAltitude(windRefFt);
+        const dirRad = (windRef.dirDeg * Math.PI) / 180;
+        const baseVx = -Math.sin(dirRad) * windRef.speedKt * CLOUD_KT_TO_MS;
+        const baseVz = -Math.cos(dirRad) * windRef.speedKt * CLOUD_KT_TO_MS;
+        const dtClamp = Math.max(0, Math.min(0.1, dt));
+
         for (const c of this.cloudInstances) {
+            c.mesh.position.x += baseVx * c.windMult * dtClamp;
+            c.mesh.position.z += baseVz * c.windMult * dtClamp;
+
             const half = c.spread * 0.5;
-            let dx = c.mesh.position.x - px;
-            let dz = c.mesh.position.z - pz;
+            const dx = c.mesh.position.x - px;
+            const dz = c.mesh.position.z - pz;
             if (dx >  half) c.mesh.position.x -= c.spread;
             if (dx < -half) c.mesh.position.x += c.spread;
             if (dz >  half) c.mesh.position.z -= c.spread;
             if (dz < -half) c.mesh.position.z += c.spread;
+        }
+    }
+
+    private _applyCloudTint(elevation: number): void {
+        if (this._cloudMats.length === 0) return;
+        const sunsetT = 1.0 - Math.max(0, Math.min(1, elevation / CLOUD_SUNSET_FADE_BAND_DEG));
+        const nightT = Math.max(0, Math.min(1, (CLOUD_NIGHT_FADE_OFFSET_DEG - elevation) / CLOUD_NIGHT_FADE_BAND_DEG));
+
+        const dayR = CLOUD_DAY_COLOR_R + (CLOUD_SUNSET_COLOR_R - CLOUD_DAY_COLOR_R) * sunsetT;
+        const dayG = CLOUD_DAY_COLOR_G + (CLOUD_SUNSET_COLOR_G - CLOUD_DAY_COLOR_G) * sunsetT;
+        const dayB = CLOUD_DAY_COLOR_B + (CLOUD_SUNSET_COLOR_B - CLOUD_DAY_COLOR_B) * sunsetT;
+
+        const r = dayR + (CLOUD_NIGHT_COLOR_R - dayR) * nightT;
+        const g = dayG + (CLOUD_NIGHT_COLOR_G - dayG) * nightT;
+        const b = dayB + (CLOUD_NIGHT_COLOR_B - dayB) * nightT;
+
+        for (const mat of this._cloudMats) {
+            mat.emissiveColor.set(r, g, b);
         }
     }
 
@@ -2578,8 +2984,21 @@ export class FlightSceneSimple extends Scene3D {
             s.chromatic = (document.getElementById('gfx-chromatic') as HTMLInputElement)?.checked ?? true;
             s.renderScale = parseInt((document.getElementById('gfx-render-scale') as HTMLInputElement)?.value || '100') / 100;
             s.fpsLimit = parseInt((document.getElementById('gfx-fps-limit') as HTMLSelectElement)?.value || '0');
+            s.cloudDensity = (document.getElementById('gfx-cloud-density') as HTMLSelectElement)?.value || 'medium';
+            s.overcast = (document.getElementById('gfx-overcast') as HTMLInputElement)?.checked ?? false;
+            s.milkyway = (document.getElementById('gfx-milkyway') as HTMLInputElement)?.checked ?? false;
             s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
             localStorage.setItem('gfx_settings', JSON.stringify(s));
+        };
+
+        const cloudDensityFromLabel = (label: string): number => {
+            switch (label) {
+                case 'low': return CLOUD_DENSITY_MULT_LOW;
+                case 'high': return CLOUD_DENSITY_MULT_HIGH;
+                case 'ultra': return CLOUD_DENSITY_MULT_ULTRA;
+                case 'medium':
+                default: return CLOUD_DENSITY_MULT_MEDIUM;
+            }
         };
 
         const applySettings = () => {
@@ -2642,6 +3061,23 @@ export class FlightSceneSimple extends Scene3D {
                         const MAX_FPS_CAP = 144;
                         (engine as any).maxFPS = limit > 0 ? limit : MAX_FPS_CAP;
                     }
+
+                    const cloudDensityEl = document.getElementById('gfx-cloud-density') as HTMLSelectElement | null;
+                    if (cloudDensityEl) {
+                        const newMult = cloudDensityFromLabel(cloudDensityEl.value);
+                        if (newMult !== this._cloudDensityMult) {
+                            this._cloudDensityMult = newMult;
+                            this._rebuildClouds(scene);
+                        }
+                    }
+                    const overcastEl = document.getElementById('gfx-overcast') as HTMLInputElement | null;
+                    if (overcastEl) {
+                        this._setOvercast(scene, overcastEl.checked);
+                    }
+                    const milkywayEl = document.getElementById('gfx-milkyway') as HTMLInputElement | null;
+                    if (milkywayEl) {
+                        this._setMilkyWay(scene, milkywayEl.checked);
+                    }
                 } catch (e) {
                     console.error('[GFX] applySettings error:', e);
                 }
@@ -2649,10 +3085,10 @@ export class FlightSceneSimple extends Scene3D {
         };
 
         const presets: Record<string, Record<string, any>> = {
-            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0' },
-            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0' },
-            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0' },
-            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0' },
+            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false },
+            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false },
+            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false },
+            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true  },
         };
 
         const applyPreset = (name: string) => {
@@ -2666,6 +3102,9 @@ export class FlightSceneSimple extends Scene3D {
             setVal('gfx-fog-density', p.fogDensity); setVal('gfx-aa', p.aa);
             setCheck('gfx-vignette', p.vignette); setCheck('gfx-chromatic', p.chromatic);
             setVal('gfx-render-scale', p.renderScale); setVal('gfx-fps-limit', p.fpsLimit);
+            setVal('gfx-cloud-density', p.cloudDensity);
+            setCheck('gfx-overcast', p.overcast);
+            setCheck('gfx-milkyway', p.milkyway);
             applySettings();
         };
 
@@ -2681,11 +3120,14 @@ export class FlightSceneSimple extends Scene3D {
             setCheck('gfx-vignette', cfg.vignette); setCheck('gfx-chromatic', cfg.chromatic);
             if (cfg.renderScale !== undefined) setVal('gfx-render-scale', Math.round(cfg.renderScale * 100));
             setVal('gfx-fps-limit', cfg.fpsLimit);
+            if (cfg.cloudDensity !== undefined) setVal('gfx-cloud-density', cfg.cloudDensity);
+            setCheck('gfx-overcast', cfg.overcast);
+            setCheck('gfx-milkyway', cfg.milkyway);
             if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
             this._safeSetTimeout(() => applySettings(), 100);
         }
 
-        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit'];
+        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-milkyway'];
         for (const id of ids) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => applySettings());
@@ -2851,7 +3293,7 @@ export class FlightSceneSimple extends Scene3D {
             this.surfaces[3].zeroLiftAoA = (this.aircraftConfig.surfaces[3]?.zero_lift_aoa ?? 0) + this.trimYaw;
         }
 
-        this._applyFlaps();
+        this._applyFlaps(_dt);
     }
 
     private _setupTouchControls(): void {
@@ -3468,13 +3910,14 @@ export class FlightSceneSimple extends Scene3D {
     private _initFlapBar(): void {}
     private _updateFlapDisplay(): void {}
 
-    private _applyFlaps(): void {
+    private _applyFlaps(dt: number): void {
         if (!this.FLAP_STEPS || !this.FLAP_STEPS.length) return;
         if (this.flapIndex >= this.FLAP_STEPS.length) this.flapIndex = this.FLAP_STEPS.length - 1;
         const targetDeg = this.FLAP_STEPS[this.flapIndex];
         const rate = 5;
-        if (this.currentFlapDeg < targetDeg) this.currentFlapDeg = Math.min(targetDeg, this.currentFlapDeg + rate * 0.016);
-        if (this.currentFlapDeg > targetDeg) this.currentFlapDeg = Math.max(targetDeg, this.currentFlapDeg - rate * 0.016);
+        const stepDt = Number.isFinite(dt) && dt > 0 ? dt : this.FIXED_DT;
+        if (this.currentFlapDeg < targetDeg) this.currentFlapDeg = Math.min(targetDeg, this.currentFlapDeg + rate * stepDt);
+        if (this.currentFlapDeg > targetDeg) this.currentFlapDeg = Math.max(targetDeg, this.currentFlapDeg - rate * stepDt);
 
         const flapRad = this.currentFlapDeg * Math.PI / 180;
         const ft = this.aircraftConfig.flap_type;
@@ -3628,34 +4071,45 @@ export class FlightSceneSimple extends Scene3D {
         }
         const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
         const isPiston = cfg.engine_type === ENGINE_TYPE_PISTON;
+        const isTurboprop = cfg.engine_type === ENGINE_TYPE_TURBOPROP;
+        const isElectric = cfg.engine_type === ENGINE_TYPE_ELECTRIC;
 
         // ── Engine model ─────────────────────────────────────────────────────
         let effectiveThrust = this.thrust;
-        if (isPiston) {
-            const mapFraction = this.thrust * (airDensity / 1.225);
-            const mixDelta = Math.abs(this.mixtureLevel - BEST_POWER_MIX);
-            const mixEfficiency = Math.max(0, 1.0 - mixDelta * 2.5);
-            let magFactor = 0;
-            if (this.magnetoSwitch === MAGNETO_BOTH) magFactor = 1.0;
-            else if (this.magnetoSwitch === MAGNETO_LEFT || this.magnetoSwitch === MAGNETO_RIGHT) magFactor = MAGNETO_SINGLE_FACTOR;
+        if (isPiston || isTurboprop) {
+            const densityRatio = Math.max(0, airDensity / SEA_LEVEL_AIR_DENSITY_KG_PER_M3);
+            const mapFraction = this.thrust * densityRatio;
+            let mixEfficiency = 1.0;
+            let magFactor = 1.0;
+            if (isPiston) {
+                const mixDelta = Math.abs(this.mixtureLevel - BEST_POWER_MIX);
+                mixEfficiency = Math.max(0, 1.0 - mixDelta * 2.5);
+                magFactor = 0;
+                if (this.magnetoSwitch === MAGNETO_BOTH) magFactor = 1.0;
+                else if (this.magnetoSwitch === MAGNETO_LEFT || this.magnetoSwitch === MAGNETO_RIGHT) magFactor = MAGNETO_SINGLE_FACTOR;
+            }
             this.enginePower = Math.max(0, Math.min(1, mapFraction * mixEfficiency * magFactor));
             this.engineRpm = (cfg.prop_rpm_max || 2700) * Math.sqrt(this.enginePower);
             effectiveThrust = this.enginePower;
         } else {
             const densityRatio = Math.max(0.0001, airDensity / SEA_LEVEL_AIR_DENSITY_KG_PER_M3);
             const thrustAltitudeLapse = Math.pow(densityRatio, JET_THRUST_LAPSE_EXPONENT);
-            const tempKEng = altitude > ISA_TROPOPAUSE_M
-                ? ISA_TROPOPAUSE_TEMP_K
-                : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
-            const speedOfSoundEng = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempKEng);
-            const machNow = this.velocity.length() / Math.max(1, speedOfSoundEng);
-            const machLapseFloor = cfg.mach_lapse_floor ?? JET_THRUST_MACH_MIN_FACTOR;
-            const machLapseCoef = cfg.mach_lapse_coef ?? JET_THRUST_MACH_LAPSE_COEF;
-            const thrustMachLapse = Math.max(
-                machLapseFloor,
-                1.0 - machLapseCoef * machNow,
-            );
-            effectiveThrust = this.thrust * thrustAltitudeLapse * thrustMachLapse;
+            let thrustMachLapse = 1.0;
+            if (!isElectric) {
+                const tempKEng = altitude > ISA_TROPOPAUSE_M
+                    ? ISA_TROPOPAUSE_TEMP_K
+                    : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
+                const speedOfSoundEng = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempKEng);
+                const machNow = this.velocity.length() / Math.max(1, speedOfSoundEng);
+                const machLapseFloor = cfg.mach_lapse_floor ?? JET_THRUST_MACH_MIN_FACTOR;
+                const machLapseCoef = cfg.mach_lapse_coef ?? JET_THRUST_MACH_LAPSE_COEF;
+                thrustMachLapse = Math.max(
+                    machLapseFloor,
+                    1.0 - machLapseCoef * machNow,
+                );
+            }
+            const altitudeLapseEffective = isElectric ? 1.0 : thrustAltitudeLapse;
+            effectiveThrust = this.thrust * altitudeLapseEffective * thrustMachLapse;
             this.enginePower = this.thrust;
             this.engineRpm = Math.round(1200 + this.thrust * 1500);
         }
@@ -3689,8 +4143,9 @@ export class FlightSceneSimple extends Scene3D {
         const cIyy = cfg.inertia_yy;
         const cIzz = cfg.inertia_zz;
 
+        const engineCountTotal = Math.max(1, cfg.engine_count ?? 1);
         const thrustVec = this._tmpFwd;
-        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n);
+        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * engineCountTotal);
 
         // ── Ground effect ────────────────────────────────────────────────────
         const groundLevel = this.tiles ? this.terrainY : GROUND_Y;
@@ -3736,6 +4191,10 @@ export class FlightSceneSimple extends Scene3D {
             this.gearCompression.fill(0);
         }
 
+        const altMslFtForWind = (this.refAlt + pos.y) * 3.28084;
+        this._getWindVectorWorldRef(altMslFtForWind, this._tmpWindWorld);
+        const windWorld = this._tmpWindWorld;
+
         const computeForces = (vel: BABYLON.Vector3, angVel: BABYLON.Vector3) => {
             const totalForce  = BABYLON.Vector3.Zero();
             const totalTorque = BABYLON.Vector3.Zero();
@@ -3744,7 +4203,9 @@ export class FlightSceneSimple extends Scene3D {
 
             totalForce.addInPlace(toWorld(thrustVec));
 
-            const bodyVel = toBody(vel);
+            const airVelWorld = vel.subtract(windWorld);
+            const bodyVel = toBody(airVelWorld);
+            let primaryAlpha = 0;
             for (let si = 0; si < this.surfaces.length; si++) {
                 const surface = this.surfaces[si];
                 const pointVel = bodyVel.add(BABYLON.Vector3.Cross(angVel, surface.position));
@@ -3755,10 +4216,16 @@ export class FlightSceneSimple extends Scene3D {
                 );
                 totalForce.addInPlace(toWorld(force));
                 totalTorque.addInPlace(torque);
+                if (si === 0 && pointVel.lengthSquared() > 1.0) {
+                    const dragDirP = pointVel.normalizeToNew().scaleInPlace(-1);
+                    const dotP = Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(dragDirP, surface.normal)));
+                    primaryAlpha = Math.asin(dotP);
+                }
             }
+            this._lastAoaRad = primaryAlpha;
 
-            // Fuselage parasite drag (+ gear drag when deployed)
-            const spd = vel.length();
+            // Fuselage parasite drag (+ gear drag when deployed) — air-relative
+            const spd = airVelWorld.length();
             if (spd >= 1.0) {
                 const baseCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0);
                 const tempK = altitude > ISA_TROPOPAUSE_M
@@ -3781,18 +4248,18 @@ export class FlightSceneSimple extends Scene3D {
                 const transFactor = cfg.transonic_cd0_factor ?? 1.0;
                 const effectiveCd0 = baseCd0 * (machExcess > 0 ? transFactor : 1.0);
                 const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area * machDragMult;
-                totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-qBody));
+                totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-qBody));
 
                 if (machExcess > 0) {
                     const wingAreaTotal = (cfg.surfaces[0]?.area ?? 0) + (cfg.surfaces[1]?.area ?? 0);
                     if (wingAreaTotal > 0) {
                         const wingWaveDrag = 0.5 * airDensity * spd * spd * cfg.skin_friction * wingAreaTotal * (machDragMult - 1.0);
-                        totalForce.addInPlace(vel.normalizeToNew().scaleInPlace(-wingWaveDrag));
+                        totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-wingWaveDrag));
                     }
                 }
 
-                // Fuselage sideslip Cy/Cn
-                const bodyVelNow = toBody(vel);
+                // Fuselage sideslip Cy/Cn (air-relative)
+                const bodyVelNow = toBody(airVelWorld);
                 const beta = Math.atan2(bodyVelNow.x, Math.max(1, Math.abs(bodyVelNow.z)));
                 const qSide = 0.5 * airDensity * spd * spd * cfg.fuselage_side_area;
                 const sideForce = -beta * qSide * 0.4;
@@ -3800,9 +4267,9 @@ export class FlightSceneSimple extends Scene3D {
                 totalTorque.y += cfg.fuselage_cn_beta * beta * qSide * 5.0;
             }
 
-            // P-factor (prop aircraft only)
+            // P-factor (prop aircraft only) — air-relative
             if (hasProp && effectiveThrust > 0) {
-                const bodyVelNow = toBody(vel);
+                const bodyVelNow = toBody(airVelWorld);
                 const alphaBody = Math.atan2(-bodyVelNow.y, Math.max(1, Math.abs(bodyVelNow.z)));
                 const propDir = cfg.prop_rotation_dir === 0 ? 1 : -1;
                 totalTorque.y += effectiveThrust * cfg.max_thrust_n * Math.sin(alphaBody) * 0.04 * propDir;
@@ -3851,6 +4318,11 @@ export class FlightSceneSimple extends Scene3D {
         pos.addInPlace(this.velocity.scale(dt));
 
         this.groundSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+
+        this._tmpAirVel.copyFrom(this.velocity).subtractInPlace(windWorld);
+        this._lastTasMs = this._tmpAirVel.length();
+        const qDyn = 0.5 * Math.max(0, airDensity) * this._lastTasMs * this._lastTasMs;
+        this._lastIasMs = Math.sqrt(Math.max(0, 2 * qDyn / SEA_LEVEL_AIR_DENSITY_KG_PER_M3));
 
         const gravityAccel = 9.81;
         const verticalAccel = avgForce.y / MASS;
@@ -4229,8 +4701,16 @@ export class FlightSceneSimple extends Scene3D {
       <span class="hud-value-main" id="bb-spd-v">0</span>
     </div>
     <div class="hud-sub-row">
+      <span class="hud-sub-label">IAS</span>
+      <span class="hud-sub-val"><span id="hud-ias-v">0</span>KT</span>
+    </div>
+    <div class="hud-sub-row">
       <span class="hud-sub-label">TAS</span>
       <span class="hud-sub-val"><span id="hud-tas-v">0</span>KT</span>
+    </div>
+    <div class="hud-sub-row">
+      <span class="hud-sub-label">GS</span>
+      <span class="hud-sub-val"><span id="hud-gs-v">0</span>KT</span>
     </div>
   </div>
   <div class="hud-engine-col" id="hud-engine1-col">
@@ -4457,6 +4937,8 @@ export class FlightSceneSimple extends Scene3D {
         this.hudGearRow  = document.getElementById('hud-gear-row')!;
         this.hudGearState = document.getElementById('hud-gear-state')!;
         this.hudTasVal   = document.getElementById('hud-tas-v')!;
+        this.hudGsVal    = document.getElementById('hud-gs-v');
+        this.hudIasVal   = document.getElementById('hud-ias-v');
         this.hudRpmVal   = document.getElementById('hud-rpm-v')!;
         this.hudRpmNeedle = document.getElementById('hud-rpm-needle')!;
         this.hudFuelVal  = document.getElementById('hud-fuel-v')!;
@@ -5602,6 +6084,17 @@ export class FlightSceneSimple extends Scene3D {
         return { speedKt: speed, dirDeg: WIND_DEFAULT_DIRECTION_DEG };
     }
 
+    private _getWindVectorWorldRef(altMslFt: number, out: BABYLON.Vector3): void {
+        const wind = this._getWindAtAltitude(altMslFt);
+        if (!Number.isFinite(wind.speedKt) || wind.speedKt <= 0) {
+            out.set(0, 0, 0);
+            return;
+        }
+        const speedMs = wind.speedKt * KT_TO_MS;
+        const dirRad = (wind.dirDeg * Math.PI) / 180;
+        out.set(-Math.sin(dirRad) * speedMs, 0, -Math.cos(dirRad) * speedMs);
+    }
+
     private _computeXteNm(prevLat: number, prevLon: number, nextLat: number, nextLon: number, curLat: number, curLon: number): number {
         const R_NM = 3440.065;
         const toRad = Math.PI / 180;
@@ -6191,8 +6684,13 @@ export class FlightSceneSimple extends Scene3D {
         const mo = String(now.getUTCMonth() + 1).padStart(2, '0');
         this.hudUtc.textContent = `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC`;
 
-        const speedKmh = Math.round(this.velocity.length() * 3.6);
-        const speedKts = Math.round(speedKmh * 0.539957);
+        const tasMs = Number.isFinite(this._lastTasMs) ? this._lastTasMs : this.velocity.length();
+        const iasMs = Number.isFinite(this._lastIasMs) ? this._lastIasMs : tasMs;
+        const gsMs  = Number.isFinite(this.groundSpeed) ? this.groundSpeed : 0;
+        const speedKtsIas = Math.max(0, Math.round(iasMs * MS_TO_KT));
+        const speedKtsTas = Math.max(0, Math.round(tasMs * MS_TO_KT));
+        const speedKtsGs  = Math.max(0, Math.round(gsMs  * MS_TO_KT));
+        const speedKts = speedKtsIas;
         const pos = this.planeRoot.position;
         const altitudeM = Math.round(Math.max(0, pos.y));
         const altitudeFt = Math.round(altitudeM * 3.28084);
@@ -6311,7 +6809,14 @@ export class FlightSceneSimple extends Scene3D {
             // EngineSound errors should not break HUD
         }
 
-        const stallActive = this._spawnSnapFramesLeft <= 0 && speedKts < this.aircraftConfig.stall_speed_kts && aglM > STALL_WARNING_MIN_AGL_M;
+        const stallAlpha = this.aircraftConfig.stall_alpha_rad;
+        const aoaAbs = Math.abs(Number.isFinite(this._lastAoaRad) ? this._lastAoaRad : 0);
+        const stallByAoa = Number.isFinite(stallAlpha) && stallAlpha > 0
+            && aoaAbs > STALL_AOA_WARNING_FRACTION * stallAlpha;
+        const stallByIas = speedKtsIas < this.aircraftConfig.stall_speed_kts;
+        const stallActive = this._spawnSnapFramesLeft <= 0
+            && aglM > STALL_WARNING_MIN_AGL_M
+            && (stallByIas || stallByAoa);
         this.hudWarning.style.display = stallActive ? 'block' : 'none';
         if (stallActive && !this._lastStallState) {
             this._doHaptic([100, 50, 100]);
@@ -6327,7 +6832,9 @@ export class FlightSceneSimple extends Scene3D {
         this.hudFps.textContent =
             `${this.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;
 
-        if (this.hudTasVal) this.hudTasVal.textContent = String(speedKts);
+        if (this.hudTasVal) this.hudTasVal.textContent = String(speedKtsTas);
+        if (this.hudGsVal)  this.hudGsVal.textContent  = String(speedKtsGs);
+        if (this.hudIasVal) this.hudIasVal.textContent = String(speedKtsIas);
 
         if (this.hudRpmVal) this.hudRpmVal.textContent = String(Math.round(this.engineRpm));
         const _engineEt = this.aircraftConfig.engine_type;
@@ -6351,7 +6858,8 @@ export class FlightSceneSimple extends Scene3D {
             : 100;
         if (this.hudFuelVal) this.hudFuelVal.textContent = `${fuelPct}%`;
 
-        const aoaDeg = Math.round(pitchDeg);
+        const aoaSource = Number.isFinite(this._lastAoaRad) ? this._lastAoaRad : 0;
+        const aoaDeg = Math.round(aoaSource * 180 / Math.PI);
         if (this.hudAoaVal) this.hudAoaVal.textContent = `${aoaDeg}\u00B0`;
 
         const vsFpm = Math.round(this.velocity.y * 196.85);
