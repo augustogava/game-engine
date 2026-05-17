@@ -209,6 +209,8 @@ interface AircraftConfig {
     mach_lapse_floor?: number;
     transonic_cd0_factor?: number;
     control_q_reference_pa?: number | null;
+    control_input_magnitude?: number | null;
+    control_smoothing_rate?: number | null;
 }
 
 const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
@@ -2704,11 +2706,17 @@ export class FlightSceneSimple extends Scene3D {
         let targetRoll: number;
         let targetYaw: number;
 
-        const SMOOTHING_RATE = this.isMobile ? 0.9 : 1.2;
-        const RETURN_RATE    = this.isMobile ? 0.7 : 0.9;
-        const KEY_PITCH_MAGNITUDE = 0.75;
-        const KEY_ROLL_MAGNITUDE  = 0.55;
-        const KEY_YAW_MAGNITUDE   = 0.65;
+        const cfgSmoothing = this.aircraftConfig.control_smoothing_rate;
+        const SMOOTHING_RATE = (cfgSmoothing != null && cfgSmoothing > 0)
+            ? cfgSmoothing
+            : (this.isMobile ? 0.9 : 1.2);
+        const RETURN_RATE    = (cfgSmoothing != null && cfgSmoothing > 0)
+            ? cfgSmoothing * 0.75
+            : (this.isMobile ? 0.7 : 0.9);
+        const cfgInputMag = this.aircraftConfig.control_input_magnitude;
+        const KEY_PITCH_MAGNITUDE = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.75;
+        const KEY_ROLL_MAGNITUDE  = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.55;
+        const KEY_YAW_MAGNITUDE   = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.65;
 
         if (this.isMobile) {
             targetPitch = this.touchPitchInput * 0.7;
