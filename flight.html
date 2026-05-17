@@ -419,6 +419,49 @@
                 </div>
             </div>
         </div>
+
+        <div style="border-top:1px solid rgba(64,255,170,.15);margin-top:12px;padding-top:12px">
+            <header style="cursor:pointer;user-select:none" id="audio-header">
+                <h3 style="font-family:'Orbitron',monospace;font-size:12px;color:#40ffaa;margin:0">AUDIO ▾</h3>
+            </header>
+            <div id="audio-settings" class="debug-form" style="margin-top:8px">
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Master</label>
+                    <input type="range" id="aud-master" min="0" max="100" value="80" style="width:100px">
+                    <span id="aud-master-val" style="font-size:10px;color:#40ffaa;min-width:30px">80%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Engine</label>
+                    <input type="range" id="aud-engine" min="0" max="100" value="100" style="width:100px">
+                    <span id="aud-engine-val" style="font-size:10px;color:#40ffaa;min-width:30px">100%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Wind</label>
+                    <input type="range" id="aud-wind" min="0" max="100" value="70" style="width:100px">
+                    <span id="aud-wind-val" style="font-size:10px;color:#40ffaa;min-width:30px">70%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Alerts</label>
+                    <input type="range" id="aud-alerts" min="0" max="100" value="100" style="width:100px">
+                    <span id="aud-alerts-val" style="font-size:10px;color:#40ffaa;min-width:30px">100%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">ATC</label>
+                    <input type="range" id="aud-atc" min="0" max="100" value="90" style="width:100px">
+                    <span id="aud-atc-val" style="font-size:10px;color:#40ffaa;min-width:30px">90%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Music</label>
+                    <input type="range" id="aud-music" min="0" max="100" value="50" style="width:100px">
+                    <span id="aud-music-val" style="font-size:10px;color:#40ffaa;min-width:30px">50%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Click</label>
+                    <input type="range" id="aud-click" min="0" max="100" value="60" style="width:100px">
+                    <span id="aud-click-val" style="font-size:10px;color:#40ffaa;min-width:30px">60%</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Our bundled flight game -->

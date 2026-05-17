@@ -1,173 +1,426 @@
-const ENGINE_BASE_FREQUENCY_HZ = 45;
-const ENGINE_RPM_TO_FREQ_DIVISOR = 35;
-const ENGINE_DETUNE_CENTS = 12;
-const ENGINE_HARMONIC_MULTIPLIER = 2.02;
-const ENGINE_HARMONIC_GAIN = 0.35;
-const ENGINE_RUMBLE_BASE_HZ = 80;
-const ENGINE_RUMBLE_FILTER_Q = 6;
-const ENGINE_MAX_GAIN = 0.06;
-const ENGINE_NOISE_MAX_GAIN = 0.025;
-const ENGINE_LOWPASS_BASE_HZ = 380;
-const ENGINE_LOWPASS_RPM_GAIN_HZ = 0.18;
-const ENGINE_LOWPASS_Q = 0.7;
-const ENGINE_NOISE_BUFFER_SECONDS = 2;
+import { AudioCore } from './AudioCore.js';
+
+export const ENGINE_SOUND_TYPE_PISTON    = 0;
+export const ENGINE_SOUND_TYPE_TURBOPROP = 1;
+export const ENGINE_SOUND_TYPE_TURBOJET  = 2;
+export const ENGINE_SOUND_TYPE_TURBOFAN  = 3;
+export const ENGINE_SOUND_TYPE_ELECTRIC  = 4;
+
 const ENGINE_GAIN_SMOOTHING = 0.08;
 const ENGINE_FREQ_SMOOTHING = 0.06;
+const ENGINE_NOISE_BUFFER_SECONDS = 2;
+
+const PISTON_BASE_FREQ_HZ = 35;
+const PISTON_RPM_TO_FREQ_DIV = 30;
+const PISTON_DETUNE_CENTS = 12;
+const PISTON_HARMONIC_MULT = 2.02;
+const PISTON_HARMONIC_GAIN = 0.35;
+const PISTON_RUMBLE_BASE_HZ = 80;
+const PISTON_RUMBLE_Q = 6;
+const PISTON_LOWPASS_BASE_HZ = 380;
+const PISTON_LOWPASS_RPM_GAIN_HZ = 0.18;
+const PISTON_LOWPASS_Q = 0.7;
+const PISTON_MAX_GAIN = 0.06;
+const PISTON_NOISE_MAX_GAIN = 0.025;
+
+const TURBOPROP_BASE_FREQ_HZ = 60;
+const TURBOPROP_RPM_TO_FREQ_DIV = 25;
+const TURBOPROP_HARMONIC_MULT = 2.0;
+const TURBOPROP_HARMONIC_GAIN = 0.25;
+const TURBOPROP_WHINE_BASE_HZ = 700;
+const TURBOPROP_WHINE_RPM_GAIN_HZ = 0.12;
+const TURBOPROP_WHINE_GAIN = 0.04;
+const TURBOPROP_LOWPASS_BASE_HZ = 600;
+const TURBOPROP_LOWPASS_Q = 0.7;
+const TURBOPROP_MAX_GAIN = 0.06;
+const TURBOPROP_NOISE_MAX_GAIN = 0.018;
+const TURBOPROP_RUMBLE_BASE_HZ = 120;
+const TURBOPROP_RUMBLE_Q = 5;
+
+const TURBOFAN_WHINE_BASE_HZ = 2200;
+const TURBOFAN_WHINE_THROTTLE_GAIN_HZ = 3500;
+const TURBOFAN_WHINE_GAIN = 0.05;
+const TURBOFAN_ROAR_BASE_HZ = 160;
+const TURBOFAN_ROAR_THROTTLE_GAIN_HZ = 80;
+const TURBOFAN_ROAR_GAIN = 0.05;
+const TURBOFAN_NOISE_MAX_GAIN = 0.06;
+const TURBOFAN_NOISE_LOWPASS_BASE_HZ = 800;
+const TURBOFAN_NOISE_LOWPASS_THROTTLE_GAIN_HZ = 2500;
+const TURBOFAN_MAX_GAIN = 0.07;
+
+const TURBOJET_ROAR_BASE_HZ = 110;
+const TURBOJET_ROAR_THROTTLE_GAIN_HZ = 60;
+const TURBOJET_ROAR_GAIN = 0.06;
+const TURBOJET_NOISE_MAX_GAIN = 0.09;
+const TURBOJET_NOISE_LOWPASS_BASE_HZ = 600;
+const TURBOJET_NOISE_LOWPASS_THROTTLE_GAIN_HZ = 2200;
+const TURBOJET_MAX_GAIN = 0.08;
+
+const ELECTRIC_BASE_FREQ_HZ = 220;
+const ELECTRIC_THROTTLE_FREQ_GAIN_HZ = 600;
+const ELECTRIC_HARMONIC_MULT = 3.0;
+const ELECTRIC_HARMONIC_GAIN = 0.18;
+const ELECTRIC_MAX_GAIN = 0.045;
+
+const PANNER_REF_DISTANCE_M = 30;
+const PANNER_MAX_DISTANCE_M = 4000;
+const PANNER_ROLLOFF = 1.6;
+
+interface EngineSoundOptions {
+    engineType: number;
+    positional?: boolean;
+    refDistanceM?: number;
+}
 
 export class EngineSound {
+    private _engineType: number;
+    private _positional: boolean;
+    private _refDistanceM: number;
+
     private _ctx: AudioContext | null = null;
-    private _oscPrimary: OscillatorNode | null = null;
-    private _oscDetuned: OscillatorNode | null = null;
-    private _oscHarmonic: OscillatorNode | null = null;
-    private _oscGain: GainNode | null = null;
-    private _harmonicGain: GainNode | null = null;
-    private _noiseSrc: AudioBufferSourceNode | null = null;
-    private _noiseGain: GainNode | null = null;
-    private _noiseFilter: BiquadFilterNode | null = null;
-    private _masterFilter: BiquadFilterNode | null = null;
-    private _masterGain: GainNode | null = null;
+    private _bus: GainNode | null = null;
+    private _output: GainNode | null = null;
+    private _panner: PannerNode | null = null;
+
     private _running = false;
+    private _disposed = false;
     private _throttle = 0;
     private _rpm = 0;
+
     private _fadeStartMs = 0;
     private _fadeDurationMs = 0;
     private _fadeActive = false;
-    private _disposed = false;
-    private _resumeListener: (() => void) | null = null;
+
+    private _nodes: { osc?: OscillatorNode[]; src?: AudioBufferSourceNode[]; filter?: BiquadFilterNode[]; gain?: GainNode[] } = {};
+    private _state: Record<string, OscillatorNode | BiquadFilterNode | GainNode | AudioBufferSourceNode> = {};
+
+    constructor(opts: EngineSoundOptions) {
+        this._engineType = Number.isFinite(opts.engineType) ? opts.engineType : ENGINE_SOUND_TYPE_TURBOFAN;
+        this._positional = !!opts.positional;
+        this._refDistanceM = opts.refDistanceM ?? PANNER_REF_DISTANCE_M;
+    }
 
     public start(): void {
         if (this._running || this._disposed) return;
         try {
-            const Ctor = (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
-                ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            if (!Ctor) {
-                console.warn('[EngineSound] AudioContext not available in this browser');
+            const ctx = AudioCore.getCtx();
+            const engineBus = AudioCore.getEngineBus();
+            if (!ctx || !engineBus) {
+                console.warn('[EngineSound] AudioCore not available');
                 return;
             }
-            this._ctx = new Ctor();
-            const ctx = this._ctx;
+            this._ctx = ctx;
+            this._bus = engineBus;
 
-            this._masterGain = ctx.createGain();
-            this._masterGain.gain.value = 0;
-            this._masterGain.connect(ctx.destination);
+            const output = ctx.createGain();
+            output.gain.value = 0;
+            this._output = output;
 
-            this._masterFilter = ctx.createBiquadFilter();
-            this._masterFilter.type = 'lowpass';
-            this._masterFilter.frequency.value = ENGINE_LOWPASS_BASE_HZ;
-            this._masterFilter.Q.value = ENGINE_LOWPASS_Q;
-            this._masterFilter.connect(this._masterGain);
+            if (this._positional) {
+                const panner = ctx.createPanner();
+                panner.panningModel = 'HRTF';
+                panner.distanceModel = 'inverse';
+                panner.refDistance = this._refDistanceM;
+                panner.maxDistance = PANNER_MAX_DISTANCE_M;
+                panner.rolloffFactor = PANNER_ROLLOFF;
+                output.connect(panner);
+                panner.connect(engineBus);
+                this._panner = panner;
+            } else {
+                output.connect(engineBus);
+            }
 
-            this._oscGain = ctx.createGain();
-            this._oscGain.gain.value = 1;
-            this._oscGain.connect(this._masterFilter);
-
-            this._oscPrimary = ctx.createOscillator();
-            this._oscPrimary.type = 'sawtooth';
-            this._oscPrimary.frequency.value = ENGINE_BASE_FREQUENCY_HZ;
-            this._oscPrimary.connect(this._oscGain);
-
-            this._oscDetuned = ctx.createOscillator();
-            this._oscDetuned.type = 'sawtooth';
-            this._oscDetuned.frequency.value = ENGINE_BASE_FREQUENCY_HZ;
-            this._oscDetuned.detune.value = ENGINE_DETUNE_CENTS;
-            this._oscDetuned.connect(this._oscGain);
-
-            this._harmonicGain = ctx.createGain();
-            this._harmonicGain.gain.value = ENGINE_HARMONIC_GAIN;
-            this._harmonicGain.connect(this._masterFilter);
-
-            this._oscHarmonic = ctx.createOscillator();
-            this._oscHarmonic.type = 'triangle';
-            this._oscHarmonic.frequency.value = ENGINE_BASE_FREQUENCY_HZ * ENGINE_HARMONIC_MULTIPLIER;
-            this._oscHarmonic.connect(this._harmonicGain);
-
-            const noiseLen = Math.floor(ctx.sampleRate * ENGINE_NOISE_BUFFER_SECONDS);
-            const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
-            const data = noiseBuf.getChannelData(0);
-            for (let i = 0; i < noiseLen; i++) data[i] = Math.random() * 2 - 1;
-            this._noiseSrc = ctx.createBufferSource();
-            this._noiseSrc.buffer = noiseBuf;
-            this._noiseSrc.loop = true;
-
-            this._noiseFilter = ctx.createBiquadFilter();
-            this._noiseFilter.type = 'bandpass';
-            this._noiseFilter.frequency.value = ENGINE_RUMBLE_BASE_HZ;
-            this._noiseFilter.Q.value = ENGINE_RUMBLE_FILTER_Q;
-
-            this._noiseGain = ctx.createGain();
-            this._noiseGain.gain.value = 0;
-
-            this._noiseSrc.connect(this._noiseFilter);
-            this._noiseFilter.connect(this._noiseGain);
-            this._noiseGain.connect(this._masterFilter);
-
-            this._oscPrimary.start();
-            this._oscDetuned.start();
-            this._oscHarmonic.start();
-            this._noiseSrc.start();
+            this._buildSynth(ctx, output);
 
             this._running = true;
-            if (ctx.state === 'suspended') {
-                ctx.resume().catch(err => console.warn('[EngineSound] Resume failed:', err));
-                this._installResumeOnGesture();
-            }
-            console.log('[EngineSound] Started (sawtooth + harmonic + rumble noise)');
+            console.log(`[EngineSound] Started type=${this._engineType} positional=${this._positional}`);
         } catch (err) {
             console.warn('[EngineSound] Start failed:', err);
             this._running = false;
         }
     }
 
-    private _installResumeOnGesture(): void {
-        if (this._resumeListener) return;
-        const events: Array<keyof DocumentEventMap> = ['pointerdown', 'keydown', 'touchstart', 'mousedown'];
-        const listener = () => {
-            try {
-                const ctx = this._ctx;
-                if (!ctx) return;
-                if (ctx.state === 'suspended') {
-                    ctx.resume()
-                        .then(() => console.log('[EngineSound] AudioContext resumed by user gesture'))
-                        .catch(err => console.warn('[EngineSound] Resume on gesture failed:', err));
-                }
-            } catch (err) {
-                console.warn('[EngineSound] Resume listener failed:', err);
-            } finally {
-                this._removeResumeListener();
-            }
-        };
-        this._resumeListener = listener;
-        for (const ev of events) {
-            try {
-                document.addEventListener(ev, listener, { once: false, capture: true, passive: true });
-            } catch (err) {
-                console.warn('[EngineSound] addEventListener failed for', ev, err);
-            }
+    private _buildSynth(ctx: AudioContext, dest: AudioNode): void {
+        switch (this._engineType) {
+            case ENGINE_SOUND_TYPE_PISTON:    this._buildPiston(ctx, dest); return;
+            case ENGINE_SOUND_TYPE_TURBOPROP: this._buildTurboprop(ctx, dest); return;
+            case ENGINE_SOUND_TYPE_TURBOJET:  this._buildTurbojet(ctx, dest); return;
+            case ENGINE_SOUND_TYPE_ELECTRIC:  this._buildElectric(ctx, dest); return;
+            case ENGINE_SOUND_TYPE_TURBOFAN:
+            default:
+                this._buildTurbofan(ctx, dest); return;
         }
     }
 
-    private _removeResumeListener(): void {
-        const listener = this._resumeListener;
-        if (!listener) return;
-        const events: Array<keyof DocumentEventMap> = ['pointerdown', 'keydown', 'touchstart', 'mousedown'];
-        for (const ev of events) {
-            try { document.removeEventListener(ev, listener, true); } catch (_) { /* ignore */ }
-        }
-        this._resumeListener = null;
+    private _makeNoiseSource(ctx: AudioContext): AudioBufferSourceNode {
+        const len = Math.floor(ctx.sampleRate * ENGINE_NOISE_BUFFER_SECONDS);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        return src;
+    }
+
+    private _buildPiston(ctx: AudioContext, dest: AudioNode): void {
+        const masterFilter = ctx.createBiquadFilter();
+        masterFilter.type = 'lowpass';
+        masterFilter.frequency.value = PISTON_LOWPASS_BASE_HZ;
+        masterFilter.Q.value = PISTON_LOWPASS_Q;
+        masterFilter.connect(dest);
+
+        const oscGain = ctx.createGain();
+        oscGain.gain.value = 1;
+        oscGain.connect(masterFilter);
+
+        const oscPrimary = ctx.createOscillator();
+        oscPrimary.type = 'sawtooth';
+        oscPrimary.frequency.value = PISTON_BASE_FREQ_HZ;
+        oscPrimary.connect(oscGain);
+
+        const oscDetuned = ctx.createOscillator();
+        oscDetuned.type = 'sawtooth';
+        oscDetuned.frequency.value = PISTON_BASE_FREQ_HZ;
+        oscDetuned.detune.value = PISTON_DETUNE_CENTS;
+        oscDetuned.connect(oscGain);
+
+        const harmonicGain = ctx.createGain();
+        harmonicGain.gain.value = PISTON_HARMONIC_GAIN;
+        harmonicGain.connect(masterFilter);
+
+        const oscHarmonic = ctx.createOscillator();
+        oscHarmonic.type = 'triangle';
+        oscHarmonic.frequency.value = PISTON_BASE_FREQ_HZ * PISTON_HARMONIC_MULT;
+        oscHarmonic.connect(harmonicGain);
+
+        const noiseSrc = this._makeNoiseSource(ctx);
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.value = PISTON_RUMBLE_BASE_HZ;
+        noiseFilter.Q.value = PISTON_RUMBLE_Q;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.value = 0;
+        noiseSrc.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(masterFilter);
+
+        oscPrimary.start();
+        oscDetuned.start();
+        oscHarmonic.start();
+        noiseSrc.start();
+
+        this._state.masterFilter = masterFilter;
+        this._state.oscPrimary = oscPrimary;
+        this._state.oscDetuned = oscDetuned;
+        this._state.oscHarmonic = oscHarmonic;
+        this._state.noiseGain = noiseGain;
+    }
+
+    private _buildTurboprop(ctx: AudioContext, dest: AudioNode): void {
+        const masterFilter = ctx.createBiquadFilter();
+        masterFilter.type = 'lowpass';
+        masterFilter.frequency.value = TURBOPROP_LOWPASS_BASE_HZ;
+        masterFilter.Q.value = TURBOPROP_LOWPASS_Q;
+        masterFilter.connect(dest);
+
+        const propGain = ctx.createGain();
+        propGain.gain.value = 1;
+        propGain.connect(masterFilter);
+
+        const oscPrimary = ctx.createOscillator();
+        oscPrimary.type = 'sawtooth';
+        oscPrimary.frequency.value = TURBOPROP_BASE_FREQ_HZ;
+        oscPrimary.connect(propGain);
+
+        const harmonicGain = ctx.createGain();
+        harmonicGain.gain.value = TURBOPROP_HARMONIC_GAIN;
+        harmonicGain.connect(masterFilter);
+
+        const oscHarmonic = ctx.createOscillator();
+        oscHarmonic.type = 'triangle';
+        oscHarmonic.frequency.value = TURBOPROP_BASE_FREQ_HZ * TURBOPROP_HARMONIC_MULT;
+        oscHarmonic.connect(harmonicGain);
+
+        const whineGain = ctx.createGain();
+        whineGain.gain.value = TURBOPROP_WHINE_GAIN;
+        whineGain.connect(dest);
+
+        const oscWhine = ctx.createOscillator();
+        oscWhine.type = 'sine';
+        oscWhine.frequency.value = TURBOPROP_WHINE_BASE_HZ;
+        oscWhine.connect(whineGain);
+
+        const noiseSrc = this._makeNoiseSource(ctx);
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.value = TURBOPROP_RUMBLE_BASE_HZ;
+        noiseFilter.Q.value = TURBOPROP_RUMBLE_Q;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.value = 0;
+        noiseSrc.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(masterFilter);
+
+        oscPrimary.start();
+        oscHarmonic.start();
+        oscWhine.start();
+        noiseSrc.start();
+
+        this._state.masterFilter = masterFilter;
+        this._state.oscPrimary = oscPrimary;
+        this._state.oscHarmonic = oscHarmonic;
+        this._state.oscWhine = oscWhine;
+        this._state.whineGain = whineGain;
+        this._state.noiseGain = noiseGain;
+    }
+
+    private _buildTurbofan(ctx: AudioContext, dest: AudioNode): void {
+        const noiseSrc = this._makeNoiseSource(ctx);
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = TURBOFAN_NOISE_LOWPASS_BASE_HZ;
+        noiseFilter.Q.value = 0.5;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.value = 0;
+        noiseSrc.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(dest);
+
+        const whineGain = ctx.createGain();
+        whineGain.gain.value = TURBOFAN_WHINE_GAIN;
+        whineGain.connect(dest);
+        const oscWhine = ctx.createOscillator();
+        oscWhine.type = 'sine';
+        oscWhine.frequency.value = TURBOFAN_WHINE_BASE_HZ;
+        oscWhine.connect(whineGain);
+
+        const roarGain = ctx.createGain();
+        roarGain.gain.value = TURBOFAN_ROAR_GAIN;
+        roarGain.connect(dest);
+        const oscRoar = ctx.createOscillator();
+        oscRoar.type = 'sawtooth';
+        oscRoar.frequency.value = TURBOFAN_ROAR_BASE_HZ;
+        oscRoar.connect(roarGain);
+
+        oscWhine.start();
+        oscRoar.start();
+        noiseSrc.start();
+
+        this._state.noiseFilter = noiseFilter;
+        this._state.noiseGain = noiseGain;
+        this._state.oscWhine = oscWhine;
+        this._state.whineGain = whineGain;
+        this._state.oscRoar = oscRoar;
+        this._state.roarGain = roarGain;
+    }
+
+    private _buildTurbojet(ctx: AudioContext, dest: AudioNode): void {
+        const noiseSrc = this._makeNoiseSource(ctx);
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = TURBOJET_NOISE_LOWPASS_BASE_HZ;
+        noiseFilter.Q.value = 0.5;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.value = 0;
+        noiseSrc.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(dest);
+
+        const roarGain = ctx.createGain();
+        roarGain.gain.value = TURBOJET_ROAR_GAIN;
+        roarGain.connect(dest);
+        const oscRoar = ctx.createOscillator();
+        oscRoar.type = 'sawtooth';
+        oscRoar.frequency.value = TURBOJET_ROAR_BASE_HZ;
+        oscRoar.connect(roarGain);
+
+        oscRoar.start();
+        noiseSrc.start();
+
+        this._state.noiseFilter = noiseFilter;
+        this._state.noiseGain = noiseGain;
+        this._state.oscRoar = oscRoar;
+        this._state.roarGain = roarGain;
+    }
+
+    private _buildElectric(ctx: AudioContext, dest: AudioNode): void {
+        const oscPrimary = ctx.createOscillator();
+        oscPrimary.type = 'triangle';
+        oscPrimary.frequency.value = ELECTRIC_BASE_FREQ_HZ;
+        oscPrimary.connect(dest);
+
+        const harmonicGain = ctx.createGain();
+        harmonicGain.gain.value = ELECTRIC_HARMONIC_GAIN;
+        harmonicGain.connect(dest);
+        const oscHarmonic = ctx.createOscillator();
+        oscHarmonic.type = 'sine';
+        oscHarmonic.frequency.value = ELECTRIC_BASE_FREQ_HZ * ELECTRIC_HARMONIC_MULT;
+        oscHarmonic.connect(harmonicGain);
+
+        oscPrimary.start();
+        oscHarmonic.start();
+
+        this._state.oscPrimary = oscPrimary;
+        this._state.oscHarmonic = oscHarmonic;
     }
 
     public stop(): void {
         if (!this._running) return;
-        try { if (this._oscPrimary) this._oscPrimary.stop(); } catch (_) { /* ignore */ }
-        try { if (this._oscDetuned) this._oscDetuned.stop(); } catch (_) { /* ignore */ }
-        try { if (this._oscHarmonic) this._oscHarmonic.stop(); } catch (_) { /* ignore */ }
-        try { if (this._noiseSrc) this._noiseSrc.stop(); } catch (_) { /* ignore */ }
         this._running = false;
+        for (const k of Object.keys(this._state)) {
+            const node = this._state[k];
+            if (node instanceof OscillatorNode || node instanceof AudioBufferSourceNode) {
+                try { node.stop(); } catch (_) { /* ignore */ }
+            }
+        }
+    }
+
+    public dispose(): void {
+        if (this._disposed) return;
+        this._disposed = true;
+        this.stop();
+        try { this._output?.disconnect(); } catch (_) { /* ignore */ }
+        try { this._panner?.disconnect(); } catch (_) { /* ignore */ }
+        for (const k of Object.keys(this._state)) {
+            const node = this._state[k];
+            try {
+                if ('disconnect' in node) (node as { disconnect: () => void }).disconnect();
+            } catch (_) { /* ignore */ }
+        }
+        this._state = {};
+        this._panner = null;
+        this._output = null;
+        this._bus = null;
+        this._ctx = null;
+    }
+
+    public setEngineType(engineType: number): void {
+        if (engineType === this._engineType) return;
+        const wasRunning = this._running;
+        if (wasRunning) {
+            this.stop();
+            try { this._output?.disconnect(); } catch (_) { /* ignore */ }
+            for (const k of Object.keys(this._state)) {
+                const node = this._state[k];
+                try {
+                    if ('disconnect' in node) (node as { disconnect: () => void }).disconnect();
+                } catch (_) { /* ignore */ }
+            }
+            this._state = {};
+        }
+        this._engineType = engineType;
+        if (wasRunning) {
+            this._running = false;
+            this._output = null;
+            this._panner = null;
+            this.start();
+        }
     }
 
     public setThrottle(t: number): void {
         if (!Number.isFinite(t)) return;
-        this._throttle = Math.max(0, Math.min(1, t));
+        this._throttle = Math.max(0, Math.min(1.5, t));
     }
 
     public setRpm(rpm: number): void {
@@ -182,66 +435,153 @@ export class EngineSound {
         this._fadeDurationMs = Math.max(1, durationMs);
     }
 
-    public update(): void {
-        if (!this._running || !this._oscPrimary || !this._oscDetuned || !this._oscHarmonic || !this._masterGain || !this._noiseGain || !this._masterFilter) return;
+    public setPosition(x: number, y: number, z: number): void {
+        if (!this._panner || !this._ctx) return;
         try {
-            const targetFreq = ENGINE_BASE_FREQUENCY_HZ + this._rpm / ENGINE_RPM_TO_FREQ_DIVISOR;
-            const currentFreq = this._oscPrimary.frequency.value;
-            const newFreq = currentFreq + (targetFreq - currentFreq) * ENGINE_FREQ_SMOOTHING;
-            this._oscPrimary.frequency.value = newFreq;
-            this._oscDetuned.frequency.value = newFreq;
-            this._oscHarmonic.frequency.value = newFreq * ENGINE_HARMONIC_MULTIPLIER;
+            const t = this._ctx.currentTime;
+            if (this._panner.positionX) {
+                this._panner.positionX.setValueAtTime(x, t);
+                this._panner.positionY.setValueAtTime(y, t);
+                this._panner.positionZ.setValueAtTime(z, t);
+            } else {
+                (this._panner as unknown as { setPosition?: (x: number, y: number, z: number) => void })
+                    .setPosition?.(x, y, z);
+            }
+        } catch (err) {
+            console.warn('[EngineSound] setPosition failed:', err);
+        }
+    }
 
-            const lpTarget = ENGINE_LOWPASS_BASE_HZ + this._rpm * ENGINE_LOWPASS_RPM_GAIN_HZ;
-            const lpCurrent = this._masterFilter.frequency.value;
-            this._masterFilter.frequency.value = lpCurrent + (lpTarget - lpCurrent) * ENGINE_FREQ_SMOOTHING;
-
+    public update(): void {
+        if (!this._running || !this._output) return;
+        try {
             let fadeMul = 1;
             if (this._fadeActive) {
                 const elapsed = performance.now() - this._fadeStartMs;
                 fadeMul = Math.max(0, Math.min(1, elapsed / this._fadeDurationMs));
                 if (fadeMul >= 1) this._fadeActive = false;
             }
-            const targetMaster = ENGINE_MAX_GAIN * (0.4 + 0.6 * this._throttle) * fadeMul;
-            const currentMaster = this._masterGain.gain.value;
-            this._masterGain.gain.value = currentMaster + (targetMaster - currentMaster) * ENGINE_GAIN_SMOOTHING;
 
-            const targetNoise = ENGINE_NOISE_MAX_GAIN * (0.3 + 0.7 * this._throttle) * fadeMul;
-            const currentNoise = this._noiseGain.gain.value;
-            this._noiseGain.gain.value = currentNoise + (targetNoise - currentNoise) * ENGINE_GAIN_SMOOTHING;
+            switch (this._engineType) {
+                case ENGINE_SOUND_TYPE_PISTON:    this._updatePiston(fadeMul); break;
+                case ENGINE_SOUND_TYPE_TURBOPROP: this._updateTurboprop(fadeMul); break;
+                case ENGINE_SOUND_TYPE_TURBOJET:  this._updateTurbojet(fadeMul); break;
+                case ENGINE_SOUND_TYPE_ELECTRIC:  this._updateElectric(fadeMul); break;
+                case ENGINE_SOUND_TYPE_TURBOFAN:
+                default:
+                    this._updateTurbofan(fadeMul); break;
+            }
         } catch (err) {
             console.warn('[EngineSound] Update failed:', err);
         }
     }
 
-    public dispose(): void {
-        if (this._disposed) return;
-        this._disposed = true;
-        this._removeResumeListener();
-        this.stop();
-        try {
-            this._masterGain?.disconnect();
-            this._masterFilter?.disconnect();
-            this._oscGain?.disconnect();
-            this._harmonicGain?.disconnect();
-            this._noiseGain?.disconnect();
-            this._noiseFilter?.disconnect();
-            if (this._ctx && this._ctx.state !== 'closed') {
-                this._ctx.close().catch(err => console.warn('[EngineSound] ctx close failed:', err));
-            }
-        } catch (err) {
-            console.warn('[EngineSound] Dispose failed:', err);
-        }
-        this._oscPrimary = null;
-        this._oscDetuned = null;
-        this._oscHarmonic = null;
-        this._oscGain = null;
-        this._harmonicGain = null;
-        this._noiseSrc = null;
-        this._noiseGain = null;
-        this._noiseFilter = null;
-        this._masterFilter = null;
-        this._masterGain = null;
-        this._ctx = null;
+    private _smoothFreq(node: OscillatorNode | BiquadFilterNode, target: number): void {
+        const cur = node.frequency.value;
+        node.frequency.value = cur + (target - cur) * ENGINE_FREQ_SMOOTHING;
+    }
+
+    private _smoothGain(node: GainNode, target: number): void {
+        const cur = node.gain.value;
+        node.gain.value = cur + (target - cur) * ENGINE_GAIN_SMOOTHING;
+    }
+
+    private _updatePiston(fadeMul: number): void {
+        if (!this._output) return;
+        const oscPrimary = this._state.oscPrimary as OscillatorNode | undefined;
+        const oscDetuned = this._state.oscDetuned as OscillatorNode | undefined;
+        const oscHarmonic = this._state.oscHarmonic as OscillatorNode | undefined;
+        const masterFilter = this._state.masterFilter as BiquadFilterNode | undefined;
+        const noiseGain = this._state.noiseGain as GainNode | undefined;
+        if (!oscPrimary || !oscDetuned || !oscHarmonic || !masterFilter || !noiseGain) return;
+
+        const targetFreq = PISTON_BASE_FREQ_HZ + this._rpm / PISTON_RPM_TO_FREQ_DIV;
+        const cur = oscPrimary.frequency.value;
+        const newFreq = cur + (targetFreq - cur) * ENGINE_FREQ_SMOOTHING;
+        oscPrimary.frequency.value = newFreq;
+        oscDetuned.frequency.value = newFreq;
+        oscHarmonic.frequency.value = newFreq * PISTON_HARMONIC_MULT;
+
+        this._smoothFreq(masterFilter, PISTON_LOWPASS_BASE_HZ + this._rpm * PISTON_LOWPASS_RPM_GAIN_HZ);
+        this._smoothGain(this._output, PISTON_MAX_GAIN * (0.4 + 0.6 * this._throttle) * fadeMul);
+        this._smoothGain(noiseGain, PISTON_NOISE_MAX_GAIN * (0.3 + 0.7 * this._throttle) * fadeMul);
+    }
+
+    private _updateTurboprop(fadeMul: number): void {
+        if (!this._output) return;
+        const oscPrimary = this._state.oscPrimary as OscillatorNode | undefined;
+        const oscHarmonic = this._state.oscHarmonic as OscillatorNode | undefined;
+        const oscWhine = this._state.oscWhine as OscillatorNode | undefined;
+        const whineGain = this._state.whineGain as GainNode | undefined;
+        const masterFilter = this._state.masterFilter as BiquadFilterNode | undefined;
+        const noiseGain = this._state.noiseGain as GainNode | undefined;
+        if (!oscPrimary || !oscHarmonic || !oscWhine || !whineGain || !masterFilter || !noiseGain) return;
+
+        const targetFreq = TURBOPROP_BASE_FREQ_HZ + this._rpm / TURBOPROP_RPM_TO_FREQ_DIV;
+        const cur = oscPrimary.frequency.value;
+        const newFreq = cur + (targetFreq - cur) * ENGINE_FREQ_SMOOTHING;
+        oscPrimary.frequency.value = newFreq;
+        oscHarmonic.frequency.value = newFreq * TURBOPROP_HARMONIC_MULT;
+
+        this._smoothFreq(oscWhine, TURBOPROP_WHINE_BASE_HZ + this._rpm * TURBOPROP_WHINE_RPM_GAIN_HZ);
+        this._smoothGain(whineGain, TURBOPROP_WHINE_GAIN * (0.5 + 0.5 * this._throttle) * fadeMul);
+
+        this._smoothGain(this._output, TURBOPROP_MAX_GAIN * (0.4 + 0.6 * this._throttle) * fadeMul);
+        this._smoothGain(noiseGain, TURBOPROP_NOISE_MAX_GAIN * (0.3 + 0.7 * this._throttle) * fadeMul);
+    }
+
+    private _updateTurbofan(fadeMul: number): void {
+        if (!this._output) return;
+        const noiseFilter = this._state.noiseFilter as BiquadFilterNode | undefined;
+        const noiseGain = this._state.noiseGain as GainNode | undefined;
+        const oscWhine = this._state.oscWhine as OscillatorNode | undefined;
+        const whineGain = this._state.whineGain as GainNode | undefined;
+        const oscRoar = this._state.oscRoar as OscillatorNode | undefined;
+        const roarGain = this._state.roarGain as GainNode | undefined;
+        if (!noiseFilter || !noiseGain || !oscWhine || !whineGain || !oscRoar || !roarGain) return;
+
+        const t = this._throttle;
+        this._smoothFreq(oscWhine, TURBOFAN_WHINE_BASE_HZ + t * TURBOFAN_WHINE_THROTTLE_GAIN_HZ);
+        this._smoothGain(whineGain, TURBOFAN_WHINE_GAIN * (0.4 + 0.6 * t) * fadeMul);
+
+        this._smoothFreq(oscRoar, TURBOFAN_ROAR_BASE_HZ + t * TURBOFAN_ROAR_THROTTLE_GAIN_HZ);
+        this._smoothGain(roarGain, TURBOFAN_ROAR_GAIN * (0.3 + 0.7 * t) * fadeMul);
+
+        this._smoothFreq(noiseFilter, TURBOFAN_NOISE_LOWPASS_BASE_HZ + t * TURBOFAN_NOISE_LOWPASS_THROTTLE_GAIN_HZ);
+        this._smoothGain(noiseGain, TURBOFAN_NOISE_MAX_GAIN * (0.3 + 0.7 * t) * fadeMul);
+
+        this._smoothGain(this._output, TURBOFAN_MAX_GAIN * fadeMul);
+    }
+
+    private _updateTurbojet(fadeMul: number): void {
+        if (!this._output) return;
+        const noiseFilter = this._state.noiseFilter as BiquadFilterNode | undefined;
+        const noiseGain = this._state.noiseGain as GainNode | undefined;
+        const oscRoar = this._state.oscRoar as OscillatorNode | undefined;
+        const roarGain = this._state.roarGain as GainNode | undefined;
+        if (!noiseFilter || !noiseGain || !oscRoar || !roarGain) return;
+
+        const t = this._throttle;
+        this._smoothFreq(oscRoar, TURBOJET_ROAR_BASE_HZ + t * TURBOJET_ROAR_THROTTLE_GAIN_HZ);
+        this._smoothGain(roarGain, TURBOJET_ROAR_GAIN * (0.3 + 0.7 * t) * fadeMul);
+
+        this._smoothFreq(noiseFilter, TURBOJET_NOISE_LOWPASS_BASE_HZ + t * TURBOJET_NOISE_LOWPASS_THROTTLE_GAIN_HZ);
+        this._smoothGain(noiseGain, TURBOJET_NOISE_MAX_GAIN * (0.3 + 0.7 * t) * fadeMul);
+
+        this._smoothGain(this._output, TURBOJET_MAX_GAIN * fadeMul);
+    }
+
+    private _updateElectric(fadeMul: number): void {
+        if (!this._output) return;
+        const oscPrimary = this._state.oscPrimary as OscillatorNode | undefined;
+        const oscHarmonic = this._state.oscHarmonic as OscillatorNode | undefined;
+        if (!oscPrimary || !oscHarmonic) return;
+
+        const targetFreq = ELECTRIC_BASE_FREQ_HZ + this._throttle * ELECTRIC_THROTTLE_FREQ_GAIN_HZ;
+        this._smoothFreq(oscPrimary, targetFreq);
+        const cur = oscPrimary.frequency.value;
+        oscHarmonic.frequency.value = cur * ELECTRIC_HARMONIC_MULT;
+
+        this._smoothGain(this._output, ELECTRIC_MAX_GAIN * (0.2 + 0.8 * this._throttle) * fadeMul);
     }
 }

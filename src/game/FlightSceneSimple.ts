@@ -7,7 +7,16 @@ import * as BABYLON from '@babylonjs/core';
 import '@babylonjs/loaders';
 import { SkyMaterial } from '@babylonjs/materials/sky';
 import { MultiplayerClient, PlayerState } from './MultiplayerClient.js';
-import { EngineSound } from './EngineSound.js';
+import {
+    EngineSound,
+    ENGINE_SOUND_TYPE_PISTON,
+    ENGINE_SOUND_TYPE_TURBOPROP,
+    ENGINE_SOUND_TYPE_TURBOJET,
+    ENGINE_SOUND_TYPE_TURBOFAN,
+    ENGINE_SOUND_TYPE_ELECTRIC,
+} from './EngineSound.js';
+import { FlightAudio } from './FlightAudio.js';
+import { AudioCore } from './AudioCore.js';
 
 const BUILD_VERSION = 8;
 
@@ -377,6 +386,8 @@ interface RemotePlayer {
     labelTexture: BABYLON.DynamicTexture | null;
     currentUsername: string | null;
     currentAvatarUrl: string | null;
+    engineSound: EngineSound | null;
+    engineTypeResolved: boolean;
 }
 
 const G_ACCEL          = 9.81;
@@ -636,7 +647,10 @@ export class FlightSceneSimple extends Scene3D {
     private _pendingAirborneGearRetract = false;
 
     private mpClient: MultiplayerClient | null = null;
-    private _engineSound: EngineSound = new EngineSound();
+    private _engineSound: EngineSound = new EngineSound({ engineType: ENGINE_SOUND_TYPE_TURBOFAN, positional: false });
+    private _flightAudio: FlightAudio = new FlightAudio({ enableTts: true });
+    private _lastFlapAnimating = false;
+    private _lastGearTransitioning = false;
     private remotePlayers = new Map<string, RemotePlayer>();
     private hudOnline!: HTMLElement;
     private dbgMpStatus!: HTMLElement;
@@ -824,6 +838,23 @@ export class FlightSceneSimple extends Scene3D {
         this.fuelRemaining = cfg.fuel_capacity_kg;
         this.gearCompression = new Array(cfg.gear_positions.length).fill(0);
         this._updateEngineColumnsVisibility();
+        try {
+            this._engineSound.setEngineType(this._mapEngineType(cfg.engine_type));
+        } catch (err) {
+            console.warn('[EngineSound] setEngineType failed:', err);
+        }
+    }
+
+    private _mapEngineType(et: number): number {
+        switch (et) {
+            case ENGINE_TYPE_PISTON:    return ENGINE_SOUND_TYPE_PISTON;
+            case ENGINE_TYPE_TURBOPROP: return ENGINE_SOUND_TYPE_TURBOPROP;
+            case ENGINE_TYPE_TURBOJET:  return ENGINE_SOUND_TYPE_TURBOJET;
+            case ENGINE_TYPE_ELECTRIC:  return ENGINE_SOUND_TYPE_ELECTRIC;
+            case ENGINE_TYPE_TURBOFAN:
+            default:
+                return ENGINE_SOUND_TYPE_TURBOFAN;
+        }
     }
 
     private _updateEngineColumnsVisibility(): void {
@@ -960,6 +991,12 @@ export class FlightSceneSimple extends Scene3D {
         }
     }
 
+    private _cockpitClick(freqHz?: number): void {
+        try {
+            this._flightAudio.playClick(freqHz);
+        } catch (_) { /* ignore */ }
+    }
+
     private _toggleGear(): void {
         if (this.gearState === GEAR_STATE_RETRACTING || this.gearState === GEAR_STATE_EXTENDING) return;
         if (this.gearState === GEAR_STATE_DOWN) {
@@ -985,6 +1022,11 @@ export class FlightSceneSimple extends Scene3D {
 
     private _updateGearState(): void {
         const now = performance.now();
+        const transitioning = this.gearState === GEAR_STATE_RETRACTING || this.gearState === GEAR_STATE_EXTENDING;
+        if (transitioning !== this._lastGearTransitioning) {
+            this._lastGearTransitioning = transitioning;
+            try { this._flightAudio.setGearTransitioning(transitioning); } catch (_) { /* ignore */ }
+        }
         if (this.gearState === GEAR_STATE_RETRACTING) {
             const animDone = this._gearUpAnimGroup ? !this._gearUpAnimGroup.isPlaying : false;
             const timerDone = (now - this._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
@@ -1020,6 +1062,7 @@ export class FlightSceneSimple extends Scene3D {
         this.mpClient?.dispose();
         this._removeUserGestureListener();
         this._engineSound.dispose();
+        this._flightAudio.dispose();
         this._disposeNavLights();
         this._disposeRunwayColliders();
         if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
@@ -1179,6 +1222,9 @@ export class FlightSceneSimple extends Scene3D {
                 remote.nextState = p;
                 remote.lastUpdateTime = now;
                 this._updatePlayerLabel(remote, p);
+                if (!remote.engineTypeResolved && p.aircraftId) {
+                    this._resolveRemoteEngineType(remote, p.aircraftId);
+                }
             }
 
             for (const [id, remote] of this.remotePlayers) {
@@ -1187,6 +1233,7 @@ export class FlightSceneSimple extends Scene3D {
                     remote.labelPlane?.dispose();
                     remote.meshes.forEach(m => m.dispose());
                     remote.root.dispose();
+                    try { remote.engineSound?.dispose(); } catch (_) { /* ignore */ }
                     this.remotePlayers.delete(id);
                 }
             }
@@ -1233,11 +1280,39 @@ export class FlightSceneSimple extends Scene3D {
         root.rotationQuaternion = BABYLON.Quaternion.Identity();
 
         const aircraftCode = modelFile || null;
-        const remote: RemotePlayer = { root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0, aircraftCode, labelPlane: null, labelTexture: null, currentUsername: null, currentAvatarUrl: null };
+        const remote: RemotePlayer = {
+            root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0,
+            aircraftCode, labelPlane: null, labelTexture: null,
+            currentUsername: null, currentAvatarUrl: null,
+            engineSound: null, engineTypeResolved: false,
+        };
 
         this._loadRemoteModel(id, root, remote, modelFile || DEFAULT_AIRCRAFT_CONFIG.model_file);
 
+        try {
+            const engineSound = new EngineSound({ engineType: ENGINE_SOUND_TYPE_TURBOFAN, positional: true });
+            engineSound.start();
+            engineSound.fadeIn(800);
+            remote.engineSound = engineSound;
+        } catch (err) {
+            console.warn('[Remote] EngineSound init failed:', err);
+        }
+
         return remote;
+    }
+
+    private _resolveRemoteEngineType(remote: RemotePlayer, aircraftId: number | undefined): void {
+        if (remote.engineTypeResolved || !aircraftId || aircraftId <= 0) return;
+        remote.engineTypeResolved = true;
+        fetchAircraftConfig(aircraftId).then((cfg) => {
+            try {
+                remote.engineSound?.setEngineType(this._mapEngineType(cfg.engine_type));
+            } catch (err) {
+                console.warn('[Remote] setEngineType failed:', err);
+            }
+        }).catch((err) => {
+            console.warn('[Remote] fetch engine type failed:', err);
+        });
     }
 
     private _loadRemoteModel(id: string, root: BABYLON.TransformNode, remote: RemotePlayer, modelFile: string): void {
@@ -1466,6 +1541,19 @@ export class FlightSceneSimple extends Scene3D {
     private _updateRemotePlayers(): void {
         const now = performance.now();
 
+        try {
+            if (this.camera) {
+                const camPos = this.camera.position;
+                AudioCore.setListenerPosition(camPos.x, camPos.y, camPos.z);
+                const target = this.camera.getTarget();
+                const fx = target.x - camPos.x;
+                const fy = target.y - camPos.y;
+                const fz = target.z - camPos.z;
+                const fLen = Math.max(1e-6, Math.sqrt(fx * fx + fy * fy + fz * fz));
+                AudioCore.setListenerOrientation(fx / fLen, fy / fLen, fz / fLen, 0, 1, 0);
+            }
+        } catch (_) { /* ignore */ }
+
         for (const [, remote] of this.remotePlayers) {
             if (!remote.nextState) continue;
 
@@ -1497,6 +1585,19 @@ export class FlightSceneSimple extends Scene3D {
                 0.15,
                 remote.root.rotationQuaternion!,
             );
+
+            const es = remote.engineSound;
+            if (es) {
+                try {
+                    const pos = remote.root.position;
+                    es.setPosition(pos.x, pos.y, pos.z);
+                    const tt = Number.isFinite(ns.throttle) ? Math.max(0, Math.min(1.5, ns.throttle)) : 0;
+                    es.setThrottle(tt);
+                    const estimatedRpm = 600 + tt * 2000;
+                    es.setRpm(estimatedRpm);
+                    es.update();
+                } catch (_) { /* ignore */ }
+            }
         }
     }
 
@@ -2963,6 +3064,36 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         this._initGraphicsSettings(scene);
+        this._initAudioSettings();
+    }
+
+    private _initAudioSettings(): void {
+        const stored = AudioCore.getVolumes();
+        const ids: Array<keyof typeof stored> = ['master', 'engine', 'wind', 'alerts', 'atc', 'music', 'click'];
+        for (const key of ids) {
+            const slider = document.getElementById(`aud-${key}`) as HTMLInputElement | null;
+            const valEl = document.getElementById(`aud-${key}-val`);
+            if (!slider) continue;
+            const pct = Math.round(stored[key] * 100);
+            slider.value = String(pct);
+            if (valEl) valEl.textContent = `${pct}%`;
+            slider.addEventListener('input', () => {
+                const v = Math.max(0, Math.min(100, parseInt(slider.value, 10) || 0)) / 100;
+                if (valEl) valEl.textContent = `${Math.round(v * 100)}%`;
+                AudioCore.setVolumes({ [key]: v } as Partial<typeof stored>);
+            });
+        }
+
+        const audHeader = document.getElementById('audio-header');
+        const audSettings = document.getElementById('audio-settings');
+        if (audHeader && audSettings) {
+            audHeader.addEventListener('click', () => {
+                const visible = audSettings.style.display !== 'none';
+                audSettings.style.display = visible ? 'none' : '';
+                const h3 = audHeader.querySelector('h3');
+                if (h3) h3.textContent = visible ? 'AUDIO \u25B8' : 'AUDIO \u25BE';
+            });
+        }
     }
 
     private _initGraphicsSettings(scene: BABYLON.Scene): void {
@@ -3180,12 +3311,14 @@ export class FlightSceneSimple extends Scene3D {
             if (p('Digit5') && !this.flapKeyLock5) {
                 this.flapKeyLock5 = true;
                 this.flapIndex = Math.max(0, this.flapIndex - 1);
+                this._cockpitClick();
             }
             if (!p('Digit5')) this.flapKeyLock5 = false;
 
             if (p('Digit6') && !this.flapKeyLock6) {
                 this.flapKeyLock6 = true;
                 this.flapIndex = Math.min(this.FLAP_STEPS.length - 1, this.flapIndex + 1);
+                this._cockpitClick();
             }
             if (!p('Digit6')) this.flapKeyLock6 = false;
 
@@ -3194,12 +3327,14 @@ export class FlightSceneSimple extends Scene3D {
             if (p('KeyB') && !this.brakeKeyLock) {
                 this.brakeKeyLock = true;
                 this.brakesOn = !this.brakesOn;
+                this._cockpitClick();
             }
             if (!p('KeyB')) this.brakeKeyLock = false;
 
             if (p('KeyC') && !this._cameraModeKeyLock) {
                 this._cameraModeKeyLock = true;
                 this._cycleCameraMode();
+                this._cockpitClick();
             }
             if (!p('KeyC')) this._cameraModeKeyLock = false;
 
@@ -3208,29 +3343,31 @@ export class FlightSceneSimple extends Scene3D {
             if (isJetAc && p('KeyG') && !this.gearKeyLockG) {
                 this.gearKeyLockG = true;
                 this._toggleGear();
+                this._cockpitClick();
             }
             if (!p('KeyG')) this.gearKeyLockG = false;
 
             // Trim: 7/8 = pitch trim nose down/up, 9/0 = yaw trim left/right
-            if (p('Digit7') && !this.trimKeyLock7) { this.trimKeyLock7 = true; this.trimPitch = Math.max(-0.15, this.trimPitch - 0.005); }
+            if (p('Digit7') && !this.trimKeyLock7) { this.trimKeyLock7 = true; this.trimPitch = Math.max(-0.15, this.trimPitch - 0.005); this._cockpitClick(2200); }
             if (!p('Digit7')) this.trimKeyLock7 = false;
-            if (p('Digit8') && !this.trimKeyLock8) { this.trimKeyLock8 = true; this.trimPitch = Math.min(0.15, this.trimPitch + 0.005); }
+            if (p('Digit8') && !this.trimKeyLock8) { this.trimKeyLock8 = true; this.trimPitch = Math.min(0.15, this.trimPitch + 0.005); this._cockpitClick(2200); }
             if (!p('Digit8')) this.trimKeyLock8 = false;
-            if (p('Digit9') && !this.trimKeyLock9) { this.trimKeyLock9 = true; this.trimYaw = Math.max(-0.1, this.trimYaw - 0.005); }
+            if (p('Digit9') && !this.trimKeyLock9) { this.trimKeyLock9 = true; this.trimYaw = Math.max(-0.1, this.trimYaw - 0.005); this._cockpitClick(2200); }
             if (!p('Digit9')) this.trimKeyLock9 = false;
-            if (p('Digit0') && !this.trimKeyLock0) { this.trimKeyLock0 = true; this.trimYaw = Math.min(0.1, this.trimYaw + 0.005); }
+            if (p('Digit0') && !this.trimKeyLock0) { this.trimKeyLock0 = true; this.trimYaw = Math.min(0.1, this.trimYaw + 0.005); this._cockpitClick(2200); }
             if (!p('Digit0')) this.trimKeyLock0 = false;
 
             // Mixture: Shift+Plus / Shift+Minus (piston only)
             if (this.aircraftConfig.engine_type === ENGINE_TYPE_PISTON) {
-                if (p('Equal') && !this.mixtureKeyLockPlus) { this.mixtureKeyLockPlus = true; this.mixtureLevel = Math.min(1.0, this.mixtureLevel + 0.05); }
+                if (p('Equal') && !this.mixtureKeyLockPlus) { this.mixtureKeyLockPlus = true; this.mixtureLevel = Math.min(1.0, this.mixtureLevel + 0.05); this._cockpitClick(); }
                 if (!p('Equal')) this.mixtureKeyLockPlus = false;
-                if (p('Minus') && !this.mixtureKeyLockMinus) { this.mixtureKeyLockMinus = true; this.mixtureLevel = Math.max(0, this.mixtureLevel - 0.05); }
+                if (p('Minus') && !this.mixtureKeyLockMinus) { this.mixtureKeyLockMinus = true; this.mixtureLevel = Math.max(0, this.mixtureLevel - 0.05); this._cockpitClick(); }
                 if (!p('Minus')) this.mixtureKeyLockMinus = false;
 
                 if (p('KeyN') && !this.magnetoKeyLockN) {
                     this.magnetoKeyLockN = true;
                     this.magnetoSwitch = (this.magnetoSwitch + 1) % 4;
+                    this._cockpitClick();
                 }
                 if (!p('KeyN')) this.magnetoKeyLockN = false;
             }
@@ -3727,6 +3864,7 @@ export class FlightSceneSimple extends Scene3D {
             try {
                 this._engineSound.start();
                 this._engineSound.fadeIn(ENGINE_SOUND_FADE_IN_MS);
+                this._flightAudio.startWind();
             } catch (err) {
                 console.warn('[EngineSound] Init failed:', err);
             }
@@ -3916,8 +4054,15 @@ export class FlightSceneSimple extends Scene3D {
         const targetDeg = this.FLAP_STEPS[this.flapIndex];
         const rate = 5;
         const stepDt = Number.isFinite(dt) && dt > 0 ? dt : this.FIXED_DT;
+        const animatingBefore = Math.abs(this.currentFlapDeg - targetDeg) > 0.05;
         if (this.currentFlapDeg < targetDeg) this.currentFlapDeg = Math.min(targetDeg, this.currentFlapDeg + rate * stepDt);
         if (this.currentFlapDeg > targetDeg) this.currentFlapDeg = Math.max(targetDeg, this.currentFlapDeg - rate * stepDt);
+        const animatingAfter = Math.abs(this.currentFlapDeg - targetDeg) > 0.05;
+        const flapAnimating = animatingBefore || animatingAfter;
+        if (flapAnimating !== this._lastFlapAnimating) {
+            this._lastFlapAnimating = flapAnimating;
+            try { this._flightAudio.setFlapsAnimating(flapAnimating); } catch (_) { /* ignore */ }
+        }
 
         const flapRad = this.currentFlapDeg * Math.PI / 180;
         const ft = this.aircraftConfig.flap_type;
@@ -6809,6 +6954,11 @@ export class FlightSceneSimple extends Scene3D {
             // EngineSound errors should not break HUD
         }
 
+        try {
+            this._flightAudio.setAirspeed(speedKtsIas);
+            this._flightAudio.update();
+        } catch (_) { /* ignore */ }
+
         const stallAlpha = this.aircraftConfig.stall_alpha_rad;
         const aoaAbs = Math.abs(Number.isFinite(this._lastAoaRad) ? this._lastAoaRad : 0);
         const stallByAoa = Number.isFinite(stallAlpha) && stallAlpha > 0
@@ -6821,7 +6971,28 @@ export class FlightSceneSimple extends Scene3D {
         if (stallActive && !this._lastStallState) {
             this._doHaptic([100, 50, 100]);
         }
+        if (stallActive !== this._lastStallState) {
+            try { this._flightAudio.setStallActive(stallActive); } catch (_) { /* ignore */ }
+        }
         this._lastStallState = stallActive;
+
+        try {
+            const altForMach = Math.max(0, pos.y);
+            const tempK = altForMach > ISA_TROPOPAUSE_M
+                ? ISA_TROPOPAUSE_TEMP_K
+                : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * altForMach;
+            const speedOfSound = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempK);
+            const mach = speedOfSound > 0 ? tasMs / speedOfSound : 0;
+            const vneMach = this.aircraftConfig.wave_drag_peak_mach ?? null;
+            this._flightAudio.maybeOverspeedFromMach(mach, vneMach);
+        } catch (_) { /* ignore */ }
+
+        try {
+            const vsFpm = this.velocity.y * 196.85;
+            const gearDown = this.gearState === GEAR_STATE_DOWN || this.gearState === GEAR_STATE_EXTENDING;
+            const aglFt = aglM * 3.28084;
+            this._flightAudio.updateGpws(aglFt, vsFpm, isOnGround, gearDown);
+        } catch (_) { /* ignore */ }
         const overGActive = this._gForce > OVER_G_THRESHOLD;
         if (overGActive && !this._lastOverGState) {
             this._doHaptic([200, 100, 200, 100, 200]);
