@@ -1122,6 +1122,21 @@ export class FlightSceneSimple extends Scene3D {
         scene.fogColor   = new BABYLON.Color3(0.55, 0.7, 0.95);
         scene.fogDensity = 0.000008;
 
+        try {
+            scene.onNewMaterialAddedObservable.add((mat: BABYLON.Material) => {
+                if (!mat) return;
+                if (mat instanceof BABYLON.PBRBaseMaterial) {
+                    try {
+                        (mat as BABYLON.PBRMaterial).maxSimultaneousLights = AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
+                    } catch (err) {
+                        console.warn('[FlightSimple] Failed to cap maxSimultaneousLights on PBR material:', mat?.name, err);
+                    }
+                }
+            });
+        } catch (err) {
+            console.warn('[FlightSimple] Failed to register PBR maxSimultaneousLights observer:', err);
+        }
+
         this.velocity        = BABYLON.Vector3.Zero();
         this.angularVelocity = BABYLON.Vector3.Zero();
 
@@ -3852,6 +3867,14 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _updateMotionBlurAndDof(): void {
+        if (this.isMobile) {
+            if (this._motionBlurPP) this._ensureMotionBlur(false);
+            if (this._dofEnabledInCockpit && this._pipeline) {
+                try { this._pipeline.depthOfFieldEnabled = false; } catch (_) { /* ignore */ }
+                this._dofEnabledInCockpit = false;
+            }
+            return;
+        }
         const gAbs = Math.abs(Number.isFinite(this._gForce) ? this._gForce : 1);
         const wantMb = gAbs > MOTION_BLUR_TRIGGER_G;
         this._ensureMotionBlur(wantMb);
@@ -5350,10 +5373,13 @@ export class FlightSceneSimple extends Scene3D {
 #touch-throttle{position:absolute;bottom:160px;left:10px;width:40px;height:150px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
 #touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:36px;height:12px;border-radius:6px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:340px;left:6px;display:flex;flex-direction:column;gap:4px;pointer-events:auto}
+#touch-flap-btns{position:absolute;bottom:340px;left:6px;display:grid;grid-template-columns:repeat(2,38px);grid-auto-rows:26px;gap:4px;pointer-events:auto}
 #touch-flap-btns button{width:38px;height:26px;padding:0;border-radius:5px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.04em;cursor:pointer;touch-action:manipulation;transition:transform .1s,background .1s,border-color .1s;backdrop-filter:blur(2px)}
 #touch-flap-btns button:active{transform:scale(.92);background:rgba(0,40,25,.55);border-color:rgba(80,255,160,.45)}
 #touch-brk.active{background:rgba(255,40,40,.32);border-color:rgba(255,80,80,.5);color:#ff6060}
+#touch-spl.active{background:rgba(80,255,160,.32);border-color:rgba(80,255,160,.6);color:#80ffa0}
+#touch-spl.armed{background:rgba(255,204,0,.28);border-color:rgba(255,204,0,.6);color:#ffcc55}
+#touch-lgt.active{background:rgba(255,240,160,.32);border-color:rgba(255,240,160,.6);color:#fff080}
 #touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
 #touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
 #touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
@@ -5364,7 +5390,7 @@ export class FlightSceneSimple extends Scene3D {
 </style>
 <div id="touch-joy"><div id="touch-joy-deadzone"></div><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
-<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button></div>
+<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button><button id="touch-spl" title="Spoilers (toque longo: arma)">SPL</button><button id="touch-lgt" title="Luzes de pouso">LGT</button></div>
 <button id="touch-controls-btn" title="Controles">\u2699</button>
 <div id="touch-controls-panel">
   <div style="font-family:'Orbitron',monospace;font-size:10px;color:#40ffaa;letter-spacing:.12em;margin-bottom:8px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:4px">CONTROLES</div>
@@ -5444,7 +5470,7 @@ export class FlightSceneSimple extends Scene3D {
         const isOnWidget = (t: Touch): boolean => {
             const el = document.elementFromPoint(t.clientX, t.clientY);
             if (!el) return false;
-            return !!el.closest('#touch-throttle,#touch-flap-btns');
+            return !!el.closest('#touch-throttle,#touch-flap-btns,#ap-panel,#missions-btn,#aircraft-btn,#flight-plans-btn,#missions-panel,#aircraft-panel,#flight-plans-panel,#touch-controls-btn,#touch-controls-panel,#gps-zoom-controls');
         };
 
         const canvas = this.scene?.getEngine()?.getRenderingCanvas();
@@ -5662,6 +5688,44 @@ export class FlightSceneSimple extends Scene3D {
             }, { passive: false });
         } else {
             console.warn('[Touch] #touch-gear element not found');
+        }
+        const splBtn = document.getElementById('touch-spl');
+        if (splBtn) {
+            const SPOILER_LONG_PRESS_MS = 500;
+            let splPressStart = 0;
+            let splLongPressFired = false;
+            let splTimer: ReturnType<typeof setTimeout> | null = null;
+            splBtn.addEventListener('touchstart', (ev: TouchEvent) => {
+                ev.preventDefault();
+                splPressStart = Date.now();
+                splLongPressFired = false;
+                if (splTimer) { clearTimeout(splTimer); }
+                splTimer = setTimeout(() => {
+                    splLongPressFired = true;
+                    this._armGroundSpoilers();
+                }, SPOILER_LONG_PRESS_MS);
+            }, { passive: false });
+            const splRelease = (ev: TouchEvent) => {
+                ev.preventDefault();
+                if (splTimer) { clearTimeout(splTimer); splTimer = null; }
+                if (!splLongPressFired && Date.now() - splPressStart < SPOILER_LONG_PRESS_MS) {
+                    this._toggleSpoilers();
+                }
+            };
+            splBtn.addEventListener('touchend', splRelease, { passive: false });
+            splBtn.addEventListener('touchcancel', splRelease, { passive: false });
+        } else {
+            console.warn('[Touch] #touch-spl element not found');
+        }
+        const lgtBtn = document.getElementById('touch-lgt');
+        if (lgtBtn) {
+            lgtBtn.addEventListener('touchstart', (ev: TouchEvent) => {
+                ev.preventDefault();
+                this._landingLightsOn = !this._landingLightsOn;
+                lgtBtn.classList.toggle('active', this._landingLightsOn);
+            }, { passive: false });
+        } else {
+            console.warn('[Touch] #touch-lgt element not found');
         }
     }
 
@@ -6785,6 +6849,9 @@ export class FlightSceneSimple extends Scene3D {
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #nav-info{top:150px!important;left:2px!important;width:140px!important;font-size:9px!important}
+#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:3px 4px!important;gap:2px!important}
+#ap-panel button{padding:2px 4px!important;font-size:9px!important}
+#ap-panel>div:nth-child(2){font-size:8px!important;gap:4px!important}
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
@@ -6805,6 +6872,9 @@ export class FlightSceneSimple extends Scene3D {
 #flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
 #flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
 #nav-info{top:120px!important;left:2px!important;width:110px!important;font-size:8px!important}
+#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:2px 3px!important;gap:1px!important;max-width:96vw!important}
+#ap-panel button{padding:2px 3px!important;font-size:8px!important;letter-spacing:.02em!important}
+#ap-panel>div:nth-child(2){font-size:7px!important;gap:3px!important}
 }
 @media(max-height:440px){
 #flight-pfd{top:30%!important;width:220px!important;height:150px!important}
@@ -6823,7 +6893,7 @@ export class FlightSceneSimple extends Scene3D {
 </div>
 <div id="hud-utc" style="position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
-<div id="ap-panel" style="position:absolute;top:38px;right:8px;display:flex;flex-direction:column;gap:3px;font-family:'Orbitron',monospace;font-size:10px;color:#aac;background:rgba(0,8,16,.55);padding:4px 5px;border:1px solid rgba(80,180,255,.25);border-radius:4px;z-index:50;pointer-events:auto">
+<div id="ap-panel" style="position:absolute;top:38px;right:54px;display:flex;flex-direction:column;gap:3px;font-family:'Orbitron',monospace;font-size:10px;color:#aac;background:rgba(0,8,16,.55);padding:4px 5px;border:1px solid rgba(80,180,255,.25);border-radius:4px;z-index:50;pointer-events:auto">
   <div style="display:flex;gap:3px;justify-content:center">
     <button id="ap-btn-ap"  type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">AP</button>
     <button id="ap-btn-hdg" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">HDG</button>
@@ -9123,6 +9193,13 @@ export class FlightSceneSimple extends Scene3D {
             } else {
                 this.hudSpoilerState.textContent = '--';
                 this.hudSpoilerState.style.color = '#888';
+            }
+            if (this.isMobile) {
+                const splBtn = document.getElementById('touch-spl');
+                if (splBtn) {
+                    splBtn.classList.toggle('active', this._spoilerDeflection > 0.01);
+                    splBtn.classList.toggle('armed', this._spoilerArmed && this._spoilerDeflection <= 0.01);
+                }
             }
         }
         if (this.hudEngsState) {
