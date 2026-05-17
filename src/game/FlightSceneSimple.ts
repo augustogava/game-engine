@@ -2706,17 +2706,19 @@ export class FlightSceneSimple extends Scene3D {
         let targetRoll: number;
         let targetYaw: number;
 
+        const LATERAL_SMOOTHING_RATE = this.isMobile ? 0.9 : 1.2;
+        const LATERAL_RETURN_RATE    = this.isMobile ? 0.7 : 0.9;
         const cfgSmoothing = this.aircraftConfig.control_smoothing_rate;
-        const SMOOTHING_RATE = (cfgSmoothing != null && cfgSmoothing > 0)
+        const PITCH_SMOOTHING_RATE = (cfgSmoothing != null && cfgSmoothing > 0)
             ? cfgSmoothing
-            : (this.isMobile ? 0.9 : 1.2);
-        const RETURN_RATE    = (cfgSmoothing != null && cfgSmoothing > 0)
+            : LATERAL_SMOOTHING_RATE;
+        const PITCH_RETURN_RATE    = (cfgSmoothing != null && cfgSmoothing > 0)
             ? cfgSmoothing * 0.75
-            : (this.isMobile ? 0.7 : 0.9);
+            : LATERAL_RETURN_RATE;
         const cfgInputMag = this.aircraftConfig.control_input_magnitude;
         const KEY_PITCH_MAGNITUDE = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.75;
-        const KEY_ROLL_MAGNITUDE  = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.55;
-        const KEY_YAW_MAGNITUDE   = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.65;
+        const KEY_ROLL_MAGNITUDE  = 0.55;
+        const KEY_YAW_MAGNITUDE   = 0.65;
 
         if (this.isMobile) {
             targetPitch = this.touchPitchInput * 0.7;
@@ -2792,8 +2794,8 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
 
-        const lerpAxis = (current: number, target: number): number => {
-            const rate = (Math.abs(target) < Math.abs(current)) ? RETURN_RATE : SMOOTHING_RATE;
+        const lerpAxis = (current: number, target: number, smoothRate: number, retRate: number): number => {
+            const rate = (Math.abs(target) < Math.abs(current)) ? retRate : smoothRate;
             const t = 1 - Math.exp(-rate * _dt);
             return current + (target - current) * t;
         };
@@ -2802,9 +2804,9 @@ export class FlightSceneSimple extends Scene3D {
             targetRoll = 0;
         }
 
-        this.smoothedPitch = lerpAxis(this.smoothedPitch, targetPitch);
-        this.smoothedRoll  = lerpAxis(this.smoothedRoll, targetRoll);
-        this.smoothedYaw   = lerpAxis(this.smoothedYaw, targetYaw);
+        this.smoothedPitch = lerpAxis(this.smoothedPitch, targetPitch, PITCH_SMOOTHING_RATE, PITCH_RETURN_RATE);
+        this.smoothedRoll  = lerpAxis(this.smoothedRoll, targetRoll, LATERAL_SMOOTHING_RATE, LATERAL_RETURN_RATE);
+        this.smoothedYaw   = lerpAxis(this.smoothedYaw, targetYaw, LATERAL_SMOOTHING_RATE, LATERAL_RETURN_RATE);
 
         this.surfaces[0].controlInput =  this.smoothedRoll;
         this.surfaces[1].controlInput = -this.smoothedRoll;
