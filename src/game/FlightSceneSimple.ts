@@ -389,6 +389,10 @@ const CLOUD_DENSITY_MULT_HIGH = 2.0;
 const CLOUD_DENSITY_MULT_ULTRA = 3.0;
 const CLOUD_VOLUMETRIC_PUFFS_PER_CLUSTER = 5;
 const CLOUD_VOLUMETRIC_PUFF_JITTER = 0.35;
+const CLOUD_VARIANT_COUNT = 4;
+const CLOUD_ASPECT_Y_JITTER_MIN = 0.85;
+const CLOUD_ASPECT_Y_JITTER_MAX = 1.15;
+const CLOUD_FLIP_X_PROBABILITY = 0.5;
 const OVERCAST_DECK_Y_M = 7500;
 const OVERCAST_DECK_SIZE_M = 60000;
 const OVERCAST_DECK_ALPHA = 0.55;
@@ -1644,6 +1648,8 @@ export class FlightSceneSimple extends Scene3D {
         if (this._sunHaloMesh) { try { this._sunHaloMesh.dispose(); } catch (_) { /* ignore */ } this._sunHaloMesh = null; }
         if (this._moonHaloMat) { try { this._moonHaloMat.dispose(true, true); } catch (_) { /* ignore */ } this._moonHaloMat = null; }
         if (this._moonHaloMesh) { try { this._moonHaloMesh.dispose(); } catch (_) { /* ignore */ } this._moonHaloMesh = null; }
+        for (const t of this._cloudTemplates) { try { t.dispose(); } catch (_) { /* ignore */ } }
+        this._cloudTemplates = [];
         for (const mat of this._cloudMats) { try { mat.dispose(true, true); } catch (_) { /* ignore */ } }
         this._cloudMats = [];
         if (this._overcastMat) { try { this._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this._overcastMat = null; }
@@ -2906,11 +2912,9 @@ export class FlightSceneSimple extends Scene3D {
 
     private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number; windMult: number }[] = [];
     private _cloudMats: BABYLON.StandardMaterial[] = [];
+    private _cloudTemplates: BABYLON.Mesh[] = [];
 
     private _buildClouds(scene: BABYLON.Scene): void {
-        const tex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
-        tex.hasAlpha = true;
-
         const layers: { count: number; yMin: number; yRange: number; spread: number; sizeBase: number; aspectY: number; windMult: number }[] = [
             { count: 40, yMin: 600,  yRange: 800,  spread: 15000, sizeBase: 700,  aspectY: 0.60, windMult: 1.0 },
             { count: 50, yMin: 1800, yRange: 1200, spread: 20000, sizeBase: 1000, aspectY: 0.50, windMult: 1.6 },
@@ -2918,23 +2922,32 @@ export class FlightSceneSimple extends Scene3D {
         ];
 
         for (const layer of layers) {
-            const mat = new BABYLON.StandardMaterial(`cloudMat_${layer.yMin}`, scene);
-            mat.diffuseTexture             = tex;
-            mat.backFaceCulling            = false;
-            mat.useAlphaFromDiffuseTexture = true;
-            mat.opacityTexture             = tex;
-            mat.transparencyMode           = BABYLON.StandardMaterial.MATERIAL_ALPHABLEND;
-            mat.alpha                      = 0.85;
-            mat.emissiveColor              = new BABYLON.Color3(CLOUD_DAY_COLOR_R, CLOUD_DAY_COLOR_G, CLOUD_DAY_COLOR_B);
-            mat.diffuseColor               = new BABYLON.Color3(0, 0, 0);
-            mat.specularColor              = new BABYLON.Color3(0, 0, 0);
-            mat.disableLighting            = true;
-            this._cloudMats.push(mat);
+            const variantTemplates: BABYLON.Mesh[] = [];
+            for (let v = 0; v < CLOUD_VARIANT_COUNT; v++) {
+                const tex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
+                tex.hasAlpha = true;
+                tex.wAng = (v / CLOUD_VARIANT_COUNT) * Math.PI * 2;
 
-            const tpl = BABYLON.MeshBuilder.CreatePlane(`cloudTpl_${layer.yMin}`, { size: layer.sizeBase }, scene);
-            tpl.isVisible = false;
-            tpl.isPickable = false;
-            tpl.material = mat;
+                const mat = new BABYLON.StandardMaterial(`cloudMat_${layer.yMin}_v${v}`, scene);
+                mat.diffuseTexture             = tex;
+                mat.backFaceCulling            = false;
+                mat.useAlphaFromDiffuseTexture = true;
+                mat.opacityTexture             = tex;
+                mat.transparencyMode           = BABYLON.StandardMaterial.MATERIAL_ALPHABLEND;
+                mat.alpha                      = 0.85;
+                mat.emissiveColor              = new BABYLON.Color3(CLOUD_DAY_COLOR_R, CLOUD_DAY_COLOR_G, CLOUD_DAY_COLOR_B);
+                mat.diffuseColor               = new BABYLON.Color3(0, 0, 0);
+                mat.specularColor              = new BABYLON.Color3(0, 0, 0);
+                mat.disableLighting            = true;
+                this._cloudMats.push(mat);
+
+                const tpl = BABYLON.MeshBuilder.CreatePlane(`cloudTpl_${layer.yMin}_v${v}`, { size: layer.sizeBase }, scene);
+                tpl.isVisible = false;
+                tpl.isPickable = false;
+                tpl.material = mat;
+                this._cloudTemplates.push(tpl);
+                variantTemplates.push(tpl);
+            }
 
             const effectiveCount = Math.max(1, Math.round(layer.count * this._cloudDensityMult));
             const puffPerCluster = this._cloudVolumetric ? CLOUD_VOLUMETRIC_PUFFS_PER_CLUSTER : 1;
@@ -2944,7 +2957,9 @@ export class FlightSceneSimple extends Scene3D {
                 const oy = layer.yMin + Math.random() * layer.yRange;
                 const clusterScale = 0.5 + Math.random() * 2.0;
                 for (let j = 0; j < puffPerCluster; j++) {
-                    const ci = tpl.createInstance(`c_${layer.yMin}_${i}_${j}`);
+                    const variant = (Math.random() * CLOUD_VARIANT_COUNT) | 0;
+                    const tpl = variantTemplates[variant];
+                    const ci = tpl.createInstance(`c_${layer.yMin}_${i}_${j}_v${variant}`);
                     const jitter = this._cloudVolumetric ? layer.sizeBase * CLOUD_VOLUMETRIC_PUFF_JITTER : 0;
                     const jx = (Math.random() - 0.5) * jitter * 2;
                     const jy = (Math.random() - 0.5) * jitter * layer.aspectY;
@@ -2953,7 +2968,9 @@ export class FlightSceneSimple extends Scene3D {
                     const subScale = this._cloudVolumetric
                         ? clusterScale * (0.6 + Math.random() * 0.7)
                         : clusterScale;
-                    ci.scaling.set(subScale, subScale * layer.aspectY, 1);
+                    const aspectJitter = CLOUD_ASPECT_Y_JITTER_MIN + Math.random() * (CLOUD_ASPECT_Y_JITTER_MAX - CLOUD_ASPECT_Y_JITTER_MIN);
+                    const flipX = Math.random() < CLOUD_FLIP_X_PROBABILITY ? -1 : 1;
+                    ci.scaling.set(subScale * flipX, subScale * layer.aspectY * aspectJitter, 1);
                     ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
                     ci.isPickable = false;
                     this.cloudInstances.push({ mesh: ci, yBase: oy + jy, spread: layer.spread, windMult: layer.windMult });
@@ -2965,6 +2982,8 @@ export class FlightSceneSimple extends Scene3D {
     private _rebuildClouds(scene: BABYLON.Scene): void {
         for (const c of this.cloudInstances) { try { c.mesh.dispose(); } catch (_) { /* ignore */ } }
         this.cloudInstances = [];
+        for (const t of this._cloudTemplates) { try { t.dispose(); } catch (_) { /* ignore */ } }
+        this._cloudTemplates = [];
         for (const m of this._cloudMats) { try { m.dispose(true, true); } catch (_) { /* ignore */ } }
         this._cloudMats = [];
         this._buildClouds(scene);
