@@ -59,6 +59,8 @@ const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;
 const SPAWN_TERRAIN_RAY_LENGTH_M = 10000;
 const TERRAIN_HIT_ABOVE_LIMIT_M = 10;
 const TERRAIN_UNKNOWN_Y = -1e9;
+const GROUND_TERRAIN_SMOOTH_TAU_S = 0.18;
+const GROUND_TERRAIN_SMOOTH_SNAP_DELTA_M = 3.0;
 const NAV_LIGHT_REFERENCE_HALF_SPAN_M = 22;
 const NAV_LIGHT_MIN_SCALE = 0.5;
 const NAV_LIGHT_MAX_SCALE = 1.5;
@@ -7127,7 +7129,14 @@ export class FlightSceneSimple extends Scene3D {
                 }
             }
             if (resolvedTerrainY !== TERRAIN_UNKNOWN_Y) {
-                this.terrainY = resolvedTerrainY;
+                if (this.isOnGround
+                    && this.terrainY !== TERRAIN_UNKNOWN_Y
+                    && Math.abs(resolvedTerrainY - this.terrainY) < GROUND_TERRAIN_SMOOTH_SNAP_DELTA_M) {
+                    const smoothAlpha = Math.min(1, dt / GROUND_TERRAIN_SMOOTH_TAU_S);
+                    this.terrainY = this.terrainY + (resolvedTerrainY - this.terrainY) * smoothAlpha;
+                } else {
+                    this.terrainY = resolvedTerrainY;
+                }
                 this._lastKnownSpawnTerrainY = resolvedTerrainY;
             } else if (inSpawnWindow && this._lastKnownSpawnTerrainY !== TERRAIN_UNKNOWN_Y) {
                 this.terrainY = this._lastKnownSpawnTerrainY;
