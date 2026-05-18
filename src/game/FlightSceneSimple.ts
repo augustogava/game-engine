@@ -5664,6 +5664,16 @@ export class FlightSceneSimple extends Scene3D {
         if (typeof cfg.cloudDensity === 'string' && cfg.cloudDensity === 'ultra') {
             this._cloudVolumetric = true;
         }
+        if (cfg.vegetation === true || cfg.colorLut === true || cfg.aerialFog === true || cfg.godRays === true) {
+            cfg.vegetation = false;
+            cfg.colorLut = false;
+            cfg.aerialFog = false;
+            cfg.godRays = false;
+            try {
+                localStorage.setItem('gfx_settings', JSON.stringify(cfg));
+                console.debug('[GFX] Migrated saved settings: disabled vegetation/colorLut/aerialFog/godRays (problematic premium flags)');
+            } catch (_) { /* ignore */ }
+        }
 
         const saveSettings = () => {
             const s: Record<string, any> = {};
@@ -5804,9 +5814,9 @@ export class FlightSceneSimple extends Scene3D {
             medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false,
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
             high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false,
-                      tileShadows: true,  aerialFog: true,  tileFade: false, godRays: false, colorLut: true,  cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: true,  volumetricClouds: false },
+                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
             ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,
-                      tileShadows: true,  aerialFog: true,  tileFade: true,  godRays: true,  colorLut: true,  cloudCameraFade: true,  waterTilesRefl: true,  fxaaFallback: true,  vegetation: true,  volumetricClouds: false },
+                      tileShadows: true,  aerialFog: false, tileFade: true,  godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: true,  fxaaFallback: true,  vegetation: false, volumetricClouds: false },
         };
 
         const applyPreset = (name: string) => {
