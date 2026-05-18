@@ -2531,18 +2531,20 @@ export class FlightSceneSimple extends Scene3D {
                     const meshes = (tileScene as any).getChildMeshes
                         ? (tileScene as any).getChildMeshes(false)
                         : [];
+                    const wantShadows = !!this._premium.tileShadows;
                     const seenMats = new Set<BABYLON.Material>();
                     for (const mesh of meshes) {
                         try {
-                            mesh.receiveShadows = true;
+                            if (wantShadows && mesh.receiveShadows !== true) {
+                                mesh.receiveShadows = true;
+                            }
                             const mat = mesh.material;
                             if (!mat || seenMats.has(mat)) continue;
                             seenMats.add(mat);
                             if (mat instanceof BABYLON.PBRBaseMaterial) {
                                 const pbr = mat as BABYLON.PBRMaterial;
-                                pbr.maxSimultaneousLights = AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
-                                if (pbr.roughness !== null && pbr.roughness !== undefined) {
-                                    pbr.roughness = Math.max(pbr.roughness, TILE_PBR_ROUGHNESS_FLOOR);
+                                if (pbr.roughness !== null && pbr.roughness !== undefined && pbr.roughness < TILE_PBR_ROUGHNESS_FLOOR) {
+                                    pbr.roughness = TILE_PBR_ROUGHNESS_FLOOR;
                                 }
                             }
                         } catch (innerErr) {
@@ -5664,14 +5666,16 @@ export class FlightSceneSimple extends Scene3D {
         if (typeof cfg.cloudDensity === 'string' && cfg.cloudDensity === 'ultra') {
             this._cloudVolumetric = true;
         }
-        if (cfg.vegetation === true || cfg.colorLut === true || cfg.aerialFog === true || cfg.godRays === true) {
+        if (cfg.vegetation === true || cfg.colorLut === true || cfg.aerialFog === true || cfg.godRays === true || cfg.tileFade === true || cfg.waterTilesRefl === true) {
             cfg.vegetation = false;
             cfg.colorLut = false;
             cfg.aerialFog = false;
             cfg.godRays = false;
+            cfg.tileFade = false;
+            cfg.waterTilesRefl = false;
             try {
                 localStorage.setItem('gfx_settings', JSON.stringify(cfg));
-                console.debug('[GFX] Migrated saved settings: disabled vegetation/colorLut/aerialFog/godRays (problematic premium flags)');
+                console.debug('[GFX] Migrated saved settings: disabled vegetation/colorLut/aerialFog/godRays/tileFade/waterTilesRefl (problematic premium flags)');
             } catch (_) { /* ignore */ }
         }
 
@@ -5816,7 +5820,7 @@ export class FlightSceneSimple extends Scene3D {
             high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false,
                       tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
             ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,
-                      tileShadows: true,  aerialFog: false, tileFade: true,  godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: true,  fxaaFallback: true,  vegetation: false, volumetricClouds: false },
+                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
         };
 
         const applyPreset = (name: string) => {
