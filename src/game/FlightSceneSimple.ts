@@ -7280,8 +7280,9 @@ export class FlightSceneSimple extends Scene3D {
         }
         let aliveCount = 0;
         for (let e = 0; e < engineCountTotal; e++) if (this._engineAlive[e]) aliveCount++;
+        const aliveThrustRatio = engineCountTotal > 0 ? aliveCount / engineCountTotal : 0;
         const thrustVec = this._tmpFwd;
-        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * aliveCount);
+        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * aliveThrustRatio);
 
         let asymYawTorqueBody = 0;
         if (aliveCount > 0 && aliveCount < engineCountTotal) {
@@ -7291,7 +7292,9 @@ export class FlightSceneSimple extends Scene3D {
             else if (engineCountTotal === 3) enginePositions.push(-halfSpanForEngines * 0.55, 0, halfSpanForEngines * 0.55);
             else if (engineCountTotal === 4) enginePositions.push(-halfSpanForEngines * 0.70, -halfSpanForEngines * 0.30, halfSpanForEngines * 0.30, halfSpanForEngines * 0.70);
             else enginePositions.push(0);
-            const thrustPerEngine = effectiveThrust * cfg.max_thrust_n;
+            const thrustPerEngine = engineCountTotal > 0
+                ? (effectiveThrust * cfg.max_thrust_n) / engineCountTotal
+                : 0;
             for (let e = 0; e < engineCountTotal && e < enginePositions.length; e++) {
                 if (!this._engineAlive[e]) continue;
                 asymYawTorqueBody += enginePositions[e] * thrustPerEngine;
