@@ -3687,12 +3687,33 @@ export class FlightSceneSimple extends Scene3D {
                 const bbW = Math.abs(localMax.x - localMin.x);
                 const bbH = Math.abs(localMax.y - localMin.y);
                 const bbD = Math.abs(localMax.z - localMin.z);
+                const wingYs: number[] = [];
+                try {
+                    for (const m of meshes) {
+                        const nm = (m.name || '').toLowerCase();
+                        if (!/wing/.test(nm)) continue;
+                        if (/wingtip|wing[._-]?(flap|aileron|spoiler|strut|fence)/.test(nm)) continue;
+                        try {
+                            const childBB = m.getBoundingInfo().boundingBox;
+                            const worldYc = childBB.centerWorld.y;
+                            wingYs.push(worldYc - planePos.y);
+                        } catch (_) { /* ignore */ }
+                    }
+                } catch (_) { /* ignore */ }
+                let detectedWingY: number | undefined = undefined;
+                if (wingYs.length > 0) {
+                    detectedWingY = wingYs.reduce((a, b) => a + b, 0) / wingYs.length;
+                    console.debug(`[NavLights] ${cfg.code}: detected wing Y from ${wingYs.length} mesh(es) = ${detectedWingY.toFixed(2)}m (bbox center.y=${localCenter.y.toFixed(2)})`);
+                } else {
+                    console.debug(`[NavLights] ${cfg.code}: no wing meshes named — using bbox heuristic for wing Y`);
+                }
                 console.debug(`[NavLights] ${cfg.code}: planeRoot-local bbox W=${bbW.toFixed(2)}m H=${bbH.toFixed(2)}m D=${bbD.toFixed(2)}m center=(${localCenter.x.toFixed(2)},${localCenter.y.toFixed(2)},${localCenter.z.toFixed(2)}) rotY=${cfg.model_rotation_y.toFixed(3)}`);
                 this._buildNavLights(scene, this.planeRoot, {
                     halfSpan: bbW / 2,
                     height: bbH,
                     halfLen: bbD / 2,
                     center: localCenter,
+                    wingY: detectedWingY,
                 });
                 this._detectControlSurfaceNodes(meshes);
                 this._buildContrails(scene, bbW / 2);
@@ -3771,14 +3792,16 @@ export class FlightSceneSimple extends Scene3D {
     private _buildNavLights(
         scene: BABYLON.Scene,
         parent: BABYLON.TransformNode,
-        dims: { halfSpan: number; height: number; halfLen: number; center?: BABYLON.Vector3 },
+        dims: { halfSpan: number; height: number; halfLen: number; center?: BABYLON.Vector3; wingY?: number },
     ): void {
         const hs = dims.halfSpan * 0.97;
         const cx = dims.center?.x ?? 0;
         const cy = dims.center?.y ?? 0;
         const cz = dims.center?.z ?? 0;
         const halfH = dims.height * 0.5;
-        const wingY = cy - halfH * 0.5;
+        const wingY = (typeof dims.wingY === 'number' && Number.isFinite(dims.wingY))
+            ? dims.wingY
+            : (cy - halfH * 0.5);
         const wingZ = cz - dims.halfLen * 0.25;
         const topY  = cy + halfH * 0.85;
         const botY  = cy - halfH * 0.85;
@@ -7389,22 +7412,20 @@ export class FlightSceneSimple extends Scene3D {
                 totalTorque.y += cfg.fuselage_cn_beta * beta * qSide * 5.0;
             }
 
-            // P-factor (prop aircraft only) — air-relative
+            const _propRotRaw: any = cfg.prop_rotation_dir;
+            const propDirCommon = (_propRotRaw === 0 || _propRotRaw === 'cw') ? 1 : -1;
+
             if (hasProp && effectiveThrust > 0) {
                 const bodyVelNow = toBody(airVelWorld);
                 const alphaBody = Math.atan2(-bodyVelNow.y, Math.max(1, Math.abs(bodyVelNow.z)));
-                const propDir = cfg.prop_rotation_dir === 0 ? 1 : -1;
-                totalTorque.y += effectiveThrust * cfg.max_thrust_n * Math.sin(alphaBody) * 0.04 * propDir;
+                totalTorque.y += effectiveThrust * cfg.max_thrust_n * Math.sin(alphaBody) * 0.04 * propDirCommon;
 
-                // Reaction torque
-                totalTorque.x += effectiveThrust * cfg.max_thrust_n * 0.015 * -propDir;
+                totalTorque.x += effectiveThrust * cfg.max_thrust_n * 0.015 * -propDirCommon;
             }
 
-            // Propeller gyroscopic precession
             if (hasProp && cfg.prop_inertia_kgm2 && cfg.prop_rpm_max) {
                 const omegaProp = (this.engineRpm / 60) * 2 * Math.PI;
-                const propDir = cfg.prop_rotation_dir === 0 ? 1 : -1;
-                const Hprop = cfg.prop_inertia_kgm2 * omegaProp * propDir;
+                const Hprop = cfg.prop_inertia_kgm2 * omegaProp * propDirCommon;
                 totalTorque.x += angVel.y * Hprop;
                 totalTorque.y -= angVel.x * Hprop;
             }
