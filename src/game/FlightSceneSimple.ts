@@ -219,6 +219,54 @@ const WATER_COLOR_BLEND = 0.4;
 
 const AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS = 4;
 
+let __PBR_MAX_LIGHTS_PROTO_PATCHED = false;
+function patchPbrMaxSimultaneousLightsProto(): void {
+    if (__PBR_MAX_LIGHTS_PROTO_PATCHED) return;
+    const PATCH_FLAG = '__pbrMaxLightsCapped';
+    const candidates: any[] = [];
+    const collectProto = (cls: any) => {
+        if (!cls || !cls.prototype) return;
+        let proto = cls.prototype;
+        while (proto) {
+            if (Object.getOwnPropertyDescriptor(proto, 'maxSimultaneousLights')) {
+                candidates.push(proto);
+                return;
+            }
+            proto = Object.getPrototypeOf(proto);
+        }
+    };
+    collectProto((BABYLON as any).PBRMaterial);
+    collectProto((BABYLON as any).OpenPBRMaterial);
+    collectProto((BABYLON as any).PBRMetallicRoughnessMaterial);
+    collectProto((BABYLON as any).PBRSpecularGlossinessMaterial);
+    let patched = 0;
+    for (const proto of candidates) {
+        if ((proto as any)[PATCH_FLAG]) continue;
+        const desc = Object.getOwnPropertyDescriptor(proto, 'maxSimultaneousLights');
+        if (!desc || typeof desc.set !== 'function' || typeof desc.get !== 'function') continue;
+        const origSet = desc.set;
+        const origGet = desc.get;
+        Object.defineProperty(proto, 'maxSimultaneousLights', {
+            get: origGet,
+            set: function (value: number) {
+                const safe = typeof value === 'number' && value > 0 ? value : AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
+                const capped = Math.min(safe, AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS);
+                origSet.call(this, capped);
+            },
+            enumerable: desc.enumerable,
+            configurable: true,
+        });
+        (proto as any)[PATCH_FLAG] = true;
+        patched++;
+    }
+    __PBR_MAX_LIGHTS_PROTO_PATCHED = true;
+    if (patched > 0) {
+        console.debug(`[FlightSimple] Patched maxSimultaneousLights setter on ${patched} PBR prototype(s) (cap=${AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS})`);
+    } else {
+        console.warn('[FlightSimple] No PBR prototype found to patch maxSimultaneousLights');
+    }
+}
+
 // Autopilot
 const AP_HDG_MAX_BANK_DEG = 25;
 const AP_HDG_BANK_GAIN = 0.06;
@@ -1123,6 +1171,12 @@ export class FlightSceneSimple extends Scene3D {
         scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
         scene.fogColor   = new BABYLON.Color3(0.55, 0.7, 0.95);
         scene.fogDensity = 0.000008;
+
+        try {
+            patchPbrMaxSimultaneousLightsProto();
+        } catch (err) {
+            console.warn('[FlightSimple] patchPbrMaxSimultaneousLightsProto failed:', err);
+        }
 
         try {
             scene.onNewMaterialAddedObservable.add((mat: BABYLON.Material) => {
