@@ -1039,6 +1039,8 @@ export class FlightSceneSimple extends Scene3D {
     private _skyMaterial: SkyMaterial | null = null;
     private _waterMesh: BABYLON.Mesh | null = null;
     private _waterMaterial: WaterMaterial | null = null;
+    private _pbrCapPluginObserver: BABYLON.Observer<any> | null = null;
+    private _pbrCapPluginCompleteObservers: BABYLON.Observer<any>[] = [];
     private _skyboxMesh: BABYLON.Mesh | null = null;
     private _starRoot: BABYLON.TransformNode | null = null;
     private _starInstances: BABYLON.InstancedMesh[] = [];
@@ -1135,6 +1137,37 @@ export class FlightSceneSimple extends Scene3D {
             });
         } catch (err) {
             console.warn('[FlightSimple] Failed to register PBR maxSimultaneousLights observer:', err);
+        }
+
+        try {
+            this._pbrCapPluginObserver = BABYLON.SceneLoader.OnPluginActivatedObservable.add((plugin: any) => {
+                if (this._disposed) return;
+                const obs = plugin?.onCompleteObservable;
+                if (!obs || typeof obs.add !== 'function') return;
+                const completeObs = obs.add(() => {
+                    if (this._disposed || !this.scene) return;
+                    try {
+                        let cappedCount = 0;
+                        for (const m of this.scene.materials) {
+                            if (m instanceof BABYLON.PBRBaseMaterial) {
+                                const pbr = m as BABYLON.PBRMaterial;
+                                if (pbr.maxSimultaneousLights > AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS) {
+                                    pbr.maxSimultaneousLights = AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
+                                    cappedCount++;
+                                }
+                            }
+                        }
+                        if (cappedCount > 0) {
+                            console.debug(`[FlightSimple] Re-capped maxSimultaneousLights=${AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS} on ${cappedCount} PBR material(s) after GLB load`);
+                        }
+                    } catch (err) {
+                        console.warn('[FlightSimple] Failed to re-cap PBR materials after GLB load:', err);
+                    }
+                });
+                if (completeObs) this._pbrCapPluginCompleteObservers.push(completeObs);
+            });
+        } catch (err) {
+            console.warn('[FlightSimple] Failed to register SceneLoader plugin activation observer:', err);
         }
 
         this.velocity        = BABYLON.Vector3.Zero();
@@ -1506,6 +1539,11 @@ export class FlightSceneSimple extends Scene3D {
     onDispose(): void {
         this._disposed = true;
         this._clearAllPendingTimeouts();
+        if (this._pbrCapPluginObserver) {
+            try { BABYLON.SceneLoader.OnPluginActivatedObservable.remove(this._pbrCapPluginObserver); } catch (_) { /* ignore */ }
+            this._pbrCapPluginObserver = null;
+        }
+        this._pbrCapPluginCompleteObservers = [];
         if (this._dbgKeydownHandler) {
             try { window.removeEventListener('keydown', this._dbgKeydownHandler); } catch (_) { /* ignore */ }
             this._dbgKeydownHandler = null;
