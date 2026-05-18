@@ -985,10 +985,18 @@ export class FlightSceneSimple extends Scene3D {
     private hudAltSel:  HTMLElement | null = null;
     private hudVsPointer: HTMLElement | null = null;
     private hudEngine2Col: HTMLElement | null = null;
+    private hudEngine3Col: HTMLElement | null = null;
+    private hudEngine4Col: HTMLElement | null = null;
     private hudRpmVal2:    HTMLElement | null = null;
+    private hudRpmVal3:    HTMLElement | null = null;
+    private hudRpmVal4:    HTMLElement | null = null;
     private hudRpmNeedle2: HTMLElement | null = null;
+    private hudRpmNeedle3: HTMLElement | null = null;
+    private hudRpmNeedle4: HTMLElement | null = null;
     private hudEng1Pct:    HTMLElement | null = null;
     private hudEng2Pct:    HTMLElement | null = null;
+    private hudEng3Pct:    HTMLElement | null = null;
+    private hudEng4Pct:    HTMLElement | null = null;
     private spdMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
     private altMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
     private lastSpdCenter = -1;
@@ -1219,9 +1227,12 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _updateEngineColumnsVisibility(): void {
-        if (!this.hudEngine2Col) return;
-        const engineCount = this.aircraftConfig?.engine_count ?? 1;
-        this.hudEngine2Col.style.display = engineCount >= 2 ? '' : 'none';
+        const engineCount = Math.max(0, this.aircraftConfig?.engine_count ?? 1);
+        const eng1Col = document.getElementById('hud-engine1-col');
+        if (eng1Col) eng1Col.style.display = engineCount >= 1 ? '' : 'none';
+        if (this.hudEngine2Col) this.hudEngine2Col.style.display = engineCount >= 2 ? '' : 'none';
+        if (this.hudEngine3Col) this.hudEngine3Col.style.display = engineCount >= 3 ? '' : 'none';
+        if (this.hudEngine4Col) this.hudEngine4Col.style.display = engineCount >= 4 ? '' : 'none';
     }
 
     onCreate(scene: any, _input: InputManager): void {
@@ -7897,6 +7908,40 @@ export class FlightSceneSimple extends Scene3D {
       </div>
     </div>
   </div>
+  <div class="hud-engine-col" id="hud-engine3-col" style="display:none">
+    <div class="hud-engine-title">ENGINE #3</div>
+    <div class="hud-engine-content">
+      <div class="hud-rpm-gauge">
+        <div class="hud-rpm-bg"></div>
+        <div class="hud-rpm-needle" id="hud-rpm-needle3"></div>
+        <div class="hud-rpm-center"></div>
+        <div class="hud-rpm-label">LVR<br>A/THR</div>
+        <div class="hud-rpm-end hud-rpm-end-min">0</div>
+        <div class="hud-rpm-end hud-rpm-end-max">110</div>
+      </div>
+      <div class="hud-engine-thr" id="hud-eng3-pct">0%</div>
+      <div class="hud-engine-vals">
+        <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-rpm3-v">0</span><span class="hud-engine-val-lbl">RPM</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="hud-engine-col" id="hud-engine4-col" style="display:none">
+    <div class="hud-engine-title">ENGINE #4</div>
+    <div class="hud-engine-content">
+      <div class="hud-rpm-gauge">
+        <div class="hud-rpm-bg"></div>
+        <div class="hud-rpm-needle" id="hud-rpm-needle4"></div>
+        <div class="hud-rpm-center"></div>
+        <div class="hud-rpm-label">LVR<br>A/THR</div>
+        <div class="hud-rpm-end hud-rpm-end-min">0</div>
+        <div class="hud-rpm-end hud-rpm-end-max">110</div>
+      </div>
+      <div class="hud-engine-thr" id="hud-eng4-pct">0%</div>
+      <div class="hud-engine-vals">
+        <div class="hud-engine-val"><span class="hud-engine-val-num" id="hud-rpm4-v">0</span><span class="hud-engine-val-lbl">RPM</span></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Right Panel - Altitude & Instruments side by side -->
@@ -8124,10 +8169,18 @@ export class FlightSceneSimple extends Scene3D {
         this.hudAltSel      = document.getElementById('hud-alt-sel');
         this.hudVsPointer   = document.getElementById('hud-vs-pointer');
         this.hudEngine2Col  = document.getElementById('hud-engine2-col');
+        this.hudEngine3Col  = document.getElementById('hud-engine3-col');
+        this.hudEngine4Col  = document.getElementById('hud-engine4-col');
         this.hudRpmVal2     = document.getElementById('hud-rpm2-v');
+        this.hudRpmVal3     = document.getElementById('hud-rpm3-v');
+        this.hudRpmVal4     = document.getElementById('hud-rpm4-v');
         this.hudRpmNeedle2  = document.getElementById('hud-rpm-needle2');
+        this.hudRpmNeedle3  = document.getElementById('hud-rpm-needle3');
+        this.hudRpmNeedle4  = document.getElementById('hud-rpm-needle4');
         this.hudEng1Pct     = document.getElementById('hud-eng1-pct');
         this.hudEng2Pct     = document.getElementById('hud-eng2-pct');
+        this.hudEng3Pct     = document.getElementById('hud-eng3-pct');
+        this.hudEng4Pct     = document.getElementById('hud-eng4-pct');
         this._updateEngineColumnsVisibility();
         this.hudUtc      = document.getElementById('hud-utc')!;
         this.mapImg      = document.getElementById('gps-map-img') as HTMLImageElement;
@@ -9910,8 +9963,12 @@ export class FlightSceneSimple extends Scene3D {
         const _engAliveArr = Array.isArray(this._engineAlive) ? this._engineAlive : [];
         const _eng1Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[0] === true);
         const _eng2Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[1] === true);
+        const _eng3Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[2] === true);
+        const _eng4Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[3] === true);
         if (this.hudEng1Pct) this.hudEng1Pct.textContent = `${_eng1Alive ? pct : 0}%`;
         if (this.hudEng2Pct) this.hudEng2Pct.textContent = `${_eng2Alive ? pct : 0}%`;
+        if (this.hudEng3Pct) this.hudEng3Pct.textContent = `${_eng3Alive ? pct : 0}%`;
+        if (this.hudEng4Pct) this.hudEng4Pct.textContent = `${_eng4Alive ? pct : 0}%`;
         if (this.hudAbTag) {
             this.hudAbTag.style.display = this.thrust > 1.0 ? '' : 'none';
         }
@@ -10155,9 +10212,18 @@ export class FlightSceneSimple extends Scene3D {
         if (this.hudRpmNeedle) {
             this.hudRpmNeedle.style.transform = `rotate(${_eng1Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
         }
-        if (this.hudEngine2Col && (this.aircraftConfig?.engine_count ?? 1) >= 2) {
+        const _engineCountCfg = this.aircraftConfig?.engine_count ?? 1;
+        if (this.hudEngine2Col && _engineCountCfg >= 2) {
             if (this.hudRpmVal2) this.hudRpmVal2.textContent = String(_eng2Alive ? _engRpmRounded : 0);
             if (this.hudRpmNeedle2) this.hudRpmNeedle2.style.transform = `rotate(${_eng2Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
+        }
+        if (this.hudEngine3Col && _engineCountCfg >= 3) {
+            if (this.hudRpmVal3) this.hudRpmVal3.textContent = String(_eng3Alive ? _engRpmRounded : 0);
+            if (this.hudRpmNeedle3) this.hudRpmNeedle3.style.transform = `rotate(${_eng3Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
+        }
+        if (this.hudEngine4Col && _engineCountCfg >= 4) {
+            if (this.hudRpmVal4) this.hudRpmVal4.textContent = String(_eng4Alive ? _engRpmRounded : 0);
+            if (this.hudRpmNeedle4) this.hudRpmNeedle4.style.transform = `rotate(${_eng4Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
         }
 
         const fuelPct = this.aircraftConfig.fuel_capacity_kg > 0
