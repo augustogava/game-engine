@@ -1035,6 +1035,7 @@ export class FlightSceneSimple extends Scene3D {
     private _autopilotTargetHdgDeg: number = 0;
     private _autopilotTargetAltFt: number = 0;
     private _autopilotTargetVsFpm:  number = 0;
+    private _apEditingField: 'hdg' | 'alt' | 'vs' | null = null;
     private _apKeyLockMaster = false;
     private _apKeyLockHdg = false;
     private _apKeyLockAlt = false;
@@ -4687,15 +4688,143 @@ export class FlightSceneSimple extends Scene3D {
         wire('ap-btn-vs',  () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotVsHold(); });
         wire('ap-btn-nav', () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotNavHold(); });
         wire('ap-btn-apr', () => { if (!this._autopilotMaster) this._engageAutopilotMaster(); this._engageAutopilotAprHold(); });
+
+        this._wireApTargetEdit('ap-tgt-hdg', 'hdg');
+        this._wireApTargetEdit('ap-tgt-alt', 'alt');
+        this._wireApTargetEdit('ap-tgt-vs',  'vs');
+
+        this._wireApKnob('ap-knob-hdg', 'hdg');
+        this._wireApKnob('ap-knob-alt', 'alt');
+        this._wireApKnob('ap-knob-vs',  'vs');
+    }
+
+    private _wireApKnob(knobId: string, field: 'hdg' | 'alt' | 'vs'): void {
+        const knob = document.getElementById(knobId);
+        if (!knob) return;
+
+        const stepFor = (big: boolean): number => {
+            if (field === 'hdg') return big ? 10 : 1;
+            if (field === 'alt') return big ? 1000 : 100;
+            return big ? 500 : 100;
+        };
+
+        const apply = (dir: 1 | -1, big: boolean) => {
+            const inc = dir * stepFor(big);
+            if (field === 'hdg')      this._adjustAutopilotHdgTarget(inc);
+            else if (field === 'alt') this._adjustAutopilotAltTarget(inc);
+            else                       this._adjustAutopilotVsTarget(inc);
+            this._updateAutopilotPanel();
+            try { this._cockpitClick(); } catch { /* ignore */ }
+        };
+
+        knob.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
+            const dir: 1 | -1 = e.deltaY < 0 ? 1 : -1;
+            apply(dir, e.shiftKey);
+        }, { passive: false });
+
+        knob.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const rect = knob.getBoundingClientRect();
+            if (rect.height <= 0) return;
+            const upper = (e.clientY - rect.top) < rect.height * 0.5;
+            apply(upper ? 1 : -1, e.shiftKey);
+        });
+
+        knob.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            apply(-1, e.shiftKey);
+        });
+    }
+
+    private _wireApTargetEdit(spanId: string, field: 'hdg' | 'alt' | 'vs'): void {
+        const span = document.getElementById(spanId);
+        if (!span) return;
+        span.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (this._apEditingField !== null) return;
+            this._beginApTargetEdit(span, field);
+        });
+    }
+
+    private _beginApTargetEdit(span: HTMLElement, field: 'hdg' | 'alt' | 'vs'): void {
+        let currentValue: number;
+        let minVal: number;
+        let maxVal: number;
+        let stepHint: string;
+        if (field === 'hdg') {
+            currentValue = Math.round(this._autopilotTargetHdgDeg);
+            minVal = 0; maxVal = 359; stepHint = '1';
+        } else if (field === 'alt') {
+            currentValue = Math.round(this._autopilotTargetAltFt);
+            minVal = 0; maxVal = 50000; stepHint = '100';
+        } else {
+            currentValue = Math.round(this._autopilotTargetVsFpm);
+            minVal = -3000; maxVal = 3000; stepHint = '100';
+        }
+
+        this._apEditingField = field;
+        const originalHtml = span.textContent || '';
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = String(currentValue);
+        input.min = String(minVal);
+        input.max = String(maxVal);
+        input.step = stepHint;
+        input.style.cssText = 'width:54px;font:inherit;background:rgba(0,16,32,.9);color:#9cf;border:1px solid #40c0ff;border-radius:2px;padding:0 2px;text-align:center;outline:none';
+
+        span.textContent = '';
+        span.appendChild(input);
+        try { input.focus(); input.select(); } catch { /* ignore */ }
+
+        const commit = (apply: boolean) => {
+            if (this._apEditingField !== field) return;
+            this._apEditingField = null;
+            input.removeEventListener('keydown', onKey);
+            input.removeEventListener('blur', onBlur);
+            if (apply) {
+                const raw = parseFloat(input.value);
+                if (Number.isFinite(raw)) {
+                    const clamped = Math.max(minVal, Math.min(maxVal, raw));
+                    if (field === 'hdg') {
+                        this._autopilotTargetHdgDeg = ((Math.round(clamped) % 360) + 360) % 360;
+                        console.log(`[AP] Target HDG set to ${Math.round(this._autopilotTargetHdgDeg)}`);
+                    } else if (field === 'alt') {
+                        this._autopilotTargetAltFt = Math.round(clamped);
+                        console.log(`[AP] Target ALT set to ${Math.round(this._autopilotTargetAltFt)} ft`);
+                    } else {
+                        this._autopilotTargetVsFpm = Math.round(clamped);
+                        console.log(`[AP] Target VS set to ${Math.round(this._autopilotTargetVsFpm)} fpm`);
+                    }
+                } else {
+                    console.warn(`[AP] Invalid input for ${field}: "${input.value}"`);
+                }
+            }
+            try { if (input.parentNode === span) span.removeChild(input); } catch { /* ignore */ }
+            span.textContent = originalHtml;
+            this._updateAutopilotPanel();
+        };
+
+        const onKey = (ev: KeyboardEvent) => {
+            ev.stopPropagation();
+            if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+            else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+        };
+        const onBlur = () => commit(true);
+        input.addEventListener('keydown', onKey);
+        input.addEventListener('blur', onBlur);
     }
 
     private _updateAutopilotPanel(): void {
         const setBtn = (id: string, active: boolean) => {
             const el = document.getElementById(id);
             if (!el) return;
-            el.style.background = active ? '#1a4830' : '#222';
-            el.style.color      = active ? '#40ff80' : '#aaa';
-            el.style.borderColor = active ? '#40ff80' : '#555';
+            el.classList.toggle('active', active);
         };
         setBtn('ap-btn-ap',  this._autopilotMaster);
         setBtn('ap-btn-hdg', this._autopilotHdgHold);
@@ -4703,12 +4832,24 @@ export class FlightSceneSimple extends Scene3D {
         setBtn('ap-btn-vs',  this._autopilotVsHold);
         setBtn('ap-btn-nav', this._autopilotNavHold);
         setBtn('ap-btn-apr', this._autopilotAprHold);
+
+        const setKnobRotation = (knobId: string, rotDeg: number) => {
+            const k = document.getElementById(knobId);
+            if (!k) return;
+            const inner = k.querySelector('.ap-knob-inner') as HTMLElement | null;
+            if (inner) inner.style.transform = `rotate(${rotDeg}deg)`;
+        };
+        setKnobRotation('ap-knob-hdg', ((this._autopilotTargetHdgDeg % 360) + 360) % 360);
+        setKnobRotation('ap-knob-alt', (((this._autopilotTargetAltFt % 1000) + 1000) % 1000) * 0.36);
+        const vsRot = Math.max(-180, Math.min(180, (this._autopilotTargetVsFpm / 3000) * 180));
+        setKnobRotation('ap-knob-vs',  vsRot);
+
         const hdgEl = document.getElementById('ap-tgt-hdg');
         const altEl = document.getElementById('ap-tgt-alt');
         const vsEl  = document.getElementById('ap-tgt-vs');
-        if (hdgEl) hdgEl.textContent = String(Math.round(this._autopilotTargetHdgDeg)).padStart(3, '0');
-        if (altEl) altEl.textContent = String(Math.round(this._autopilotTargetAltFt)).padStart(5, '0');
-        if (vsEl)  vsEl.textContent  = `${this._autopilotTargetVsFpm >= 0 ? '+' : ''}${Math.round(this._autopilotTargetVsFpm)}`;
+        if (hdgEl && this._apEditingField !== 'hdg') hdgEl.textContent = String(Math.round(this._autopilotTargetHdgDeg)).padStart(3, '0');
+        if (altEl && this._apEditingField !== 'alt') altEl.textContent = String(Math.round(this._autopilotTargetAltFt)).padStart(5, '0');
+        if (vsEl  && this._apEditingField !== 'vs')  vsEl.textContent  = `${this._autopilotTargetVsFpm >= 0 ? '+' : ''}${Math.round(this._autopilotTargetVsFpm)}`;
     }
 
     private _maybeDisengageAutopilotByInput(): void {
@@ -7711,6 +7852,19 @@ export class FlightSceneSimple extends Scene3D {
 #hw{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,30,0,.12);border:1px solid rgba(255,60,0,.7);border-radius:10px;color:#ff5500;font-size:20px;letter-spacing:.2em;text-align:center;padding:16px 36px;display:none;animation:stallPulse 1s ease-in-out infinite}
 @keyframes stallPulse{0%,100%{opacity:1}50%{opacity:.3}}
 
+#ap-panel{user-select:none}
+#ap-panel .ap-btn{background:#1a1a1f;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 8px;font:inherit;cursor:pointer;letter-spacing:.06em;transition:background .15s,color .15s,box-shadow .15s,border-color .15s}
+#ap-panel .ap-btn:hover{border-color:#8aa;color:#ddd}
+#ap-panel .ap-btn.active{background:#15402a;color:#40ff80;border-color:#40ff80;box-shadow:0 0 8px rgba(64,255,128,.55),inset 0 0 4px rgba(64,255,128,.25);text-shadow:0 0 4px rgba(64,255,128,.6)}
+#ap-panel .ap-units{display:flex;gap:10px;justify-content:space-between;align-items:flex-start;padding:0 2px}
+#ap-panel .ap-unit{display:flex;flex-direction:column;align-items:center;gap:3px}
+#ap-panel .ap-display{background:#000;color:#9cf;border:1px solid rgba(80,180,255,.45);border-radius:3px;padding:1px 5px;font-size:11px;font-family:'Orbitron',monospace;min-width:54px;text-align:center;text-shadow:0 0 4px rgba(120,200,255,.55);letter-spacing:.05em}
+#ap-panel .ap-display span{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;color:inherit}
+#ap-panel .ap-knob{width:28px;height:28px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#666,#222 65%,#0a0a0a 100%);border:1px solid #2a2a2a;box-shadow:inset 0 -2px 4px rgba(0,0,0,.6),0 1px 3px rgba(0,0,0,.5);cursor:pointer;position:relative;flex-shrink:0}
+#ap-panel .ap-knob:hover{border-color:#5a8aaa}
+#ap-panel .ap-knob-inner{position:absolute;inset:0;border-radius:50%;transition:transform .12s ease-out;pointer-events:none}
+#ap-panel .ap-knob-tick{position:absolute;top:2px;left:50%;transform:translateX(-50%);width:2px;height:9px;background:#aac8ff;border-radius:1px;box-shadow:0 0 3px rgba(120,200,255,.7)}
+
 /* Left Panel - Airspeed */
 .hud-panel-left{position:absolute;left:12px;bottom:12px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
 .hud-panel-right{position:absolute;right:12px;bottom:12px;font-family:'Inter',sans-serif;display:flex;align-items:flex-end;gap:8px}
@@ -7821,9 +7975,12 @@ export class FlightSceneSimple extends Scene3D {
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #nav-info{top:150px!important;left:2px!important;width:140px!important;font-size:9px!important}
-#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:3px 4px!important;gap:2px!important}
-#ap-panel button{padding:2px 4px!important;font-size:9px!important}
-#ap-panel>div:nth-child(2){font-size:8px!important;gap:4px!important}
+#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
+#ap-panel .ap-btn{padding:2px 5px!important;font-size:9px!important}
+#ap-panel .ap-units{gap:6px!important}
+#ap-panel .ap-display{font-size:10px!important;min-width:46px!important;padding:1px 4px!important}
+#ap-panel .ap-knob{width:22px!important;height:22px!important}
+#ap-panel .ap-knob-tick{height:7px!important;top:2px!important}
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
@@ -7844,9 +8001,12 @@ export class FlightSceneSimple extends Scene3D {
 #flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
 #flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
 #nav-info{top:120px!important;left:2px!important;width:110px!important;font-size:8px!important}
-#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:2px 3px!important;gap:1px!important;max-width:96vw!important}
-#ap-panel button{padding:2px 3px!important;font-size:8px!important;letter-spacing:.02em!important}
-#ap-panel>div:nth-child(2){font-size:7px!important;gap:3px!important}
+#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
+#ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
+#ap-panel .ap-units{gap:4px!important}
+#ap-panel .ap-display{font-size:9px!important;min-width:40px!important;padding:1px 3px!important}
+#ap-panel .ap-knob{width:20px!important;height:20px!important}
+#ap-panel .ap-knob-tick{height:6px!important;top:2px!important;width:2px!important}
 }
 @media(max-height:440px){
 #flight-pfd{top:30%!important;width:220px!important;height:150px!important}
@@ -7865,19 +8025,28 @@ export class FlightSceneSimple extends Scene3D {
 </div>
 <div id="hud-utc" style="position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
-<div id="ap-panel" style="position:absolute;top:38px;right:54px;display:flex;flex-direction:column;gap:3px;font-family:'Orbitron',monospace;font-size:10px;color:#aac;background:rgba(0,8,16,.55);padding:4px 5px;border:1px solid rgba(80,180,255,.25);border-radius:4px;z-index:50;pointer-events:auto">
-  <div style="display:flex;gap:3px;justify-content:center">
-    <button id="ap-btn-ap"  type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">AP</button>
-    <button id="ap-btn-hdg" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">HDG</button>
-    <button id="ap-btn-alt" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">ALT</button>
-    <button id="ap-btn-vs"  type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">VS</button>
-    <button id="ap-btn-nav" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">NAV</button>
-    <button id="ap-btn-apr" type="button" class="ap-btn" style="background:#222;color:#aaa;border:1px solid #555;border-radius:3px;padding:2px 6px;font:inherit;cursor:pointer;letter-spacing:.06em">APR</button>
+<div id="ap-panel" style="position:absolute;top:38px;right:54px;display:flex;flex-direction:column;gap:6px;font-family:'Orbitron',monospace;font-size:10px;color:#aac;background:rgba(0,8,16,.65);padding:6px 7px;border:1px solid rgba(80,180,255,.3);border-radius:5px;z-index:50;pointer-events:auto">
+  <div style="display:flex;gap:4px;justify-content:center">
+    <button id="ap-btn-ap"  type="button" class="ap-btn">AP</button>
+    <button id="ap-btn-nav" type="button" class="ap-btn">NAV</button>
+    <button id="ap-btn-apr" type="button" class="ap-btn">APR</button>
   </div>
-  <div style="display:flex;gap:6px;justify-content:space-between;font-size:9px;color:#9cf;padding:0 2px">
-    <span>HDG <span id="ap-tgt-hdg">---</span></span>
-    <span>ALT <span id="ap-tgt-alt">-----</span></span>
-    <span>VS <span id="ap-tgt-vs">----</span></span>
+  <div class="ap-units">
+    <div class="ap-unit">
+      <div class="ap-display"><span id="ap-tgt-hdg" title="Clique para editar (0-359)">---</span></div>
+      <div class="ap-knob" id="ap-knob-hdg" title="Rolar para ajustar (Shift = passo grande, clique direito = -)"><div class="ap-knob-inner"><div class="ap-knob-tick"></div></div></div>
+      <button id="ap-btn-hdg" type="button" class="ap-btn">HDG</button>
+    </div>
+    <div class="ap-unit">
+      <div class="ap-display"><span id="ap-tgt-alt" title="Clique para editar (ft)">-----</span></div>
+      <div class="ap-knob" id="ap-knob-alt" title="Rolar para ajustar (Shift = passo grande, clique direito = -)"><div class="ap-knob-inner"><div class="ap-knob-tick"></div></div></div>
+      <button id="ap-btn-alt" type="button" class="ap-btn">ALT</button>
+    </div>
+    <div class="ap-unit">
+      <div class="ap-display"><span id="ap-tgt-vs" title="Clique para editar (ft/min)">----</span></div>
+      <div class="ap-knob" id="ap-knob-vs" title="Rolar para ajustar (Shift = passo grande, clique direito = -)"><div class="ap-knob-inner"><div class="ap-knob-tick"></div></div></div>
+      <button id="ap-btn-vs" type="button" class="ap-btn">VS</button>
+    </div>
   </div>
 </div>
 <div id="crash-overlay" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(180,0,0,.35);z-index:500;pointer-events:none">
