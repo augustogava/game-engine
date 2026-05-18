@@ -396,6 +396,28 @@ const CLOUD_FLIP_X_PROBABILITY = 0.5;
 const OVERCAST_DECK_Y_M = 7500;
 const OVERCAST_DECK_SIZE_M = 60000;
 const OVERCAST_DECK_ALPHA = 0.55;
+const CLOUD_ALPHA_INDEX = 50;
+const OVERCAST_ALPHA_INDEX = 10;
+const TILE_PBR_ROUGHNESS_FLOOR = 0.45;
+const TILE_FADE_DURATION_S = 0.25;
+const AERIAL_FOG_ALT_FADE_REF_M = 4000;
+const AERIAL_FOG_ALT_FADE_MIN_MULT = 0.25;
+const CLOUD_NEAR_FADE_NEAR_M = 300;
+const CLOUD_NEAR_FADE_FAR_M  = 600;
+const CLOUD_WRAP_FADE_S = 0.5;
+const VEGETATION_GRID_HALF_M = 1000;
+const VEGETATION_CELL_M = 60;
+const VEGETATION_MAX_INSTANCES = 1500;
+const VEGETATION_FADE_BAND_M = 300;
+const VEGETATION_FADE_RANGE_M = 200;
+const VEGETATION_RESEED_DIST_M = 1000;
+const VEGETATION_TREE_HEIGHT_M = 14;
+const VEGETATION_TREE_HALF_WIDTH_M = 6;
+const VOLUMETRIC_CLOUDS_NOISE_URL = 'src/game/assets/textures/cloud_noise_3d.png';
+const VOLUMETRIC_CLOUDS_BLUE_NOISE_URL = 'src/game/assets/textures/blue_64_64/LDR_LLL1_0.png';
+const VOLUMETRIC_CLOUDS_SHADER_URL = 'src/game/shaders/volumetricClouds.fragment.fx';
+const COLOR_LUT_URL = 'src/game/assets/luts/cinematic_warm.png';
+const TREES_TEXTURE_BASE_URL = 'src/game/assets/textures/trees/';
 const MILKY_WAY_BAND_COUNT = 120;
 const MILKY_WAY_BAND_DIST = 50000;
 const MILKY_WAY_BAND_HALF_WIDTH_DEG = 7;
@@ -1114,6 +1136,37 @@ export class FlightSceneSimple extends Scene3D {
     private _pipeline: BABYLON.DefaultRenderingPipeline | null = null;
     private _ssao: BABYLON.SSAO2RenderingPipeline | null = null;
     private _shadowGen: BABYLON.CascadedShadowGenerator | null = null;
+
+    private _premium = {
+        tileShadows: false,
+        aerialFog: false,
+        tileFade: false,
+        godRays: false,
+        colorLut: false,
+        cloudCameraFade: false,
+        waterTilesRefl: false,
+        fxaaFallback: false,
+        vegetation: false,
+        volumetricClouds: false,
+    };
+    private _fogColorBase: BABYLON.Color3 = new BABYLON.Color3(0.55, 0.7, 0.95);
+    private _fogDensityBase: number = 0.000008;
+    private _tileFadeEntries: Map<string, { meshes: BABYLON.AbstractMesh[]; t: number }> = new Map();
+    private _vegetationTemplates: BABYLON.Mesh[] = [];
+    private _vegetationMaterials: BABYLON.PBRMaterial[] = [];
+    private _vegetationInstances: BABYLON.InstancedMesh[] = [];
+    private _vegetationGridCenter: BABYLON.Vector3 = new BABYLON.Vector3(0, 0, 0);
+    private _vegetationSeeded = false;
+    private _vegetationVisibility = 1;
+    private _vegetationBuilt = false;
+    private _godRays: BABYLON.VolumetricLightScatteringPostProcess | null = null;
+    private _colorLutTexture: BABYLON.BaseTexture | null = null;
+    private _volumetricCloudsPost: BABYLON.PostProcess | null = null;
+    private _volumetricNoiseTexture: BABYLON.Texture | null = null;
+    private _volumetricBlueNoiseTexture: BABYLON.Texture | null = null;
+    private _volumetricShaderRegistered = false;
+    private _cloudWindOffset: { x: number; z: number } = { x: 0, z: 0 };
+
     private hudUtc!: HTMLElement;
 
     private _applyAircraftConfig(cfg: AircraftConfig): void {
@@ -1175,6 +1228,8 @@ export class FlightSceneSimple extends Scene3D {
         scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
         scene.fogColor   = new BABYLON.Color3(0.55, 0.7, 0.95);
         scene.fogDensity = 0.000008;
+        this._fogColorBase.copyFrom(scene.fogColor);
+        this._fogDensityBase = scene.fogDensity;
 
         try {
             patchPbrMaxSimultaneousLightsProto();
@@ -1282,6 +1337,8 @@ export class FlightSceneSimple extends Scene3D {
             this.ground.isVisible = false;
             scene.fogColor   = new BABYLON.Color3(0.65, 0.75, 0.90);
             scene.fogDensity = 0.0000025;
+            this._fogColorBase.copyFrom(scene.fogColor);
+            this._fogDensityBase = scene.fogDensity;
             this._buildWater(scene);
         }
 
@@ -1290,6 +1347,10 @@ export class FlightSceneSimple extends Scene3D {
     update(dt: number): void {
         if (!this.spawned) return;
         if (this.tiles) this.tiles.update();
+        if (this._premium.tileFade) this._updateTileFade(dt);
+        if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
+        if (this._premium.waterTilesRefl) this._updateWaterWind(dt);
+        if (this._premium.vegetation) this._updateVegetation();
         if (this._crashed) return;
 
         if (!this._worldReady) {
@@ -2418,6 +2479,8 @@ export class FlightSceneSimple extends Scene3D {
             this.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
         } catch (e) { console.warn('[3DTiles] Auth plugin failed:', e); }
 
+        this._attachTilesVisualHandlers();
+
         const latRad = lat * Math.PI / 180;
         const lonRad = lon * Math.PI / 180;
         const sinLat = Math.sin(latRad);
@@ -2452,6 +2515,87 @@ export class FlightSceneSimple extends Scene3D {
         );
 
         console.info(`[3DTiles] ENU transform at (${lat}, ${lon}, alt=${alt}). Group pos: ${this.tiles.group.position}`);
+    }
+
+    private _attachTilesVisualHandlers(): void {
+        if (!this.tiles) return;
+        const tiles: any = this.tiles;
+        try {
+            tiles.addEventListener('load-model', (event: any) => {
+                try {
+                    const tileScene: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
+                    if (!tileScene) return;
+                    const meshes = (tileScene as any).getChildMeshes
+                        ? (tileScene as any).getChildMeshes(false)
+                        : [];
+                    const seenMats = new Set<BABYLON.Material>();
+                    for (const mesh of meshes) {
+                        try {
+                            mesh.receiveShadows = true;
+                            const mat = mesh.material;
+                            if (!mat || seenMats.has(mat)) continue;
+                            seenMats.add(mat);
+                            if (mat instanceof BABYLON.PBRBaseMaterial) {
+                                const pbr = mat as BABYLON.PBRMaterial;
+                                pbr.maxSimultaneousLights = AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
+                                if (pbr.roughness !== null && pbr.roughness !== undefined) {
+                                    pbr.roughness = Math.max(pbr.roughness, TILE_PBR_ROUGHNESS_FLOOR);
+                                }
+                            }
+                        } catch (innerErr) {
+                            console.warn('[3DTiles] Failed to polish tile mesh:', innerErr);
+                        }
+                    }
+                    if (this._premium.tileFade) {
+                        try {
+                            const tileKey = (event.tile && event.tile.__h) ? String(event.tile.__h) : (tileScene as any).uniqueId + '_' + Date.now();
+                            (event.tile && (event.tile.__h = tileKey));
+                            for (const mesh of meshes) {
+                                mesh.visibility = 0;
+                            }
+                            this._tileFadeEntries.set(tileKey, { meshes, t: 0 });
+                        } catch (fadeErr) {
+                            console.warn('[3DTiles] Tile fade setup failed:', fadeErr);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[3DTiles] load-model handler failed:', err);
+                }
+            });
+            tiles.addEventListener('dispose-model', (event: any) => {
+                try {
+                    const key = event && event.tile && event.tile.__h ? String(event.tile.__h) : null;
+                    if (key) this._tileFadeEntries.delete(key);
+                } catch (err) {
+                    console.warn('[3DTiles] dispose-model handler failed:', err);
+                }
+            });
+            console.debug('[3DTiles] Visual handlers attached (shadow receivers + PBR polish + fade hook)');
+        } catch (err) {
+            console.warn('[3DTiles] Failed to attach visual handlers:', err);
+        }
+    }
+
+    private _updateTileFade(dt: number): void {
+        if (this._tileFadeEntries.size === 0) return;
+        const step = dt / TILE_FADE_DURATION_S;
+        const done: string[] = [];
+        for (const [key, entry] of this._tileFadeEntries) {
+            entry.t = Math.min(1, entry.t + step);
+            for (const mesh of entry.meshes) {
+                try { mesh.visibility = entry.t; } catch (_) { /* ignore */ }
+            }
+            if (entry.t >= 1) done.push(key);
+        }
+        for (const k of done) this._tileFadeEntries.delete(k);
+    }
+
+    private _applyAerialFogDensity(scene: BABYLON.Scene): void {
+        if (!this.planeRoot) return;
+        const altM = Math.max(0, this.planeRoot.position.y);
+        const altT = Math.max(0, Math.min(1, altM / AERIAL_FOG_ALT_FADE_REF_M));
+        const mult = 1.0 - (1.0 - AERIAL_FOG_ALT_FADE_MIN_MULT) * altT;
+        scene.fogDensity = this._fogDensityBase * mult;
     }
 
     // ── Lighting ─────────────────────────────────────────────────────────────
@@ -2834,10 +2978,23 @@ export class FlightSceneSimple extends Scene3D {
             this._sunMeshMat.emissiveColor.set(1.0, 0.7 + warmth * 0.25, 0.3 + warmth * 0.4);
         }
 
-        const fogR = 0.02 + t * 0.53;
-        const fogG = 0.02 + t * 0.68;
-        const fogB = 0.06 + t * 0.89;
+        let fogR = 0.02 + t * 0.53;
+        let fogG = 0.02 + t * 0.68;
+        let fogB = 0.06 + t * 0.89;
+        if (this._premium.aerialFog) {
+            const sunsetT = Math.max(0, Math.min(1, (10 - elevation) / 12));
+            if (sunsetT > 0) {
+                const warmR = 1.00, warmG = 0.55, warmB = 0.32;
+                const mixR = sunsetT * 0.55;
+                const mixG = sunsetT * 0.45;
+                const mixB = sunsetT * 0.35;
+                fogR = fogR * (1 - mixR) + warmR * mixR;
+                fogG = fogG * (1 - mixG) + warmG * mixG;
+                fogB = fogB * (1 - mixB) + warmB * mixB;
+            }
+        }
         scene.fogColor.set(fogR, fogG, fogB);
+        this._fogColorBase.set(fogR, fogG, fogB);
 
         const nightGlowT = Math.max(0, Math.min(1, (NIGHT_HORIZON_GLOW_OFFSET_DEG - elevation) / NIGHT_HORIZON_GLOW_FADE_BAND_DEG));
         const clearR = fogR * 0.5 + NIGHT_HORIZON_GLOW_R * nightGlowT;
@@ -2910,7 +3067,7 @@ export class FlightSceneSimple extends Scene3D {
 
     // ── Clouds ─────────────────────────────────────────────────────────────────
 
-    private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number; windMult: number }[] = [];
+    private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number; windMult: number; wrapFade: number }[] = [];
     private _cloudMats: BABYLON.StandardMaterial[] = [];
     private _cloudTemplates: BABYLON.Mesh[] = [];
 
@@ -2939,12 +3096,15 @@ export class FlightSceneSimple extends Scene3D {
                 mat.diffuseColor               = new BABYLON.Color3(0, 0, 0);
                 mat.specularColor              = new BABYLON.Color3(0, 0, 0);
                 mat.disableLighting            = true;
+                mat.disableDepthWrite          = true;
+                mat.alphaMode                  = BABYLON.Engine.ALPHA_COMBINE;
                 this._cloudMats.push(mat);
 
                 const tpl = BABYLON.MeshBuilder.CreatePlane(`cloudTpl_${layer.yMin}_v${v}`, { size: layer.sizeBase }, scene);
                 tpl.isVisible = false;
                 tpl.isPickable = false;
                 tpl.material = mat;
+                tpl.alphaIndex = CLOUD_ALPHA_INDEX;
                 this._cloudTemplates.push(tpl);
                 variantTemplates.push(tpl);
             }
@@ -2973,7 +3133,7 @@ export class FlightSceneSimple extends Scene3D {
                     ci.scaling.set(subScale * flipX, subScale * layer.aspectY * aspectJitter, 1);
                     ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
                     ci.isPickable = false;
-                    this.cloudInstances.push({ mesh: ci, yBase: oy + jy, spread: layer.spread, windMult: layer.windMult });
+                    this.cloudInstances.push({ mesh: ci, yBase: oy + jy, spread: layer.spread, windMult: layer.windMult, wrapFade: 1 });
                 }
             }
         }
@@ -2999,6 +3159,8 @@ export class FlightSceneSimple extends Scene3D {
             deck.position.y = OVERCAST_DECK_Y_M;
             deck.isPickable = false;
             deck.applyFog = true;
+            deck.renderingGroupId = 0;
+            deck.alphaIndex = OVERCAST_ALPHA_INDEX;
 
             const mat = new BABYLON.StandardMaterial('overcastMat', scene);
             const tex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
@@ -3015,10 +3177,13 @@ export class FlightSceneSimple extends Scene3D {
             mat.backFaceCulling = false;
             mat.alpha = OVERCAST_DECK_ALPHA;
             mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+            mat.disableDepthWrite = true;
+            mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
             deck.material = mat;
 
             this._overcastMesh = deck;
             this._overcastMat = mat;
+            console.debug('[Overcast] Deck created with disabled depth write to prevent cloud occlusion artifacts');
         } else {
             if (this._overcastMesh) { try { this._overcastMesh.dispose(); } catch (_) { /* ignore */ } this._overcastMesh = null; }
             if (this._overcastMat) { try { this._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this._overcastMat = null; }
@@ -3085,6 +3250,17 @@ export class FlightSceneSimple extends Scene3D {
         const baseVx = -Math.sin(dirRad) * windRef.speedKt * CLOUD_KT_TO_MS;
         const baseVz = -Math.cos(dirRad) * windRef.speedKt * CLOUD_KT_TO_MS;
         const dtClamp = Math.max(0, Math.min(0.1, dt));
+        this._cloudWindOffset.x += baseVx * dtClamp;
+        this._cloudWindOffset.z += baseVz * dtClamp;
+
+        const cameraFadeOn = this._premium.cloudCameraFade;
+        const cam = cameraFadeOn ? this.scene?.activeCamera : null;
+        const camX = cam ? cam.globalPosition.x : px;
+        const camY = cam ? cam.globalPosition.y : 0;
+        const camZ = cam ? cam.globalPosition.z : pz;
+        const fadeNear = CLOUD_NEAR_FADE_NEAR_M;
+        const fadeFar  = CLOUD_NEAR_FADE_FAR_M;
+        const wrapStep = dt / CLOUD_WRAP_FADE_S;
 
         for (const c of this.cloudInstances) {
             c.mesh.position.x += baseVx * c.windMult * dtClamp;
@@ -3093,10 +3269,26 @@ export class FlightSceneSimple extends Scene3D {
             const half = c.spread * 0.5;
             const dx = c.mesh.position.x - px;
             const dz = c.mesh.position.z - pz;
-            if (dx >  half) c.mesh.position.x -= c.spread;
-            if (dx < -half) c.mesh.position.x += c.spread;
-            if (dz >  half) c.mesh.position.z -= c.spread;
-            if (dz < -half) c.mesh.position.z += c.spread;
+            let wrapped = false;
+            if (dx >  half) { c.mesh.position.x -= c.spread; wrapped = true; }
+            if (dx < -half) { c.mesh.position.x += c.spread; wrapped = true; }
+            if (dz >  half) { c.mesh.position.z -= c.spread; wrapped = true; }
+            if (dz < -half) { c.mesh.position.z += c.spread; wrapped = true; }
+
+            if (cameraFadeOn) {
+                if (wrapped) c.wrapFade = 0;
+                else if (c.wrapFade < 1) c.wrapFade = Math.min(1, c.wrapFade + wrapStep);
+
+                const ddx = c.mesh.position.x - camX;
+                const ddy = c.mesh.position.y - camY;
+                const ddz = c.mesh.position.z - camZ;
+                const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+                const nearFade = Math.max(0, Math.min(1, (dist - fadeNear) / (fadeFar - fadeNear)));
+                c.mesh.visibility = Math.min(nearFade, c.wrapFade);
+            } else if (c.mesh.visibility !== 1) {
+                c.mesh.visibility = 1;
+                c.wrapFade = 1;
+            }
         }
     }
 
@@ -4530,6 +4722,382 @@ export class FlightSceneSimple extends Scene3D {
         this._refreshKeysHelper();
     }
 
+    // ── Premium Visual Helpers ────────────────────────────────────────────────
+
+    private _setGodRays(scene: BABYLON.Scene, enabled: boolean): void {
+        if (enabled === !!this._godRays) return;
+        if (enabled) {
+            const cam = scene.activeCamera;
+            const sunMesh = scene.getMeshByName('sunMesh');
+            if (!cam || !sunMesh) {
+                console.warn('[GodRays] Cannot create — missing camera or sunMesh');
+                return;
+            }
+            try {
+                this._godRays = new BABYLON.VolumetricLightScatteringPostProcess(
+                    'godRays',
+                    0.5,
+                    cam,
+                    sunMesh as BABYLON.Mesh,
+                    60,
+                    BABYLON.Texture.BILINEAR_SAMPLINGMODE,
+                    scene.getEngine(),
+                    false,
+                    scene,
+                );
+                this._godRays.exposure = 0.18;
+                this._godRays.decay    = 0.96;
+                this._godRays.weight   = 0.40;
+                this._godRays.density  = 0.92;
+                console.debug('[GodRays] Volumetric light scattering enabled');
+            } catch (err) {
+                console.warn('[GodRays] Failed to create:', err);
+                this._godRays = null;
+            }
+        } else if (this._godRays) {
+            try {
+                const cam = scene.activeCamera;
+                if (cam) this._godRays.dispose(cam);
+                else (this._godRays as any).dispose();
+            } catch (_) { /* ignore */ }
+            this._godRays = null;
+            console.debug('[GodRays] Disposed');
+        }
+    }
+
+    private _setWaterTilesReflection(enabled: boolean): void {
+        if (!this._waterMaterial || !this.tiles) return;
+        const wm = this._waterMaterial as any;
+        try {
+            const list: any[] = wm.renderList || [];
+            const present = list.indexOf(this.tiles.group) >= 0;
+            if (enabled && !present) {
+                wm.addToRenderList(this.tiles.group);
+                console.debug('[Water] Added tiles group to reflection render list');
+            } else if (!enabled && present) {
+                const idx = list.indexOf(this.tiles.group);
+                if (idx >= 0) list.splice(idx, 1);
+                console.debug('[Water] Removed tiles group from reflection render list');
+            }
+        } catch (err) {
+            console.warn('[Water] Reflection list mutation failed:', err);
+        }
+    }
+
+    private _waterWindTimer = 0;
+    private _waterWindDir: BABYLON.Vector2 = new BABYLON.Vector2(0, 1);
+    private _updateWaterWind(dt: number): void {
+        if (!this._waterMaterial) return;
+        this._waterWindTimer += dt;
+        if (this._waterWindTimer < 1.0) return;
+        this._waterWindTimer = 0;
+        try {
+            const wind = this._getWindAtAltitude(0);
+            const dirRad = (wind.dirDeg * Math.PI) / 180;
+            this._waterWindDir.set(Math.sin(dirRad), Math.cos(dirRad));
+            const wm = this._waterMaterial as any;
+            wm.windDirection = this._waterWindDir;
+            wm.windForce = Math.max(WATER_WIND_FORCE, wind.speedKt * 0.5);
+        } catch (_) { /* ignore */ }
+    }
+
+    private _setFxaaFallback(enabled: boolean): void {
+        if (!this._pipeline) return;
+        const samples = this._pipeline.samples ?? 1;
+        const want = enabled && samples <= 1;
+        if (this._pipeline.fxaaEnabled !== want) {
+            this._pipeline.fxaaEnabled = want;
+            console.debug(`[FXAA] fallback set to ${want} (samples=${samples})`);
+        }
+    }
+
+    private _setVegetation(scene: BABYLON.Scene, enabled: boolean): void {
+        if (enabled) {
+            if (!this._vegetationBuilt) this._buildVegetation(scene);
+            this._seedVegetation();
+            for (const tpl of this._vegetationTemplates) tpl.setEnabled(true);
+            console.debug(`[Vegetation] Enabled with ${this._vegetationInstances.length} instances`);
+        } else {
+            this._clearVegetationInstances();
+            for (const tpl of this._vegetationTemplates) tpl.setEnabled(false);
+            this._vegetationSeeded = false;
+            console.debug('[Vegetation] Disabled');
+        }
+    }
+
+    private _buildVegetation(scene: BABYLON.Scene): void {
+        if (this._vegetationBuilt) return;
+        const species = ['oak', 'pine', 'palm', 'shrub'];
+        for (const name of species) {
+            try {
+                const tex = new BABYLON.Texture(
+                    `${TREES_TEXTURE_BASE_URL}${name}.png`,
+                    scene,
+                    true,
+                    false,
+                    BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+                );
+                tex.hasAlpha = true;
+                const mat = new BABYLON.PBRMaterial(`vegMat_${name}`, scene);
+                mat.albedoTexture = tex;
+                mat.useAlphaFromAlbedoTexture = true;
+                mat.transparencyMode = BABYLON.PBRMaterial.PBRMATERIAL_ALPHATEST;
+                mat.alphaCutOff = 0.5;
+                mat.backFaceCulling = false;
+                mat.metallic = 0;
+                mat.roughness = 0.9;
+                mat.maxSimultaneousLights = AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
+                this._vegetationMaterials.push(mat);
+
+                const tpl = BABYLON.MeshBuilder.CreatePlane(`vegTpl_${name}`, {
+                    width: VEGETATION_TREE_HALF_WIDTH_M * 2,
+                    height: VEGETATION_TREE_HEIGHT_M,
+                    sideOrientation: BABYLON.Mesh.DOUBLESIDE,
+                }, scene);
+                tpl.material = mat;
+                tpl.isPickable = false;
+                tpl.receiveShadows = false;
+                tpl.isVisible = false;
+                tpl.setEnabled(false);
+                this._vegetationTemplates.push(tpl);
+            } catch (err) {
+                console.warn(`[Vegetation] Failed to build template for "${name}":`, err);
+            }
+        }
+        this._vegetationBuilt = this._vegetationTemplates.length > 0;
+    }
+
+    private _clearVegetationInstances(): void {
+        for (const inst of this._vegetationInstances) {
+            try { inst.dispose(); } catch (_) { /* ignore */ }
+        }
+        this._vegetationInstances = [];
+    }
+
+    private _seedVegetation(): void {
+        if (!this.planeRoot || this._vegetationTemplates.length === 0) return;
+        this._clearVegetationInstances();
+
+        const cx = this.planeRoot.position.x;
+        const cz = this.planeRoot.position.z;
+        this._vegetationGridCenter.set(cx, GROUND_Y, cz);
+
+        const half = VEGETATION_GRID_HALF_M;
+        const cellM = VEGETATION_CELL_M;
+        const cellsPerSide = Math.floor((half * 2) / cellM);
+        const speciesCount = this._vegetationTemplates.length;
+        const startX = cx - half;
+        const startZ = cz - half;
+
+        let total = 0;
+        for (let iz = 0; iz < cellsPerSide && total < VEGETATION_MAX_INSTANCES; iz++) {
+            for (let ix = 0; ix < cellsPerSide && total < VEGETATION_MAX_INSTANCES; ix++) {
+                const cellSeed = (((ix + 1024) * 73856093) ^ ((iz + 1024) * 19349663)) >>> 0;
+                const r1 = (cellSeed % 10000) / 10000;
+                if (r1 > 0.5) continue;
+                const r2 = ((Math.imul(cellSeed, 17) >>> 0) % 10000) / 10000;
+                const r3 = ((Math.imul(cellSeed, 31) >>> 0) % 10000) / 10000;
+                const r4 = ((Math.imul(cellSeed, 53) >>> 0) % 10000) / 10000;
+                const r5 = ((Math.imul(cellSeed, 97) >>> 0) % 10000) / 10000;
+
+                const speciesIdx = Math.min(speciesCount - 1, Math.floor(r4 * speciesCount));
+                const tpl = this._vegetationTemplates[speciesIdx];
+                const wx = startX + ix * cellM + (r2 - 0.5) * cellM;
+                const wz = startZ + iz * cellM + (r3 - 0.5) * cellM;
+                const scale = 0.6 + r5 * 0.6;
+
+                try {
+                    const inst = tpl.createInstance(`veg_${ix}_${iz}`);
+                    const wy = GROUND_Y + VEGETATION_TREE_HEIGHT_M * 0.5 * scale;
+                    inst.position.set(wx, wy, wz);
+                    inst.scaling.setAll(scale);
+                    inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
+                    inst.isPickable = false;
+                    this._vegetationInstances.push(inst);
+                    total++;
+                } catch (err) {
+                    console.warn('[Vegetation] Failed to spawn instance:', err);
+                    break;
+                }
+            }
+        }
+        this._vegetationSeeded = true;
+        this._vegetationVisibility = 1;
+        for (const inst of this._vegetationInstances) inst.visibility = 1;
+        console.debug(`[Vegetation] Seeded ${total} instances at (${cx.toFixed(0)},${cz.toFixed(0)})`);
+    }
+
+    private _updateVegetation(): void {
+        if (!this._premium.vegetation || !this._vegetationSeeded || !this.planeRoot) return;
+        const px = this.planeRoot.position.x;
+        const py = this.planeRoot.position.y;
+        const pz = this.planeRoot.position.z;
+        const dx = px - this._vegetationGridCenter.x;
+        const dz = pz - this._vegetationGridCenter.z;
+        if ((dx * dx + dz * dz) > VEGETATION_RESEED_DIST_M * VEGETATION_RESEED_DIST_M) {
+            this._seedVegetation();
+            return;
+        }
+        const aglM = Math.max(0, py - GROUND_Y);
+        const fadeStart = VEGETATION_FADE_BAND_M;
+        const fadeEnd   = VEGETATION_FADE_BAND_M + VEGETATION_FADE_RANGE_M;
+        let vis = 1;
+        if (aglM >= fadeEnd) vis = 0;
+        else if (aglM > fadeStart) vis = 1 - (aglM - fadeStart) / (fadeEnd - fadeStart);
+        if (Math.abs(vis - this._vegetationVisibility) < 0.01) return;
+        this._vegetationVisibility = vis;
+        for (const inst of this._vegetationInstances) inst.visibility = vis;
+    }
+
+    private async _registerVolumetricShader(): Promise<boolean> {
+        if (this._volumetricShaderRegistered) return true;
+        try {
+            const res = await fetch(VOLUMETRIC_CLOUDS_SHADER_URL);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const code = await res.text();
+            (BABYLON.Effect.ShadersStore as any)['volumetricCloudsFragmentShader'] = code;
+            this._volumetricShaderRegistered = true;
+            console.debug('[VolumetricClouds] Shader registered in ShadersStore');
+            return true;
+        } catch (err) {
+            console.warn('[VolumetricClouds] Failed to fetch shader file:', err);
+            return false;
+        }
+    }
+
+    private _setVolumetricClouds(scene: BABYLON.Scene, enabled: boolean): void {
+        if (enabled === !!this._volumetricCloudsPost) return;
+        const cam = scene.activeCamera;
+        if (enabled) {
+            if (!cam) {
+                console.warn('[VolumetricClouds] No active camera');
+                return;
+            }
+            this._registerVolumetricShader().then((ok) => {
+                if (!ok || this._volumetricCloudsPost) return;
+                try {
+                    for (const c of this.cloudInstances) c.mesh.isVisible = false;
+                    if (this._overcastMesh) this._overcastMesh.isVisible = false;
+
+                    let depthRenderer: BABYLON.DepthRenderer | null = null;
+                    try {
+                        depthRenderer = scene.enableDepthRenderer(cam, false);
+                    } catch (depthErr) {
+                        console.warn('[VolumetricClouds] enableDepthRenderer failed:', depthErr);
+                    }
+                    const depthMap = depthRenderer ? depthRenderer.getDepthMap() : null;
+
+                    if (!this._volumetricNoiseTexture) {
+                        this._volumetricNoiseTexture = new BABYLON.Texture(
+                            VOLUMETRIC_CLOUDS_NOISE_URL, scene, false, false,
+                            BABYLON.Texture.BILINEAR_SAMPLINGMODE,
+                        );
+                        this._volumetricNoiseTexture.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
+                        this._volumetricNoiseTexture.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+                    }
+                    if (!this._volumetricBlueNoiseTexture) {
+                        this._volumetricBlueNoiseTexture = new BABYLON.Texture(
+                            VOLUMETRIC_CLOUDS_BLUE_NOISE_URL, scene, false, false,
+                            BABYLON.Texture.NEAREST_SAMPLINGMODE,
+                        );
+                        this._volumetricBlueNoiseTexture.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
+                        this._volumetricBlueNoiseTexture.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+                    }
+
+                    const post = new BABYLON.PostProcess(
+                        'volumetricClouds',
+                        'volumetricClouds',
+                        ['invViewProj', 'cameraPos', 'sunDir', 'sunColor', 'ambientColor',
+                         'time', 'cloudBaseAlt', 'cloudTopAlt', 'cloudCoverage', 'cloudDensity',
+                         'farClipZ', 'windOffset', 'screenSize'],
+                        ['depthSampler', 'noiseSampler', 'blueNoiseSampler'],
+                        0.5,
+                        cam,
+                        BABYLON.Texture.BILINEAR_SAMPLINGMODE,
+                        scene.getEngine(),
+                        false,
+                    );
+                    post.onApply = (effect) => {
+                        const camera = scene.activeCamera;
+                        if (!camera) return;
+                        const vp = camera.getProjectionMatrix().multiply(camera.getViewMatrix());
+                        const inv = BABYLON.Matrix.Invert(vp);
+                        effect.setMatrix('invViewProj', inv);
+                        effect.setVector3('cameraPos', camera.globalPosition);
+                        const sd = this._sunLight ? this._sunLight.direction : new BABYLON.Vector3(0, -1, 0.5).normalize();
+                        effect.setVector3('sunDir', sd);
+                        const sCol = this._sunLight ? this._sunLight.diffuse : new BABYLON.Color3(1, 1, 1);
+                        effect.setColor3('sunColor', sCol);
+                        const aCol = this._hemiLight ? this._hemiLight.diffuse.scale(0.4) : new BABYLON.Color3(0.3, 0.4, 0.5);
+                        effect.setColor3('ambientColor', aCol);
+                        effect.setFloat('time', performance.now() * 0.001);
+                        effect.setFloat('cloudBaseAlt', 800);
+                        effect.setFloat('cloudTopAlt', 5500);
+                        effect.setFloat('cloudCoverage', 0.45);
+                        effect.setFloat('cloudDensity', 1.2);
+                        effect.setFloat('farClipZ', camera.maxZ);
+                        effect.setFloat2('windOffset', this._cloudWindOffset.x, this._cloudWindOffset.z);
+                        const eng = scene.getEngine();
+                        effect.setFloat2('screenSize', eng.getRenderWidth(), eng.getRenderHeight());
+                        if (depthMap && this._volumetricNoiseTexture && this._volumetricBlueNoiseTexture) {
+                            effect.setTexture('depthSampler', depthMap);
+                            effect.setTexture('noiseSampler', this._volumetricNoiseTexture);
+                            effect.setTexture('blueNoiseSampler', this._volumetricBlueNoiseTexture);
+                        }
+                    };
+                    this._volumetricCloudsPost = post;
+                    console.debug('[VolumetricClouds] PostProcess attached at half-res');
+                } catch (err) {
+                    console.warn('[VolumetricClouds] Failed to create PostProcess:', err);
+                    this._volumetricCloudsPost = null;
+                }
+            });
+        } else if (this._volumetricCloudsPost) {
+            try {
+                if (cam) this._volumetricCloudsPost.dispose(cam);
+                else (this._volumetricCloudsPost as any).dispose();
+            } catch (_) { /* ignore */ }
+            this._volumetricCloudsPost = null;
+            for (const c of this.cloudInstances) c.mesh.isVisible = true;
+            console.debug('[VolumetricClouds] PostProcess disposed; sprite clouds restored');
+        }
+    }
+
+    private _setColorLut(scene: BABYLON.Scene, enabled: boolean): void {
+        if (!this._pipeline) return;
+        const ip = this._pipeline.imageProcessing;
+        if (!ip) return;
+        if (enabled === !!this._colorLutTexture) return;
+        if (enabled) {
+            try {
+                const tex = new BABYLON.Texture(
+                    COLOR_LUT_URL,
+                    scene,
+                    true,
+                    false,
+                    BABYLON.Texture.BILINEAR_SAMPLINGMODE,
+                );
+                tex.wrapU = BABYLON.Texture.CLAMP_ADDRESSMODE;
+                tex.wrapV = BABYLON.Texture.CLAMP_ADDRESSMODE;
+                ip.colorGradingTexture = tex;
+                ip.colorGradingEnabled = true;
+                this._colorLutTexture = tex;
+                console.debug(`[ColorLUT] Enabled (${COLOR_LUT_URL})`);
+            } catch (err) {
+                console.warn('[ColorLUT] Failed to enable:', err);
+                this._colorLutTexture = null;
+            }
+        } else if (this._colorLutTexture) {
+            try {
+                ip.colorGradingEnabled = false;
+                ip.colorGradingTexture = null;
+                this._colorLutTexture.dispose();
+            } catch (_) { /* ignore */ }
+            this._colorLutTexture = null;
+            console.debug('[ColorLUT] Disabled');
+        }
+    }
+
     private _initUxSettings(): void {
         const prefs = UiPreferences.get();
         const setVal = (id: string, val: string | number) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(val); };
@@ -5002,6 +5570,16 @@ export class FlightSceneSimple extends Scene3D {
             s.overcast = (document.getElementById('gfx-overcast') as HTMLInputElement)?.checked ?? false;
             s.milkyway = (document.getElementById('gfx-milkyway') as HTMLInputElement)?.checked ?? false;
             s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
+            s.tileShadows      = this._premium.tileShadows;
+            s.aerialFog        = this._premium.aerialFog;
+            s.tileFade         = this._premium.tileFade;
+            s.godRays          = this._premium.godRays;
+            s.colorLut         = this._premium.colorLut;
+            s.cloudCameraFade  = this._premium.cloudCameraFade;
+            s.waterTilesRefl   = this._premium.waterTilesRefl;
+            s.fxaaFallback     = this._premium.fxaaFallback;
+            s.vegetation       = this._premium.vegetation;
+            s.volumetricClouds = this._premium.volumetricClouds;
             localStorage.setItem('gfx_settings', JSON.stringify(s));
         };
 
@@ -5094,6 +5672,13 @@ export class FlightSceneSimple extends Scene3D {
                     if (milkywayEl) {
                         this._setMilkyWay(scene, milkywayEl.checked);
                     }
+                    this._fogDensityBase = scene.fogDensity;
+                    this._setGodRays(scene, this._premium.godRays);
+                    this._setColorLut(scene, this._premium.colorLut);
+                    this._setWaterTilesReflection(this._premium.waterTilesRefl);
+                    this._setFxaaFallback(this._premium.fxaaFallback);
+                    this._setVegetation(scene, this._premium.vegetation);
+                    this._setVolumetricClouds(scene, this._premium.volumetricClouds);
                 } catch (e) {
                     console.error('[GFX] applySettings error:', e);
                 }
@@ -5101,10 +5686,14 @@ export class FlightSceneSimple extends Scene3D {
         };
 
         const presets: Record<string, Record<string, any>> = {
-            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false },
-            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false },
-            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false },
-            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true  },
+            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false,
+                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
+            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false,
+                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
+            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false,
+                      tileShadows: true,  aerialFog: true,  tileFade: false, godRays: false, colorLut: true,  cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: true,  volumetricClouds: false },
+            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,
+                      tileShadows: true,  aerialFog: true,  tileFade: true,  godRays: true,  colorLut: true,  cloudCameraFade: true,  waterTilesRefl: true,  fxaaFallback: true,  vegetation: true,  volumetricClouds: false },
         };
 
         const applyPreset = (name: string) => {
@@ -5121,6 +5710,16 @@ export class FlightSceneSimple extends Scene3D {
             setVal('gfx-cloud-density', p.cloudDensity);
             setCheck('gfx-overcast', p.overcast);
             setCheck('gfx-milkyway', p.milkyway);
+            this._premium.tileShadows      = !!p.tileShadows;
+            this._premium.aerialFog        = !!p.aerialFog;
+            this._premium.tileFade         = !!p.tileFade;
+            this._premium.godRays          = !!p.godRays;
+            this._premium.colorLut         = !!p.colorLut;
+            this._premium.cloudCameraFade  = !!p.cloudCameraFade;
+            this._premium.waterTilesRefl   = !!p.waterTilesRefl;
+            this._premium.fxaaFallback     = !!p.fxaaFallback;
+            this._premium.vegetation       = !!p.vegetation;
+            this._premium.volumetricClouds = !!p.volumetricClouds;
             applySettings();
         };
 
@@ -5140,6 +5739,37 @@ export class FlightSceneSimple extends Scene3D {
             setCheck('gfx-overcast', cfg.overcast);
             setCheck('gfx-milkyway', cfg.milkyway);
             if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
+
+            const hasPremiumKeys = cfg.tileShadows !== undefined
+                || cfg.aerialFog !== undefined
+                || cfg.colorLut !== undefined
+                || cfg.vegetation !== undefined;
+            if (!hasPremiumKeys && cfg.preset && presets[cfg.preset]) {
+                const pd = presets[cfg.preset];
+                this._premium.tileShadows      = !!pd.tileShadows;
+                this._premium.aerialFog        = !!pd.aerialFog;
+                this._premium.tileFade         = !!pd.tileFade;
+                this._premium.godRays          = !!pd.godRays;
+                this._premium.colorLut         = !!pd.colorLut;
+                this._premium.cloudCameraFade  = !!pd.cloudCameraFade;
+                this._premium.waterTilesRefl   = !!pd.waterTilesRefl;
+                this._premium.fxaaFallback     = !!pd.fxaaFallback;
+                this._premium.vegetation       = !!pd.vegetation;
+                this._premium.volumetricClouds = !!pd.volumetricClouds;
+                console.debug(`[GFX] Migrated cfg without premium keys using preset "${cfg.preset}" defaults`);
+            } else {
+                if (cfg.tileShadows      !== undefined) this._premium.tileShadows      = !!cfg.tileShadows;
+                if (cfg.aerialFog        !== undefined) this._premium.aerialFog        = !!cfg.aerialFog;
+                if (cfg.tileFade         !== undefined) this._premium.tileFade         = !!cfg.tileFade;
+                if (cfg.godRays          !== undefined) this._premium.godRays          = !!cfg.godRays;
+                if (cfg.colorLut         !== undefined) this._premium.colorLut         = !!cfg.colorLut;
+                if (cfg.cloudCameraFade  !== undefined) this._premium.cloudCameraFade  = !!cfg.cloudCameraFade;
+                if (cfg.waterTilesRefl   !== undefined) this._premium.waterTilesRefl   = !!cfg.waterTilesRefl;
+                if (cfg.fxaaFallback     !== undefined) this._premium.fxaaFallback     = !!cfg.fxaaFallback;
+                if (cfg.vegetation       !== undefined) this._premium.vegetation       = !!cfg.vegetation;
+                if (cfg.volumetricClouds !== undefined) this._premium.volumetricClouds = !!cfg.volumetricClouds;
+            }
+
             this._safeSetTimeout(() => applySettings(), 100);
         }
 

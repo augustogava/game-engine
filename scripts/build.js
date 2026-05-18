@@ -101,6 +101,12 @@ async function build() {
         copyDirRecursive(assetsDir, destAssetsDir);
     }
 
+    const shadersDir = 'src/game/shaders';
+    if (fs.existsSync(shadersDir)) {
+        const destShadersDir = path.join(DIST_DIR, 'src/game/shaders');
+        copyDirRecursive(shadersDir, destShadersDir);
+    }
+
     const modelsDir = 'models';
     if (fs.existsSync(modelsDir)) {
         const destModelsDir = path.join(DIST_DIR, 'models');
