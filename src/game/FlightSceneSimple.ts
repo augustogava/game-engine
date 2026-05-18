@@ -1049,6 +1049,9 @@ export class FlightSceneSimple extends Scene3D {
     private _trimKeyLockPgUp = false;
     private _trimKeyLockPgDn = false;
     private _terrainRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), 1000);
+    private _frameTick: number = 0;
+    private _terrainPickFrameTick: number = -1;
+    private _cachedTerrainHit: BABYLON.PickingInfo | null = null;
     private _mapHdgCtx: CanvasRenderingContext2D | null = null;
     private _missionPanelEl: HTMLElement | null = null;
     private _missionBtnEl: HTMLElement | null = null;
@@ -1364,6 +1367,7 @@ export class FlightSceneSimple extends Scene3D {
 
     update(dt: number): void {
         if (!this.spawned) return;
+        this._frameTick++;
         if (this.tiles) this.tiles.update();
         if (this._premium.tileFade) this._updateTileFade(dt);
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
@@ -4257,7 +4261,7 @@ export class FlightSceneSimple extends Scene3D {
             if (m.name === 'skyBox') return false;
             if (planeRoot && m.isDescendantOf(planeRoot)) return true;
             return true;
-        });
+        }, true);
         const occluded = !!(pick && pick.hit);
         this._flareOccluded = occluded;
     }
@@ -7101,7 +7105,14 @@ export class FlightSceneSimple extends Scene3D {
             const rayLength = inSpawnWindow ? SPAWN_TERRAIN_RAY_LENGTH_M : TERRAIN_RAY_LENGTH_M;
             this._terrainRay.origin.set(pos.x, pos.y + rayHeight, pos.z);
             this._terrainRay.length = rayLength;
-            const hit = this._pickTerrainPreferRunway(this._terrainRay);
+            let hit: BABYLON.PickingInfo | null;
+            if (!inSpawnWindow && this._terrainPickFrameTick === this._frameTick && this._cachedTerrainHit) {
+                hit = this._cachedTerrainHit;
+            } else {
+                hit = this._pickTerrainPreferRunway(this._terrainRay);
+                this._cachedTerrainHit = hit;
+                this._terrainPickFrameTick = this._frameTick;
+            }
             const wasUnknown = this.terrainY === TERRAIN_UNKNOWN_Y;
             let resolvedTerrainY: number = TERRAIN_UNKNOWN_Y;
             if (hit?.hit && hit.pickedPoint) {
