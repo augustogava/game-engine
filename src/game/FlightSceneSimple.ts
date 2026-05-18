@@ -698,9 +698,9 @@ function computeCoefficients(
 function computeSurfaceForces(
     surface: AeroSurface, bodyVelocity: BABYLON.Vector3, airDensity: number,
     groundEffectFactor: number, flapType: number, propwashSpeedBoost: number,
-): { force: BABYLON.Vector3; torque: BABYLON.Vector3 } {
+): { force: BABYLON.Vector3; torque: BABYLON.Vector3; liftVec: BABYLON.Vector3 } {
     const speed = bodyVelocity.length();
-    const zero  = { force: BABYLON.Vector3.Zero(), torque: BABYLON.Vector3.Zero() };
+    const zero  = { force: BABYLON.Vector3.Zero(), torque: BABYLON.Vector3.Zero(), liftVec: BABYLON.Vector3.Zero() };
     if (speed < 1.0) return zero;
 
     const dragDir = bodyVelocity.normalizeToNew().scaleInPlace(-1);
@@ -721,9 +721,11 @@ function computeSurfaceForces(
 
     const effectiveSpeed = speed + propwashSpeedBoost;
     const q     = 0.5 * airDensity * effectiveSpeed * effectiveSpeed * surface.area;
-    const force = liftDir.scale(cl * q).addInPlace(dragDir.scale(cd * q));
+    const liftVec = liftDir.scale(cl * q);
+    const dragVec = dragDir.scale(cd * q);
+    const force = liftVec.add(dragVec);
     const torque = BABYLON.Vector3.Cross(surface.position, force);
-    return { force, torque };
+    return { force, torque, liftVec };
 }
 
 // ── Solar position ───────────────────────────────────────────────────────────
@@ -7349,14 +7351,14 @@ export class FlightSceneSimple extends Scene3D {
                 const pointVel = bodyVel.add(BABYLON.Vector3.Cross(angVel, surface.position));
                 const isTailSurface = si >= 2;
                 const pwBoost = isTailSurface ? propwashBoost : 0;
-                const { force, torque } = computeSurfaceForces(
+                const { force, torque, liftVec } = computeSurfaceForces(
                     surface, pointVel, airDensity, groundEffectFactor, cfg.flap_type, pwBoost,
                 );
                 if ((si === 0 || si === 1) && this._spoilerDeflection > 0) {
-                    const liftLoss = (cfg.spoiler_lift_loss ?? SPOILER_DEFAULT_LIFT_LOSS) * this._spoilerDeflection;
-                    const scale = Math.max(0, 1.0 - liftLoss);
-                    force.scaleInPlace(scale);
-                    torque.scaleInPlace(scale);
+                    const liftLoss = Math.max(0, Math.min(1, (cfg.spoiler_lift_loss ?? SPOILER_DEFAULT_LIFT_LOSS) * this._spoilerDeflection));
+                    const liftPenalty = liftVec.scale(-liftLoss);
+                    force.addInPlace(liftPenalty);
+                    torque.addInPlace(BABYLON.Vector3.Cross(surface.position, liftPenalty));
                 }
                 totalForce.addInPlace(toWorld(force));
                 totalTorque.addInPlace(torque);
