@@ -3037,10 +3037,13 @@ export class FlightSceneSimple extends Scene3D {
             wm.waveLength = WATER_WAVE_LENGTH_M;
             wm.waterColor = new BABYLON.Color3(WATER_COLOR_R, WATER_COLOR_G, WATER_COLOR_B);
             wm.colorBlendFactor = WATER_COLOR_BLEND;
+            wm.maxSimultaneousLights = AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS;
             if (this._skyboxMesh) {
                 try { wm.addToRenderList(this._skyboxMesh); } catch (_) { /* ignore */ }
             }
             water.material = wm;
+            const prePass = scene.prePassRenderer;
+            if (prePass) { prePass.excludedMaterials.push(wm); }
             this._waterMesh = water;
             this._waterMaterial = wm;
             console.log('[Water] Sea-level plane created');
@@ -4661,6 +4664,33 @@ export class FlightSceneSimple extends Scene3D {
         document.body.classList.toggle('a11y-no-cb', prefs.colorblindMode === COLORBLIND_NONE);
     }
 
+    private _makeDraggable(el: HTMLElement): void {
+        let startX = 0, startY = 0, elX = 0, elY = 0, dragging = false;
+        el.style.pointerEvents = 'auto';
+        el.addEventListener('mousedown', (e: MouseEvent) => {
+            if (e.button !== 0) return;
+            dragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            const rect = el.getBoundingClientRect();
+            elX = rect.left;
+            elY = rect.top;
+            e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e: MouseEvent) => {
+            if (!dragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            el.style.position = 'fixed';
+            el.style.left = `${elX + dx}px`;
+            el.style.top = `${elY + dy}px`;
+            el.style.right = 'auto';
+            el.style.bottom = 'auto';
+            el.style.transform = 'none';
+        });
+        window.addEventListener('mouseup', () => { dragging = false; });
+    }
+
     private _refreshKeysHelper(): void {
         const helper = document.getElementById('keys-helper');
         if (!helper) return;
@@ -5383,8 +5413,8 @@ export class FlightSceneSimple extends Scene3D {
 #touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
 #touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
 #touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
-#touch-controls-btn{position:absolute;bottom:6px;left:6px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
-#touch-controls-panel{display:none;position:absolute;bottom:48px;left:6px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#touch-controls-btn{position:absolute;bottom:6px;right:6px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+#touch-controls-panel{display:none;position:absolute;bottom:48px;right:6px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
 #touch-controls-panel label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 #touch-controls-panel input[type=range]{width:120px}
 </style>
@@ -7155,6 +7185,12 @@ export class FlightSceneSimple extends Scene3D {
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">GS</span><span id="nav-gs" style="color:#40ffaa">\u2014 kt</span></div>
 </div>`;
         document.body.appendChild(hud);
+        const panelLeft = hud.querySelector<HTMLElement>('.hud-panel-left');
+        const panelRight = hud.querySelector<HTMLElement>('.hud-panel-right');
+        const apPanel = hud.querySelector<HTMLElement>('#ap-panel');
+        if (panelLeft) this._makeDraggable(panelLeft);
+        if (panelRight) this._makeDraggable(panelRight);
+        if (apPanel) this._makeDraggable(apPanel);
         this.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
         this.hudCtx    = this.hudCanvas.getContext('2d')!;
         this.hudSpeedVal = document.getElementById('bb-spd-v')!;
