@@ -4702,6 +4702,9 @@ export class FlightSceneSimple extends Scene3D {
         const knob = document.getElementById(knobId);
         if (!knob) return;
 
+        const KNOB_DEG_PER_STEP = 12;
+        const KNOB_DRAG_MOVE_THRESHOLD_DEG = 4;
+
         const stepFor = (big: boolean): number => {
             if (field === 'hdg') return big ? 10 : 1;
             if (field === 'alt') return big ? 1000 : 100;
@@ -4714,8 +4717,55 @@ export class FlightSceneSimple extends Scene3D {
             else if (field === 'alt') this._adjustAutopilotAltTarget(inc);
             else                       this._adjustAutopilotVsTarget(inc);
             this._updateAutopilotPanel();
-            try { this._cockpitClick(); } catch { /* ignore */ }
         };
+
+        const angleFrom = (clientX: number, clientY: number): number => {
+            const rect = knob.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top  + rect.height / 2;
+            return Math.atan2(clientY - cy, clientX - cx) * 180 / Math.PI;
+        };
+
+        let dragging = false;
+        let lastAngle = 0;
+        let accumDeg = 0;
+        let movedSignificantly = false;
+        let dragShift = false;
+
+        const onMove = (e: MouseEvent) => {
+            if (!dragging) return;
+            const a = angleFrom(e.clientX, e.clientY);
+            let delta = a - lastAngle;
+            if (delta > 180) delta -= 360;
+            else if (delta < -180) delta += 360;
+            lastAngle = a;
+            accumDeg += delta;
+            if (Math.abs(accumDeg) > KNOB_DRAG_MOVE_THRESHOLD_DEG) movedSignificantly = true;
+            while (accumDeg >= KNOB_DEG_PER_STEP)  { apply(1,  dragShift); accumDeg -= KNOB_DEG_PER_STEP; }
+            while (accumDeg <= -KNOB_DEG_PER_STEP) { apply(-1, dragShift); accumDeg += KNOB_DEG_PER_STEP; }
+        };
+        const onUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            if (movedSignificantly) {
+                try { this._cockpitClick(); } catch { /* ignore */ }
+            }
+        };
+
+        knob.addEventListener('mousedown', (e: MouseEvent) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dragging = true;
+            movedSignificantly = false;
+            dragShift = e.shiftKey;
+            lastAngle = angleFrom(e.clientX, e.clientY);
+            accumDeg = 0;
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        });
 
         knob.addEventListener('wheel', (e) => {
             e.preventDefault();
@@ -4723,21 +4773,25 @@ export class FlightSceneSimple extends Scene3D {
             if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
             const dir: 1 | -1 = e.deltaY < 0 ? 1 : -1;
             apply(dir, e.shiftKey);
+            try { this._cockpitClick(); } catch { /* ignore */ }
         }, { passive: false });
 
         knob.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (movedSignificantly) { movedSignificantly = false; return; }
             const rect = knob.getBoundingClientRect();
             if (rect.height <= 0) return;
             const upper = (e.clientY - rect.top) < rect.height * 0.5;
             apply(upper ? 1 : -1, e.shiftKey);
+            try { this._cockpitClick(); } catch { /* ignore */ }
         });
 
         knob.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             e.stopPropagation();
             apply(-1, e.shiftKey);
+            try { this._cockpitClick(); } catch { /* ignore */ }
         });
     }
 
