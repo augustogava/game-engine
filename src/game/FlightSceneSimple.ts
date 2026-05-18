@@ -5413,10 +5413,14 @@ export class FlightSceneSimple extends Scene3D {
 #touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
 #touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
 #touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
-#touch-controls-btn{position:absolute;bottom:6px;right:6px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
-#touch-controls-panel{display:none;position:absolute;bottom:48px;right:6px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#touch-controls-btn{position:absolute;top:136px;right:10px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+#touch-controls-panel{display:none;position:absolute;top:172px;right:6px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
 #touch-controls-panel label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 #touch-controls-panel input[type=range]{width:120px}
+@media(max-width:480px){
+#touch-controls-btn{top:108px!important;right:6px!important;width:28px!important;height:28px!important}
+#touch-controls-panel{top:142px!important;right:6px!important;width:200px!important}
+}
 </style>
 <div id="touch-joy"><div id="touch-joy-deadzone"></div><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
