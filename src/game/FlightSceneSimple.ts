@@ -126,7 +126,7 @@ const SEA_LEVEL_AIR_DENSITY_KG_PER_M3 = 1.225;
 
 // ── Wind model (P2) ─────────────────────────────────────────────────────────
 const WIND_DEFAULT_DIRECTION_DEG = 270;
-const WIND_DEFAULT_SPEED_KT = 8;
+const WIND_DEFAULT_SPEED_KT = 2;
 const WIND_ALTITUDE_GAIN_KT_PER_1000FT = 0.5;
 const WIND_MAX_SPEED_KT = 80;
 const KT_TO_MS = 0.514444;
