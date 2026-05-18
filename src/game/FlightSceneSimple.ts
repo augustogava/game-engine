@@ -9907,8 +9907,11 @@ export class FlightSceneSimple extends Scene3D {
         const barPct = Math.min(100, pct);
         this.hudThrottle.style.width = `${barPct}%`;
         if (this.hudThrPct) this.hudThrPct.textContent = `${pct}%`;
-        if (this.hudEng1Pct) this.hudEng1Pct.textContent = `${pct}%`;
-        if (this.hudEng2Pct) this.hudEng2Pct.textContent = `${pct}%`;
+        const _engAliveArr = Array.isArray(this._engineAlive) ? this._engineAlive : [];
+        const _eng1Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[0] === true);
+        const _eng2Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[1] === true);
+        if (this.hudEng1Pct) this.hudEng1Pct.textContent = `${_eng1Alive ? pct : 0}%`;
+        if (this.hudEng2Pct) this.hudEng2Pct.textContent = `${_eng2Alive ? pct : 0}%`;
         if (this.hudAbTag) {
             this.hudAbTag.style.display = this.thrust > 1.0 ? '' : 'none';
         }
@@ -10138,7 +10141,6 @@ export class FlightSceneSimple extends Scene3D {
             }
         }
 
-        if (this.hudRpmVal) this.hudRpmVal.textContent = String(Math.round(this.engineRpm));
         const _engineEt = this.aircraftConfig.engine_type;
         const _engineIsProp = _engineEt === ENGINE_TYPE_PISTON || _engineEt === ENGINE_TYPE_TURBOPROP;
         const _engineRpmMax = this.aircraftConfig.prop_rpm_max || 2700;
@@ -10147,12 +10149,15 @@ export class FlightSceneSimple extends Scene3D {
             : this.enginePower;
         const _engineClamped = Math.max(0, Math.min(1, Number.isFinite(_engineFrac) ? _engineFrac : 0));
         const _engineRpmAngle = -120 + _engineClamped * 240;
+        const _engineDeadAngle = -120;
+        const _engRpmRounded = Math.round(this.engineRpm);
+        if (this.hudRpmVal) this.hudRpmVal.textContent = String(_eng1Alive ? _engRpmRounded : 0);
         if (this.hudRpmNeedle) {
-            this.hudRpmNeedle.style.transform = `rotate(${_engineRpmAngle}deg)`;
+            this.hudRpmNeedle.style.transform = `rotate(${_eng1Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
         }
         if (this.hudEngine2Col && (this.aircraftConfig?.engine_count ?? 1) >= 2) {
-            if (this.hudRpmVal2) this.hudRpmVal2.textContent = String(Math.round(this.engineRpm));
-            if (this.hudRpmNeedle2) this.hudRpmNeedle2.style.transform = `rotate(${_engineRpmAngle}deg)`;
+            if (this.hudRpmVal2) this.hudRpmVal2.textContent = String(_eng2Alive ? _engRpmRounded : 0);
+            if (this.hudRpmNeedle2) this.hudRpmNeedle2.style.transform = `rotate(${_eng2Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
         }
 
         const fuelPct = this.aircraftConfig.fuel_capacity_kg > 0
