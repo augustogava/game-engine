@@ -618,6 +618,8 @@ const GROUND_Y         = 6;
 const CRASH_VS_THRESHOLD_MS = -12;
 const CRASH_GROUND_SPEED_MS = 25.7;
 const CRASH_GROUND_ATTITUDE_DEG = 45;
+const CRASH_METERS_TO_FEET = 3.28084;
+const CRASH_MPS_TO_FPM = 196.85;
 
 // ── ISA atmosphere (with optional ISA + dT density altitude) ─────────────────
 const ISA_DELTA_TEMP_K_MAX = 50;
@@ -6631,13 +6633,22 @@ export class FlightSceneSimple extends Scene3D {
         }
     }
 
-    private _triggerCrash(): void {
+    private _triggerCrash(reason: string = 'unknown'): void {
+        const altFtBefore = this.planeRoot
+            ? Math.max(0, (this.refAlt + this.planeRoot.position.y) * CRASH_METERS_TO_FEET)
+            : 0;
+        const vsFpmBefore = this.velocity.y * CRASH_MPS_TO_FPM;
         this._crashed = true;
         this.velocity.setAll(0);
         this.angularVelocity.setAll(0);
         this.thrust = 0;
         if (this._crashOverlayEl) this._crashOverlayEl.style.display = 'block';
-        console.log('[Crash] Ground impact detected — respawning in 3s');
+        console.log(`[Crash] Ground impact detected reason=${reason} altFt=${altFtBefore.toFixed(0)} vsFpm=${vsFpmBefore.toFixed(0)} — respawning in 3s`);
+        try {
+            this.mpClient?.sendCrash(reason, altFtBefore, vsFpmBefore);
+        } catch (err) {
+            console.error('[Crash] Failed to notify server about crash:', (err as Error)?.message || err);
+        }
         const RESPAWN_DELAY_MS = 3000;
         this._safeSetTimeout(() => {
             if (!this.planeRoot) return;
@@ -7064,7 +7075,7 @@ export class FlightSceneSimple extends Scene3D {
                 } else if (!inSpawnWindow) {
                     const buryDepth = hit.pickedPoint.y - pos.y;
                     console.warn(`[Crash] Terrain tunneling detected: pos.y=${pos.y.toFixed(1)}m terrainHit=${hit.pickedPoint.y.toFixed(1)}m bury=${buryDepth.toFixed(1)}m speed=${(this.velocity.length() * 1.94384).toFixed(0)}kt`);
-                    this._triggerCrash();
+                    this._triggerCrash('terrain_tunneling');
                     return;
                 }
             }
@@ -7180,7 +7191,9 @@ export class FlightSceneSimple extends Scene3D {
             this.enginePower = n1;
             this.engineRpm = Math.round(1200 + n1 * 1500);
         }
-        if (this.fuelRemaining <= 0 && cfg.fuel_capacity_kg > 0) {
+        const allEnginesDead = Array.isArray(this._engineAlive) && this._engineAlive.length > 0 && !this._engineAlive.some(Boolean);
+        const outOfFuel = this.fuelRemaining <= 0 && cfg.fuel_capacity_kg > 0;
+        if (outOfFuel || allEnginesDead) {
             effectiveThrust = 0;
             this.enginePower = 0;
             this.engineRpm = 0;
@@ -7460,7 +7473,7 @@ export class FlightSceneSimple extends Scene3D {
         const safetyFloor = groundLevel - 0.5;
         if (pos.y < safetyFloor) {
             if (this.velocity.y < CRASH_VS_THRESHOLD_MS) {
-                this._triggerCrash();
+                this._triggerCrash('hard_impact');
                 return;
             }
             if (!this._safetyFloorSnapActive) {
@@ -7505,7 +7518,7 @@ export class FlightSceneSimple extends Scene3D {
                 const rollAbsDeg = Math.abs(rollAngle) * 180 / Math.PI;
                 if (pitchAbsDeg > CRASH_GROUND_ATTITUDE_DEG || rollAbsDeg > CRASH_GROUND_ATTITUDE_DEG) {
                     console.warn(`[Crash] Ground attitude crash: speed=${(horizSpeed * 1.94384).toFixed(1)}kt pitch=${pitchAbsDeg.toFixed(1)}deg roll=${rollAbsDeg.toFixed(1)}deg`);
-                    this._triggerCrash();
+                    this._triggerCrash('ground_attitude');
                     return;
                 }
             }

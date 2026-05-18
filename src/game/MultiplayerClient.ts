@@ -100,6 +100,23 @@ export class MultiplayerClient {
         });
     }
 
+    sendCrash(reason: string, altitudeFt: number, verticalSpeedFpm: number): void {
+        if (!this.rt.connected) {
+            console.warn(`[Crash] sendCrash skipped: WebSocket not connected (reason=${reason})`);
+            return;
+        }
+        const safeReason = (typeof reason === 'string' && reason.length > 0) ? reason.slice(0, 64) : 'unknown';
+        const safeAlt = Number.isFinite(altitudeFt) ? Math.round(altitudeFt) : 0;
+        const safeVs = Number.isFinite(verticalSpeedFpm) ? Math.round(verticalSpeedFpm) : 0;
+        console.log(`[Crash] sendCrash reason=${safeReason} altFt=${safeAlt} vsFpm=${safeVs}`);
+        this.rt.send({
+            type: 'crash',
+            reason: safeReason,
+            altitudeFt: safeAlt,
+            verticalSpeedFpm: safeVs,
+        });
+    }
+
     onPlayersUpdate(cb: PlayersUpdateCallback): void {
         this.onPlayersUpdateCb = cb;
     }

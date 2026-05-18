@@ -1879,6 +1879,27 @@ wss.on('connection', (ws) => {
                     }
                 }
             }
+
+            if (msg.type === 'crash' && playerId) {
+                const entry = players.get(playerId);
+                if (!entry) {
+                    console.warn(`[Crash] Received crash from unknown player ${playerId}`);
+                    return;
+                }
+                const reasonRaw = typeof msg.reason === 'string' ? msg.reason.slice(0, 64) : 'unknown';
+                const altFt = Number.isFinite(Number(msg.altitudeFt)) ? Math.round(Number(msg.altitudeFt)) : null;
+                const vsFpm = Number.isFinite(Number(msg.verticalSpeedFpm)) ? Math.round(Number(msg.verticalSpeedFpm)) : null;
+                if (!entry.flightLogId) {
+                    console.warn(`[Crash] Player ${playerId} reported crash without an active flight log (reason=${reasonRaw}, altFt=${altFt}, vsFpm=${vsFpm}) — ignoring`);
+                    return;
+                }
+                console.log(`[Crash] Player ${playerId} crashed: reason=${reasonRaw} altFt=${altFt} vsFpm=${vsFpm} flightLogId=${entry.flightLogId}`);
+                try {
+                    await finalizeFlight(playerId, entry, 'crashed', entry.state);
+                } catch (err) {
+                    console.error(`[Crash] finalizeFlight error for user ${playerId}:`, err.message);
+                }
+            }
         } catch (e) { /* ignore malformed */ }
     });
 
