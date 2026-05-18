@@ -396,6 +396,9 @@ const CLOUD_FLIP_X_PROBABILITY = 0.5;
 const OVERCAST_DECK_Y_M = 7500;
 const OVERCAST_DECK_SIZE_M = 60000;
 const OVERCAST_DECK_ALPHA = 0.55;
+const OVERCAST_TEXTURE_SIZE = 512;
+const OVERCAST_TEXTURE_TILES = 4;
+const OVERCAST_NOISE_FREQ = 5;
 const CLOUD_ALPHA_INDEX = 50;
 const OVERCAST_ALPHA_INDEX = 10;
 const TILE_PBR_ROUGHNESS_FLOOR = 0.45;
@@ -2558,6 +2561,17 @@ export class FlightSceneSimple extends Scene3D {
                             console.warn('[3DTiles] Tile fade setup failed:', fadeErr);
                         }
                     }
+                    if (this._premium.waterTilesRefl && this._waterMaterial) {
+                        try {
+                            const wm: any = this._waterMaterial;
+                            const list: any[] = wm.renderList || (wm.renderList = []);
+                            for (const mesh of meshes) {
+                                if (mesh && list.indexOf(mesh) < 0) list.push(mesh);
+                            }
+                        } catch (reflErr) {
+                            console.warn('[3DTiles] Water reflection add failed:', reflErr);
+                        }
+                    }
                 } catch (err) {
                     console.warn('[3DTiles] load-model handler failed:', err);
                 }
@@ -2566,6 +2580,22 @@ export class FlightSceneSimple extends Scene3D {
                 try {
                     const key = event && event.tile && event.tile.__h ? String(event.tile.__h) : null;
                     if (key) this._tileFadeEntries.delete(key);
+                    if (this._waterMaterial) {
+                        try {
+                            const tileScene: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
+                            const meshes: any[] = tileScene && (tileScene as any).getChildMeshes
+                                ? (tileScene as any).getChildMeshes(false)
+                                : [];
+                            const wm: any = this._waterMaterial;
+                            const list: any[] = wm.renderList || [];
+                            for (const mesh of meshes) {
+                                const idx = list.indexOf(mesh);
+                                if (idx >= 0) list.splice(idx, 1);
+                            }
+                        } catch (reflErr) {
+                            console.warn('[3DTiles] Water reflection remove failed:', reflErr);
+                        }
+                    }
                 } catch (err) {
                     console.warn('[3DTiles] dispose-model handler failed:', err);
                 }
@@ -3149,6 +3179,77 @@ export class FlightSceneSimple extends Scene3D {
         this._buildClouds(scene);
     }
 
+    private _buildOvercastTexture(scene: BABYLON.Scene): BABYLON.DynamicTexture {
+        const SIZE = OVERCAST_TEXTURE_SIZE;
+        const tex = new BABYLON.DynamicTexture(
+            'overcastTex',
+            SIZE,
+            scene,
+            true,
+            BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+        );
+        const ctx = tex.getContext() as CanvasRenderingContext2D;
+        const img = ctx.createImageData(SIZE, SIZE);
+
+        const FREQ = OVERCAST_NOISE_FREQ;
+        const FEATURE_COUNT = FREQ * FREQ;
+        const features: { x: number; y: number }[] = [];
+        for (let i = 0; i < FEATURE_COUNT; i++) {
+            features.push({ x: Math.random(), y: Math.random() });
+        }
+
+        const detailFeatures: { x: number; y: number }[] = [];
+        const DETAIL_COUNT = FREQ * FREQ * 4;
+        for (let i = 0; i < DETAIL_COUNT; i++) {
+            detailFeatures.push({ x: Math.random(), y: Math.random() });
+        }
+
+        const wrapDistSq = (ax: number, ay: number, bx: number, by: number) => {
+            let dx = ax - bx;
+            let dy = ay - by;
+            if (dx >  0.5) dx -= 1;
+            if (dx < -0.5) dx += 1;
+            if (dy >  0.5) dy -= 1;
+            if (dy < -0.5) dy += 1;
+            return dx * dx + dy * dy;
+        };
+
+        for (let y = 0; y < SIZE; y++) {
+            for (let x = 0; x < SIZE; x++) {
+                const fx = x / SIZE;
+                const fy = y / SIZE;
+                let minBase = 10;
+                for (const f of features) {
+                    const d = wrapDistSq(fx, fy, f.x, f.y);
+                    if (d < minBase) minBase = d;
+                }
+                let minDetail = 10;
+                for (const f of detailFeatures) {
+                    const d = wrapDistSq(fx, fy, f.x, f.y);
+                    if (d < minDetail) minDetail = d;
+                }
+                const baseDist = Math.sqrt(minBase) * FREQ;
+                const detailDist = Math.sqrt(minDetail) * (FREQ * 2);
+                const baseLayer   = Math.max(0, 1 - baseDist * 1.0);
+                const detailLayer = Math.max(0, 1 - detailDist * 1.2);
+                const cloud = Math.max(0, Math.min(1, baseLayer * 0.75 + detailLayer * 0.35));
+                const alpha = Math.pow(cloud, 0.8);
+                const i4 = (y * SIZE + x) * 4;
+                img.data[i4]     = 255;
+                img.data[i4 + 1] = 255;
+                img.data[i4 + 2] = 255;
+                img.data[i4 + 3] = Math.round(alpha * 255);
+            }
+        }
+
+        ctx.putImageData(img, 0, 0);
+        tex.update(true);
+        tex.hasAlpha = true;
+        tex.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
+        tex.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+        return tex;
+    }
+
     private _setOvercast(scene: BABYLON.Scene, enabled: boolean): void {
         if (enabled) {
             if (this._overcastMesh) {
@@ -3163,10 +3264,9 @@ export class FlightSceneSimple extends Scene3D {
             deck.alphaIndex = OVERCAST_ALPHA_INDEX;
 
             const mat = new BABYLON.StandardMaterial('overcastMat', scene);
-            const tex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
-            tex.hasAlpha = true;
-            tex.uScale = 30;
-            tex.vScale = 30;
+            const tex = this._buildOvercastTexture(scene);
+            tex.uScale = OVERCAST_TEXTURE_TILES;
+            tex.vScale = OVERCAST_TEXTURE_TILES;
             mat.diffuseTexture = tex;
             mat.opacityTexture = tex;
             mat.useAlphaFromDiffuseTexture = true;
@@ -3183,7 +3283,7 @@ export class FlightSceneSimple extends Scene3D {
 
             this._overcastMesh = deck;
             this._overcastMat = mat;
-            console.debug('[Overcast] Deck created with disabled depth write to prevent cloud occlusion artifacts');
+            console.debug(`[Overcast] Deck created with seamless Worley overcast texture (${OVERCAST_TEXTURE_SIZE}px, ${OVERCAST_TEXTURE_TILES}x tiling)`);
         } else {
             if (this._overcastMesh) { try { this._overcastMesh.dispose(); } catch (_) { /* ignore */ } this._overcastMesh = null; }
             if (this._overcastMat) { try { this._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this._overcastMat = null; }
@@ -4769,15 +4869,28 @@ export class FlightSceneSimple extends Scene3D {
         if (!this._waterMaterial || !this.tiles) return;
         const wm = this._waterMaterial as any;
         try {
-            const list: any[] = wm.renderList || [];
-            const present = list.indexOf(this.tiles.group) >= 0;
-            if (enabled && !present) {
-                wm.addToRenderList(this.tiles.group);
-                console.debug('[Water] Added tiles group to reflection render list');
-            } else if (!enabled && present) {
-                const idx = list.indexOf(this.tiles.group);
-                if (idx >= 0) list.splice(idx, 1);
-                console.debug('[Water] Removed tiles group from reflection render list');
+            const list: any[] = wm.renderList || (wm.renderList = []);
+            const groupIdx = list.indexOf(this.tiles.group);
+            if (groupIdx >= 0) list.splice(groupIdx, 1);
+            const meshes: any[] = (this.tiles.group as any).getChildMeshes
+                ? (this.tiles.group as any).getChildMeshes(false)
+                : [];
+            if (enabled) {
+                let added = 0;
+                for (const m of meshes) {
+                    if (m && (m as any).getClassName && list.indexOf(m) < 0) {
+                        list.push(m);
+                        added++;
+                    }
+                }
+                console.debug(`[Water] Added ${added} existing tile meshes to reflection render list`);
+            } else {
+                let removed = 0;
+                for (const m of meshes) {
+                    const idx = list.indexOf(m);
+                    if (idx >= 0) { list.splice(idx, 1); removed++; }
+                }
+                console.debug(`[Water] Removed ${removed} tile meshes from reflection render list`);
             }
         } catch (err) {
             console.warn('[Water] Reflection list mutation failed:', err);
