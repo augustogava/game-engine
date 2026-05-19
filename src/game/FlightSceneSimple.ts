@@ -956,6 +956,7 @@ export class FlightSceneSimple extends Scene3D {
         });
 
         this._initSurfaces();
+        try { (window as any).__flightScene = this; } catch (_) { /* ignore */ }
         this._init3DTiles(scene);
         this._setupLighting(scene);
         this._buildSkybox(scene);
