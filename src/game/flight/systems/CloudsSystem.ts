@@ -328,8 +328,10 @@ export class CloudsSystem {
                 const ddz = c.mesh.position.z - camZ;
                 const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
                 const nearFade = Math.max(0, Math.min(1, (dist - fadeNear) / (fadeFar - fadeNear)));
-                c.mesh.visibility = Math.min(nearFade, c.wrapFade);
-            } else if (c.mesh.visibility !== 1) {
+                if (!(c.mesh instanceof BABYLON.InstancedMesh)) {
+                    c.mesh.visibility = Math.min(nearFade, c.wrapFade);
+                }
+            } else if (!(c.mesh instanceof BABYLON.InstancedMesh) && c.mesh.visibility !== 1) {
                 c.mesh.visibility = 1;
                 c.wrapFade = 1;
             }
