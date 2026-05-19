@@ -956,7 +956,6 @@ export class FlightSceneSimple extends Scene3D {
         });
 
         this._initSurfaces();
-        try { (window as any).__flightScene = this; } catch (_) { /* ignore */ }
         this._init3DTiles(scene);
         this._setupLighting(scene);
         this._buildSkybox(scene);
@@ -981,30 +980,11 @@ export class FlightSceneSimple extends Scene3D {
     update(dt: number): void {
         if (!this.spawned) return;
         this._frameTick++;
-
-        const __prof = (window as any).__perfDiag !== false;
-        const __pStart = __prof ? performance.now() : 0;
-        const __t = __prof ? this.__perfTotals : null;
-        const __m = (key: string, t0: number) => {
-            if (!__t) return;
-            __t[key] = (__t[key] || 0) + (performance.now() - t0);
-        };
-        let __s = __prof ? performance.now() : 0;
-
         if (this.tiles) this.tiles.update();
-        if (__t) __m('tiles.update', __s);
-        __s = __prof ? performance.now() : 0;
         if (this._premium.tileFade) this._updateTileFade(dt);
-        if (__t) __m('tileFade', __s);
-        __s = __prof ? performance.now() : 0;
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
-        if (__t) __m('aerialFog', __s);
-        __s = __prof ? performance.now() : 0;
         if (this._premium.waterTilesRefl) this._updateWaterWind(dt);
-        if (__t) __m('waterTilesRefl', __s);
-        __s = __prof ? performance.now() : 0;
         if (this._premium.vegetation) this._updateVegetation();
-        if (__t) __m('vegetation', __s);
         if (this._crashed) return;
 
         if (!this._worldReady) {
@@ -1012,9 +992,7 @@ export class FlightSceneSimple extends Scene3D {
             return;
         }
 
-        __s = __prof ? performance.now() : 0;
         this._handleInput(dt);
-        if (__t) __m('handleInput', __s);
 
         const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
         if (replayFrame && this.planeRoot && this.planeRoot.rotationQuaternion) {
@@ -1028,7 +1006,6 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         const physicsActive = !this._paused && !this._replayActive;
-        __s = __prof ? performance.now() : 0;
         if (physicsActive) {
             const scaledDt = dt * Math.max(0.05, Math.min(8, this._timeScale));
             this.physicsAccumulator += scaledDt;
@@ -1043,7 +1020,6 @@ export class FlightSceneSimple extends Scene3D {
                 this.physicsAccumulator = 0;
             }
         }
-        if (__t) __m('physics', __s);
 
         if (physicsActive && this.planeRoot && this.planeRoot.rotationQuaternion) {
             const q = this.planeRoot.rotationQuaternion;
@@ -1064,98 +1040,25 @@ export class FlightSceneSimple extends Scene3D {
         if (this._skyMaterial && this.camera) {
             this._skyMaterial.cameraOffset.y = this.camera.position.y;
         }
-        __s = __prof ? performance.now() : 0;
         this._updateStarTwinkle(dt);
-        if (__t) __m('starTwinkle', __s);
         const aglForTurb = this.planeRoot
             ? Math.max(0, this.planeRoot.position.y - (this.tiles ? this.terrainY : GROUND_Y))
             : 0;
-        __s = __prof ? performance.now() : 0;
         this._updateTurbulence(dt, aglForTurb);
-        if (__t) __m('turbulence', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateNavLights(dt);
-        if (__t) __m('navLights', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateClouds(dt);
-        if (__t) __m('clouds', __s);
-        __s = __prof ? performance.now() : 0;
         this._updatePropellerAnim();
-        if (__t) __m('propellerAnim', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateControlSurfaceAnim();
-        if (__t) __m('controlSurfaceAnim', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateGearState();
-        if (__t) __m('gearState', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateContrails(dt);
-        if (__t) __m('contrails', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateVaporCone();
-        if (__t) __m('vaporCone', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateHeatHaze();
-        if (__t) __m('heatHaze', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateLensFlareOcclusion(dt * 1000);
-        if (__t) __m('lensFlareOcc', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateMotionBlurAndDof();
-        if (__t) __m('motionBlurDof', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateHUD();
-        if (__t) __m('hud', __s);
-        __s = __prof ? performance.now() : 0;
         this._sendOwnState();
-        if (__t) __m('sendOwnState', __s);
-        __s = __prof ? performance.now() : 0;
         this._updateRemotePlayers();
-        if (__t) __m('remotePlayers', __s);
-
-        if (__t) {
-            __t.__total = (__t.__total || 0) + (performance.now() - __pStart);
-            __t.__frames = (__t.__frames || 0) + 1;
-            const nowMs = performance.now();
-            if (nowMs - this.__perfLastLog > 1000) {
-                this.__perfLastLog = nowMs;
-                const frames = __t.__frames;
-                const total = __t.__total;
-                const rows: string[] = [];
-                const keys = Object.keys(__t).filter(k => !k.startsWith('__')).sort((a, b) => __t[b] - __t[a]);
-                for (const k of keys) {
-                    const ms = __t[k];
-                    const perFrame = ms / frames;
-                    if (perFrame >= 0.1) rows.push(`${k}: ${perFrame.toFixed(2)}ms/frame (total ${ms.toFixed(0)}ms)`);
-                }
-                const fpsSnap = this.scene?.getEngine().getFps() || 0;
-                const frameMsActual = fpsSnap > 0 ? 1000 / fpsSnap : 0;
-                const scriptMs = total / frames;
-                const otherMs = Math.max(0, frameMsActual - scriptMs);
-                let rendered = 0;
-                let totalMeshes = 0;
-                try {
-                    const s = this.scene;
-                    if (s) {
-                        totalMeshes = s.meshes.length;
-                        for (const m of s.meshes) {
-                            if (m.isEnabled() && m.isVisible) rendered++;
-                        }
-                    }
-                } catch (_) { /* ignore */ }
-                console.log(
-                    `[Perf] ${frames} frames in ${total.toFixed(0)}ms (script avg ${scriptMs.toFixed(2)}ms/frame, ` +
-                    `actual ${frameMsActual.toFixed(1)}ms/frame @ ${fpsSnap.toFixed(1)} FPS, ` +
-                    `GPU/other ~${otherMs.toFixed(1)}ms/frame). Meshes ${rendered}/${totalMeshes} enabled. Top script costs:`,
-                );
-                for (const r of rows) console.log('  ' + r);
-                for (const k of Object.keys(__t)) delete __t[k];
-            }
-        }
     }
-
-    /** @internal */ __perfTotals: Record<string, number> = {};
-    /** @internal */ __perfLastLog = 0;
 
     private _updatePropellerAnim(): void {
         this._aircraftModelSystem.updatePropellerAnim();

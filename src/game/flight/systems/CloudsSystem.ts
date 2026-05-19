@@ -73,10 +73,6 @@ export class CloudsSystem {
                 mat.disableDepthWrite          = true;
                 mat.alphaMode                  = BABYLON.Engine.ALPHA_COMBINE;
                 this.scene._cloudMats.push(mat);
-                try {
-                    const prePass = scene.prePassRenderer;
-                    if (prePass) prePass.excludedMaterials.push(mat);
-                } catch (_) { /* ignore */ }
 
                 const tpl = BABYLON.MeshBuilder.CreatePlane(`cloudTpl_${layer.yMin}_v${v}`, { size: layer.sizeBase }, scene);
                 tpl.isVisible = false;
@@ -332,11 +328,9 @@ export class CloudsSystem {
                 const ddz = c.mesh.position.z - camZ;
                 const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
                 const nearFade = Math.max(0, Math.min(1, (dist - fadeNear) / (fadeFar - fadeNear)));
-                const v = Math.min(nearFade, c.wrapFade);
-                const wantVisible = v > 0.01;
-                if (c.mesh.isVisible !== wantVisible) c.mesh.isVisible = wantVisible;
-            } else if (!c.mesh.isVisible) {
-                c.mesh.isVisible = true;
+                c.mesh.visibility = Math.min(nearFade, c.wrapFade);
+            } else if (c.mesh.visibility !== 1) {
+                c.mesh.visibility = 1;
                 c.wrapFade = 1;
             }
         }
