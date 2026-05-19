@@ -1127,7 +1127,26 @@ export class FlightSceneSimple extends Scene3D {
                     const perFrame = ms / frames;
                     if (perFrame >= 0.1) rows.push(`${k}: ${perFrame.toFixed(2)}ms/frame (total ${ms.toFixed(0)}ms)`);
                 }
-                console.log(`[Perf] ${frames} frames in ${total.toFixed(0)}ms (avg ${(total / frames).toFixed(2)}ms update). Top costs:`);
+                const fpsSnap = this.scene?.getEngine().getFps() || 0;
+                const frameMsActual = fpsSnap > 0 ? 1000 / fpsSnap : 0;
+                const scriptMs = total / frames;
+                const otherMs = Math.max(0, frameMsActual - scriptMs);
+                let rendered = 0;
+                let totalMeshes = 0;
+                try {
+                    const s = this.scene;
+                    if (s) {
+                        totalMeshes = s.meshes.length;
+                        for (const m of s.meshes) {
+                            if (m.isEnabled() && m.isVisible) rendered++;
+                        }
+                    }
+                } catch (_) { /* ignore */ }
+                console.log(
+                    `[Perf] ${frames} frames in ${total.toFixed(0)}ms (script avg ${scriptMs.toFixed(2)}ms/frame, ` +
+                    `actual ${frameMsActual.toFixed(1)}ms/frame @ ${fpsSnap.toFixed(1)} FPS, ` +
+                    `GPU/other ~${otherMs.toFixed(1)}ms/frame). Meshes ${rendered}/${totalMeshes} enabled. Top script costs:`,
+                );
                 for (const r of rows) console.log('  ' + r);
                 for (const k of Object.keys(__t)) delete __t[k];
             }
