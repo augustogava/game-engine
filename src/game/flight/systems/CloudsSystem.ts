@@ -328,9 +328,11 @@ export class CloudsSystem {
                 const ddz = c.mesh.position.z - camZ;
                 const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
                 const nearFade = Math.max(0, Math.min(1, (dist - fadeNear) / (fadeFar - fadeNear)));
-                c.mesh.visibility = Math.min(nearFade, c.wrapFade);
-            } else if (c.mesh.visibility !== 1) {
-                c.mesh.visibility = 1;
+                const v = Math.min(nearFade, c.wrapFade);
+                const wantVisible = v > 0.01;
+                if (c.mesh.isVisible !== wantVisible) c.mesh.isVisible = wantVisible;
+            } else if (!c.mesh.isVisible) {
+                c.mesh.isVisible = true;
                 c.wrapFade = 1;
             }
         }
