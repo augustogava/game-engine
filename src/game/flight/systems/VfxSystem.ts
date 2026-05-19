@@ -212,10 +212,12 @@ export class VfxSystem {
         const dir = toSun.scale(1 / distToSun);
         const ray = new BABYLON.Ray(camPos, dir, distToSun);
         const planeRoot = this.scene.planeRoot;
+        const tilesGroup = this.scene.tiles ? this.scene.tiles.group : null;
         const pick = this.scene.scene.pickWithRay(ray, (m: BABYLON.AbstractMesh) => {
             if (!m || !m.isEnabled() || !m.isVisible || m.isPickable === false) return false;
             if (m.name === 'sunMesh' || m.name === 'sunHalo' || m.name === 'moonMesh' || m.name === 'moonHalo') return false;
             if (m.name === 'skyBox') return false;
+            if (tilesGroup && m.isDescendantOf(tilesGroup)) return false;
             if (planeRoot && m.isDescendantOf(planeRoot)) return true;
             return true;
         }, true);

@@ -111,8 +111,23 @@ export class RunwayCollidersSystem {
 
     pickTerrainPreferRunway(ray: BABYLON.Ray): BABYLON.PickingInfo | null {
         const planeRoot = this.scene.planeRoot;
-        const predicate = (mesh: BABYLON.AbstractMesh) =>
-            mesh.isPickable && !mesh.isDescendantOf(planeRoot) && mesh.name !== 'ground';
+        const originX = ray.origin.x;
+        const originY = ray.origin.y;
+        const originZ = ray.origin.z;
+        const rayEndY = originY - ray.length;
+        const predicate = (mesh: BABYLON.AbstractMesh) => {
+            if (!mesh.isPickable) return false;
+            if (mesh.name === 'ground') return false;
+            if (mesh.isDescendantOf(planeRoot)) return false;
+            const bb = mesh.getBoundingInfo().boundingBox;
+            const minW = bb.minimumWorld;
+            const maxW = bb.maximumWorld;
+            if (minW.y > originY) return false;
+            if (maxW.y < rayEndY) return false;
+            if (maxW.x < originX || minW.x > originX) return false;
+            if (maxW.z < originZ || minW.z > originZ) return false;
+            return true;
+        };
         const babylonScene: BABYLON.Scene = this.scene.scene;
         const hits = babylonScene.multiPickWithRay(ray, predicate);
         if (!hits || hits.length === 0) return null;

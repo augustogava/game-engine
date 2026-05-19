@@ -414,7 +414,7 @@ export class LightingSystem {
 
         if (this.scene._sunMeshMat) {
             const warmth = Math.max(0, Math.min(1, elevation / 15));
-            this.scene._sunMeshMat.emissiveColor.set(1.0, 0.7 + warmth * 0.25, 0.3 + warmth * 0.4);
+            this.scene._sunMeshMat.emissiveColor.set(1.0, 0.92 + warmth * 0.05, 0.80 + warmth * 0.10);
         }
 
         let fogR = 0.02 + t * 0.53;
