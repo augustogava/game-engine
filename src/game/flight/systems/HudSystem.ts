@@ -547,6 +547,23 @@ export class HudSystem {
                     if (bloomWEl) p.bloomWeight = parseInt(bloomWEl.value) / 100;
                     if (ssaoEl && ssao) {
                         ssao.totalStrength = ssaoEl.checked ? 1.2 : 0;
+                        try {
+                            const cam = this.scene.scene?.activeCamera;
+                            const ppm = this.scene.scene?.postProcessRenderPipelineManager;
+                            if (cam && ppm) {
+                                if (ssaoEl.checked) {
+                                    if (!this.scene._ssaoAttached) {
+                                        ppm.attachCamerasToRenderPipeline('ssao', cam);
+                                        this.scene._ssaoAttached = true;
+                                    }
+                                } else if (this.scene._ssaoAttached !== false) {
+                                    ppm.detachCamerasFromRenderPipeline('ssao', cam);
+                                    this.scene._ssaoAttached = false;
+                                }
+                            }
+                        } catch (err) {
+                            console.warn('[SSAO] attach/detach failed:', err);
+                        }
                     }
                     if (shadowsEl && this.scene._shadowGen) {
                         if (!shadowsEl.checked) {

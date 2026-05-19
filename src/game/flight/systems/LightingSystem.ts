@@ -500,5 +500,14 @@ export class LightingSystem {
         this.scene._skyboxMesh.applyFog = false;
         this.scene._skyboxMesh.renderingGroupId = 0;
         this.scene._skyboxMesh.freezeWorldMatrix();
+
+        try {
+            const prePass = scene.prePassRenderer;
+            if (prePass && this.scene._skyMaterial) {
+                prePass.excludedMaterials.push(this.scene._skyMaterial);
+            }
+        } catch (err) {
+            console.warn('[Sky] prePass exclusion failed:', err);
+        }
     }
 }

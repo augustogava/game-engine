@@ -805,6 +805,7 @@ export class FlightSceneSimple extends Scene3D {
     private _sunElevation = 45;
     private _pipeline: BABYLON.DefaultRenderingPipeline | null = null;
     private _ssao: BABYLON.SSAO2RenderingPipeline | null = null;
+    /** @internal */ _ssaoAttached = true;
     private _shadowGen: BABYLON.CascadedShadowGenerator | null = null;
 
     private _premium = {
