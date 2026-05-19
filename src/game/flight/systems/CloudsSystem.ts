@@ -73,6 +73,10 @@ export class CloudsSystem {
                 mat.disableDepthWrite          = true;
                 mat.alphaMode                  = BABYLON.Engine.ALPHA_COMBINE;
                 this.scene._cloudMats.push(mat);
+                try {
+                    const prePass = scene.prePassRenderer;
+                    if (prePass) prePass.excludedMaterials.push(mat);
+                } catch (_) { /* ignore */ }
 
                 const tpl = BABYLON.MeshBuilder.CreatePlane(`cloudTpl_${layer.yMin}_v${v}`, { size: layer.sizeBase }, scene);
                 tpl.isVisible = false;

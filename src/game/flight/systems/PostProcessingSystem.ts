@@ -46,6 +46,22 @@ export class PostProcessingSystem {
         this.scene._ssao.minZAspect = 0.5;
         if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
 
+        try {
+            const prePass = scene.prePassRenderer;
+            if (prePass) {
+                if (this.scene._skyMaterial) prePass.excludedMaterials.push(this.scene._skyMaterial);
+                for (const cm of (this.scene._cloudMats || [])) {
+                    if (cm) prePass.excludedMaterials.push(cm);
+                }
+                if (this.scene._sunMeshMat) prePass.excludedMaterials.push(this.scene._sunMeshMat);
+                if (this.scene._sunHaloMat) prePass.excludedMaterials.push(this.scene._sunHaloMat);
+                if (this.scene._moonMat) prePass.excludedMaterials.push(this.scene._moonMat);
+                if (this.scene._moonHaloMat) prePass.excludedMaterials.push(this.scene._moonHaloMat);
+            }
+        } catch (err) {
+            console.warn('[PostProcessing] prePass exclusion failed:', err);
+        }
+
         const sunEmitter = scene.getMeshByName('sunMesh') || scene.getLightByName('sun');
         if (sunEmitter) {
             const lfs = new BABYLON.LensFlareSystem('sunFlare', sunEmitter, scene);
