@@ -1,0 +1,21 @@
+export const SPAWN_SNAP_FRAMES = 600;
+export const AIRBORNE_MISSION_MIN_OFFSET_M = 300;
+export const TERRAIN_RAY_HEIGHT_M = 200;
+export const TERRAIN_RAY_LENGTH_M = 1000;
+export const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;
+export const SPAWN_TERRAIN_RAY_LENGTH_M = 10000;
+export const TERRAIN_HIT_ABOVE_LIMIT_M = 10;
+export const TERRAIN_UNKNOWN_Y = -1e9;
+export const GROUND_TERRAIN_SMOOTH_TAU_S = 0.18;
+export const GROUND_TERRAIN_SMOOTH_SNAP_DELTA_M = 3.0;
+
+export const WORLD_READY_TIMEOUT_MS = 15000;
+export const WORLD_READY_PROBE_HEIGHT_M = 5000;
+export const WORLD_READY_PROBE_LENGTH_M = 10000;
+
+export const RUNWAY_DEFAULT_WIDTH_FT = 148;
+export const RUNWAY_COLLIDER_RADIUS_KM = 10;
+export const RUNWAY_COLLIDER_Y_BIAS_M = 0.5;
+export const RUNWAY_RENDERING_GROUP_ID = 1;
+export const RUNWAY_COLLIDER_ALPHA = 0.85;
+export const RUNWAY_COLLIDER_DIFFUSE = { r: 0.12, g: 0.12, b: 0.13 };

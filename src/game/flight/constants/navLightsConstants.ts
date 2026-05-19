@@ -1,0 +1,16 @@
+export const NAV_LIGHT_REFERENCE_HALF_SPAN_M = 22;
+export const NAV_LIGHT_MIN_SCALE = 0.5;
+export const NAV_LIGHT_MAX_SCALE = 1.5;
+export const NAV_LIGHT_CORE_DIAMETER_M = 0.4;
+export const NAV_LIGHT_KIND_STATIC      = 0;
+export const NAV_LIGHT_KIND_STROBE      = 1;
+export const NAV_LIGHT_KIND_BEACON      = 2;
+export const NAV_LIGHT_KIND_ANTICOL     = 3;
+export const NAV_LIGHT_KIND_LANDING     = 4;
+export const NAV_BEACON_PERIOD_S        = 1.0;
+export const NAV_BEACON_ON_FRAC         = 0.15;
+export const NAV_STROBE_PERIOD_S        = 1.5;
+export const NAV_STROBE_PULSE_FRAC      = 0.05;
+export const NAV_STROBE_DOUBLE_GAP_S    = 0.10;
+export const NAV_ANTICOL_PERIOD_S       = 0.7;
+export const NAV_ANTICOL_ON_FRAC        = 0.10;

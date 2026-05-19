@@ -1,0 +1,17 @@
+export const AP_HDG_MAX_BANK_DEG = 25;
+export const AP_HDG_BANK_GAIN = 0.06;
+export const AP_HDG_ROLL_RATE_GAIN = 0.6;
+export const AP_ALT_PITCH_GAIN = 0.0009;
+export const AP_ALT_PITCH_MAX = 0.18;
+export const AP_ALT_VS_DAMP_GAIN = 0.00015;
+export const AP_VS_PITCH_GAIN = 0.0006;
+export const AP_VS_PITCH_MAX = 0.18;
+export const AP_VS_DEFAULT_FPM = 500;
+export const AP_NAV_XTE_DEG_PER_NM = 6;
+export const AP_NAV_MAX_INTERCEPT_DEG = 45;
+export const AP_APR_GLIDESLOPE_DEG = 3;
+export const AP_APR_MIN_ALT_FT = 0;
+export const AP_INPUT_DISENGAGE_THRESHOLD = 0.25;
+export const AUTOTRIM_RATE_PER_S = 0.04;
+export const AUTOTRIM_MAX = 0.15;
+export const AUTOTRIM_DEADBAND = 0.01;

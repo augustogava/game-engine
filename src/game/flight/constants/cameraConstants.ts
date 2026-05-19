@@ -1,0 +1,20 @@
+export const CAMERA_RADIUS_LENGTH_FACTOR = 3;
+export const CAMERA_RADIUS_MIN_M = 15;
+export const CAMERA_RADIUS_MAX_M = 65;
+export const CAMERA_LOWER_RADIUS_LIMIT_M = 8;
+export const CAMERA_UPPER_RADIUS_LIMIT_M = 500;
+export const CAMERA_LOWER_RADIUS_AIRCRAFT_FACTOR = 0.55;
+export const CAMERA_LOWER_RADIUS_HEIGHT_FACTOR = 0.8;
+export const CAMERA_LOWER_RADIUS_FALLBACK_M = 8;
+export const CAMERA_GROUND_CLEARANCE_M = 1.0;
+export const CAMERA_BETA_SAFETY_EPSILON = 0.001;
+
+export const CAMERA_MODE_CHASE = 0;
+export const CAMERA_MODE_COCKPIT = 1;
+export const CAMERA_MODE_EXTERNAL_FIXED = 2;
+export const CAMERA_MODE_FLYBY = 3;
+export const CAMERA_MODE_TOWER = 4;
+export const CAMERA_MODE_COUNT = 5;
+export const TOWER_CAMERA_HEIGHT_M = 30;
+export const TOWER_CAMERA_MIN_RADIUS_M = 80;
+export const TOWER_CAMERA_BETA_RAD = 1.3;

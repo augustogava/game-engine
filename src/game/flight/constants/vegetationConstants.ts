@@ -1,0 +1,9 @@
+export const VEGETATION_GRID_HALF_M = 1000;
+export const VEGETATION_CELL_M = 60;
+export const VEGETATION_MAX_INSTANCES = 1500;
+export const VEGETATION_FADE_BAND_M = 300;
+export const VEGETATION_FADE_RANGE_M = 200;
+export const VEGETATION_RESEED_DIST_M = 1000;
+export const VEGETATION_TREE_HEIGHT_M = 14;
+export const VEGETATION_TREE_HALF_WIDTH_M = 6;
+export const TREES_TEXTURE_BASE_URL = 'src/game/assets/textures/trees/';
