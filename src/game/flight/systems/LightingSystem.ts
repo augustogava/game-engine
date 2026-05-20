@@ -1,5 +1,4 @@
 import * as BABYLON from '@babylonjs/core';
-import '@babylonjs/core/Materials/Background/backgroundMaterial.js';
 import { SkyMaterial } from '@babylonjs/materials/sky';
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { getSunPosition } from '../physics/SolarPosition.js';
@@ -42,7 +41,7 @@ export class LightingSystem {
     private _originalEnvTexture: BABYLON.BaseTexture | null = null;
     private _hdrTexture: BABYLON.HDRCubeTexture | null = null;
     private _hdrSkyboxTexture: BABYLON.HDRCubeTexture | null = null;
-    private _hdrSkyboxMaterial: BABYLON.BackgroundMaterial | null = null;
+    private _hdrSkyboxMaterial: BABYLON.StandardMaterial | null = null;
     private _currentHdrEnv: string = HDR_ENV_NONE;
 
     constructor(scene: FlightSceneSimple) {
@@ -567,14 +566,15 @@ export class LightingSystem {
             return;
         }
 
-        let skyboxMat: BABYLON.BackgroundMaterial | null = null;
+        let skyboxMat: BABYLON.StandardMaterial | null = null;
         try {
-            skyboxMat = new BABYLON.BackgroundMaterial(`hdrSkyMat_${name}`, scene);
+            skyboxMat = new BABYLON.StandardMaterial(`hdrSkyMat_${name}`, scene);
             skyboxMat.backFaceCulling = false;
-            skyboxMat.reflectionTexture = skyboxHdr;
-            skyboxMat.useRGBColor = false;
-            skyboxMat.enableNoise = true;
+            skyboxMat.disableLighting = true;
             skyboxMat.maxSimultaneousLights = 0;
+            skyboxMat.reflectionTexture = skyboxHdr;
+            skyboxMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+            skyboxMat.specularColor = new BABYLON.Color3(0, 0, 0);
 
             const prePass = scene.prePassRenderer;
             if (prePass) {
