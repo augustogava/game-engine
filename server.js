@@ -127,6 +127,7 @@ const MIME_TYPES = {
     '.woff2': 'font/woff2',
     '.ttf': 'font/ttf',
     '.glb': 'model/gltf-binary',
+    '.hdr': 'application/octet-stream',
 };
 
 // ── Haversine (nautical miles) ────────────────────────────────────────────────

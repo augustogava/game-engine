@@ -206,6 +206,7 @@ ctx2D.then(async (c2D) => {
                 '.webp': 'image/webp',
                 '.glb': 'model/gltf-binary',
                 '.glb_file': 'model/gltf-binary',
+                '.hdr': 'application/octet-stream',
             };
             res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
             res.end(data);

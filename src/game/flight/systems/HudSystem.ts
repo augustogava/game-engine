@@ -496,6 +496,7 @@ export class HudSystem {
             s.cloudDensity = (document.getElementById('gfx-cloud-density') as HTMLSelectElement)?.value || 'medium';
             s.overcast = (document.getElementById('gfx-overcast') as HTMLInputElement)?.checked ?? false;
             s.milkyway = (document.getElementById('gfx-milkyway') as HTMLInputElement)?.checked ?? false;
+            s.hdrEnv = (document.getElementById('gfx-hdr-env') as HTMLSelectElement)?.value || 'none';
             s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
             s.tileShadows      = this.scene._premium.tileShadows;
             s.aerialFog        = this.scene._premium.aerialFog;
@@ -616,6 +617,14 @@ export class HudSystem {
                     if (milkywayEl) {
                         this.scene._setMilkyWay(scene, milkywayEl.checked);
                     }
+                    const hdrEnvEl = document.getElementById('gfx-hdr-env') as HTMLSelectElement | null;
+                    if (hdrEnvEl) {
+                        try {
+                            this.scene._applyHdrEnvironment(scene, hdrEnvEl.value || 'none');
+                        } catch (err) {
+                            console.error('[GFX] applyHdrEnvironment failed:', err);
+                        }
+                    }
                     this.scene._fogDensityBase = scene.fogDensity;
                     this.scene._setGodRays(scene, this.scene._premium.godRays);
                     this.scene._setColorLut(scene, this.scene._premium.colorLut);
@@ -630,13 +639,13 @@ export class HudSystem {
         };
 
         const presets: Record<string, Record<string, any>> = {
-            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false,
+            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false, hdrEnv: 'none',
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
-            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false,
+            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'none',
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
-            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false,
+            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'none',
                       tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
-            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,
+            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,  hdrEnv: 'none',
                       tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
         };
 
@@ -654,6 +663,7 @@ export class HudSystem {
             setVal('gfx-cloud-density', p.cloudDensity);
             setCheck('gfx-overcast', p.overcast);
             setCheck('gfx-milkyway', p.milkyway);
+            setVal('gfx-hdr-env', p.hdrEnv);
             this.scene._premium.tileShadows      = !!p.tileShadows;
             this.scene._premium.aerialFog        = !!p.aerialFog;
             this.scene._premium.tileFade         = !!p.tileFade;
@@ -682,6 +692,7 @@ export class HudSystem {
             if (cfg.cloudDensity !== undefined) setVal('gfx-cloud-density', cfg.cloudDensity);
             setCheck('gfx-overcast', cfg.overcast);
             setCheck('gfx-milkyway', cfg.milkyway);
+            if (cfg.hdrEnv !== undefined) setVal('gfx-hdr-env', cfg.hdrEnv);
             if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
 
             const hasPremiumKeys = cfg.tileShadows !== undefined
@@ -717,7 +728,7 @@ export class HudSystem {
             this.scene._safeSetTimeout(() => applySettings(), 100);
         }
 
-        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-milkyway'];
+        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-milkyway', 'gfx-hdr-env'];
         for (const id of ids) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => applySettings());

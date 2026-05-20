@@ -29,3 +29,23 @@ export const BRIGHT_STAR_COUNT = 25;
 export const BRIGHT_STAR_BASE_SIZE = 110;
 export const BRIGHT_STAR_SIZE_RANDOM = 70;
 export const BRIGHT_STAR_TWINKLE_AMOUNT = 0.45;
+
+export const HDR_ENV_NONE = 'none';
+export const HDR_ASSETS_PATH = 'src/game/assets/hdr/';
+export const HDR_CUBE_SIZE = 256;
+export const HDR_DEFAULT_ENV_URL = 'https://assets.babylonjs.com/environments/environmentSpecular.env';
+
+export interface HdrOption {
+    value: string;
+    label: string;
+}
+
+export const HDR_OPTIONS: HdrOption[] = [
+    { value: HDR_ENV_NONE,                                  label: 'Procedural (Default)' },
+    { value: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr', label: 'Kloofendal - Partly Cloudy' },
+    { value: 'qwantani_dawn_puresky_4k.hdr',                label: 'Qwantani - Dawn' },
+    { value: 'qwantani_dusk_1_puresky_4k.hdr',              label: 'Qwantani - Dusk' },
+    { value: 'hilly_terrain_01_puresky_4k.hdr',             label: 'Hilly Terrain' },
+    { value: 'rosendal_park_sunset_puresky_4k.hdr',         label: 'Rosendal Park - Sunset' },
+    { value: 'drakensberg_solitary_mountain_puresky_4k.hdr', label: 'Drakensberg - Solitary Mountain' },
+];

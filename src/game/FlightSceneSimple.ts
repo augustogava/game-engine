@@ -1344,6 +1344,10 @@ export class FlightSceneSimple extends Scene3D {
         this._lightingSystem.buildSkybox(scene);
     }
 
+    private _applyHdrEnvironment(scene: BABYLON.Scene, hdrName: string): void {
+        this._lightingSystem.applyHdrEnvironment(scene, hdrName);
+    }
+
     // ── Clouds ─────────────────────────────────────────────────────────────────
 
     private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number; windMult: number; wrapFade: number }[] = [];
