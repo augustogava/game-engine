@@ -514,7 +514,11 @@ export class LightingSystem {
 
     applyHdrEnvironment(scene: BABYLON.Scene, hdrName: string): void {
         const name = typeof hdrName === 'string' && hdrName.length > 0 ? hdrName : HDR_ENV_NONE;
-        if (name === this._currentHdrEnv) return;
+        console.info(`[HDR] applyHdrEnvironment requested: "${name}" (current: "${this._currentHdrEnv}")`);
+        if (name === this._currentHdrEnv) {
+            console.info('[HDR] Same as current, skipping');
+            return;
+        }
 
         const skyboxMesh = this.scene._skyboxMesh as BABYLON.Mesh | null;
         if (!skyboxMesh) {
@@ -532,7 +536,7 @@ export class LightingSystem {
                 }
                 this._disposeHdrResources();
                 this._currentHdrEnv = HDR_ENV_NONE;
-                console.debug('[HDR] Restored procedural skybox + default IBL');
+                console.info('[HDR] Restored procedural skybox + default IBL');
             } catch (err) {
                 console.error('[HDR] Failed to restore procedural environment:', err);
             }
@@ -540,11 +544,20 @@ export class LightingSystem {
         }
 
         const url = HDR_ASSETS_PATH + name;
+        console.info(`[HDR] Loading HDR from URL: ${url}`);
         let envHdr: BABYLON.HDRCubeTexture | null = null;
         let skyboxHdr: BABYLON.HDRCubeTexture | null = null;
         try {
-            envHdr = new BABYLON.HDRCubeTexture(url, scene, HDR_CUBE_SIZE, false, true, false, true);
-            skyboxHdr = new BABYLON.HDRCubeTexture(url, scene, HDR_CUBE_SIZE, false, true, false, false);
+            envHdr = new BABYLON.HDRCubeTexture(
+                url, scene, HDR_CUBE_SIZE, false, true, false, true,
+                () => console.info(`[HDR] IBL texture loaded: ${name}`),
+                (msg, ex) => console.error(`[HDR] IBL texture FAILED to load: ${name} - ${msg}`, ex),
+            );
+            skyboxHdr = new BABYLON.HDRCubeTexture(
+                url, scene, HDR_CUBE_SIZE, false, true, false, false,
+                () => console.info(`[HDR] Skybox texture loaded: ${name}`),
+                (msg, ex) => console.error(`[HDR] Skybox texture FAILED to load: ${name} - ${msg}`, ex),
+            );
             skyboxHdr.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
         } catch (err) {
             console.error(`[HDR] Failed to construct HDRCubeTexture for "${name}":`, err);
@@ -571,7 +584,7 @@ export class LightingSystem {
             this._hdrSkyboxTexture = skyboxHdr;
             this._hdrSkyboxMaterial = skyboxMat;
             this._currentHdrEnv = name;
-            console.debug(`[HDR] Applied HDR environment "${name}"`);
+            console.info(`[HDR] Applied HDR environment "${name}" (texture loading async)`);
         } catch (err) {
             console.error(`[HDR] Failed to apply HDR environment "${name}":`, err);
             try { envHdr.dispose(); } catch (_) { /* ignore */ }
