@@ -104,10 +104,12 @@ export class CloudsSystem {
                         : clusterScale;
                     const aspectJitter = CLOUD_ASPECT_Y_JITTER_MIN + Math.random() * (CLOUD_ASPECT_Y_JITTER_MAX - CLOUD_ASPECT_Y_JITTER_MIN);
                     const flipX = Math.random() < CLOUD_FLIP_X_PROBABILITY ? -1 : 1;
-                    ci.scaling.set(subScale * flipX, subScale * layer.aspectY * aspectJitter, 1);
+                    const baseScaleX = subScale * flipX;
+                    const baseScaleY = subScale * layer.aspectY * aspectJitter;
+                    ci.scaling.set(baseScaleX, baseScaleY, 1);
                     ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
                     ci.isPickable = false;
-                    this.scene.cloudInstances.push({ mesh: ci, yBase: oy + jy, spread: layer.spread, windMult: layer.windMult, wrapFade: 1 });
+                    this.scene.cloudInstances.push({ mesh: ci, yBase: oy + jy, spread: layer.spread, windMult: layer.windMult, wrapFade: 1, baseScaleX, baseScaleY });
                 }
             }
         }
@@ -319,10 +321,18 @@ export class CloudsSystem {
             if (dz >  half) { c.mesh.position.z -= c.spread; wrapped = true; }
             if (dz < -half) { c.mesh.position.z += c.spread; wrapped = true; }
 
-            if (cameraFadeOn) {
-                if (wrapped) c.wrapFade = 0;
-                else if (c.wrapFade < 1) c.wrapFade = Math.min(1, c.wrapFade + wrapStep);
+            if (wrapped) c.wrapFade = 0;
+            else if (c.wrapFade < 1) c.wrapFade = Math.min(1, c.wrapFade + wrapStep);
 
+            if (c.wrapFade < 1) {
+                c.mesh.scaling.x = c.baseScaleX * c.wrapFade;
+                c.mesh.scaling.y = c.baseScaleY * c.wrapFade;
+            } else if (c.mesh.scaling.x !== c.baseScaleX || c.mesh.scaling.y !== c.baseScaleY) {
+                c.mesh.scaling.x = c.baseScaleX;
+                c.mesh.scaling.y = c.baseScaleY;
+            }
+
+            if (cameraFadeOn) {
                 const ddx = c.mesh.position.x - camX;
                 const ddy = c.mesh.position.y - camY;
                 const ddz = c.mesh.position.z - camZ;
@@ -333,7 +343,6 @@ export class CloudsSystem {
                 }
             } else if (!(c.mesh instanceof BABYLON.InstancedMesh) && c.mesh.visibility !== 1) {
                 c.mesh.visibility = 1;
-                c.wrapFade = 1;
             }
         }
     }

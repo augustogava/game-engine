@@ -31,15 +31,24 @@ export class GameCore3D {
     fps: number = 0;
 
     constructor(config: GameCore3DConfig) {
-        this.engine = new BABYLON.Engine(config.canvas, config.antialias ?? true, {
+        const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const antialias = isMobile ? false : (config.antialias ?? true);
+
+        this.engine = new BABYLON.Engine(config.canvas, antialias, {
             preserveDrawingBuffer: true,
             stencil: true,
             disableWebGL2Support: false,
         });
 
+        if (isMobile) {
+            const maxDpr = 1.5;
+            const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
+            this.engine.setHardwareScalingLevel(1 / dpr);
+            console.info(`[GameCore3D] Mobile detected — DPR capped at ${maxDpr}, effective hardware scaling = ${(1 / dpr).toFixed(3)}`);
+        }
+
         this.input = new InputManager(config.canvas);
 
-        // Keep canvas full-screen
         window.addEventListener('resize', () => this.engine.resize());
     }
 

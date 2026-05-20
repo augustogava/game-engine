@@ -186,9 +186,11 @@ export class AircraftModelSystem {
                 modelPivot.rotation = new BABYLON.Vector3(0, cfg.model_rotation_y, 0);
 
                 const shadow = (this.scene as any)._shadow;
-                meshes.forEach((m: BABYLON.AbstractMesh) => {
-                    if (shadow) shadow.addShadowCaster(m, true);
-                });
+                if (shadow && !this.scene.isMobile) {
+                    meshes.forEach((m: BABYLON.AbstractMesh) => {
+                        shadow.addShadowCaster(m, true);
+                    });
+                }
 
                 const savedPlaneQuat = this.scene.planeRoot.rotationQuaternion?.clone() || null;
                 const savedPlaneRot = this.scene.planeRoot.rotation.clone();

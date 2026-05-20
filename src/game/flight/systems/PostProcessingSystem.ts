@@ -12,39 +12,43 @@ export class PostProcessingSystem {
 
     setupPostProcessing(scene: BABYLON.Scene): void {
         const cam = scene.activeCamera;
+        const isMobile = this.scene.isMobile === true;
+
         this.scene._pipeline = new BABYLON.DefaultRenderingPipeline('pp', true, scene, cam ? [cam] : []);
-        this.scene._pipeline.samples        = 4;
-        this.scene._pipeline.bloomEnabled   = true;
+        this.scene._pipeline.samples        = isMobile ? 1 : 4;
+        this.scene._pipeline.bloomEnabled   = !isMobile;
         this.scene._pipeline.bloomWeight    = 0.4;
         this.scene._pipeline.bloomKernel    = 128;
         this.scene._pipeline.bloomScale     = 0.5;
         this.scene._pipeline.bloomThreshold = 0.8;
-        this.scene._pipeline.chromaticAberrationEnabled            = true;
+        this.scene._pipeline.chromaticAberrationEnabled            = !isMobile;
         this.scene._pipeline.chromaticAberration.aberrationAmount   = 0.8;
         this.scene._pipeline.chromaticAberration.radialIntensity    = 1.0;
-        this.scene._pipeline.sharpenEnabled        = true;
+        this.scene._pipeline.sharpenEnabled        = !isMobile;
         this.scene._pipeline.sharpen.edgeAmount    = 0.2;
         this.scene._pipeline.imageProcessingEnabled                 = true;
         this.scene._pipeline.imageProcessing.toneMappingEnabled     = true;
         this.scene._pipeline.imageProcessing.toneMappingType        = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
         this.scene._pipeline.imageProcessing.exposure               = 1.0;
         this.scene._pipeline.imageProcessing.contrast               = 1.08;
-        this.scene._pipeline.imageProcessing.vignetteEnabled        = true;
+        this.scene._pipeline.imageProcessing.vignetteEnabled        = !isMobile;
         this.scene._pipeline.imageProcessing.vignetteWeight         = 2.2;
         this.scene._pipeline.imageProcessing.vignetteColor          = new BABYLON.Color4(0, 0, 0, 0);
         this.scene._pipeline.imageProcessing.vignetteBlendMode      = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
 
-        this.scene._ssao = new BABYLON.SSAO2RenderingPipeline('ssao', scene, {
-            ssaoRatio: 0.5,
-            blurRatio: 0.5,
-        });
-        this.scene._ssao.radius = 3.0;
-        this.scene._ssao.totalStrength = 1.2;
-        this.scene._ssao.base = 0.1;
-        this.scene._ssao.samples = 16;
-        this.scene._ssao.maxZ = 250;
-        this.scene._ssao.minZAspect = 0.5;
-        if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
+        if (!isMobile) {
+            this.scene._ssao = new BABYLON.SSAO2RenderingPipeline('ssao', scene, {
+                ssaoRatio: 0.5,
+                blurRatio: 0.5,
+            });
+            this.scene._ssao.radius = 3.0;
+            this.scene._ssao.totalStrength = 1.2;
+            this.scene._ssao.base = 0.1;
+            this.scene._ssao.samples = 16;
+            this.scene._ssao.maxZ = 250;
+            this.scene._ssao.minZAspect = 0.5;
+            if (cam) scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('ssao', cam);
+        }
 
         const sunEmitter = scene.getMeshByName('sunMesh') || scene.getLightByName('sun');
         if (sunEmitter) {

@@ -639,7 +639,7 @@ export class HudSystem {
         };
 
         const presets: Record<string, Record<string, any>> = {
-            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false, hdrEnv: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr',
+            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false, hdrEnv: 'none',
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
             medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr',
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
@@ -676,6 +676,14 @@ export class HudSystem {
             this.scene._premium.volumetricClouds = !!p.volumetricClouds;
             applySettings();
         };
+
+        const isMobile = this.scene.isMobile === true;
+        if (isMobile && Object.keys(cfg).length === 0) {
+            console.info('[GFX] Mobile detected, first visit — applying "low" preset');
+            applyPreset('low');
+            const presetEl2 = document.getElementById('gfx-preset') as HTMLSelectElement | null;
+            if (presetEl2) presetEl2.value = 'low';
+        }
 
         if (Object.keys(cfg).length > 0) {
             const setCheck = (id: string, val: boolean | undefined) => { if (val !== undefined) { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.checked = val; } };

@@ -68,16 +68,18 @@ export class LightingSystem {
         this.scene._fillLight.diffuse = new BABYLON.Color3(0.6, 0.7, 0.9);
         this.scene._fillLight.specular = BABYLON.Color3.Black();
 
-        this.scene._shadowGen = new BABYLON.CascadedShadowGenerator(4096, this.scene._sunLight);
+        const isMobile = this.scene.isMobile === true;
+        const shadowMapSize = isMobile ? 1024 : 4096;
+        this.scene._shadowGen = new BABYLON.CascadedShadowGenerator(shadowMapSize, this.scene._sunLight);
         this.scene._shadowGen.lambda                 = 0.75;
         this.scene._shadowGen.cascadeBlendPercentage = 0.1;
         this.scene._shadowGen.depthClamp             = true;
         this.scene._shadowGen.autoCalcDepthBounds    = true;
         this.scene._shadowGen.stabilizeCascades      = true;
-        this.scene._shadowGen.numCascades            = 4;
+        this.scene._shadowGen.numCascades            = isMobile ? 2 : 4;
         this.scene._shadowGen.penumbraDarkness       = 0.6;
         this.scene._shadowGen.usePercentageCloserFiltering = true;
-        (this.scene._shadowGen as any).filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
+        (this.scene._shadowGen as any).filteringQuality = isMobile ? BABYLON.ShadowGenerator.QUALITY_LOW : BABYLON.ShadowGenerator.QUALITY_HIGH;
         this.scene._shadow = this.scene._shadowGen;
 
         scene.environmentIntensity = 1.3;
@@ -453,10 +455,12 @@ export class LightingSystem {
         const clearB = fogB * 0.6 + NIGHT_HORIZON_GLOW_B * nightGlowT;
         scene.clearColor.set(clearR, clearG, clearB, 1);
 
-        scene.environmentIntensity = 0.15 + t * 1.15;
+        const envBase = 0.15 + t * 1.15;
+        scene.environmentIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
 
         if (this.scene._pipeline) {
-            this.scene._pipeline.imageProcessing.exposure = 0.7 + t * 1.1;
+            const expBase = 0.7 + t * 1.1;
+            this.scene._pipeline.imageProcessing.exposure = this.scene.isMobile ? Math.max(expBase * 1.15, 1.2) : expBase;
         }
 
         if (this.scene._moonMesh) {

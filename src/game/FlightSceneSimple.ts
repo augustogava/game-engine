@@ -1356,7 +1356,7 @@ export class FlightSceneSimple extends Scene3D {
 
     // ── Clouds ─────────────────────────────────────────────────────────────────
 
-    private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number; windMult: number; wrapFade: number }[] = [];
+    private cloudInstances: { mesh: BABYLON.InstancedMesh; yBase: number; spread: number; windMult: number; wrapFade: number; baseScaleX: number; baseScaleY: number }[] = [];
     private _cloudMats: BABYLON.StandardMaterial[] = [];
     private _cloudTemplates: BABYLON.Mesh[] = [];
 
