@@ -1,4 +1,5 @@
 import * as BABYLON from '@babylonjs/core';
+import '@babylonjs/core/Materials/Background/backgroundMaterial.js';
 import { SkyMaterial } from '@babylonjs/materials/sky';
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { getSunPosition } from '../physics/SolarPosition.js';
@@ -41,7 +42,7 @@ export class LightingSystem {
     private _originalEnvTexture: BABYLON.BaseTexture | null = null;
     private _hdrTexture: BABYLON.HDRCubeTexture | null = null;
     private _hdrSkyboxTexture: BABYLON.HDRCubeTexture | null = null;
-    private _hdrSkyboxMaterial: BABYLON.StandardMaterial | null = null;
+    private _hdrSkyboxMaterial: BABYLON.BackgroundMaterial | null = null;
     private _currentHdrEnv: string = HDR_ENV_NONE;
 
     constructor(scene: FlightSceneSimple) {
@@ -566,14 +567,18 @@ export class LightingSystem {
             return;
         }
 
-        let skyboxMat: BABYLON.StandardMaterial | null = null;
+        let skyboxMat: BABYLON.BackgroundMaterial | null = null;
         try {
-            skyboxMat = new BABYLON.StandardMaterial(`hdrSkyMat_${name}`, scene);
+            skyboxMat = new BABYLON.BackgroundMaterial(`hdrSkyMat_${name}`, scene);
             skyboxMat.backFaceCulling = false;
-            skyboxMat.disableLighting = true;
             skyboxMat.reflectionTexture = skyboxHdr;
-            skyboxMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
-            skyboxMat.specularColor = new BABYLON.Color3(0, 0, 0);
+            skyboxMat.useRGBColor = false;
+            skyboxMat.enableNoise = true;
+
+            const prePass = scene.prePassRenderer;
+            if (prePass) {
+                try { prePass.excludedMaterials.push(skyboxMat); } catch (_) { /* ignore */ }
+            }
 
             this._disposeHdrResources();
 
@@ -584,7 +589,7 @@ export class LightingSystem {
             this._hdrSkyboxTexture = skyboxHdr;
             this._hdrSkyboxMaterial = skyboxMat;
             this._currentHdrEnv = name;
-            console.info(`[HDR] Applied HDR environment "${name}" (texture loading async)`);
+            console.info(`[HDR] Applied HDR environment "${name}" (texture loading async) - material: ${skyboxMesh.material?.name}`);
         } catch (err) {
             console.error(`[HDR] Failed to apply HDR environment "${name}":`, err);
             try { envHdr.dispose(); } catch (_) { /* ignore */ }
@@ -595,6 +600,13 @@ export class LightingSystem {
 
     private _disposeHdrResources(): void {
         if (this._hdrSkyboxMaterial) {
+            try {
+                const prePass = this._hdrSkyboxMaterial.getScene().prePassRenderer;
+                if (prePass) {
+                    const idx = prePass.excludedMaterials.indexOf(this._hdrSkyboxMaterial);
+                    if (idx >= 0) prePass.excludedMaterials.splice(idx, 1);
+                }
+            } catch (_) { /* ignore */ }
             try { this._hdrSkyboxMaterial.dispose(); } catch (_) { /* ignore */ }
             this._hdrSkyboxMaterial = null;
         }
