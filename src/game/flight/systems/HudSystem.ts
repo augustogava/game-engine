@@ -496,7 +496,7 @@ export class HudSystem {
             s.cloudDensity = (document.getElementById('gfx-cloud-density') as HTMLSelectElement)?.value || 'medium';
             s.overcast = (document.getElementById('gfx-overcast') as HTMLInputElement)?.checked ?? false;
             s.milkyway = (document.getElementById('gfx-milkyway') as HTMLInputElement)?.checked ?? false;
-            s.hdrEnv = (document.getElementById('gfx-hdr-env') as HTMLSelectElement)?.value || 'none';
+            s.hdrEnv = (document.getElementById('gfx-hdr-env') as HTMLSelectElement)?.value || 'kloofendal_48d_partly_cloudy_puresky_4k.hdr';
             s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
             s.tileShadows      = this.scene._premium.tileShadows;
             s.aerialFog        = this.scene._premium.aerialFog;
@@ -639,13 +639,13 @@ export class HudSystem {
         };
 
         const presets: Record<string, Record<string, any>> = {
-            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false, hdrEnv: 'none',
+            low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false, hdrEnv: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr',
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
-            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'none',
+            medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr',
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
-            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'none',
+            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr',
                       tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
-            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,  hdrEnv: 'none',
+            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,  hdrEnv: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr',
                       tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
         };
 
@@ -726,6 +726,18 @@ export class HudSystem {
             }
 
             this.scene._safeSetTimeout(() => applySettings(), 100);
+        } else {
+            this.scene._safeSetTimeout(() => {
+                try {
+                    const hdrEnvEl = document.getElementById('gfx-hdr-env') as HTMLSelectElement | null;
+                    const val = hdrEnvEl?.value || 'none';
+                    if (val && val !== 'none') {
+                        this.scene._applyHdrEnvironment(scene, val);
+                    }
+                } catch (err) {
+                    console.error('[GFX] Initial HDR apply failed:', err);
+                }
+            }, 100);
         }
 
         const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-milkyway', 'gfx-hdr-env'];

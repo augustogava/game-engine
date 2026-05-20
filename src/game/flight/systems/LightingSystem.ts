@@ -34,6 +34,8 @@ import {
     HDR_ASSETS_PATH,
     HDR_CUBE_SIZE,
     HDR_DEFAULT_ENV_URL,
+    HDR_SKYBOX_LEVEL,
+    HDR_SKYBOX_SIZE,
 } from '../constants/index.js';
 
 export class LightingSystem {
@@ -559,6 +561,7 @@ export class LightingSystem {
                 (msg, ex) => console.error(`[HDR] Skybox texture FAILED to load: ${name} - ${msg}`, ex),
             );
             skyboxHdr.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+            skyboxHdr.level = HDR_SKYBOX_LEVEL;
         } catch (err) {
             console.error(`[HDR] Failed to construct HDRCubeTexture for "${name}":`, err);
             try { envHdr?.dispose(); } catch (_) { /* ignore */ }
@@ -582,7 +585,7 @@ export class LightingSystem {
                 try { prePass.excludedMaterials.push(skyboxMat); } catch (_) { /* ignore */ }
             }
 
-            hdrMesh = BABYLON.MeshBuilder.CreateBox(`hdrSkyBox_${name}`, { size: 5000 }, scene);
+            hdrMesh = BABYLON.MeshBuilder.CreateBox(`hdrSkyBox_${name}`, { size: HDR_SKYBOX_SIZE }, scene);
             hdrMesh.material = skyboxMat;
             hdrMesh.infiniteDistance = true;
             hdrMesh.isPickable = false;
