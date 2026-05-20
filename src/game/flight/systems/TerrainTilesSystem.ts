@@ -57,11 +57,13 @@ export class TerrainTilesSystem {
 
         const url = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${apiKey}`;
         this.scene.tiles = new TilesRenderer(url, scene);
-        this.scene.tiles.errorTarget = 6;
+        const isMobile = this.scene.isMobile === true;
+        this.scene.tiles.errorTarget = isMobile ? 3 : 6;
         (this.scene.tiles as any).maxDepth = 100;
         (this.scene.tiles as any).errorThreshold = 60;
         this.scene.tiles.lruCache.maxSize = 2000;
         this.scene.tiles.lruCache.minSize = 800;
+        console.info(`[3DTiles] errorTarget=${this.scene.tiles.errorTarget} (mobile=${isMobile})`);
         try {
             this.scene.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
         } catch (e) { console.warn('[3DTiles] Auth plugin failed:', e); }

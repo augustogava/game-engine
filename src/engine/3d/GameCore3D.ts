@@ -41,7 +41,7 @@ export class GameCore3D {
         });
 
         if (isMobile) {
-            const maxDpr = 1.5;
+            const maxDpr = 2;
             const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
             this.engine.setHardwareScalingLevel(1 / dpr);
             console.info(`[GameCore3D] Mobile detected — DPR capped at ${maxDpr}, effective hardware scaling = ${(1 / dpr).toFixed(3)}`);

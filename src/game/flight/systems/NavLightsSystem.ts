@@ -33,6 +33,10 @@ export class NavLightsSystem {
         parent: BABYLON.TransformNode,
         dims: { halfSpan: number; height: number; halfLen: number; center?: BABYLON.Vector3; wingY?: number },
     ): void {
+        if (this.scene.isMobile === true) {
+            console.info('[NavLights] Skipped on mobile (lights/glow disabled for performance)');
+            return;
+        }
         const hs = dims.halfSpan * 0.97;
         const cx = dims.center?.x ?? 0;
         const cy = dims.center?.y ?? 0;

@@ -42,6 +42,10 @@ export class VfxSystem {
     buildContrails(scene: BABYLON.Scene, halfSpan: number): void {
         this.disposeContrails();
         this.scene._contrailHalfSpan = Math.max(2, halfSpan);
+        if (this.scene.isMobile === true) {
+            console.info('[Contrails] Skipped on mobile (particle system disabled for performance)');
+            return;
+        }
         const makeEmitter = (name: string, x: number) => {
             const em = new BABYLON.TransformNode(name, scene);
             em.parent = this.scene.planeRoot;
@@ -93,6 +97,10 @@ export class VfxSystem {
 
     buildVaporCone(scene: BABYLON.Scene): void {
         this.disposeVaporCone();
+        if (this.scene.isMobile === true) {
+            console.info('[VaporCone] Skipped on mobile (particle system disabled for performance)');
+            return;
+        }
         try {
             const em = new BABYLON.TransformNode('vaporConeEm', scene);
             em.parent = this.scene.planeRoot;
@@ -143,6 +151,10 @@ export class VfxSystem {
         const cfg = this.scene.aircraftConfig;
         const isJet = cfg.engine_type === ENGINE_TYPE_TURBOFAN || cfg.engine_type === ENGINE_TYPE_TURBOJET;
         if (!isJet) return;
+        if (this.scene.isMobile === true) {
+            console.info('[HeatHaze] Skipped on mobile (particle system disabled for performance)');
+            return;
+        }
         try {
             const em = new BABYLON.TransformNode('heatHazeEm', scene);
             em.parent = this.scene.planeRoot;

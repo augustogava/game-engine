@@ -51,7 +51,7 @@ export class PostProcessingSystem {
         }
 
         const sunEmitter = scene.getMeshByName('sunMesh') || scene.getLightByName('sun');
-        if (sunEmitter) {
+        if (sunEmitter && this.scene.isMobile !== true) {
             const lfs = new BABYLON.LensFlareSystem('sunFlare', sunEmitter, scene);
             lfs.borderLimit = 600;
             ([[0.6, 0], [0.2, 0.4], [0.12, 0.7], [0.3, -0.2]] as [number, number][]).forEach(([size, pos]) => {
@@ -59,6 +59,8 @@ export class PostProcessingSystem {
                     'https://assets.babylonjs.com/textures/flare.png', lfs);
             });
             this.scene._lensFlareSystem = lfs;
+        } else if (this.scene.isMobile === true) {
+            console.info('[LensFlare] Skipped on mobile (light effect disabled for performance)');
         }
 
         this.scene._initGraphicsSettings(scene);
