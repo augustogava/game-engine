@@ -574,6 +574,7 @@ export class LightingSystem {
             skyboxMat.reflectionTexture = skyboxHdr;
             skyboxMat.useRGBColor = false;
             skyboxMat.enableNoise = true;
+            skyboxMat.maxSimultaneousLights = 0;
 
             const prePass = scene.prePassRenderer;
             if (prePass) {
