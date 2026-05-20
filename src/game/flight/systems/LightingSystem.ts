@@ -42,6 +42,7 @@ export class LightingSystem {
     private _hdrTexture: BABYLON.HDRCubeTexture | null = null;
     private _hdrSkyboxTexture: BABYLON.HDRCubeTexture | null = null;
     private _hdrSkyboxMaterial: BABYLON.StandardMaterial | null = null;
+    private _hdrSkyboxMesh: BABYLON.Mesh | null = null;
     private _currentHdrEnv: string = HDR_ENV_NONE;
 
     constructor(scene: FlightSceneSimple) {
@@ -531,9 +532,8 @@ export class LightingSystem {
                 if (this._originalEnvTexture) {
                     scene.environmentTexture = this._originalEnvTexture;
                 }
-                if (this.scene._skyMaterial) {
-                    skyboxMesh.material = this.scene._skyMaterial;
-                }
+                skyboxMesh.setEnabled(true);
+                skyboxMesh.isVisible = true;
                 this._disposeHdrResources();
                 this._currentHdrEnv = HDR_ENV_NONE;
                 console.info('[HDR] Restored procedural skybox + default IBL');
@@ -554,7 +554,7 @@ export class LightingSystem {
                 (msg, ex) => console.error(`[HDR] IBL texture FAILED to load: ${name} - ${msg}`, ex),
             );
             skyboxHdr = new BABYLON.HDRCubeTexture(
-                url, scene, HDR_CUBE_SIZE, false, true, false, false,
+                url, scene, HDR_CUBE_SIZE, false, true, true, false,
                 () => console.info(`[HDR] Skybox texture loaded: ${name}`),
                 (msg, ex) => console.error(`[HDR] Skybox texture FAILED to load: ${name} - ${msg}`, ex),
             );
@@ -567,6 +567,7 @@ export class LightingSystem {
         }
 
         let skyboxMat: BABYLON.StandardMaterial | null = null;
+        let hdrMesh: BABYLON.Mesh | null = null;
         try {
             skyboxMat = new BABYLON.StandardMaterial(`hdrSkyMat_${name}`, scene);
             skyboxMat.backFaceCulling = false;
@@ -581,25 +582,53 @@ export class LightingSystem {
                 try { prePass.excludedMaterials.push(skyboxMat); } catch (_) { /* ignore */ }
             }
 
+            hdrMesh = BABYLON.MeshBuilder.CreateBox(`hdrSkyBox_${name}`, { size: 5000 }, scene);
+            hdrMesh.material = skyboxMat;
+            hdrMesh.infiniteDistance = true;
+            hdrMesh.isPickable = false;
+            hdrMesh.applyFog = false;
+            hdrMesh.renderingGroupId = 0;
+            hdrMesh.ignoreCameraMaxZ = true;
+
             this._disposeHdrResources();
 
             scene.environmentTexture = envHdr;
-            skyboxMesh.material = skyboxMat;
+            skyboxMesh.setEnabled(false);
+            skyboxMesh.isVisible = false;
+
+            const water = this.scene._waterMaterial as BABYLON.Nullable<any>;
+            if (water && typeof water.addToRenderList === 'function') {
+                try { water.addToRenderList(hdrMesh); } catch (_) { /* ignore */ }
+            }
 
             this._hdrTexture = envHdr;
             this._hdrSkyboxTexture = skyboxHdr;
             this._hdrSkyboxMaterial = skyboxMat;
+            this._hdrSkyboxMesh = hdrMesh;
             this._currentHdrEnv = name;
-            console.info(`[HDR] Applied HDR environment "${name}" (texture loading async) - material: ${skyboxMesh.material?.name}`);
+            console.info(`[HDR] Applied HDR environment "${name}" (texture loading async) - hidden procedural, new mesh: ${hdrMesh.name}`);
         } catch (err) {
             console.error(`[HDR] Failed to apply HDR environment "${name}":`, err);
             try { envHdr.dispose(); } catch (_) { /* ignore */ }
             try { skyboxHdr.dispose(); } catch (_) { /* ignore */ }
             try { skyboxMat?.dispose(); } catch (_) { /* ignore */ }
+            try { hdrMesh?.dispose(); } catch (_) { /* ignore */ }
         }
     }
 
     private _disposeHdrResources(): void {
+        if (this._hdrSkyboxMesh) {
+            try {
+                const water = this.scene._waterMaterial as BABYLON.Nullable<any>;
+                if (water && Array.isArray(water.renderTargetTexture?.renderList)) {
+                    const list = water.renderTargetTexture.renderList as BABYLON.AbstractMesh[];
+                    const idx = list.indexOf(this._hdrSkyboxMesh);
+                    if (idx >= 0) list.splice(idx, 1);
+                }
+            } catch (_) { /* ignore */ }
+            try { this._hdrSkyboxMesh.dispose(); } catch (_) { /* ignore */ }
+            this._hdrSkyboxMesh = null;
+        }
         if (this._hdrSkyboxMaterial) {
             try {
                 const prePass = this._hdrSkyboxMaterial.getScene().prePassRenderer;
