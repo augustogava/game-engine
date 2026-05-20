@@ -35,8 +35,8 @@ export const HDR_ASSETS_PATH = 'src/game/assets/hdr/';
 export const HDR_CUBE_SIZE = 256;
 export const HDR_DEFAULT_ENV_URL = 'https://assets.babylonjs.com/environments/environmentSpecular.env';
 export const HDR_ENV_DEFAULT = 'kloofendal_48d_partly_cloudy_puresky_4k.hdr';
-export const HDR_SKYBOX_SIZE = 20000;
-export const HDR_SKYBOX_LEVEL = 0.3;
+export const HDR_SKYBOX_SIZE = 10_000_000;
+export const HDR_SKYBOX_LEVEL = 0.8;
 
 export interface HdrOption {
     value: string;
