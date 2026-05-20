@@ -370,6 +370,7 @@ import { PostProcessingSystem } from './flight/systems/PostProcessingSystem.js';
 import { LightingSystem } from './flight/systems/LightingSystem.js';
 import { CloudsSystem } from './flight/systems/CloudsSystem.js';
 import { TerrainTilesSystem } from './flight/systems/TerrainTilesSystem.js';
+import { AirportOverlaysSystem } from './flight/systems/AirportOverlaysSystem.js';
 import { VfxSystem } from './flight/systems/VfxSystem.js';
 import { AircraftConfigSystem } from './flight/systems/AircraftConfigSystem.js';
 import { AircraftModelSystem } from './flight/systems/AircraftModelSystem.js';
@@ -396,6 +397,8 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _lightingSystem = new LightingSystem(this);
     /** @internal */ private readonly _cloudsSystem = new CloudsSystem(this);
     /** @internal */ private readonly _terrainTilesSystem = new TerrainTilesSystem(this);
+    /** @internal */ private readonly _airportOverlaysSystem = new AirportOverlaysSystem(this);
+    /** @internal */ private _airportClipZones: { centerVec: BABYLON.Vector3; clipRadiusM: number; clipMaxAltM: number }[] = [];
     /** @internal */ private readonly _vfxSystem = new VfxSystem(this);
     /** @internal */ private readonly _aircraftConfigSystem = new AircraftConfigSystem(this);
     /** @internal */ private readonly _aircraftModelSystem = new AircraftModelSystem(this);
@@ -957,6 +960,7 @@ export class FlightSceneSimple extends Scene3D {
 
         this._initSurfaces();
         this._init3DTiles(scene);
+        this._airportOverlaysSystem.init(scene);
         this._setupLighting(scene);
         this._buildSkybox(scene);
         this._buildClouds(scene);
@@ -982,6 +986,7 @@ export class FlightSceneSimple extends Scene3D {
         this._frameTick++;
         if (this.tiles) this.tiles.update();
         if (this._premium.tileFade) this._updateTileFade(dt);
+        this._airportOverlaysSystem.update(dt);
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
         if (this._premium.waterTilesRefl) this._updateWaterWind(dt);
         if (this._premium.vegetation) this._updateVegetation();
@@ -1159,6 +1164,7 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('touch-overlay')?.remove();
         document.getElementById('aircraft-btn')?.remove();
         document.getElementById('aircraft-panel')?.remove();
+        try { this._airportOverlaysSystem.dispose(); } catch (err) { console.warn('[FlightSimple] AirportOverlays dispose failed:', err); }
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         this.mpClient?.dispose();
         this._removeUserGestureListener();

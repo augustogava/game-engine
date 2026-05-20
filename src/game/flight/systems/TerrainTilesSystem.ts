@@ -8,6 +8,7 @@ import {
     TILE_FADE_DURATION_S,
     AERIAL_FOG_ALT_FADE_REF_M,
     AERIAL_FOG_ALT_FADE_MIN_MULT,
+    AIRPORT_OVERLAY_CLIP_MIN_TILE_RADIUS_M,
 } from '../constants/index.js';
 
 declare const __GOOGLE_MAPS_API_KEY__: string;
@@ -116,10 +117,23 @@ export class TerrainTilesSystem {
                         : [];
                     const wantShadows = !!this.scene._premium.tileShadows;
                     const seenMats = new Set<BABYLON.Material>();
+                    const clipZones = this.scene._airportClipZones as
+                        | { centerVec: BABYLON.Vector3; clipRadiusM: number; clipMaxAltM: number }[]
+                        | undefined;
+                    const hasClipZones = !!(clipZones && clipZones.length);
                     for (const mesh of meshes) {
                         try {
                             if (wantShadows && mesh.receiveShadows !== true) {
                                 mesh.receiveShadows = true;
+                            }
+                            if (hasClipZones) {
+                                try {
+                                    if (this.isMeshInsideAnyClipZone(mesh, clipZones!)) {
+                                        mesh.setEnabled(false);
+                                    }
+                                } catch (clipErr) {
+                                    console.warn('[3DTiles] Clip-zone check failed for tile mesh:', clipErr);
+                                }
                             }
                             const mat = mesh.material;
                             if (!mat || seenMats.has(mat)) continue;
@@ -203,6 +217,63 @@ export class TerrainTilesSystem {
             if (entry.t >= 1) done.push(key);
         }
         for (const k of done) this.scene._tileFadeEntries.delete(k);
+    }
+
+    private isMeshInsideAnyClipZone(
+        mesh: any,
+        zones: { centerVec: BABYLON.Vector3; clipRadiusM: number; clipMaxAltM: number }[],
+    ): boolean {
+        if (!mesh || !mesh.getBoundingInfo) return false;
+        const bi = mesh.getBoundingInfo();
+        if (!bi || !bi.boundingSphere) return false;
+        const bs = bi.boundingSphere;
+        const radiusWorld: number = typeof bs.radiusWorld === 'number' ? bs.radiusWorld : 0;
+        if (radiusWorld < AIRPORT_OVERLAY_CLIP_MIN_TILE_RADIUS_M) return false;
+        const c: BABYLON.Vector3 = bs.centerWorld;
+        if (!c) return false;
+        for (const z of zones) {
+            const dx = c.x - z.centerVec.x;
+            const dz = c.z - z.centerVec.z;
+            if (dx * dx + dz * dz <= z.clipRadiusM * z.clipRadiusM && c.y <= z.clipMaxAltM) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    reEvaluateClipForLoadedTiles(): void {
+        if (!this.scene.tiles || !this.scene.tiles.group) return;
+        const zones = this.scene._airportClipZones as
+            | { centerVec: BABYLON.Vector3; clipRadiusM: number; clipMaxAltM: number }[]
+            | undefined;
+        const hasZones = !!(zones && zones.length);
+        try {
+            const meshes: any[] = (this.scene.tiles.group as any).getChildMeshes
+                ? (this.scene.tiles.group as any).getChildMeshes(false)
+                : [];
+            let disabled = 0;
+            let enabled = 0;
+            for (const mesh of meshes) {
+                try {
+                    if (hasZones && this.isMeshInsideAnyClipZone(mesh, zones!)) {
+                        if (mesh.isEnabled && mesh.isEnabled()) {
+                            mesh.setEnabled(false);
+                            disabled++;
+                        }
+                    } else {
+                        if (mesh.isEnabled && !mesh.isEnabled()) {
+                            mesh.setEnabled(true);
+                            enabled++;
+                        }
+                    }
+                } catch (meshErr) {
+                    console.warn('[3DTiles] Re-evaluate clip mesh failed:', meshErr);
+                }
+            }
+            console.debug(`[3DTiles] Clip re-evaluation: disabled=${disabled} re-enabled=${enabled} zones=${zones ? zones.length : 0}`);
+        } catch (err) {
+            console.warn('[3DTiles] reEvaluateClipForLoadedTiles failed:', err);
+        }
     }
 
     applyAerialFogDensity(scene: BABYLON.Scene): void {
