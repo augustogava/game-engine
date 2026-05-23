@@ -31,6 +31,7 @@ const {
     GEAR_SPRING_K_MIN_N_PER_M,
     GROUND_Y,
     G_ACCEL,
+    RUNWAY_COLLIDER_Y_BIAS_M,
     WIND_ALTITUDE_GAIN_KT_PER_1000FT,
     WIND_MAX_SPEED_KT,
     WIND_DEFAULT_SPEED_KT,
@@ -247,7 +248,10 @@ export class FlightPhysicsSystem {
             if (hit?.hit && hit.pickedPoint) {
                 const accept = inSpawnWindow || hit.pickedPoint.y <= pos.y + TERRAIN_HIT_ABOVE_LIMIT_M;
                 if (accept) {
-                    resolvedTerrainY = hit.pickedPoint.y;
+                    const isRunwayHit = hit.pickedMesh?.metadata?.type === 'runway-collider';
+                    resolvedTerrainY = (inSpawnWindow && !isRunwayHit)
+                        ? hit.pickedPoint.y + RUNWAY_COLLIDER_Y_BIAS_M
+                        : hit.pickedPoint.y;
                 } else if (!inSpawnWindow) {
                     const buryDepth = hit.pickedPoint.y - pos.y;
                     console.warn(`[Crash] Terrain tunneling detected: pos.y=${pos.y.toFixed(1)}m terrainHit=${hit.pickedPoint.y.toFixed(1)}m bury=${buryDepth.toFixed(1)}m speed=${(this.scene.velocity.length() * 1.94384).toFixed(0)}kt`);
