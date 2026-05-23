@@ -351,9 +351,15 @@ export class LightingSystem {
     }
 
     applyDayNightCycle(scene: BABYLON.Scene): void {
-        const _perfStartMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const _hasPerf = (typeof performance !== 'undefined' && performance.now);
+        const _now = (): number => (_hasPerf ? performance.now() : Date.now());
+        const _perfStartMs = _now();
+        let _tSunPosMs = 0, _tSunLightMs = 0, _tSunMeshHaloMs = 0, _tColorGradeMs = 0, _tSkyMaterialMs = 0;
+        let _tLightsMs = 0, _tFogEnvMs = 0, _tExposureMs = 0, _tMoonStarsMs = 0, _tCloudHdrMs = 0;
+        let _markMs = _perfStartMs;
         const { elevation, azimuth } = getSunPosition(this.scene.originLat, this.scene.originLon, this.getSimDate());
         this.scene._sunElevation = elevation;
+        _tSunPosMs = _now() - _markMs; _markMs = _now();
         const rad = Math.PI / 180;
         const elevR = elevation * rad;
         const azR = azimuth * rad;
@@ -371,6 +377,7 @@ export class LightingSystem {
             this.scene._sunLight.direction = sunDir;
             this.scene._sunLight.position = sunDir.scale(-1200);
         }
+        _tSunLightMs = _now() - _markMs; _markMs = _now();
 
         const sunWorldPos = sunDir.scale(-SUN_DISTANCE);
         if (this.scene._sunMesh) {
@@ -397,7 +404,9 @@ export class LightingSystem {
         if (this.scene._lensFlareSystem) {
             this.scene._lensFlareSystem.isEnabled = elevation > 1 && !this.scene._flareOccluded;
         }
+        _tSunMeshHaloMs = _now() - _markMs; _markMs = _now();
         this.scene._updateColorGrading(elevation);
+        _tColorGradeMs = _now() - _markMs; _markMs = _now();
 
         if (this.scene._skyMaterial) {
             this.scene._skyMaterial.sunPosition = new BABYLON.Vector3(sunPosX * 1000, sunPosY * 1000, sunPosZ * 1000);
@@ -411,6 +420,7 @@ export class LightingSystem {
             const gT = elevForG / SKY_MIE_G_TRANSITION_DEG;
             this.scene._skyMaterial.mieDirectionalG = SKY_MIE_G_LOW_HORIZON + (SKY_MIE_G_HIGH_SUN - SKY_MIE_G_LOW_HORIZON) * gT;
         }
+        _tSkyMaterialMs = _now() - _markMs; _markMs = _now();
 
         const t = Math.max(0, Math.min(1, (elevation + 6) / 30));
 
@@ -437,6 +447,7 @@ export class LightingSystem {
             const warmth = Math.max(0, Math.min(1, elevation / 15));
             this.scene._sunMeshMat.emissiveColor.set(1.0, 0.92 + warmth * 0.05, 0.80 + warmth * 0.10);
         }
+        _tLightsMs = _now() - _markMs; _markMs = _now();
 
         let fogR = 0.02 + t * 0.53;
         let fogG = 0.02 + t * 0.68;
@@ -464,11 +475,13 @@ export class LightingSystem {
 
         const envBase = 0.15 + t * 1.15;
         scene.environmentIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
+        _tFogEnvMs = _now() - _markMs; _markMs = _now();
 
         if (this.scene._pipeline) {
             const expBase = 0.7 + t * 1.1;
             this.scene._pipeline.imageProcessing.exposure = this.scene.isMobile ? Math.max(expBase * 1.15, 1.2) : expBase;
         }
+        _tExposureMs = _now() - _markMs; _markMs = _now();
 
         if (this.scene._moonMesh) {
             const moonY = -sunPosY;
@@ -496,14 +509,19 @@ export class LightingSystem {
             this.scene._starRoot.setEnabled(starsActive);
             if (this.scene._milkyWayRoot) this.scene._milkyWayRoot.setEnabled(starsActive);
         }
+        _tMoonStarsMs = _now() - _markMs; _markMs = _now();
 
         this.scene._applyCloudTint(elevation);
 
         this._maybeAutoSwapHdr(scene);
+        _tCloudHdrMs = _now() - _markMs;
         try {
-            const _perfEndMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-            const _elapsedMs = _perfEndMs - _perfStartMs;
-            console.debug(`[DayNight] applyDayNightCycle took ${_elapsedMs.toFixed(2)}ms elev=${elevation.toFixed(2)}deg`);
+            const _elapsedMs = _now() - _perfStartMs;
+            if (_elapsedMs >= 20) {
+                console.warn(`[DayNight] SPIKE ${_elapsedMs.toFixed(1)}ms elev=${elevation.toFixed(2)}deg | sunPos=${_tSunPosMs.toFixed(1)} sunLight=${_tSunLightMs.toFixed(1)} sunMeshHalo=${_tSunMeshHaloMs.toFixed(1)} colorGrade=${_tColorGradeMs.toFixed(1)} sky=${_tSkyMaterialMs.toFixed(1)} lights=${_tLightsMs.toFixed(1)} fogEnv=${_tFogEnvMs.toFixed(1)} exposure=${_tExposureMs.toFixed(1)} moonStars=${_tMoonStarsMs.toFixed(1)} cloudHdr=${_tCloudHdrMs.toFixed(1)}`);
+            } else {
+                console.debug(`[DayNight] applyDayNightCycle took ${_elapsedMs.toFixed(2)}ms elev=${elevation.toFixed(2)}deg`);
+            }
         } catch (_) { /* ignore */ }
     }
 
