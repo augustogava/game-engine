@@ -9,7 +9,11 @@ import {
     RUNWAY_RENDERING_GROUP_ID,
     RUNWAY_COLLIDER_DIFFUSE,
     RUNWAY_COLLIDER_ALPHA,
+    SPAWN_TERRAIN_RAY_HEIGHT_M,
+    SPAWN_TERRAIN_RAY_LENGTH_M,
 } from '../constants/index.js';
+
+const RUNWAY_TILE_ALIGN_LOG_DELTA_M = 1.0;
 
 export class RunwayCollidersSystem {
     private readonly scene: any;
@@ -66,7 +70,19 @@ export class RunwayCollidersSystem {
         const northM = (centerLat - this.scene.originLat) * METERS_PER_DEG_LAT;
         const sceneX = eastM;
         const sceneZ = -northM;
-        const sceneY = (elevationFt * FT_TO_M - this.scene.refAlt) + RUNWAY_COLLIDER_Y_BIAS_M;
+        const dbSceneY = (elevationFt * FT_TO_M - this.scene.refAlt) + RUNWAY_COLLIDER_Y_BIAS_M;
+        const tileY = this._probeTilesYAt(sceneX, sceneZ);
+        let sceneY: number;
+        if (tileY != null && Number.isFinite(tileY)) {
+            sceneY = tileY + RUNWAY_COLLIDER_Y_BIAS_M;
+            const delta = sceneY - dbSceneY;
+            if (Math.abs(delta) >= RUNWAY_TILE_ALIGN_LOG_DELTA_M) {
+                console.debug(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: aligned to tile terrain y=${sceneY.toFixed(2)}m (db-derived=${dbSceneY.toFixed(2)}m, delta=${delta.toFixed(2)}m)`);
+            }
+        } else {
+            sceneY = dbSceneY;
+            console.debug(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: tile probe missed at scene(${sceneX.toFixed(1)},${sceneZ.toFixed(1)}) — using db elevation y=${sceneY.toFixed(2)}m`);
+        }
 
         const name = `runway-collider-${icao}-${r.le_ident || ''}-${r.he_ident || ''}`;
         const babylonScene: BABYLON.Scene = this.scene.scene;
@@ -107,6 +123,38 @@ export class RunwayCollidersSystem {
         }
         this.scene._runwayColliders = [];
         this.scene._runwayCollidersLoaded = false;
+    }
+
+    private _probeTilesYAt(x: number, z: number): number | null {
+        if (!Number.isFinite(x) || !Number.isFinite(z)) {
+            console.warn(`[Runway] _probeTilesYAt invalid coords x=${x} z=${z}`);
+            return null;
+        }
+        const babylonScene: BABYLON.Scene | null = this.scene.scene || null;
+        if (!babylonScene) return null;
+        if (!this.scene.tiles) return null;
+        try {
+            const ray = new BABYLON.Ray(
+                new BABYLON.Vector3(x, SPAWN_TERRAIN_RAY_HEIGHT_M, z),
+                new BABYLON.Vector3(0, -1, 0),
+                SPAWN_TERRAIN_RAY_LENGTH_M,
+            );
+            const planeRoot = this.scene.planeRoot;
+            const predicate = (mesh: BABYLON.AbstractMesh) => {
+                if (!mesh.isPickable) return false;
+                if (mesh.name === 'ground') return false;
+                if (mesh.metadata && mesh.metadata.type === 'runway-collider') return false;
+                if (planeRoot && mesh.isDescendantOf(planeRoot)) return false;
+                return true;
+            };
+            const hit = babylonScene.pickWithRay(ray, predicate);
+            if (hit?.hit && hit.pickedPoint && Number.isFinite(hit.pickedPoint.y)) {
+                return hit.pickedPoint.y;
+            }
+        } catch (err) {
+            console.warn('[Runway] _probeTilesYAt failed:', err);
+        }
+        return null;
     }
 
     pickTerrainPreferRunway(ray: BABYLON.Ray): BABYLON.PickingInfo | null {

@@ -39,8 +39,8 @@ export const HDR_ENV_DEFAULT = 'kloofendal_48d_partly_cloudy_puresky_4k.hdr';
 export const HDR_SKYBOX_SIZE = 10_000_000;
 export const HDR_SKYBOX_LEVEL = 0.8;
 
-export const HDR_AUTO_DAY_FILE   = 'kloofendal_48d_partly_cloudy_puresky_4k.hdr';
-export const HDR_AUTO_NIGHT_FILE = 'qwantani_moonrise_puresky_4k.hdr';
+export const HDR_AUTO_DAY_FILE   = 'drakensberg_solitary_mountain_puresky_4k.hdr';
+export const HDR_AUTO_NIGHT_FILE = 'qwantani_moon_noon_puresky_4k.hdr';
 export const HDR_AUTO_NIGHT_ELEVATION_DEG = -3;
 export const HDR_AUTO_HYSTERESIS_DEG = 1.5;
 
