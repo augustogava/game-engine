@@ -80,9 +80,10 @@ export class MissionSystem {
         this.scene._activeUserMissionId = userMissionId;
 
         const isDiscovery = mission.type === 'discovery';
+        const isFreeFlight = mission.type === 'free_flight';
         const isRoute = mission.type === 'route';
 
-        if (isDiscovery && mission.spawn_latitude != null && mission.spawn_longitude != null) {
+        if ((isDiscovery || isFreeFlight) && mission.spawn_latitude != null && mission.spawn_longitude != null) {
             this.scene._pendingMissionLat = Number(mission.spawn_latitude);
             this.scene._pendingMissionLon = Number(mission.spawn_longitude);
             this.scene._pendingMissionAltM = mission.spawn_altitude_ft != null ? Number(mission.spawn_altitude_ft) * 0.3048 : 1000;
