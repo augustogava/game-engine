@@ -10,6 +10,9 @@ import {
     WORLD_READY_TIMEOUT_MS,
     GEAR_STATE_DOWN,
     GEAR_STATE_UP,
+    GEAR_MAX_TRAVEL_M,
+    GEAR_SPRING_K_MIN_N_PER_M,
+    G_ACCEL,
     ENGINE_TYPE_PISTON,
     MAGNETO_BOTH,
     CAMERA_MODE_CHASE,
@@ -86,14 +89,24 @@ export class SpawnSystem {
                 this.scene.planeRoot.position.y = desiredY;
                 console.debug(`[WorldReady] Airborne spawn snapped to terrainY=${this.scene.terrainY.toFixed(1)}m + offset=${altOffset.toFixed(1)}m -> pos.y=${this.scene.planeRoot.position.y.toFixed(1)}m`);
             } else {
-                const desiredY = this.scene.terrainY + gearHeight;
+                const nGears = Math.max(1, cfg.gear_positions.length);
+                const sitMass = cfg.mass_kg + (this.scene.fuelRemaining || 0);
+                const safeSpringK = Math.max(
+                    GEAR_SPRING_K_MIN_N_PER_M,
+                    Number.isFinite(cfg.gear_spring_k) ? cfg.gear_spring_k : 0,
+                );
+                const eqComp = Math.min(
+                    GEAR_MAX_TRAVEL_M * 0.5,
+                    (sitMass * G_ACCEL) / (nGears * safeSpringK),
+                );
+                const desiredY = this.scene.terrainY + gearHeight - eqComp;
                 if (this.scene.planeRoot.position.y < desiredY) {
                     console.warn(`[Spawn] Clamped ground pos.y from ${this.scene.planeRoot.position.y.toFixed(1)}m to ${desiredY.toFixed(1)}m (below terrain+gear)`);
                 }
                 this.scene.planeRoot.position.y = desiredY;
                 this.scene.velocity.set(0, 0, 0);
                 this.scene.angularVelocity.set(0, 0, 0);
-                console.debug(`[WorldReady] Ground spawn snapped to terrainY=${this.scene.terrainY.toFixed(1)}m + gearHeight=${gearHeight.toFixed(2)}m -> pos.y=${this.scene.planeRoot.position.y.toFixed(1)}m`);
+                console.debug(`[WorldReady] Ground spawn snapped to terrainY=${this.scene.terrainY.toFixed(1)}m + gearHeight=${gearHeight.toFixed(2)}m - eqComp=${eqComp.toFixed(3)}m -> pos.y=${this.scene.planeRoot.position.y.toFixed(2)}m`);
             }
         }
         this.scene._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
