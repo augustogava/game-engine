@@ -43,6 +43,9 @@ import {
     HDR_AUTO_HYSTERESIS_DEG,
 } from '../constants/index.js';
 
+const DAYNIGHT_EXPOSURE_EPSILON = 0.005;
+const DAYNIGHT_ENV_INTENSITY_EPSILON = 0.005;
+
 export class LightingSystem {
     private readonly scene: any;
     private _originalEnvTexture: BABYLON.BaseTexture | null = null;
@@ -52,6 +55,8 @@ export class LightingSystem {
     private _hdrSkyboxMesh: BABYLON.Mesh | null = null;
     private _currentHdrEnv: string = HDR_ENV_NONE;
     private _userHdrChoice: string = HDR_ENV_NONE;
+    private _lastExposure: number = Number.NaN;
+    private _lastEnvIntensity: number = Number.NaN;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -474,12 +479,20 @@ export class LightingSystem {
         scene.clearColor.set(clearR, clearG, clearB, 1);
 
         const envBase = 0.15 + t * 1.15;
-        scene.environmentIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
+        const newEnvIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
+        if (!Number.isFinite(this._lastEnvIntensity) || Math.abs(newEnvIntensity - this._lastEnvIntensity) >= DAYNIGHT_ENV_INTENSITY_EPSILON) {
+            scene.environmentIntensity = newEnvIntensity;
+            this._lastEnvIntensity = newEnvIntensity;
+        }
         _tFogEnvMs = _now() - _markMs; _markMs = _now();
 
         if (this.scene._pipeline) {
             const expBase = 0.7 + t * 1.1;
-            this.scene._pipeline.imageProcessing.exposure = this.scene.isMobile ? Math.max(expBase * 1.15, 1.2) : expBase;
+            const newExposure = this.scene.isMobile ? Math.max(expBase * 1.15, 1.2) : expBase;
+            if (!Number.isFinite(this._lastExposure) || Math.abs(newExposure - this._lastExposure) >= DAYNIGHT_EXPOSURE_EPSILON) {
+                this.scene._pipeline.imageProcessing.exposure = newExposure;
+                this._lastExposure = newExposure;
+            }
         }
         _tExposureMs = _now() - _markMs; _markMs = _now();
 

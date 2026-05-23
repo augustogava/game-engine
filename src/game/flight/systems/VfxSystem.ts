@@ -32,8 +32,17 @@ import {
     COLOR_LUT_URL,
 } from '../constants/index.js';
 
+const COLOR_GRADE_TINT_HUE_EPSILON_DEG = 1.0;
+const COLOR_GRADE_TINT_DENSITY_EPSILON = 0.5;
+const COLOR_GRADE_CONTRAST_EPSILON = 0.01;
+
 export class VfxSystem {
     private readonly scene: any;
+    private _lastTintH: number = Number.NaN;
+    private _lastTintAmp: number = Number.NaN;
+    private _lastContrast: number = Number.NaN;
+    private _lastColorCurvesEnabled: boolean | null = null;
+    private _lastColorGradingEnabled: boolean | null = null;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -255,15 +264,31 @@ export class VfxSystem {
               + COLOR_GRADE_NIGHT_TINT_B * nightT;
         const norm = Math.max(0.001, dayT + sunsetT + nightT);
         r /= norm; g /= norm; b /= norm;
-        ip.colorCurvesEnabled = true;
+        if (this._lastColorCurvesEnabled !== true) {
+            ip.colorCurvesEnabled = true;
+            this._lastColorCurvesEnabled = true;
+        }
         if (!ip.colorCurves) ip.colorCurves = new BABYLON.ColorCurves();
         const cc = ip.colorCurves;
         const tintH = ((Math.atan2(g - b, r - g) * 180 / Math.PI) + 360) % 360;
         const tintAmp = Math.min(40, Math.abs((r - 1.0) + (b - 1.0)) * 60);
-        cc.globalHue = tintH;
-        cc.globalDensity = tintAmp;
-        ip.contrast = COLOR_GRADE_CONTRAST_DAY * dayT + COLOR_GRADE_CONTRAST_NIGHT * (sunsetT + nightT) / Math.max(0.001, sunsetT + nightT + dayT);
-        ip.colorGradingEnabled = false;
+        if (!Number.isFinite(this._lastTintH) || Math.abs(tintH - this._lastTintH) >= COLOR_GRADE_TINT_HUE_EPSILON_DEG) {
+            cc.globalHue = tintH;
+            this._lastTintH = tintH;
+        }
+        if (!Number.isFinite(this._lastTintAmp) || Math.abs(tintAmp - this._lastTintAmp) >= COLOR_GRADE_TINT_DENSITY_EPSILON) {
+            cc.globalDensity = tintAmp;
+            this._lastTintAmp = tintAmp;
+        }
+        const newContrast = COLOR_GRADE_CONTRAST_DAY * dayT + COLOR_GRADE_CONTRAST_NIGHT * (sunsetT + nightT) / Math.max(0.001, sunsetT + nightT + dayT);
+        if (!Number.isFinite(this._lastContrast) || Math.abs(newContrast - this._lastContrast) >= COLOR_GRADE_CONTRAST_EPSILON) {
+            ip.contrast = newContrast;
+            this._lastContrast = newContrast;
+        }
+        if (this._lastColorGradingEnabled !== false) {
+            ip.colorGradingEnabled = false;
+            this._lastColorGradingEnabled = false;
+        }
     }
 
     ensureMotionBlur(active: boolean): void {
