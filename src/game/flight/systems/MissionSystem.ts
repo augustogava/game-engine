@@ -83,12 +83,22 @@ export class MissionSystem {
         const isFreeFlight = mission.type === 'free_flight';
         const isRoute = mission.type === 'route';
 
+        const firstWp = Array.isArray(mission.waypoints) && mission.waypoints.length > 0 ? mission.waypoints[0] : null;
+        const firstWpLat = firstWp && firstWp.latitude != null ? Number(firstWp.latitude) : null;
+        const firstWpLon = firstWp && firstWp.longitude != null ? Number(firstWp.longitude) : null;
+        const hasFirstWp = firstWpLat != null && Number.isFinite(firstWpLat) && firstWpLon != null && Number.isFinite(firstWpLon);
+
         if ((isDiscovery || isFreeFlight) && mission.spawn_latitude != null && mission.spawn_longitude != null) {
-            this.scene._pendingMissionLat = Number(mission.spawn_latitude);
-            this.scene._pendingMissionLon = Number(mission.spawn_longitude);
+            const spawnLat = Number(mission.spawn_latitude);
+            const spawnLon = Number(mission.spawn_longitude);
+            this.scene._pendingMissionLat = spawnLat;
+            this.scene._pendingMissionLon = spawnLon;
             this.scene._pendingMissionAltM = mission.spawn_altitude_ft != null ? Number(mission.spawn_altitude_ft) * 0.3048 : 1000;
-            this.scene._pendingMissionHdg = 0;
+            this.scene._pendingMissionHdg = hasFirstWp ? this.computeBearingDeg(spawnLat, spawnLon, firstWpLat!, firstWpLon!) : 0;
             this.scene._pendingMissionAirborne = true;
+            if (hasFirstWp) {
+                console.debug(`[Mission] Spawn heading aligned to next waypoint: hdg=${this.scene._pendingMissionHdg.toFixed(1)}° → wp lat=${firstWpLat} lon=${firstWpLon}`);
+            }
         } else if (isRoute && mission.dep_rwy_latitude != null && mission.dep_rwy_longitude != null) {
             this.scene._pendingMissionLat = Number(mission.dep_rwy_latitude);
             this.scene._pendingMissionLon = Number(mission.dep_rwy_longitude);
@@ -97,9 +107,11 @@ export class MissionSystem {
             this.scene._pendingMissionAirborne = false;
             console.log(`[Mission] Spawning at runway centerline lat=${this.scene._pendingMissionLat} lon=${this.scene._pendingMissionLon} hdg=${this.scene._pendingMissionHdg}`);
         } else if (isRoute && mission.departure_lat != null && mission.departure_lon != null) {
-            this.scene._pendingMissionLat = Number(mission.departure_lat);
-            this.scene._pendingMissionLon = Number(mission.departure_lon);
-            this.scene._pendingMissionHdg = 0;
+            const depLat = Number(mission.departure_lat);
+            const depLon = Number(mission.departure_lon);
+            this.scene._pendingMissionLat = depLat;
+            this.scene._pendingMissionLon = depLon;
+            this.scene._pendingMissionHdg = hasFirstWp ? this.computeBearingDeg(depLat, depLon, firstWpLat!, firstWpLon!) : 0;
             this.scene._pendingMissionAltM = 0;
             this.scene._pendingMissionAirborne = false;
             console.warn('[Mission] Route mission has no runway centerline — falling back to airport center');
@@ -124,6 +136,17 @@ export class MissionSystem {
         this.scene._missionCurrentWpIndex = 0;
 
         console.log(`[Mission] Active mission id=${this.scene._activeMissionId}, type=${mission.type}, spawn lat=${this.scene._pendingMissionLat} lon=${this.scene._pendingMissionLon} airborne=${this.scene._pendingMissionAirborne} waypoints=${this.scene._missionWaypoints.length}`);
+    }
+
+    private computeBearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const toRad = (d: number) => (d * Math.PI) / 180;
+        const phi1 = toRad(lat1);
+        const phi2 = toRad(lat2);
+        const dLambda = toRad(lon2 - lon1);
+        const y = Math.sin(dLambda) * Math.cos(phi2);
+        const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+        const theta = Math.atan2(y, x);
+        return ((theta * 180) / Math.PI + 360) % 360;
     }
 
     checkWaypointProgress(lat: number, lon: number): void {

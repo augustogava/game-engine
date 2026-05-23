@@ -1578,7 +1578,12 @@ export class HudSystem {
         const ss = String(now.getUTCSeconds()).padStart(2, '0');
         const dd = String(now.getUTCDate()).padStart(2, '0');
         const mo = String(now.getUTCMonth() + 1).padStart(2, '0');
-        this.scene.hudUtc.textContent = `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC`;
+        const lonForLocal = Number.isFinite(this.scene.originLon) ? this.scene.originLon : 0;
+        const localMs = now.getTime() + (lonForLocal / 15) * 3600 * 1000;
+        const localDate = new Date(localMs);
+        const lhh = String(localDate.getUTCHours()).padStart(2, '0');
+        const lmm = String(localDate.getUTCMinutes()).padStart(2, '0');
+        this.scene.hudUtc.textContent = `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC \u00B7 ${lhh}:${lmm} LCL`;
 
         const tasMs = Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length();
         const iasMs = Number.isFinite(this.scene._lastIasMs) ? this.scene._lastIasMs : tasMs;

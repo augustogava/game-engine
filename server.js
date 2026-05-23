@@ -197,6 +197,10 @@ const MISSION_SELECT = `
     m.spawn_latitude, m.spawn_longitude, m.spawn_altitude_ft,
     m.distance_nm, m.estimated_duration_min, m.reward_points,
     m.image_base64, m.is_active, m.is_enabled, m.sort_order,
+    m.required_aircraft_id, m.required_aircraft_type,
+    req_ac.code AS required_aircraft_code,
+    req_ac.name AS required_aircraft_name,
+    req_ac.thumbnail_url AS required_aircraft_thumbnail,
     da.name AS departure_airport_name, da.icao_code AS departure_icao,
     da.latitude AS departure_lat, da.longitude AS departure_lon,
     aa.name AS arrival_airport_name, aa.icao_code AS arrival_icao,
@@ -213,7 +217,8 @@ const MISSION_JOINS = `
     LEFT JOIN airports da ON m.departure_airport_id = da.id
     LEFT JOIN airports aa ON m.arrival_airport_id = aa.id
     LEFT JOIN airport_runways dr ON m.departure_runway_id = dr.id
-    LEFT JOIN airport_runways ar ON m.arrival_runway_id = ar.id`;
+    LEFT JOIN airport_runways ar ON m.arrival_runway_id = ar.id
+    LEFT JOIN aircrafts req_ac ON m.required_aircraft_id = req_ac.id`;
 
 function buildMissionNested(row) {
     return {
