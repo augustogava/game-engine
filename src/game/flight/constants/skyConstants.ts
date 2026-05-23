@@ -31,6 +31,7 @@ export const BRIGHT_STAR_SIZE_RANDOM = 70;
 export const BRIGHT_STAR_TWINKLE_AMOUNT = 0.45;
 
 export const HDR_ENV_NONE = 'none';
+export const HDR_ENV_AUTO = 'auto';
 export const HDR_ASSETS_PATH = 'src/game/assets/hdr/';
 export const HDR_CUBE_SIZE = 256;
 export const HDR_DEFAULT_ENV_URL = 'https://assets.babylonjs.com/environments/environmentSpecular.env';
@@ -38,17 +39,27 @@ export const HDR_ENV_DEFAULT = 'kloofendal_48d_partly_cloudy_puresky_4k.hdr';
 export const HDR_SKYBOX_SIZE = 10_000_000;
 export const HDR_SKYBOX_LEVEL = 0.8;
 
+export const HDR_AUTO_DAY_FILE   = 'kloofendal_48d_partly_cloudy_puresky_4k.hdr';
+export const HDR_AUTO_NIGHT_FILE = 'qwantani_moonrise_puresky_4k.hdr';
+export const HDR_AUTO_NIGHT_ELEVATION_DEG = -3;
+export const HDR_AUTO_HYSTERESIS_DEG = 1.5;
+
 export interface HdrOption {
     value: string;
     label: string;
 }
 
 export const HDR_OPTIONS: HdrOption[] = [
-    { value: HDR_ENV_NONE,                                  label: 'Procedural (Default)' },
-    { value: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr', label: 'Kloofendal - Partly Cloudy' },
-    { value: 'qwantani_dawn_puresky_4k.hdr',                label: 'Qwantani - Dawn' },
-    { value: 'qwantani_dusk_1_puresky_4k.hdr',              label: 'Qwantani - Dusk' },
-    { value: 'hilly_terrain_01_puresky_4k.hdr',             label: 'Hilly Terrain' },
-    { value: 'rosendal_park_sunset_puresky_4k.hdr',         label: 'Rosendal Park - Sunset' },
+    { value: HDR_ENV_AUTO,                                   label: 'Auto (Day / Night)' },
+    { value: HDR_ENV_NONE,                                   label: 'Procedural' },
+    { value: 'kloofendal_48d_partly_cloudy_puresky_4k.hdr',  label: 'Kloofendal - Partly Cloudy' },
+    { value: 'qwantani_dawn_puresky_4k.hdr',                 label: 'Qwantani - Dawn' },
+    { value: 'qwantani_dusk_1_puresky_4k.hdr',               label: 'Qwantani - Dusk' },
+    { value: 'hilly_terrain_01_puresky_4k.hdr',              label: 'Hilly Terrain' },
+    { value: 'rosendal_park_sunset_puresky_4k.hdr',          label: 'Rosendal Park - Sunset' },
     { value: 'drakensberg_solitary_mountain_puresky_4k.hdr', label: 'Drakensberg - Solitary Mountain' },
+    { value: 'qwantani_moonrise_puresky_4k.hdr',             label: 'Qwantani - Moonrise (Night)' },
+    { value: 'qwantani_moon_noon_puresky_4k.hdr',            label: 'Qwantani - Moon Noon (Night)' },
+    { value: 'rogland_clear_night_4k.hdr',                   label: 'Rogland - Clear Night' },
+    { value: 'moonless_golf_4k.hdr',                         label: 'Moonless Golf (Night)' },
 ];

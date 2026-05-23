@@ -31,11 +31,16 @@ import {
     NIGHT_HORIZON_GLOW_FADE_BAND_DEG,
     NIGHT_HORIZON_GLOW_OFFSET_DEG,
     HDR_ENV_NONE,
+    HDR_ENV_AUTO,
     HDR_ASSETS_PATH,
     HDR_CUBE_SIZE,
     HDR_DEFAULT_ENV_URL,
     HDR_SKYBOX_LEVEL,
     HDR_SKYBOX_SIZE,
+    HDR_AUTO_DAY_FILE,
+    HDR_AUTO_NIGHT_FILE,
+    HDR_AUTO_NIGHT_ELEVATION_DEG,
+    HDR_AUTO_HYSTERESIS_DEG,
 } from '../constants/index.js';
 
 export class LightingSystem {
@@ -46,6 +51,7 @@ export class LightingSystem {
     private _hdrSkyboxMaterial: BABYLON.StandardMaterial | null = null;
     private _hdrSkyboxMesh: BABYLON.Mesh | null = null;
     private _currentHdrEnv: string = HDR_ENV_NONE;
+    private _userHdrChoice: string = HDR_ENV_NONE;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -491,6 +497,8 @@ export class LightingSystem {
         }
 
         this.scene._applyCloudTint(elevation);
+
+        this._maybeAutoSwapHdr(scene);
     }
 
     buildSkybox(scene: BABYLON.Scene): void {
@@ -520,8 +528,32 @@ export class LightingSystem {
     }
 
     applyHdrEnvironment(scene: BABYLON.Scene, hdrName: string): void {
-        const name = typeof hdrName === 'string' && hdrName.length > 0 ? hdrName : HDR_ENV_NONE;
-        console.info(`[HDR] applyHdrEnvironment requested: "${name}" (current: "${this._currentHdrEnv}")`);
+        const requested = typeof hdrName === 'string' && hdrName.length > 0 ? hdrName : HDR_ENV_NONE;
+        this._userHdrChoice = requested;
+        const effective = requested === HDR_ENV_AUTO ? this._resolveAutoHdr() : requested;
+        console.info(`[HDR] applyHdrEnvironment requested: "${requested}" → effective: "${effective}" (current: "${this._currentHdrEnv}")`);
+        this._applyHdrInternal(scene, effective);
+    }
+
+    private _resolveAutoHdr(): string {
+        const elev: number = typeof this.scene._sunElevation === 'number' ? this.scene._sunElevation : 45;
+        const isNightNow = this._currentHdrEnv === HDR_AUTO_NIGHT_FILE;
+        const threshold = isNightNow
+            ? HDR_AUTO_NIGHT_ELEVATION_DEG + HDR_AUTO_HYSTERESIS_DEG
+            : HDR_AUTO_NIGHT_ELEVATION_DEG;
+        const isNight = elev < threshold;
+        return isNight ? HDR_AUTO_NIGHT_FILE : HDR_AUTO_DAY_FILE;
+    }
+
+    private _maybeAutoSwapHdr(scene: BABYLON.Scene): void {
+        if (this._userHdrChoice !== HDR_ENV_AUTO) return;
+        const desired = this._resolveAutoHdr();
+        if (desired === this._currentHdrEnv) return;
+        console.info(`[HDR] Auto mode: sun elevation triggered swap → "${desired}"`);
+        this._applyHdrInternal(scene, desired);
+    }
+
+    private _applyHdrInternal(scene: BABYLON.Scene, name: string): void {
         if (name === this._currentHdrEnv) {
             console.info('[HDR] Same as current, skipping');
             return;
