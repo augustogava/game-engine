@@ -45,6 +45,15 @@ import {
 
 const DAYNIGHT_EXPOSURE_EPSILON = 0.005;
 const DAYNIGHT_ENV_INTENSITY_EPSILON = 0.005;
+const DAYNIGHT_SUN_DIR_EPSILON = 0.002;
+const DAYNIGHT_LIGHT_INTENSITY_EPSILON = 0.005;
+const DAYNIGHT_COLOR_EPSILON = 0.005;
+const DAYNIGHT_SKY_LUMINANCE_EPSILON = 0.005;
+const DAYNIGHT_SKY_TURBIDITY_EPSILON = 0.05;
+const DAYNIGHT_SKY_RAYLEIGH_EPSILON = 0.01;
+const DAYNIGHT_SKY_MIE_COEFF_EPSILON = 0.0005;
+const DAYNIGHT_SKY_MIE_G_EPSILON = 0.005;
+const DAYNIGHT_FOG_COLOR_EPSILON = 0.005;
 
 export class LightingSystem {
     private readonly scene: any;
@@ -57,6 +66,32 @@ export class LightingSystem {
     private _userHdrChoice: string = HDR_ENV_NONE;
     private _lastExposure: number = Number.NaN;
     private _lastEnvIntensity: number = Number.NaN;
+    private _lastSunDirX: number = Number.NaN;
+    private _lastSunDirY: number = Number.NaN;
+    private _lastSunDirZ: number = Number.NaN;
+    private _lastSunIntensity: number = Number.NaN;
+    private _lastSunDiffR: number = Number.NaN;
+    private _lastSunDiffG: number = Number.NaN;
+    private _lastSunDiffB: number = Number.NaN;
+    private _lastHemiIntensity: number = Number.NaN;
+    private _lastHemiDiffR: number = Number.NaN;
+    private _lastHemiDiffG: number = Number.NaN;
+    private _lastHemiDiffB: number = Number.NaN;
+    private _lastHemiGroundR: number = Number.NaN;
+    private _lastHemiGroundG: number = Number.NaN;
+    private _lastHemiGroundB: number = Number.NaN;
+    private _lastFillIntensity: number = Number.NaN;
+    private _lastSkyLuminance: number = Number.NaN;
+    private _lastSkyTurbidity: number = Number.NaN;
+    private _lastSkyRayleigh: number = Number.NaN;
+    private _lastSkyMieCoeff: number = Number.NaN;
+    private _lastSkyMieG: number = Number.NaN;
+    private _lastFogR: number = Number.NaN;
+    private _lastFogG: number = Number.NaN;
+    private _lastFogB: number = Number.NaN;
+    private _lastClearR: number = Number.NaN;
+    private _lastClearG: number = Number.NaN;
+    private _lastClearB: number = Number.NaN;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -356,15 +391,8 @@ export class LightingSystem {
     }
 
     applyDayNightCycle(scene: BABYLON.Scene): void {
-        const _hasPerf = (typeof performance !== 'undefined' && performance.now);
-        const _now = (): number => (_hasPerf ? performance.now() : Date.now());
-        const _perfStartMs = _now();
-        let _tSunPosMs = 0, _tSunLightMs = 0, _tSunMeshHaloMs = 0, _tColorGradeMs = 0, _tSkyMaterialMs = 0;
-        let _tLightsMs = 0, _tFogEnvMs = 0, _tExposureMs = 0, _tMoonStarsMs = 0, _tCloudHdrMs = 0;
-        let _markMs = _perfStartMs;
         const { elevation, azimuth } = getSunPosition(this.scene.originLat, this.scene.originLon, this.getSimDate());
         this.scene._sunElevation = elevation;
-        _tSunPosMs = _now() - _markMs; _markMs = _now();
         const rad = Math.PI / 180;
         const elevR = elevation * rad;
         const azR = azimuth * rad;
@@ -379,10 +407,21 @@ export class LightingSystem {
         const sunPosZ = Math.cos(azR) * Math.cos(elevR);
 
         if (this.scene._sunLight) {
-            this.scene._sunLight.direction = sunDir;
-            this.scene._sunLight.position = sunDir.scale(-1200);
+            const dx = sunDir.x - this._lastSunDirX;
+            const dy = sunDir.y - this._lastSunDirY;
+            const dz = sunDir.z - this._lastSunDirZ;
+            const dirChanged = !Number.isFinite(this._lastSunDirX)
+                || Math.abs(dx) >= DAYNIGHT_SUN_DIR_EPSILON
+                || Math.abs(dy) >= DAYNIGHT_SUN_DIR_EPSILON
+                || Math.abs(dz) >= DAYNIGHT_SUN_DIR_EPSILON;
+            if (dirChanged) {
+                this.scene._sunLight.direction = sunDir;
+                this.scene._sunLight.position = sunDir.scale(-1200);
+                this._lastSunDirX = sunDir.x;
+                this._lastSunDirY = sunDir.y;
+                this._lastSunDirZ = sunDir.z;
+            }
         }
-        _tSunLightMs = _now() - _markMs; _markMs = _now();
 
         const sunWorldPos = sunDir.scale(-SUN_DISTANCE);
         if (this.scene._sunMesh) {
@@ -409,50 +448,108 @@ export class LightingSystem {
         if (this.scene._lensFlareSystem) {
             this.scene._lensFlareSystem.isEnabled = elevation > 1 && !this.scene._flareOccluded;
         }
-        _tSunMeshHaloMs = _now() - _markMs; _markMs = _now();
         this.scene._updateColorGrading(elevation);
-        _tColorGradeMs = _now() - _markMs; _markMs = _now();
 
         if (this.scene._skyMaterial) {
             this.scene._skyMaterial.sunPosition = new BABYLON.Vector3(sunPosX * 1000, sunPosY * 1000, sunPosZ * 1000);
             const lumT = Math.max(0, Math.min(1, (elevation + 5) / 20));
-            this.scene._skyMaterial.luminance = Math.min(SKY_LUMINANCE_MAX, 0.01 + lumT * 1.19);
+            const newLuminance = Math.min(SKY_LUMINANCE_MAX, 0.01 + lumT * 1.19);
+            if (!Number.isFinite(this._lastSkyLuminance) || Math.abs(newLuminance - this._lastSkyLuminance) >= DAYNIGHT_SKY_LUMINANCE_EPSILON) {
+                this.scene._skyMaterial.luminance = newLuminance;
+                this._lastSkyLuminance = newLuminance;
+            }
             const sunsetT = 1.0 - Math.max(0, Math.min(1, Math.abs(elevation) / 10));
-            this.scene._skyMaterial.turbidity = 8 + sunsetT * 6;
-            this.scene._skyMaterial.rayleigh = 1.5 + lumT * 1.5;
-            this.scene._skyMaterial.mieCoefficient = 0.005 + sunsetT * 0.015;
+            const newTurbidity = 8 + sunsetT * 6;
+            if (!Number.isFinite(this._lastSkyTurbidity) || Math.abs(newTurbidity - this._lastSkyTurbidity) >= DAYNIGHT_SKY_TURBIDITY_EPSILON) {
+                this.scene._skyMaterial.turbidity = newTurbidity;
+                this._lastSkyTurbidity = newTurbidity;
+            }
+            const newRayleigh = 1.5 + lumT * 1.5;
+            if (!Number.isFinite(this._lastSkyRayleigh) || Math.abs(newRayleigh - this._lastSkyRayleigh) >= DAYNIGHT_SKY_RAYLEIGH_EPSILON) {
+                this.scene._skyMaterial.rayleigh = newRayleigh;
+                this._lastSkyRayleigh = newRayleigh;
+            }
+            const newMieCoeff = 0.005 + sunsetT * 0.015;
+            if (!Number.isFinite(this._lastSkyMieCoeff) || Math.abs(newMieCoeff - this._lastSkyMieCoeff) >= DAYNIGHT_SKY_MIE_COEFF_EPSILON) {
+                this.scene._skyMaterial.mieCoefficient = newMieCoeff;
+                this._lastSkyMieCoeff = newMieCoeff;
+            }
             const elevForG = Math.max(0, Math.min(SKY_MIE_G_TRANSITION_DEG, elevation));
             const gT = elevForG / SKY_MIE_G_TRANSITION_DEG;
-            this.scene._skyMaterial.mieDirectionalG = SKY_MIE_G_LOW_HORIZON + (SKY_MIE_G_HIGH_SUN - SKY_MIE_G_LOW_HORIZON) * gT;
+            const newMieG = SKY_MIE_G_LOW_HORIZON + (SKY_MIE_G_HIGH_SUN - SKY_MIE_G_LOW_HORIZON) * gT;
+            if (!Number.isFinite(this._lastSkyMieG) || Math.abs(newMieG - this._lastSkyMieG) >= DAYNIGHT_SKY_MIE_G_EPSILON) {
+                this.scene._skyMaterial.mieDirectionalG = newMieG;
+                this._lastSkyMieG = newMieG;
+            }
         }
-        _tSkyMaterialMs = _now() - _markMs; _markMs = _now();
 
         const t = Math.max(0, Math.min(1, (elevation + 6) / 30));
 
         if (this.scene._sunLight) {
-            this.scene._sunLight.intensity = 0.1 + t * 2.9;
+            const newSunIntensity = 0.1 + t * 2.9;
+            if (!Number.isFinite(this._lastSunIntensity) || Math.abs(newSunIntensity - this._lastSunIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
+                this.scene._sunLight.intensity = newSunIntensity;
+                this._lastSunIntensity = newSunIntensity;
+            }
             const r = 0.3 + t * 0.7;
             const g = 0.25 + t * 0.67;
             const b = 0.2 + t * 0.55;
-            this.scene._sunLight.diffuse.set(r, g, b);
-            this.scene._sunLight.specular.set(r, g * 0.98, b * 0.8);
+            if (!Number.isFinite(this._lastSunDiffR)
+                || Math.abs(r - this._lastSunDiffR) >= DAYNIGHT_COLOR_EPSILON
+                || Math.abs(g - this._lastSunDiffG) >= DAYNIGHT_COLOR_EPSILON
+                || Math.abs(b - this._lastSunDiffB) >= DAYNIGHT_COLOR_EPSILON) {
+                this.scene._sunLight.diffuse.set(r, g, b);
+                this.scene._sunLight.specular.set(r, g * 0.98, b * 0.8);
+                this._lastSunDiffR = r;
+                this._lastSunDiffG = g;
+                this._lastSunDiffB = b;
+            }
         }
 
         if (this.scene._hemiLight) {
-            this.scene._hemiLight.intensity = 0.03 + t * 0.47;
-            this.scene._hemiLight.diffuse.set(0.1 + t * 0.5, 0.12 + t * 0.63, 0.2 + t * 0.8);
-            this.scene._hemiLight.groundColor.set(0.02 + t * 0.23, 0.03 + t * 0.32, 0.04 + t * 0.14);
+            const newHemiIntensity = 0.03 + t * 0.47;
+            if (!Number.isFinite(this._lastHemiIntensity) || Math.abs(newHemiIntensity - this._lastHemiIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
+                this.scene._hemiLight.intensity = newHemiIntensity;
+                this._lastHemiIntensity = newHemiIntensity;
+            }
+            const hr = 0.1 + t * 0.5;
+            const hg = 0.12 + t * 0.63;
+            const hb = 0.2 + t * 0.8;
+            if (!Number.isFinite(this._lastHemiDiffR)
+                || Math.abs(hr - this._lastHemiDiffR) >= DAYNIGHT_COLOR_EPSILON
+                || Math.abs(hg - this._lastHemiDiffG) >= DAYNIGHT_COLOR_EPSILON
+                || Math.abs(hb - this._lastHemiDiffB) >= DAYNIGHT_COLOR_EPSILON) {
+                this.scene._hemiLight.diffuse.set(hr, hg, hb);
+                this._lastHemiDiffR = hr;
+                this._lastHemiDiffG = hg;
+                this._lastHemiDiffB = hb;
+            }
+            const gr = 0.02 + t * 0.23;
+            const gg = 0.03 + t * 0.32;
+            const gb = 0.04 + t * 0.14;
+            if (!Number.isFinite(this._lastHemiGroundR)
+                || Math.abs(gr - this._lastHemiGroundR) >= DAYNIGHT_COLOR_EPSILON
+                || Math.abs(gg - this._lastHemiGroundG) >= DAYNIGHT_COLOR_EPSILON
+                || Math.abs(gb - this._lastHemiGroundB) >= DAYNIGHT_COLOR_EPSILON) {
+                this.scene._hemiLight.groundColor.set(gr, gg, gb);
+                this._lastHemiGroundR = gr;
+                this._lastHemiGroundG = gg;
+                this._lastHemiGroundB = gb;
+            }
         }
 
         if (this.scene._fillLight) {
-            this.scene._fillLight.intensity = 0.05 + t * 0.55;
+            const newFillIntensity = 0.05 + t * 0.55;
+            if (!Number.isFinite(this._lastFillIntensity) || Math.abs(newFillIntensity - this._lastFillIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
+                this.scene._fillLight.intensity = newFillIntensity;
+                this._lastFillIntensity = newFillIntensity;
+            }
         }
 
         if (this.scene._sunMeshMat) {
             const warmth = Math.max(0, Math.min(1, elevation / 15));
             this.scene._sunMeshMat.emissiveColor.set(1.0, 0.92 + warmth * 0.05, 0.80 + warmth * 0.10);
         }
-        _tLightsMs = _now() - _markMs; _markMs = _now();
 
         let fogR = 0.02 + t * 0.53;
         let fogG = 0.02 + t * 0.68;
@@ -469,14 +566,30 @@ export class LightingSystem {
                 fogB = fogB * (1 - mixB) + warmB * mixB;
             }
         }
-        scene.fogColor.set(fogR, fogG, fogB);
-        this.scene._fogColorBase.set(fogR, fogG, fogB);
+        if (!Number.isFinite(this._lastFogR)
+            || Math.abs(fogR - this._lastFogR) >= DAYNIGHT_FOG_COLOR_EPSILON
+            || Math.abs(fogG - this._lastFogG) >= DAYNIGHT_FOG_COLOR_EPSILON
+            || Math.abs(fogB - this._lastFogB) >= DAYNIGHT_FOG_COLOR_EPSILON) {
+            scene.fogColor.set(fogR, fogG, fogB);
+            this.scene._fogColorBase.set(fogR, fogG, fogB);
+            this._lastFogR = fogR;
+            this._lastFogG = fogG;
+            this._lastFogB = fogB;
+        }
 
         const nightGlowT = Math.max(0, Math.min(1, (NIGHT_HORIZON_GLOW_OFFSET_DEG - elevation) / NIGHT_HORIZON_GLOW_FADE_BAND_DEG));
         const clearR = fogR * 0.5 + NIGHT_HORIZON_GLOW_R * nightGlowT;
         const clearG = fogG * 0.5 + NIGHT_HORIZON_GLOW_G * nightGlowT;
         const clearB = fogB * 0.6 + NIGHT_HORIZON_GLOW_B * nightGlowT;
-        scene.clearColor.set(clearR, clearG, clearB, 1);
+        if (!Number.isFinite(this._lastClearR)
+            || Math.abs(clearR - this._lastClearR) >= DAYNIGHT_FOG_COLOR_EPSILON
+            || Math.abs(clearG - this._lastClearG) >= DAYNIGHT_FOG_COLOR_EPSILON
+            || Math.abs(clearB - this._lastClearB) >= DAYNIGHT_FOG_COLOR_EPSILON) {
+            scene.clearColor.set(clearR, clearG, clearB, 1);
+            this._lastClearR = clearR;
+            this._lastClearG = clearG;
+            this._lastClearB = clearB;
+        }
 
         const envBase = 0.15 + t * 1.15;
         const newEnvIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
@@ -484,7 +597,6 @@ export class LightingSystem {
             scene.environmentIntensity = newEnvIntensity;
             this._lastEnvIntensity = newEnvIntensity;
         }
-        _tFogEnvMs = _now() - _markMs; _markMs = _now();
 
         if (this.scene._pipeline) {
             const expBase = 0.7 + t * 1.1;
@@ -494,7 +606,6 @@ export class LightingSystem {
                 this._lastExposure = newExposure;
             }
         }
-        _tExposureMs = _now() - _markMs; _markMs = _now();
 
         if (this.scene._moonMesh) {
             const moonY = -sunPosY;
@@ -522,20 +633,10 @@ export class LightingSystem {
             this.scene._starRoot.setEnabled(starsActive);
             if (this.scene._milkyWayRoot) this.scene._milkyWayRoot.setEnabled(starsActive);
         }
-        _tMoonStarsMs = _now() - _markMs; _markMs = _now();
 
         this.scene._applyCloudTint(elevation);
 
         this._maybeAutoSwapHdr(scene);
-        _tCloudHdrMs = _now() - _markMs;
-        try {
-            const _elapsedMs = _now() - _perfStartMs;
-            if (_elapsedMs >= 20) {
-                console.warn(`[DayNight] SPIKE ${_elapsedMs.toFixed(1)}ms elev=${elevation.toFixed(2)}deg | sunPos=${_tSunPosMs.toFixed(1)} sunLight=${_tSunLightMs.toFixed(1)} sunMeshHalo=${_tSunMeshHaloMs.toFixed(1)} colorGrade=${_tColorGradeMs.toFixed(1)} sky=${_tSkyMaterialMs.toFixed(1)} lights=${_tLightsMs.toFixed(1)} fogEnv=${_tFogEnvMs.toFixed(1)} exposure=${_tExposureMs.toFixed(1)} moonStars=${_tMoonStarsMs.toFixed(1)} cloudHdr=${_tCloudHdrMs.toFixed(1)}`);
-            } else {
-                console.debug(`[DayNight] applyDayNightCycle took ${_elapsedMs.toFixed(2)}ms elev=${elevation.toFixed(2)}deg`);
-            }
-        } catch (_) { /* ignore */ }
     }
 
     buildSkybox(scene: BABYLON.Scene): void {

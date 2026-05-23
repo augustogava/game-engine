@@ -39,8 +39,13 @@ import {
     MILKY_WAY_BAND_DIST,
 } from '../constants/index.js';
 
+const CLOUD_TINT_EPSILON = 0.005;
+
 export class CloudsSystem {
     private readonly scene: any;
+    private _lastCloudTintR: number = Number.NaN;
+    private _lastCloudTintG: number = Number.NaN;
+    private _lastCloudTintB: number = Number.NaN;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -381,6 +386,16 @@ export class CloudsSystem {
         const r = dayR + (CLOUD_NIGHT_COLOR_R - dayR) * nightT;
         const g = dayG + (CLOUD_NIGHT_COLOR_G - dayG) * nightT;
         const b = dayB + (CLOUD_NIGHT_COLOR_B - dayB) * nightT;
+
+        if (Number.isFinite(this._lastCloudTintR)
+            && Math.abs(r - this._lastCloudTintR) < CLOUD_TINT_EPSILON
+            && Math.abs(g - this._lastCloudTintG) < CLOUD_TINT_EPSILON
+            && Math.abs(b - this._lastCloudTintB) < CLOUD_TINT_EPSILON) {
+            return;
+        }
+        this._lastCloudTintR = r;
+        this._lastCloudTintG = g;
+        this._lastCloudTintB = b;
 
         for (const mat of this.scene._cloudMats) {
             mat.emissiveColor.set(r, g, b);
