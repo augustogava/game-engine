@@ -11,9 +11,11 @@ import {
     RUNWAY_COLLIDER_ALPHA,
     SPAWN_TERRAIN_RAY_HEIGHT_M,
     SPAWN_TERRAIN_RAY_LENGTH_M,
+    TERRAIN_UNKNOWN_Y,
 } from '../constants/index.js';
 
 const RUNWAY_TILE_ALIGN_LOG_DELTA_M = 1.0;
+const RUNWAY_NEAR_ORIGIN_FALLBACK_M = 8000;
 
 export class RunwayCollidersSystem {
     private readonly scene: any;
@@ -71,17 +73,37 @@ export class RunwayCollidersSystem {
         const sceneX = eastM;
         const sceneZ = -northM;
         const dbSceneY = (elevationFt * FT_TO_M - this.scene.refAlt) + RUNWAY_COLLIDER_Y_BIAS_M;
-        const tileY = this._probeTilesYAt(sceneX, sceneZ);
+        let tileY = this._probeTilesYAt(sceneX, sceneZ);
+        let probeSource = 'center';
+        if (tileY == null) {
+            const leEastM = (Number(r.le_longitude_deg) - this.scene.originLon) * METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
+            const leNorthM = (Number(r.le_latitude_deg) - this.scene.originLat) * METERS_PER_DEG_LAT;
+            tileY = this._probeTilesYAt(leEastM, -leNorthM);
+            if (tileY != null) probeSource = 'LE';
+        }
+        if (tileY == null && hasHE) {
+            const heEastM = (Number(r.he_longitude_deg) - this.scene.originLon) * METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
+            const heNorthM = (Number(r.he_latitude_deg) - this.scene.originLat) * METERS_PER_DEG_LAT;
+            tileY = this._probeTilesYAt(heEastM, -heNorthM);
+            if (tileY != null) probeSource = 'HE';
+        }
+        if (tileY == null
+            && Number.isFinite(this.scene.terrainY)
+            && this.scene.terrainY !== TERRAIN_UNKNOWN_Y
+            && Math.hypot(sceneX, sceneZ) < RUNWAY_NEAR_ORIGIN_FALLBACK_M) {
+            tileY = this.scene.terrainY - RUNWAY_COLLIDER_Y_BIAS_M;
+            probeSource = 'scene.terrainY';
+        }
         let sceneY: number;
         if (tileY != null && Number.isFinite(tileY)) {
             sceneY = tileY + RUNWAY_COLLIDER_Y_BIAS_M;
             const delta = sceneY - dbSceneY;
             if (Math.abs(delta) >= RUNWAY_TILE_ALIGN_LOG_DELTA_M) {
-                console.debug(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: aligned to tile terrain y=${sceneY.toFixed(2)}m (db-derived=${dbSceneY.toFixed(2)}m, delta=${delta.toFixed(2)}m)`);
+                console.log(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: aligned to tile terrain y=${sceneY.toFixed(2)}m via ${probeSource} (db-derived=${dbSceneY.toFixed(2)}m, delta=${delta.toFixed(2)}m)`);
             }
         } else {
             sceneY = dbSceneY;
-            console.debug(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: tile probe missed at scene(${sceneX.toFixed(1)},${sceneZ.toFixed(1)}) — using db elevation y=${sceneY.toFixed(2)}m`);
+            console.warn(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: tile probe missed at center/LE/HE — using db elevation y=${sceneY.toFixed(2)}m (risk: plane may fall through if this is the spawn runway)`);
         }
 
         const name = `runway-collider-${icao}-${r.le_ident || ''}-${r.he_ident || ''}`;
