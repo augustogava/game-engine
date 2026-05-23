@@ -16,6 +16,7 @@ import {
     CINEMATIC_DURATION_MS,
     HUD_FADE_IN_MS,
     ENGINE_SOUND_FADE_IN_MS,
+    RUNWAY_COLLIDER_Y_BIAS_M,
 } from '../constants/index.js';
 
 export class SpawnSystem {
@@ -47,10 +48,14 @@ export class SpawnSystem {
         const hit = this.scene._pickTerrainPreferRunway(this.scene._worldReadyProbeRay);
 
         if (hit?.hit && hit.pickedPoint) {
-            this.scene.terrainY = hit.pickedPoint.y;
-            this.scene._lastKnownSpawnTerrainY = hit.pickedPoint.y;
+            const isRunwayHit = hit.pickedMesh?.metadata?.type === 'runway-collider';
+            const adjustedTerrainY = isRunwayHit
+                ? hit.pickedPoint.y
+                : hit.pickedPoint.y + RUNWAY_COLLIDER_Y_BIAS_M;
+            this.scene.terrainY = adjustedTerrainY;
+            this.scene._lastKnownSpawnTerrainY = adjustedTerrainY;
             this.scene._worldReady = true;
-            console.debug(`[WorldReady] Terrain detected at y=${hit.pickedPoint.y.toFixed(1)}m after ${elapsed.toFixed(0)}ms`);
+            console.debug(`[WorldReady] Terrain detected at y=${hit.pickedPoint.y.toFixed(1)}m (adjusted=${adjustedTerrainY.toFixed(2)}m, runway=${isRunwayHit}) after ${elapsed.toFixed(0)}ms`);
             this.onWorldReady();
             return;
         }
