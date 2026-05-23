@@ -351,6 +351,7 @@ export class LightingSystem {
     }
 
     applyDayNightCycle(scene: BABYLON.Scene): void {
+        const _perfStartMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         const { elevation, azimuth } = getSunPosition(this.scene.originLat, this.scene.originLon, this.getSimDate());
         this.scene._sunElevation = elevation;
         const rad = Math.PI / 180;
@@ -499,6 +500,11 @@ export class LightingSystem {
         this.scene._applyCloudTint(elevation);
 
         this._maybeAutoSwapHdr(scene);
+        try {
+            const _perfEndMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            const _elapsedMs = _perfEndMs - _perfStartMs;
+            console.debug(`[DayNight] applyDayNightCycle took ${_elapsedMs.toFixed(2)}ms elev=${elevation.toFixed(2)}deg`);
+        } catch (_) { /* ignore */ }
     }
 
     buildSkybox(scene: BABYLON.Scene): void {

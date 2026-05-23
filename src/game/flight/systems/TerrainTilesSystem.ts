@@ -111,12 +111,20 @@ export class TerrainTilesSystem {
         const tiles: any = this.scene.tiles;
         try {
             tiles.addEventListener('load-model', (event: any) => {
+                const _perfStartMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                let _meshCount = 0;
+                let _matPolishCount = 0;
+                let _clippedCount = 0;
+                let _shadowFlagCount = 0;
+                let _waterReflAddCount = 0;
+                let _fadeInitFlag = false;
                 try {
                     const tileScene: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
                     if (!tileScene) return;
                     const meshes = (tileScene as any).getChildMeshes
                         ? (tileScene as any).getChildMeshes(false)
                         : [];
+                    _meshCount = meshes ? meshes.length : 0;
                     const wantShadows = !!this.scene._premium.tileShadows;
                     const seenMats = new Set<BABYLON.Material>();
                     const clipZones = this.scene._airportClipZones as
@@ -127,11 +135,13 @@ export class TerrainTilesSystem {
                         try {
                             if (wantShadows && mesh.receiveShadows !== true) {
                                 mesh.receiveShadows = true;
+                                _shadowFlagCount++;
                             }
                             if (hasClipZones) {
                                 try {
                                     if (this.isMeshInsideAnyClipZone(mesh, clipZones!)) {
                                         mesh.setEnabled(false);
+                                        _clippedCount++;
                                     }
                                 } catch (clipErr) {
                                     console.warn('[3DTiles] Clip-zone check failed for tile mesh:', clipErr);
@@ -144,6 +154,7 @@ export class TerrainTilesSystem {
                                 const pbr = mat as BABYLON.PBRMaterial;
                                 if (pbr.roughness !== null && pbr.roughness !== undefined && pbr.roughness < TILE_PBR_ROUGHNESS_FLOOR) {
                                     pbr.roughness = TILE_PBR_ROUGHNESS_FLOOR;
+                                    _matPolishCount++;
                                 }
                             }
                         } catch (innerErr) {
@@ -158,6 +169,7 @@ export class TerrainTilesSystem {
                                 mesh.visibility = 0;
                             }
                             this.scene._tileFadeEntries.set(tileKey, { meshes, t: 0 });
+                            _fadeInitFlag = true;
                         } catch (fadeErr) {
                             console.warn('[3DTiles] Tile fade setup failed:', fadeErr);
                         }
@@ -167,7 +179,10 @@ export class TerrainTilesSystem {
                             const wm: any = this.scene._waterMaterial;
                             const list: any[] = wm.renderList || (wm.renderList = []);
                             for (const mesh of meshes) {
-                                if (mesh && list.indexOf(mesh) < 0) list.push(mesh);
+                                if (mesh && list.indexOf(mesh) < 0) {
+                                    list.push(mesh);
+                                    _waterReflAddCount++;
+                                }
                             }
                         } catch (reflErr) {
                             console.warn('[3DTiles] Water reflection add failed:', reflErr);
@@ -175,6 +190,12 @@ export class TerrainTilesSystem {
                     }
                 } catch (err) {
                     console.warn('[3DTiles] load-model handler failed:', err);
+                } finally {
+                    try {
+                        const _perfEndMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                        const _elapsedMs = _perfEndMs - _perfStartMs;
+                        console.debug(`[3DTiles] load-model handler took ${_elapsedMs.toFixed(2)}ms meshes=${_meshCount} polishedMats=${_matPolishCount} clipped=${_clippedCount} shadowFlags=${_shadowFlagCount} waterReflAdded=${_waterReflAddCount} fadeInit=${_fadeInitFlag}`);
+                    } catch (_) { /* ignore */ }
                 }
             });
             tiles.addEventListener('dispose-model', (event: any) => {

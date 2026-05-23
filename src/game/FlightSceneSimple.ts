@@ -1037,7 +1037,7 @@ export class FlightSceneSimple extends Scene3D {
         }
         
         this._sunUpdateTimer += dt;
-        if (this._sunUpdateTimer >= 2.0) {
+        if (this._sunUpdateTimer >= 5.0) {
             this._sunUpdateTimer = 0;
             const scene = this.planeRoot.getScene();
             if (scene) this._applyDayNightCycle(scene);
