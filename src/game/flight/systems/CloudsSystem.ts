@@ -52,9 +52,9 @@ export class CloudsSystem {
 
     buildClouds(scene: BABYLON.Scene): void {
         const layers: { count: number; yMin: number; yRange: number; spread: number; sizeBase: number; aspectY: number; windMult: number }[] = [
-            { count: 40, yMin: 600,  yRange: 800,  spread: 15000, sizeBase: 700,  aspectY: 0.60, windMult: 1.0 },
-            { count: 50, yMin: 1800, yRange: 1200, spread: 20000, sizeBase: 1000, aspectY: 0.50, windMult: 1.6 },
-            { count: 35, yMin: 4000, yRange: 2500, spread: 25000, sizeBase: 1500, aspectY: 0.25, windMult: 3.0 },
+            { count: 90,  yMin: 600,  yRange: 800,  spread: 32000, sizeBase: 700,  aspectY: 0.60, windMult: 1.0 },
+            { count: 110, yMin: 1800, yRange: 1200, spread: 42000, sizeBase: 1000, aspectY: 0.50, windMult: 1.6 },
+            { count: 80,  yMin: 4000, yRange: 2500, spread: 52000, sizeBase: 1500, aspectY: 0.25, windMult: 3.0 },
         ];
 
         for (const layer of layers) {
@@ -336,8 +336,10 @@ export class CloudsSystem {
             else if (c.wrapFade < 1) c.wrapFade = Math.min(1, c.wrapFade + wrapStep);
 
             if (c.wrapFade < 1) {
-                c.mesh.scaling.x = c.baseScaleX * c.wrapFade;
-                c.mesh.scaling.y = c.baseScaleY * c.wrapFade;
+                const t = c.wrapFade;
+                const eased = t * t * t * (t * (t * 6 - 15) + 10);
+                c.mesh.scaling.x = c.baseScaleX * eased;
+                c.mesh.scaling.y = c.baseScaleY * eased;
             } else if (c.mesh.scaling.x !== c.baseScaleX || c.mesh.scaling.y !== c.baseScaleY) {
                 c.mesh.scaling.x = c.baseScaleX;
                 c.mesh.scaling.y = c.baseScaleY;

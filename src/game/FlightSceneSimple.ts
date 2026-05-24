@@ -1396,6 +1396,7 @@ export class FlightSceneSimple extends Scene3D {
 
     private _applyCloudTint(elevation: number): void {
         this._cloudsSystem.applyCloudTint(elevation);
+        this._highCloudsSystem.applyTint(elevation);
     }
 
     private _buildHighClouds(scene: BABYLON.Scene): void {

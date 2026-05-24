@@ -17,9 +17,22 @@ import {
     HIGH_CLOUDS_DEFAULT_COLOR_B,
     HIGH_CLOUDS_DEFAULT_ALPHA,
     HIGH_CLOUDS_DEFAULT_REFLECT,
+    CLOUD_DAY_COLOR_R,
+    CLOUD_DAY_COLOR_G,
+    CLOUD_DAY_COLOR_B,
+    CLOUD_SUNSET_COLOR_R,
+    CLOUD_SUNSET_COLOR_G,
+    CLOUD_SUNSET_COLOR_B,
+    CLOUD_NIGHT_COLOR_R,
+    CLOUD_NIGHT_COLOR_G,
+    CLOUD_NIGHT_COLOR_B,
+    CLOUD_SUNSET_FADE_BAND_DEG,
+    CLOUD_NIGHT_FADE_BAND_DEG,
+    CLOUD_NIGHT_FADE_OFFSET_DEG,
 } from '../constants/index.js';
 
 const SUN_INTENSITY_EPSILON = 0.002;
+const TINT_EPSILON = 0.003;
 
 export class HighCloudsSystem {
     private readonly scene: any;
@@ -41,6 +54,10 @@ export class HighCloudsSystem {
     private _timeAccum = 0;
     private _lastAppliedSunIntensity = Number.NaN;
     private _sceneRef: BABYLON.Scene | null = null;
+    private _autoTintEnabled = true;
+    private _lastTintR = Number.NaN;
+    private _lastTintG = Number.NaN;
+    private _lastTintB = Number.NaN;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -225,10 +242,41 @@ export class HighCloudsSystem {
     setReflect(value: number): void { this._reflect = clamp01(value); }
     setColor(r: number, g: number, b: number): void {
         this._color.set(clamp01(r), clamp01(g), clamp01(b));
+        this._autoTintEnabled = false;
+        this._lastTintR = Number.NaN;
     }
     setColorHex(hex: string): void {
         const rgb = hexToRgb(hex);
         if (rgb) this.setColor(rgb.r, rgb.g, rgb.b);
+    }
+    setAutoTint(enabled: boolean): void {
+        this._autoTintEnabled = enabled;
+        if (enabled) this._lastTintR = Number.NaN;
+    }
+
+    applyTint(elevation: number): void {
+        if (!this._autoTintEnabled) return;
+        const sunsetT = 1.0 - Math.max(0, Math.min(1, elevation / CLOUD_SUNSET_FADE_BAND_DEG));
+        const nightT  = Math.max(0, Math.min(1, (CLOUD_NIGHT_FADE_OFFSET_DEG - elevation) / CLOUD_NIGHT_FADE_BAND_DEG));
+
+        const dayR = CLOUD_DAY_COLOR_R + (CLOUD_SUNSET_COLOR_R - CLOUD_DAY_COLOR_R) * sunsetT;
+        const dayG = CLOUD_DAY_COLOR_G + (CLOUD_SUNSET_COLOR_G - CLOUD_DAY_COLOR_G) * sunsetT;
+        const dayB = CLOUD_DAY_COLOR_B + (CLOUD_SUNSET_COLOR_B - CLOUD_DAY_COLOR_B) * sunsetT;
+
+        const r = dayR + (CLOUD_NIGHT_COLOR_R - dayR) * nightT;
+        const g = dayG + (CLOUD_NIGHT_COLOR_G - dayG) * nightT;
+        const b = dayB + (CLOUD_NIGHT_COLOR_B - dayB) * nightT;
+
+        if (Number.isFinite(this._lastTintR)
+            && Math.abs(r - this._lastTintR) < TINT_EPSILON
+            && Math.abs(g - this._lastTintG) < TINT_EPSILON
+            && Math.abs(b - this._lastTintB) < TINT_EPSILON) {
+            return;
+        }
+        this._lastTintR = r;
+        this._lastTintG = g;
+        this._lastTintB = b;
+        this._color.set(r, g, b);
     }
 
     isEnabled(): boolean { return this._enabled; }
