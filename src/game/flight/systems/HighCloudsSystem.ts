@@ -8,6 +8,8 @@ import {
     HIGH_CLOUDS_ALPHA_INDEX,
     HIGH_CLOUDS_NOISE_UV_SCALE,
     HIGH_CLOUDS_SHADOW_SAMPLE_MIN_SUN_Y,
+    HIGH_CLOUDS_EDGE_FADE_START_FRAC,
+    HIGH_CLOUDS_EDGE_FADE_END_FRAC,
     HIGH_CLOUDS_DEFAULT_ENABLED,
     HIGH_CLOUDS_DEFAULT_COVER,
     HIGH_CLOUDS_DEFAULT_SPEED,
@@ -119,6 +121,7 @@ export class HighCloudsSystem {
                 uniforms: [
                     'world', 'worldViewProjection',
                     'time', 'cover', 'speed', 'scale', 'noiseUvScale', 'alpha', 'reflectAmount',
+                    'edgeFadeStart', 'edgeFadeEnd',
                     'cloudColor', 'sunDir', 'sunColor', 'cameraPos', 'horizonColor',
                 ],
             },
@@ -159,6 +162,9 @@ export class HighCloudsSystem {
         this._material.setFloat('noiseUvScale', HIGH_CLOUDS_NOISE_UV_SCALE);
         this._material.setFloat('alpha', this._alpha);
         this._material.setFloat('reflectAmount', this._reflect);
+        const halfSize = HIGH_CLOUDS_PLANE_SIZE_M * 0.5;
+        this._material.setFloat('edgeFadeStart', halfSize * HIGH_CLOUDS_EDGE_FADE_START_FRAC);
+        this._material.setFloat('edgeFadeEnd', halfSize * HIGH_CLOUDS_EDGE_FADE_END_FRAC);
         this._material.setColor3('cloudColor', this._color);
         this._material.setVector3('sunDir', sunDir);
         this._material.setColor3('sunColor', sunColor);

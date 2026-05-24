@@ -11,6 +11,8 @@ uniform float scale;
 uniform float noiseUvScale;
 uniform float alpha;
 uniform float reflectAmount;
+uniform float edgeFadeStart;
+uniform float edgeFadeEnd;
 uniform vec3  cloudColor;
 uniform vec3  sunDir;
 uniform vec3  sunColor;
@@ -56,10 +58,16 @@ void main(void) {
     float dl = smoothstep(-0.2 + 0.4 * cover, 0.6, cl);
     if (dl < 0.005) discard;
 
+    float distXZ = length(vWorldPos.xz - cameraPos.xz);
+    float edgeFade = 1.0 - smoothstep(edgeFadeStart, edgeFadeEnd, distXZ);
+    if (edgeFade <= 0.001) discard;
+
     vec3 viewDir = normalize(vWorldPos - cameraPos);
 
-    float horizonFade = 1.0 - clamp(abs(viewDir.y) * 1.4, 0.0, 1.0);
+    float vAbsY = abs(viewDir.y);
+    float horizonFade = 1.0 - clamp(vAbsY * 1.4, 0.0, 1.0);
     horizonFade = horizonFade * horizonFade;
+    float horizonAlphaFade = smoothstep(0.02, 0.18, vAbsY);
 
     vec3 cloudCol = mix(cloudColor, vec3(1.0), reflectAmount);
     float sunAlt  = clamp(-sunDir.y * 1.5 + 0.25, 0.0, 1.0);
@@ -69,9 +77,9 @@ void main(void) {
     cloudCol += 0.35 * sunColor * pow(sun, 16.0);
     cloudCol += 0.18 * sunColor * pow(sun, 4.0) * sunAlt;
 
-    cloudCol = mix(cloudCol, horizonColor, horizonFade * 0.55);
+    cloudCol = mix(cloudCol, horizonColor, horizonFade * 0.65);
 
-    float finalAlpha = dl * alpha * (0.4 + 0.6 * clamp(abs(viewDir.y) * 2.5, 0.0, 1.0));
+    float finalAlpha = dl * alpha * horizonAlphaFade * edgeFade;
 
     gl_FragColor = vec4(cloudCol, finalAlpha);
 }
