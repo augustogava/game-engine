@@ -25,7 +25,6 @@ import {
     CLOUD_NEAR_FADE_NEAR_M,
     CLOUD_NEAR_FADE_FAR_M,
     CLOUD_WRAP_FADE_S,
-    CLOUD_WRAP_HARD_MAX_MULT,
     OVERCAST_TEXTURE_SIZE,
     OVERCAST_TEXTURE_TILES,
     OVERCAST_NOISE_FREQ,
@@ -310,10 +309,6 @@ export class CloudsSystem {
         const camX = cam ? cam.globalPosition.x : px;
         const camY = cam ? cam.globalPosition.y : 0;
         const camZ = cam ? cam.globalPosition.z : pz;
-        const camFwdRay = cam ? cam.getForwardRay() : null;
-        const camFwdX = camFwdRay ? camFwdRay.direction.x : 0;
-        const camFwdZ = camFwdRay ? camFwdRay.direction.z : 0;
-        const camFwdValid = !!camFwdRay && (camFwdX !== 0 || camFwdZ !== 0);
         const fadeNear = CLOUD_NEAR_FADE_NEAR_M;
         const fadeFar  = CLOUD_NEAR_FADE_FAR_M;
         const wrapStep = dt / CLOUD_WRAP_FADE_S;
@@ -322,30 +317,19 @@ export class CloudsSystem {
             c.mesh.position.x += baseVx * c.windMult * dtClamp;
             c.mesh.position.z += baseVz * c.windMult * dtClamp;
 
-            const half = c.spread * 0.5;
-            const hardMax = c.spread * CLOUD_WRAP_HARD_MAX_MULT;
             const dx = c.mesh.position.x - px;
             const dz = c.mesh.position.z - pz;
 
-            let wdx = 0;
-            let wdz = 0;
-            if (dx >  half) wdx = -c.spread;
-            else if (dx < -half) wdx = +c.spread;
-            if (dz >  half) wdz = -c.spread;
-            else if (dz < -half) wdz = +c.spread;
+            const periodsX = Math.round(dx / c.spread);
+            const periodsZ = Math.round(dz / c.spread);
+            const wdx = -periodsX * c.spread;
+            const wdz = -periodsZ * c.spread;
 
             let wrapped = false;
             if (wdx !== 0 || wdz !== 0) {
-                const destFromCamX = (c.mesh.position.x + wdx) - camX;
-                const destFromCamZ = (c.mesh.position.z + wdz) - camZ;
-                const destBehind = !camFwdValid
-                    || (destFromCamX * camFwdX + destFromCamZ * camFwdZ) < 0;
-                const tooFar = Math.abs(dx) > hardMax || Math.abs(dz) > hardMax;
-                if (destBehind || tooFar) {
-                    c.mesh.position.x += wdx;
-                    c.mesh.position.z += wdz;
-                    wrapped = true;
-                }
+                c.mesh.position.x += wdx;
+                c.mesh.position.z += wdz;
+                wrapped = true;
             }
 
             if (wrapped) c.wrapFade = 0;

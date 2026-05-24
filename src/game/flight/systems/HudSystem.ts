@@ -496,6 +496,13 @@ export class HudSystem {
             s.cloudDensity = (document.getElementById('gfx-cloud-density') as HTMLSelectElement)?.value || 'medium';
             s.overcast = (document.getElementById('gfx-overcast') as HTMLInputElement)?.checked ?? false;
             s.milkyway = (document.getElementById('gfx-milkyway') as HTMLInputElement)?.checked ?? false;
+            s.highClouds = (document.getElementById('gfx-highclouds') as HTMLInputElement)?.checked ?? true;
+            s.highCloudsCover = parseInt((document.getElementById('gfx-highclouds-cover') as HTMLInputElement)?.value || '55') / 100;
+            s.highCloudsSpeed = parseInt((document.getElementById('gfx-highclouds-speed') as HTMLInputElement)?.value || '12') / 100;
+            s.highCloudsScale = parseInt((document.getElementById('gfx-highclouds-scale') as HTMLInputElement)?.value || '170') / 100;
+            s.highCloudsAlpha = parseInt((document.getElementById('gfx-highclouds-alpha') as HTMLInputElement)?.value || '85') / 100;
+            s.highCloudsReflect = parseInt((document.getElementById('gfx-highclouds-reflect') as HTMLInputElement)?.value || '35') / 100;
+            s.highCloudsColor = (document.getElementById('gfx-highclouds-color') as HTMLInputElement)?.value || '#f3f1e7';
             s.hdrEnv = (document.getElementById('gfx-hdr-env') as HTMLSelectElement)?.value || 'auto';
             s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
             s.tileShadows      = this.scene._premium.tileShadows;
@@ -617,6 +624,53 @@ export class HudSystem {
                     if (milkywayEl) {
                         this.scene._setMilkyWay(scene, milkywayEl.checked);
                     }
+
+                    const highCloudsSys = this.scene.getHighCloudsSystem?.();
+                    if (highCloudsSys) {
+                        const hcEnableEl = document.getElementById('gfx-highclouds') as HTMLInputElement | null;
+                        const hcCoverEl = document.getElementById('gfx-highclouds-cover') as HTMLInputElement | null;
+                        const hcCoverLbl = document.getElementById('gfx-highclouds-cover-val');
+                        const hcSpeedEl = document.getElementById('gfx-highclouds-speed') as HTMLInputElement | null;
+                        const hcSpeedLbl = document.getElementById('gfx-highclouds-speed-val');
+                        const hcScaleEl = document.getElementById('gfx-highclouds-scale') as HTMLInputElement | null;
+                        const hcScaleLbl = document.getElementById('gfx-highclouds-scale-val');
+                        const hcAlphaEl = document.getElementById('gfx-highclouds-alpha') as HTMLInputElement | null;
+                        const hcAlphaLbl = document.getElementById('gfx-highclouds-alpha-val');
+                        const hcReflectEl = document.getElementById('gfx-highclouds-reflect') as HTMLInputElement | null;
+                        const hcReflectLbl = document.getElementById('gfx-highclouds-reflect-val');
+                        const hcColorEl = document.getElementById('gfx-highclouds-color') as HTMLInputElement | null;
+                        const hcColorLbl = document.getElementById('gfx-highclouds-color-val');
+                        if (hcEnableEl) highCloudsSys.setEnabled(hcEnableEl.checked);
+                        if (hcCoverEl) {
+                            const v = parseInt(hcCoverEl.value) / 100;
+                            highCloudsSys.setCover(v);
+                            if (hcCoverLbl) hcCoverLbl.textContent = v.toFixed(2);
+                        }
+                        if (hcSpeedEl) {
+                            const v = parseInt(hcSpeedEl.value) / 100;
+                            highCloudsSys.setSpeed(v);
+                            if (hcSpeedLbl) hcSpeedLbl.textContent = v.toFixed(2);
+                        }
+                        if (hcScaleEl) {
+                            const v = parseInt(hcScaleEl.value) / 100;
+                            highCloudsSys.setScale(v);
+                            if (hcScaleLbl) hcScaleLbl.textContent = v.toFixed(2);
+                        }
+                        if (hcAlphaEl) {
+                            const v = parseInt(hcAlphaEl.value) / 100;
+                            highCloudsSys.setAlpha(v);
+                            if (hcAlphaLbl) hcAlphaLbl.textContent = v.toFixed(2);
+                        }
+                        if (hcReflectEl) {
+                            const v = parseInt(hcReflectEl.value) / 100;
+                            highCloudsSys.setReflect(v);
+                            if (hcReflectLbl) hcReflectLbl.textContent = v.toFixed(2);
+                        }
+                        if (hcColorEl) {
+                            highCloudsSys.setColorHex(hcColorEl.value);
+                            if (hcColorLbl) hcColorLbl.textContent = hcColorEl.value.toLowerCase();
+                        }
+                    }
                     const hdrEnvEl = document.getElementById('gfx-hdr-env') as HTMLSelectElement | null;
                     if (hdrEnvEl) {
                         try {
@@ -640,13 +694,17 @@ export class HudSystem {
 
         const presets: Record<string, Record<string, any>> = {
             low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, milkyway: false, hdrEnv: 'none',
-                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
+                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false,
+                      highClouds: false, highCloudsCover: 0.55, highCloudsSpeed: 0.12, highCloudsScale: 1.70, highCloudsAlpha: 0.85, highCloudsReflect: 0.20, highCloudsColor: '#f3f1e7' },
             medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'auto',
-                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
+                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false,
+                      highClouds: true,  highCloudsCover: 0.55, highCloudsSpeed: 0.12, highCloudsScale: 1.70, highCloudsAlpha: 0.85, highCloudsReflect: 0.30, highCloudsColor: '#f3f1e7' },
             high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'auto',
-                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
+                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false,
+                      highClouds: true,  highCloudsCover: 0.60, highCloudsSpeed: 0.12, highCloudsScale: 1.70, highCloudsAlpha: 0.85, highCloudsReflect: 0.35, highCloudsColor: '#f3f1e7' },
             ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,  hdrEnv: 'auto',
-                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
+                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false,
+                      highClouds: true,  highCloudsCover: 0.65, highCloudsSpeed: 0.12, highCloudsScale: 1.70, highCloudsAlpha: 0.90, highCloudsReflect: 0.40, highCloudsColor: '#f3f1e7' },
         };
 
         const applyPreset = (name: string) => {
@@ -663,6 +721,13 @@ export class HudSystem {
             setVal('gfx-cloud-density', p.cloudDensity);
             setCheck('gfx-overcast', p.overcast);
             setCheck('gfx-milkyway', p.milkyway);
+            setCheck('gfx-highclouds', p.highClouds);
+            if (p.highCloudsCover !== undefined) setVal('gfx-highclouds-cover', Math.round(p.highCloudsCover * 100));
+            if (p.highCloudsSpeed !== undefined) setVal('gfx-highclouds-speed', Math.round(p.highCloudsSpeed * 100));
+            if (p.highCloudsScale !== undefined) setVal('gfx-highclouds-scale', Math.round(p.highCloudsScale * 100));
+            if (p.highCloudsAlpha !== undefined) setVal('gfx-highclouds-alpha', Math.round(p.highCloudsAlpha * 100));
+            if (p.highCloudsReflect !== undefined) setVal('gfx-highclouds-reflect', Math.round(p.highCloudsReflect * 100));
+            if (p.highCloudsColor !== undefined) setVal('gfx-highclouds-color', p.highCloudsColor);
             setVal('gfx-hdr-env', p.hdrEnv);
             this.scene._premium.tileShadows      = !!p.tileShadows;
             this.scene._premium.aerialFog        = !!p.aerialFog;
@@ -700,6 +765,13 @@ export class HudSystem {
             if (cfg.cloudDensity !== undefined) setVal('gfx-cloud-density', cfg.cloudDensity);
             setCheck('gfx-overcast', cfg.overcast);
             setCheck('gfx-milkyway', cfg.milkyway);
+            setCheck('gfx-highclouds', cfg.highClouds);
+            if (cfg.highCloudsCover !== undefined) setVal('gfx-highclouds-cover', Math.round(cfg.highCloudsCover * 100));
+            if (cfg.highCloudsSpeed !== undefined) setVal('gfx-highclouds-speed', Math.round(cfg.highCloudsSpeed * 100));
+            if (cfg.highCloudsScale !== undefined) setVal('gfx-highclouds-scale', Math.round(cfg.highCloudsScale * 100));
+            if (cfg.highCloudsAlpha !== undefined) setVal('gfx-highclouds-alpha', Math.round(cfg.highCloudsAlpha * 100));
+            if (cfg.highCloudsReflect !== undefined) setVal('gfx-highclouds-reflect', Math.round(cfg.highCloudsReflect * 100));
+            if (cfg.highCloudsColor !== undefined) setVal('gfx-highclouds-color', cfg.highCloudsColor);
             if (cfg.hdrEnv !== undefined) setVal('gfx-hdr-env', cfg.hdrEnv);
             if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
 
@@ -748,7 +820,7 @@ export class HudSystem {
             }, 100);
         }
 
-        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-milkyway', 'gfx-hdr-env'];
+        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-milkyway', 'gfx-highclouds', 'gfx-highclouds-cover', 'gfx-highclouds-speed', 'gfx-highclouds-scale', 'gfx-highclouds-alpha', 'gfx-highclouds-reflect', 'gfx-highclouds-color', 'gfx-hdr-env'];
         for (const id of ids) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => applySettings());

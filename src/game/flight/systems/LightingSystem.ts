@@ -97,6 +97,10 @@ export class LightingSystem {
         this.scene = scene;
     }
 
+    getLastDayNightSunIntensity(): number {
+        return Number.isFinite(this._lastSunIntensity) ? this._lastSunIntensity : 3.0;
+    }
+
     setupLighting(scene: BABYLON.Scene): void {
         this.scene._hemiLight = new BABYLON.HemisphericLight('sky', new BABYLON.Vector3(0, 1, 0), scene);
         this.scene._hemiLight.intensity = 0.5;

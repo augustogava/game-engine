@@ -365,6 +365,7 @@ import { VegetationSystem } from './flight/systems/VegetationSystem.js';
 import { NavLightsSystem } from './flight/systems/NavLightsSystem.js';
 import { RunwayCollidersSystem } from './flight/systems/RunwayCollidersSystem.js';
 import { VolumetricCloudsSystem } from './flight/systems/VolumetricCloudsSystem.js';
+import { HighCloudsSystem } from './flight/systems/HighCloudsSystem.js';
 import { CameraSystem } from './flight/systems/CameraSystem.js';
 import { PostProcessingSystem } from './flight/systems/PostProcessingSystem.js';
 import { LightingSystem } from './flight/systems/LightingSystem.js';
@@ -392,6 +393,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _navLightsSystem = new NavLightsSystem(this);
     /** @internal */ private readonly _runwayCollidersSystem = new RunwayCollidersSystem(this);
     /** @internal */ private readonly _volumetricCloudsSystem = new VolumetricCloudsSystem(this);
+    /** @internal */ private readonly _highCloudsSystem = new HighCloudsSystem(this);
     /** @internal */ private readonly _cameraSystem = new CameraSystem(this);
     /** @internal */ private readonly _postProcessingSystem = new PostProcessingSystem(this);
     /** @internal */ private readonly _lightingSystem = new LightingSystem(this);
@@ -964,6 +966,7 @@ export class FlightSceneSimple extends Scene3D {
         this._setupLighting(scene);
         this._buildSkybox(scene);
         this._buildClouds(scene);
+        this._buildHighClouds(scene);
         this._buildGround(scene);
         this._buildPlane(scene);
         this._buildCamera(scene);
@@ -976,7 +979,6 @@ export class FlightSceneSimple extends Scene3D {
             scene.fogDensity = 0.0000025;
             this._fogColorBase.copyFrom(scene.fogColor);
             this._fogDensityBase = scene.fogDensity;
-            this._buildWater(scene);
         }
 
     }
@@ -988,7 +990,6 @@ export class FlightSceneSimple extends Scene3D {
         if (this._premium.tileFade) this._updateTileFade(dt);
         this._airportOverlaysSystem.update(dt);
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
-        if (this._premium.waterTilesRefl) this._updateWaterWind(dt);
         if (this._premium.vegetation) this._updateVegetation();
         if (this._crashed) return;
 
@@ -1011,8 +1012,13 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         const physicsActive = !this._paused && !this._replayActive;
+        const TIME_SCALE_MIN = 0.05;
+        const TIME_SCALE_MAX = 8;
+        const effectiveTimeScale = physicsActive
+            ? Math.max(TIME_SCALE_MIN, Math.min(TIME_SCALE_MAX, this._timeScale))
+            : 0;
+        const scaledDt = dt * effectiveTimeScale;
         if (physicsActive) {
-            const scaledDt = dt * Math.max(0.05, Math.min(8, this._timeScale));
             this.physicsAccumulator += scaledDt;
             const maxSteps = 8;
             let steps = 0;
@@ -1024,6 +1030,9 @@ export class FlightSceneSimple extends Scene3D {
             if (this.physicsAccumulator > this.FIXED_DT * maxSteps) {
                 this.physicsAccumulator = 0;
             }
+        }
+        if (Number.isFinite(dt) && dt > 0) {
+            this._simTimeOffsetMs += (scaledDt - dt) * 1000;
         }
 
         if (physicsActive && this.planeRoot && this.planeRoot.rotationQuaternion) {
@@ -1052,6 +1061,7 @@ export class FlightSceneSimple extends Scene3D {
         this._updateTurbulence(dt, aglForTurb);
         this._updateNavLights(dt);
         this._updateClouds(dt);
+        this._updateHighClouds(dt);
         this._updatePropellerAnim();
         this._updateControlSurfaceAnim();
         this._updateGearState();
@@ -1386,6 +1396,18 @@ export class FlightSceneSimple extends Scene3D {
 
     private _applyCloudTint(elevation: number): void {
         this._cloudsSystem.applyCloudTint(elevation);
+    }
+
+    private _buildHighClouds(scene: BABYLON.Scene): void {
+        void this._highCloudsSystem.build(scene);
+    }
+
+    private _updateHighClouds(dt: number): void {
+        this._highCloudsSystem.update(dt);
+    }
+
+    /** @internal */ getHighCloudsSystem(): HighCloudsSystem {
+        return this._highCloudsSystem;
     }
 
     // ── Ground ────────────────────────────────────────────────────────────────

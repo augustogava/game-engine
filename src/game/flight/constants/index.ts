@@ -4,6 +4,7 @@ export * from './autopilotConstants.js';
 export * from './buildConstants.js';
 export * from './cameraConstants.js';
 export * from './cloudConstants.js';
+export * from './highCloudsConstants.js';
 export * from './cockpitConstants.js';
 export * from './gpwsConstants.js';
 export * from './hudNavConstants.js';
