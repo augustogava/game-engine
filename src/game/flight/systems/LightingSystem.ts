@@ -660,7 +660,7 @@ export class LightingSystem {
         this.scene._skyMaterial.mieDirectionalG = 0.8;
         this.scene._skyMaterial.luminance = 1.0;
 
-        this.scene._skyboxMesh = BABYLON.MeshBuilder.CreateBox('skyBox', { size: 10_000_000 }, scene);
+        this.scene._skyboxMesh = BABYLON.MeshBuilder.CreateBox('skyBox', { size: HDR_SKYBOX_SIZE }, scene);
         this.scene._skyboxMesh.material = this.scene._skyMaterial;
         this.scene._skyboxMesh.infiniteDistance = true;
         this.scene._skyboxMesh.isPickable = false;
