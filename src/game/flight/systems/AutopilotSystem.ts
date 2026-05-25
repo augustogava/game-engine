@@ -7,11 +7,13 @@ import {
     AP_HDG_BANK_GAIN,
     AP_HDG_ROLL_RATE_GAIN,
     AP_ALT_PITCH_MAX,
-    AP_ALT_PITCH_GAIN,
-    AP_ALT_VS_DAMP_GAIN,
     AP_VS_PITCH_MAX,
     AP_VS_PITCH_GAIN,
     AP_VS_DEFAULT_FPM,
+    AP_PITCH_RATE_DAMP_GAIN,
+    AP_PITCH_RATE_MAX_RAD_PER_S,
+    AP_ALT_TO_VS_GAIN_FPM_PER_FT,
+    AP_ALT_MAX_VS_FPM,
     AP_NAV_MAX_INTERCEPT_DEG,
     AP_NAV_XTE_DEG_PER_NM,
     AP_APR_GLIDESLOPE_DEG,
@@ -116,6 +118,20 @@ export class AutopilotSystem {
             this.scene.surfaces[1].controlInput = -rollCmd;
         }
 
+        const curPitchSin = Math.max(-1, Math.min(1, fwd.y));
+        const curPitchRad = Math.asin(curPitchSin);
+        const lastPitchRad = this.scene._autopilotLastPitchRad;
+        let pitchRateRadPerS = 0;
+        if (Number.isFinite(lastPitchRad)) {
+            const raw = (curPitchRad - lastPitchRad) / stepDt;
+            pitchRateRadPerS = Math.max(-AP_PITCH_RATE_MAX_RAD_PER_S, Math.min(AP_PITCH_RATE_MAX_RAD_PER_S, raw));
+        }
+        this.scene._autopilotLastPitchRad = curPitchRad;
+
+        const vsFpmNow = this.scene.velocity.y * 196.85;
+        let targetVsFpm: number | null = null;
+        let pitchMax = AP_VS_PITCH_MAX;
+
         if (this.scene._autopilotAprHold && this.scene.surfaces.length >= 3) {
             const target = this.apCurrentNavTarget();
             const here = this.apCurrentLatLon();
@@ -125,22 +141,23 @@ export class AutopilotSystem {
                 const glideAltFt = Math.max(AP_APR_MIN_ALT_FT, distFt * Math.tan(AP_APR_GLIDESLOPE_DEG * Math.PI / 180));
                 const altMslFt = Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y)) * 3.28084;
                 const errFt = glideAltFt - altMslFt;
-                const vsFpm = this.scene.velocity.y * 196.85;
-                const pitchCmd = Math.max(-AP_ALT_PITCH_MAX, Math.min(AP_ALT_PITCH_MAX,
-                    errFt * AP_ALT_PITCH_GAIN - vsFpm * AP_ALT_VS_DAMP_GAIN));
-                this.scene.surfaces[2].controlInput = -pitchCmd;
+                targetVsFpm = Math.max(-AP_ALT_MAX_VS_FPM, Math.min(AP_ALT_MAX_VS_FPM, errFt * AP_ALT_TO_VS_GAIN_FPM_PER_FT));
+                pitchMax = AP_ALT_PITCH_MAX;
             }
         } else if (this.scene._autopilotVsHold && this.scene.surfaces.length >= 3) {
-            const vsFpm = this.scene.velocity.y * 196.85;
-            const errFpm = this.scene._autopilotTargetVsFpm - vsFpm;
-            const pitchCmd = Math.max(-AP_VS_PITCH_MAX, Math.min(AP_VS_PITCH_MAX, errFpm * AP_VS_PITCH_GAIN));
-            this.scene.surfaces[2].controlInput = -pitchCmd;
+            targetVsFpm = this.scene._autopilotTargetVsFpm;
+            pitchMax = AP_VS_PITCH_MAX;
         } else if (this.scene._autopilotAltHold && this.scene.surfaces.length >= 3) {
             const altMslFt = Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y)) * 3.28084;
             const errFt = this.scene._autopilotTargetAltFt - altMslFt;
-            const vsFpm = this.scene.velocity.y * 196.85;
-            const pitchCmd = Math.max(-AP_ALT_PITCH_MAX, Math.min(AP_ALT_PITCH_MAX,
-                errFt * AP_ALT_PITCH_GAIN - vsFpm * AP_ALT_VS_DAMP_GAIN));
+            targetVsFpm = Math.max(-AP_ALT_MAX_VS_FPM, Math.min(AP_ALT_MAX_VS_FPM, errFt * AP_ALT_TO_VS_GAIN_FPM_PER_FT));
+            pitchMax = AP_ALT_PITCH_MAX;
+        }
+
+        if (targetVsFpm !== null) {
+            const errFpm = targetVsFpm - vsFpmNow;
+            const pitchCmd = Math.max(-pitchMax, Math.min(pitchMax,
+                errFpm * AP_VS_PITCH_GAIN - pitchRateRadPerS * AP_PITCH_RATE_DAMP_GAIN));
             this.scene.surfaces[2].controlInput = -pitchCmd;
         }
 
@@ -190,6 +207,7 @@ export class AutopilotSystem {
         if (newState) {
             this.scene._autopilotVsHold = false;
             this.scene._autopilotAprHold = false;
+            this.scene._autopilotLastPitchRad = Number.NaN;
             if (this.scene.planeRoot) {
                 this.scene._autopilotTargetAltFt = Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y)) * 3.28084;
             }
@@ -202,6 +220,7 @@ export class AutopilotSystem {
         if (newState) {
             this.scene._autopilotAltHold = false;
             this.scene._autopilotAprHold = false;
+            this.scene._autopilotLastPitchRad = Number.NaN;
             const vsFpm = this.scene.velocity.y * 196.85;
             this.scene._autopilotTargetVsFpm = Math.round(vsFpm / 100) * 100;
             if (Math.abs(this.scene._autopilotTargetVsFpm) < 50) {
@@ -235,6 +254,7 @@ export class AutopilotSystem {
             this.scene._autopilotAltHold = false;
             this.scene._autopilotVsHold = false;
             this.scene._autopilotNavHold = false;
+            this.scene._autopilotLastPitchRad = Number.NaN;
         }
     }
 

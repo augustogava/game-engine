@@ -689,6 +689,7 @@ export class FlightSceneSimple extends Scene3D {
     private _autopilotTargetHdgDeg: number = 0;
     private _autopilotTargetAltFt: number = 0;
     private _autopilotTargetVsFpm:  number = 0;
+    private _autopilotLastPitchRad: number = Number.NaN;
     private _apEditingField: 'hdg' | 'alt' | 'vs' | null = null;
     private _apKeyLockMaster = false;
     private _apKeyLockHdg = false;
