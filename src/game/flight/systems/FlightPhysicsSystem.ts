@@ -215,7 +215,7 @@ export class FlightPhysicsSystem {
         const orientation = this.scene.planeRoot.rotationQuaternion!;
         const pos         = this.scene.planeRoot.position;
 
-        const altitude = pos.y;
+        const altitude = (this.scene.refAlt ?? 0) + pos.y;
         const airDensity = getAirDensity(altitude, this.scene._isaDeltaTempK);
 
         const rotMatrix = this.scene._tmpRotMatrix;
@@ -590,6 +590,18 @@ export class FlightPhysicsSystem {
             totalForce.addInPlace(gearForce);
             totalTorque.addInPlace(gearTorque);
             totalTorque.y += asymYawTorqueBody;
+
+            if (this.scene.isOnGround && this.scene.surfaces.length >= 4) {
+                const groundSpeedSq = vel.x * vel.x + vel.z * vel.z;
+                if (groundSpeedSq > 0.25) {
+                    const groundSpeed = Math.sqrt(groundSpeedSq);
+                    const rudderInput = this.scene.surfaces[3].controlInput;
+                    const NOSEWHEEL_GAIN = 600;
+                    const NOSEWHEEL_MAX_SPEED_MS = 30;
+                    const speedFactor = Math.max(0, 1 - groundSpeed / NOSEWHEEL_MAX_SPEED_MS);
+                    totalTorque.y += -rudderInput * NOSEWHEEL_GAIN * speedFactor;
+                }
+            }
 
             return { force: totalForce, torque: totalTorque };
         };

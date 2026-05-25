@@ -351,10 +351,18 @@ export class CloudsSystem {
                 const ddz = c.mesh.position.z - camZ;
                 const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
                 const nearFade = Math.max(0, Math.min(1, (dist - fadeNear) / (fadeFar - fadeNear)));
-                if (!(c.mesh instanceof BABYLON.InstancedMesh)) {
-                    c.mesh.visibility = Math.min(nearFade, c.wrapFade);
+                const effectiveFade = Math.min(nearFade, c.wrapFade);
+                if (c.mesh instanceof BABYLON.InstancedMesh) {
+                    c.mesh.scaling.x = c.baseScaleX * effectiveFade;
+                    c.mesh.scaling.y = c.baseScaleY * effectiveFade;
+                    const shouldEnable = effectiveFade > 0.01;
+                    if (c.mesh.isEnabled() !== shouldEnable) c.mesh.setEnabled(shouldEnable);
+                } else {
+                    c.mesh.visibility = effectiveFade;
                 }
-            } else if (!(c.mesh instanceof BABYLON.InstancedMesh) && c.mesh.visibility !== 1) {
+            } else if (c.mesh instanceof BABYLON.InstancedMesh) {
+                if (c.mesh.isEnabled() !== true) c.mesh.setEnabled(true);
+            } else if (c.mesh.visibility !== 1) {
                 c.mesh.visibility = 1;
             }
         }

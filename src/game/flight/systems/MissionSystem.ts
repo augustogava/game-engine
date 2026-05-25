@@ -163,9 +163,28 @@ export class MissionSystem {
             return;
         }
         const dist = this.scene._haversineNm(lat, lon, wpLat, wpLon);
+        let passed = false;
+        let reason = '';
         if (dist <= WAYPOINT_REACH_NM) {
+            passed = true;
+            reason = `dist=${dist.toFixed(3)}nm <= reach=${WAYPOINT_REACH_NM}nm`;
+        } else {
+            const groundSpeedMs = Number(this.scene.groundSpeed) || 0;
+            const trackVx = this.scene.velocity?.x ?? 0;
+            const trackVz = this.scene.velocity?.z ?? 0;
+            if (groundSpeedMs > 5 && (trackVx !== 0 || trackVz !== 0)) {
+                const trackTrueDeg = ((Math.atan2(trackVx, -trackVz) * 180) / Math.PI + 360) % 360;
+                const bearingToWpDeg = this.computeBearingDeg(lat, lon, wpLat, wpLon);
+                const relBearing = Math.abs(((bearingToWpDeg - trackTrueDeg + 540) % 360) - 180);
+                if (relBearing > 90 && dist < WAYPOINT_REACH_NM * 8) {
+                    passed = true;
+                    reason = `abeam relBrg=${relBearing.toFixed(1)}deg dist=${dist.toFixed(3)}nm`;
+                }
+            }
+        }
+        if (passed) {
             const reachedNum = idx + 1;
-            console.log(`[Mission] WP ${reachedNum}/${total} reached: order=${wp.order_index} name="${wp.name ?? 'unnamed'}" dist=${dist.toFixed(3)}nm reach=${WAYPOINT_REACH_NM}nm`);
+            console.log(`[Mission] WP ${reachedNum}/${total} reached: order=${wp.order_index} name="${wp.name ?? 'unnamed'}" ${reason}`);
             this.scene._missionCurrentWpIndex++;
             if (this.scene._missionCurrentWpIndex >= total) {
                 if (this.scene._activeUserMissionId) {

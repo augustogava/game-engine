@@ -80,6 +80,7 @@ export interface AircraftConfig {
     spoiler_drag_cd?: number | null;
     spoiler_lift_loss?: number | null;
     ground_spoilers_auto?: boolean | null;
+    gear_retractable?: boolean | null;
 }
 
 export const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
@@ -113,4 +114,5 @@ export const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
         { x: 3, y: -1.5, z: -0.5 },
     ],
     fuselage_side_area: 80, fuselage_cn_beta: -0.1, gear_drag_cd: 0,
+    gear_retractable: true,
 };

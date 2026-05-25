@@ -108,6 +108,13 @@ const DICTIONARIES: Record<Language, Dict> = {
         'checklist.approach.gear': 'Trem baixado',
         'checklist.landing.flare': 'Arredondar (flare)',
 
+        'checklist.takeoff.atc': 'Autorizado para decolagem',
+        'checklist.climb.atc': 'Subindo para altitude de cruzeiro',
+        'checklist.cruise.atc': 'Manter altitude de cruzeiro',
+        'checklist.descent.atc': 'Iniciando descida',
+        'checklist.approach.atc': 'Estabelecido na aproximacao',
+        'checklist.landing.atc': 'Autorizado para pouso',
+
         'replay.recording': 'Gravando replay',
         'replay.playing': 'Reproduzindo replay',
         'replay.empty': 'Sem replay disponivel',
@@ -222,6 +229,13 @@ const DICTIONARIES: Record<Language, Dict> = {
         'checklist.approach.flaps': 'Flaps progressively',
         'checklist.approach.gear': 'Gear down',
         'checklist.landing.flare': 'Flare',
+
+        'checklist.takeoff.atc': 'Cleared for takeoff',
+        'checklist.climb.atc': 'Climbing to cruise altitude',
+        'checklist.cruise.atc': 'Maintaining cruise altitude',
+        'checklist.descent.atc': 'Beginning descent',
+        'checklist.approach.atc': 'Established on approach',
+        'checklist.landing.atc': 'Cleared to land',
 
         'replay.recording': 'Recording replay',
         'replay.playing': 'Playing replay',

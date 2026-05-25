@@ -123,7 +123,13 @@ export class VolumetricCloudsSystem {
             } catch (_) { /* ignore */ }
             this.scene._volumetricCloudsPost = null;
             for (const c of this.scene.cloudInstances) c.mesh.isVisible = true;
-            console.debug('[VolumetricClouds] PostProcess disposed; sprite clouds restored');
+            try {
+                if (cam) scene.disableDepthRenderer(cam);
+                else scene.disableDepthRenderer();
+            } catch (depthErr) {
+                console.warn('[VolumetricClouds] disableDepthRenderer failed:', depthErr);
+            }
+            console.debug('[VolumetricClouds] PostProcess + DepthRenderer disposed; sprite clouds restored');
         }
     }
 }

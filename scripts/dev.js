@@ -5,8 +5,10 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 
 const PORT = 3002;
+const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 function loadEnv() {
     const envPath = path.join(__dirname, '..', '.env');
@@ -21,6 +23,10 @@ function loadEnv() {
 }
 const env = loadEnv();
 const DATABASE_URL = process.env.DATABASE_URL || env.DATABASE_URL || '';
+const SECRET_KEY = process.env.SECRET_KEY || env.SECRET_KEY || '';
+if (!SECRET_KEY) {
+    console.warn('[DEV] SECRET_KEY not configured: WebSocket JWT verification will reject all connections');
+}
 
 // ── MySQL pool ───────────────────────────────────────────────────────────────
 let dbPool = null;
@@ -185,7 +191,14 @@ ctx2D.then(async (c2D) => {
 
         // Static files from project root
         let filePath = req.url === '/' ? '/index.html' : req.url;
-        const fullPath = path.join(__dirname, '..', decodeURIComponent(filePath.split('?')[0]));
+        const decoded = decodeURIComponent(filePath.split('?')[0]);
+        const fullPath = path.resolve(PROJECT_ROOT, '.' + decoded);
+        if (fullPath !== PROJECT_ROOT && !fullPath.startsWith(PROJECT_ROOT + path.sep)) {
+            console.warn(`[DEV] Path traversal attempt blocked: ${decoded}`);
+            res.writeHead(403);
+            res.end('Forbidden');
+            return;
+        }
 
         fs.readFile(fullPath, (err, data) => {
             if (err) {
@@ -235,8 +248,31 @@ ctx2D.then(async (c2D) => {
             try {
                 const msg = JSON.parse(raw);
 
-                if (msg.type === 'join' && msg.userId) {
-                    playerId = msg.userId;
+                if (msg.type === 'join') {
+                    if (!SECRET_KEY) {
+                        console.warn('[WS] Rejecting join: SECRET_KEY not configured');
+                        try { ws.close(4001, 'Server JWT not configured'); } catch (_) { /* ignore */ }
+                        return;
+                    }
+                    if (!msg.token || typeof msg.token !== 'string') {
+                        console.warn('[WS] Rejecting join: missing token');
+                        try { ws.close(4001, 'Authentication required'); } catch (_) { /* ignore */ }
+                        return;
+                    }
+                    let decodedToken;
+                    try {
+                        decodedToken = jwt.verify(msg.token, SECRET_KEY);
+                    } catch (err) {
+                        console.warn(`[WS] Rejecting join: invalid token: ${err.message}`);
+                        try { ws.close(4001, 'Invalid or expired token'); } catch (_) { /* ignore */ }
+                        return;
+                    }
+                    if (!decodedToken || decodedToken.id == null) {
+                        console.warn('[WS] Rejecting join: token missing id');
+                        try { ws.close(4001, 'Invalid token payload'); } catch (_) { /* ignore */ }
+                        return;
+                    }
+                    playerId = decodedToken.id;
                     players.set(playerId, { ws, state: null });
                     const onlineCount = players.size;
                     ws.send(JSON.stringify({ type: 'welcome', onlineCount }));

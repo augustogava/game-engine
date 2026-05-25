@@ -77,6 +77,21 @@ export class MultiplayerSystem {
                 this.scene.dbgMpStatus.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
                 this.scene.dbgMpStatus.style.color = connected ? '#40ffaa' : '#ff5555';
             }
+            if (!connected) {
+                try {
+                    for (const [id, remote] of this.scene.remotePlayers) {
+                        try { remote.labelTexture?.dispose(); } catch (_) { /* ignore */ }
+                        try { remote.labelPlane?.dispose(); } catch (_) { /* ignore */ }
+                        try { remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose()); } catch (_) { /* ignore */ }
+                        try { remote.root.dispose(); } catch (_) { /* ignore */ }
+                        try { remote.engineSound?.dispose(); } catch (_) { /* ignore */ }
+                        this.scene.remotePlayers.delete(id);
+                    }
+                    console.debug('[MP] Cleared remote players on disconnect');
+                } catch (err) {
+                    console.warn('[MP] Disconnect cleanup failed:', err);
+                }
+            }
         });
 
         if (onAuthFailure) this.scene.mpClient.onAuthFailure(onAuthFailure);
@@ -150,6 +165,12 @@ export class MultiplayerSystem {
             '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[]) => {
                 if (!meshes.length) return;
+                const stillActive = this.scene.remotePlayers.get(id) === remote && !root.isDisposed();
+                if (!stillActive) {
+                    console.debug(`[Remote] Discarding GLB for ${id}: entity no longer active`);
+                    try { meshes.forEach((m) => m.dispose()); } catch (_) { /* ignore */ }
+                    return;
+                }
                 const glbRoot = meshes[0];
                 const bb = glbRoot.getHierarchyBoundingVectors(true);
                 const center = bb.min.add(bb.max).scale(0.5);
@@ -177,6 +198,11 @@ export class MultiplayerSystem {
             },
             null,
             () => {
+                const stillActive = this.scene.remotePlayers.get(id) === remote && !root.isDisposed();
+                if (!stillActive) {
+                    console.debug(`[Remote] Skipping fallback for ${id}: entity no longer active`);
+                    return;
+                }
                 this.buildRemoteFallback(id, root, remote);
             },
         );

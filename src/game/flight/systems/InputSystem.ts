@@ -29,9 +29,32 @@ const CONTROL_SETTINGS_STORAGE_KEY = 'flight_controls_v1';
 
 export class InputSystem {
     private readonly scene: any;
+    private _touchCanvas: HTMLCanvasElement | null = null;
+    private _touchStartHandler: ((e: TouchEvent) => void) | null = null;
+    private _touchMoveHandler: ((e: TouchEvent) => void) | null = null;
+    private _touchEndHandler: ((e: TouchEvent) => void) | null = null;
+    private _touchCancelHandler: ((e: TouchEvent) => void) | null = null;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    dispose(): void {
+        try {
+            if (this._touchCanvas) {
+                if (this._touchStartHandler) this._touchCanvas.removeEventListener('touchstart', this._touchStartHandler);
+                if (this._touchMoveHandler) this._touchCanvas.removeEventListener('touchmove', this._touchMoveHandler);
+                if (this._touchEndHandler) this._touchCanvas.removeEventListener('touchend', this._touchEndHandler);
+                if (this._touchCancelHandler) this._touchCanvas.removeEventListener('touchcancel', this._touchCancelHandler);
+            }
+        } catch (err) {
+            console.warn('[InputSystem] touch listener removal failed:', err);
+        }
+        this._touchCanvas = null;
+        this._touchStartHandler = null;
+        this._touchMoveHandler = null;
+        this._touchEndHandler = null;
+        this._touchCancelHandler = null;
     }
 
     cockpitClick(freqHz?: number): void {
@@ -103,19 +126,19 @@ export class InputSystem {
     }
 
     toggleReplay(): void {
-        if (this.scene._replayActive) {
-            this.scene._replayActive = false;
-            this.scene._replayBuffer.stopPlayback();
-            console.log('[Replay] Stopped by user');
-        } else {
-            const ok = this.scene._replayBuffer.startPlayback(1.0);
-            if (ok) {
-                this.scene._replayActive = true;
-                console.log('[Replay] Started');
-            } else {
-                console.warn('[Replay] No data to play');
-            }
-        }
+        // if (this.scene._replayActive) {
+        //     this.scene._replayActive = false;
+        //     this.scene._replayBuffer.stopPlayback();
+        //     console.log('[Replay] Stopped by user');
+        // } else {
+        //     const ok = this.scene._replayBuffer.startPlayback(1.0);
+        //     if (ok) {
+        //         this.scene._replayActive = true;
+        //         console.log('[Replay] Started');
+        //     } else {
+        //         console.warn('[Replay] No data to play');
+        //     }
+        // }
     }
 
     initF12Screenshot(): void {
@@ -323,10 +346,9 @@ export class InputSystem {
             }
             if (!p('PageDown')) this.scene._trimKeyLockPgDn = false;
 
-            const isJetAc = this.scene.aircraftConfig.engine_type === ENGINE_TYPE_TURBOFAN
-                         || this.scene.aircraftConfig.engine_type === ENGINE_TYPE_TURBOJET;
+            const gearRetractable = this.scene.aircraftConfig.gear_retractable === true;
             const gearCode = bind('gearToggle');
-            if (isJetAc && ((p(gearCode) && !this.scene.gearKeyLockG) || gpEdges.gear)) {
+            if (gearRetractable && ((p(gearCode) && !this.scene.gearKeyLockG) || gpEdges.gear)) {
                 this.scene.gearKeyLockG = true;
                 this.scene._toggleGear();
                 this.scene._cockpitClick();
@@ -406,12 +428,19 @@ export class InputSystem {
             }
             if (!p(towerCode)) this.scene._towerCamKeyLock = false;
 
-            const replayCode = bind('replayToggle');
-            if (p(replayCode) && !this.scene._replayKeyLock) {
-                this.scene._replayKeyLock = true;
-                this.scene._toggleReplay();
+            // const replayCode = bind('replayToggle');
+            // if (p(replayCode) && !this.scene._replayKeyLock) {
+            //     this.scene._replayKeyLock = true;
+            //     this.scene._toggleReplay();
+            // }
+            // if (!p(replayCode)) this.scene._replayKeyLock = false;
+
+            const atCode = bind('autothrottleToggle');
+            if (p(atCode) && !this.scene._autothrottleKeyLock) {
+                this.scene._autothrottleKeyLock = true;
+                this.scene._toggleAutothrottle();
             }
-            if (!p(replayCode)) this.scene._replayKeyLock = false;
+            if (!p(atCode)) this.scene._autothrottleKeyLock = false;
         }
 
         if (this.scene._easyModeAssistEnabled()) {
@@ -458,7 +487,7 @@ export class InputSystem {
         if (!this.scene.isOnGround && this.scene.planeRoot) {
             const speedSq = this.scene.velocity.lengthSquared();
             if (speedSq > 1) {
-                const altitudeForQ = this.scene.planeRoot.position.y;
+                const altitudeForQ = (this.scene.refAlt ?? 0) + this.scene.planeRoot.position.y;
                 const airDensityHere = getAirDensity(altitudeForQ, this.scene._isaDeltaTempK);
                 const dynamicPressure = 0.5 * airDensityHere * speedSq;
                 const qRef = (this.scene.aircraftConfig.control_q_reference_pa != null && this.scene.aircraftConfig.control_q_reference_pa > 0)
@@ -471,6 +500,13 @@ export class InputSystem {
                     this.scene.surfaces[2].controlInput *= qScale;
                     this.scene.surfaces[3].controlInput *= qScale;
                 }
+            }
+            if (this.scene._failures?.hydraulicFailed === true && this.scene.surfaces.length >= 4) {
+                const hydraulicLossScale = 0.3;
+                this.scene.surfaces[0].controlInput *= hydraulicLossScale;
+                this.scene.surfaces[1].controlInput *= hydraulicLossScale;
+                this.scene.surfaces[2].controlInput *= hydraulicLossScale;
+                this.scene.surfaces[3].controlInput *= hydraulicLossScale;
             }
         }
 
@@ -668,7 +704,7 @@ export class InputSystem {
             this.scene._twoFingerFiredCamera = false;
         };
 
-        canvas.addEventListener('touchstart', (e: TouchEvent) => {
+        const canvasTouchStart = (e: TouchEvent) => {
             const free = collectFreeTouches(e.touches);
             if (free.length >= 2 && !this.scene._twoFingerActive) {
                 startTwoFinger(free);
@@ -691,9 +727,12 @@ export class InputSystem {
                 dzEl.style.borderColor = 'rgba(80,255,160,.4)';
                 e.preventDefault();
             }
-        }, { passive: false });
+        };
+        canvas.addEventListener('touchstart', canvasTouchStart, { passive: false });
+        this._touchCanvas = canvas;
+        this._touchStartHandler = canvasTouchStart;
 
-        canvas.addEventListener('touchmove', (e: TouchEvent) => {
+        const canvasTouchMove = (e: TouchEvent) => {
             if (this.scene._twoFingerActive && e.touches.length >= 2) {
                 const free = collectFreeTouches(e.touches);
                 if (free.length >= 2) {
@@ -753,7 +792,9 @@ export class InputSystem {
                 knob.style.top = `${50 + ny * 35}%`;
             }
             e.preventDefault();
-        }, { passive: false });
+        };
+        canvas.addEventListener('touchmove', canvasTouchMove, { passive: false });
+        this._touchMoveHandler = canvasTouchMove;
 
         const resetJoy = (e: TouchEvent) => {
             for (let i = 0; i < e.changedTouches.length; i++) {
@@ -772,6 +813,8 @@ export class InputSystem {
         };
         canvas.addEventListener('touchend', resetJoy);
         canvas.addEventListener('touchcancel', resetJoy);
+        this._touchEndHandler = resetJoy;
+        this._touchCancelHandler = resetJoy;
 
         throttleEl.addEventListener('touchstart', (e: TouchEvent) => {
             if (this.scene.throttleTouchId !== null) return;
@@ -816,6 +859,10 @@ export class InputSystem {
         if (gearBtn) {
             gearBtn.addEventListener('touchstart', (ev: TouchEvent) => {
                 ev.preventDefault();
+                if (this.scene.aircraftConfig?.gear_retractable !== true) {
+                    console.debug('[Touch] gear ignored: aircraft has fixed gear');
+                    return;
+                }
                 this.scene._toggleGear();
             }, { passive: false });
         } else {

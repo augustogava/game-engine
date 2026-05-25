@@ -29,7 +29,8 @@ export type ActionId =
     | 'mouseYokeToggle'
     | 'screenshot'
     | 'towerCamera'
-    | 'replayToggle';
+    | 'replayToggle'
+    | 'autothrottleToggle';
 
 export type KeyBindings = Record<ActionId, string>;
 
@@ -63,6 +64,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
     screenshot: 'F12',
     towerCamera: 'KeyT',
     replayToggle: 'KeyV',
+    autothrottleToggle: 'KeyH',
 };
 
 export const ACTION_LABELS: Record<ActionId, string> = {
@@ -95,6 +97,7 @@ export const ACTION_LABELS: Record<ActionId, string> = {
     screenshot: 'Screenshot',
     towerCamera: 'Tower Cam',
     replayToggle: 'Replay',
+    autothrottleToggle: 'Autothrottle',
 };
 
 type Listener = (bindings: KeyBindings) => void;

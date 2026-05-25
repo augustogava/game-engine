@@ -134,7 +134,9 @@ export class CameraSystem {
         if (!this.scene.planeRoot) return;
         const groundY = this.scene.tiles ? this.scene.terrainY : GROUND_Y;
         const lockedY = (Number.isFinite(groundY) && groundY > -1e8 ? groundY : GROUND_Y) + TOWER_CAMERA_HEIGHT_M;
-        this.scene._towerCameraPos.set(0, lockedY, 0);
+        const px = this.scene.planeRoot.position.x;
+        const pz = this.scene.planeRoot.position.z;
+        this.scene._towerCameraPos.set(px, lockedY, pz);
         this.scene._towerCameraSet = true;
     }
 }

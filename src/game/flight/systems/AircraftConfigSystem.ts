@@ -7,6 +7,7 @@ import {
     ENGINE_TYPE_PISTON,
     ENGINE_TYPE_TURBOPROP,
     ENGINE_TYPE_TURBOJET,
+    ENGINE_TYPE_TURBOFAN,
     ENGINE_TYPE_ELECTRIC,
     MACH_DRAG_RISE_COEF,
     JET_THRUST_MACH_LAPSE_COEF,
@@ -46,7 +47,12 @@ export class AircraftConfigSystem {
         if (cfg.mach_lapse_coef         == null) cfg.mach_lapse_coef         = JET_THRUST_MACH_LAPSE_COEF;
         if (cfg.mach_lapse_floor        == null) cfg.mach_lapse_floor        = JET_THRUST_MACH_MIN_FACTOR;
         if (cfg.transonic_cd0_factor    == null) cfg.transonic_cd0_factor    = 1.0;
+        if (cfg.gear_retractable        == null) {
+            cfg.gear_retractable = cfg.engine_type === ENGINE_TYPE_TURBOFAN
+                                || cfg.engine_type === ENGINE_TYPE_TURBOJET;
+        }
         this.scene.aircraftConfig = cfg;
+        this._updateTouchGearButtonVisibility(cfg.gear_retractable === true);
         this.scene.FLAP_STEPS = cfg.flap_steps_json || DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
         this.scene.baseZeroLiftAoA = cfg.base_zero_lift_aoa;
         this.scene.fuelRemaining = cfg.fuel_capacity_kg;
@@ -56,6 +62,17 @@ export class AircraftConfigSystem {
             this.scene._engineSound.setEngineType(this.mapEngineType(cfg.engine_type));
         } catch (err) {
             console.warn('[EngineSound] setEngineType failed:', err);
+        }
+    }
+
+    private _updateTouchGearButtonVisibility(retractable: boolean): void {
+        try {
+            const gearBtn = document.getElementById('touch-gear') as HTMLElement | null;
+            if (gearBtn) {
+                gearBtn.style.display = retractable ? '' : 'none';
+            }
+        } catch (err) {
+            console.warn('[AircraftConfig] touch gear visibility update failed:', err);
         }
     }
 

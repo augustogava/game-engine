@@ -83,10 +83,12 @@ vec3 worldRay(vec2 uv) {
     return normalize(wFar.xyz - wNear.xyz);
 }
 
-float linearSceneDistance(vec2 uv) {
+float linearSceneDistance(vec2 uv, vec3 rayDirW, vec3 camForwardW) {
     float d = texture2D(depthSampler, uv).r;
     if (d >= 0.999) return 1.0e8;
-    return d * farClipZ;
+    float viewZ = d * farClipZ;
+    float c = dot(rayDirW, camForwardW);
+    return viewZ / max(c, 0.001);
 }
 
 void main(void) {
@@ -105,7 +107,8 @@ void main(void) {
 
     if (tExit <= 0.0 || tEnter >= tExit) { gl_FragColor = sceneColor; return; }
 
-    float sceneDist = linearSceneDistance(vUV);
+    vec3 camForwardW = worldRay(vec2(0.5, 0.5));
+    float sceneDist = linearSceneDistance(vUV, rayDir, camForwardW);
     tExit = min(tExit, sceneDist);
     if (tEnter >= tExit) { gl_FragColor = sceneColor; return; }
 

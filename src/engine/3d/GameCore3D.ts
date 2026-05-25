@@ -19,6 +19,12 @@ export interface GameCore3DConfig {
     antialias?: boolean;
 }
 
+const PERF_BENCHMARK_DURATION_MS = 5000;
+const PERF_BENCHMARK_WARMUP_MS = 1500;
+const PERF_PRESET_LOW_FPS = 25;
+const PERF_PRESET_MED_FPS = 45;
+const PERF_DETECTED_PRESET_KEY = 'perf_detected_preset_v1';
+
 export class GameCore3D {
     readonly engine: any; // BABYLON.Engine
     readonly input: InputManager;
@@ -26,6 +32,11 @@ export class GameCore3D {
     private _scene3D: Scene3D | null = null;
     private _babylonScene: any | null = null; // BABYLON.Scene
     private _lastTime: number = 0;
+    private _renderPaused: boolean = false;
+    private _visibilityHandler: (() => void) | null = null;
+    private _perfStartedAt: number = 0;
+    private _perfSamples: number[] = [];
+    private _perfBenchmarkDone: boolean = false;
 
     // Public stats
     fps: number = 0;
@@ -50,13 +61,27 @@ export class GameCore3D {
         this.input = new InputManager(config.canvas);
 
         window.addEventListener('resize', () => this.engine.resize());
+
+        this._visibilityHandler = () => {
+            this._renderPaused = document.visibilityState === 'hidden';
+            if (this._renderPaused) {
+                console.debug('[GameCore3D] Tab hidden: pausing render loop');
+            } else {
+                this._lastTime = performance.now();
+                console.debug('[GameCore3D] Tab visible: resuming render loop');
+            }
+        };
+        try { document.addEventListener('visibilitychange', this._visibilityHandler); } catch (_) { /* ignore */ }
     }
 
     /**
      * Load a Scene3D, create the BabylonJS scene, and start the render loop.
      */
     start(scene: Scene3D): void {
-        // Dispose previous if any
+        if (this._scene3D) {
+            try { this._scene3D.onDispose(); } catch (err) { console.warn('[GameCore3D] previous scene onDispose failed:', err); }
+            this._scene3D = null;
+        }
         if (this._babylonScene) {
             this._babylonScene.dispose();
         }
@@ -69,14 +94,27 @@ export class GameCore3D {
         scene._init(babylonScene, this.input);
 
         this._lastTime = performance.now();
+        this._perfStartedAt = performance.now();
+        this._perfSamples = [];
+        this._perfBenchmarkDone = false;
 
         // BabylonJS render loop
         this.engine.runRenderLoop(() => {
+            if (this._renderPaused) return;
             const now = performance.now();
             const dt = Math.min((now - this._lastTime) / 1000, 0.1);
             this._lastTime = now;
 
             this.fps = Math.round(this.engine.getFps());
+
+            if (!this._perfBenchmarkDone && this._perfStartedAt > 0) {
+                const elapsed = now - this._perfStartedAt;
+                if (elapsed > PERF_BENCHMARK_WARMUP_MS && elapsed < PERF_BENCHMARK_DURATION_MS) {
+                    this._perfSamples.push(this.fps);
+                } else if (elapsed >= PERF_BENCHMARK_DURATION_MS) {
+                    this._finishPerfBenchmark();
+                }
+            }
 
             if (this._scene3D) {
                 this._scene3D.update(dt);
@@ -90,8 +128,29 @@ export class GameCore3D {
         });
     }
 
+    private _finishPerfBenchmark(): void {
+        this._perfBenchmarkDone = true;
+        if (this._perfSamples.length === 0) return;
+        const sorted = [...this._perfSamples].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        let preset: 'low' | 'medium' | 'high';
+        if (median < PERF_PRESET_LOW_FPS) preset = 'low';
+        else if (median < PERF_PRESET_MED_FPS) preset = 'medium';
+        else preset = 'high';
+        console.log(`[Perf] Benchmark complete: ${this._perfSamples.length} samples, median=${median}fps, recommended preset=${preset}`);
+        try {
+            localStorage.setItem(PERF_DETECTED_PRESET_KEY, JSON.stringify({ preset, medianFps: median, samples: this._perfSamples.length, ts: Date.now() }));
+        } catch (err) {
+            console.warn('[Perf] Failed to persist detected preset:', err);
+        }
+    }
+
     /** Stop the render loop and release everything */
     dispose(): void {
+        if (this._visibilityHandler) {
+            try { document.removeEventListener('visibilitychange', this._visibilityHandler); } catch (_) { /* ignore */ }
+            this._visibilityHandler = null;
+        }
         this.engine.stopRenderLoop();
         this._scene3D?.onDispose();
         this._babylonScene?.dispose();

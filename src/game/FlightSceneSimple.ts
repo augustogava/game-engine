@@ -385,6 +385,7 @@ import { MiniMapSystem } from './flight/systems/MiniMapSystem.js';
 import { DebugPanelSystem } from './flight/systems/DebugPanelSystem.js';
 import { InputSystem } from './flight/systems/InputSystem.js';
 import { HudSystem } from './flight/systems/HudSystem.js';
+import { WeatherService } from './flight/systems/WeatherService.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 export class FlightSceneSimple extends Scene3D {
@@ -414,6 +415,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _debugPanelSystem = new DebugPanelSystem(this);
     /** @internal */ private readonly _inputSystem = new InputSystem(this);
     /** @internal */ private readonly _hudSystem = new HudSystem(this);
+    /** @internal */ private readonly _weatherService = new WeatherService(this);
     private planeRoot!: BABYLON.TransformNode;
     private velocity        = BABYLON.Vector3.Zero();
     private angularVelocity = BABYLON.Vector3.Zero();
@@ -485,7 +487,7 @@ export class FlightSceneSimple extends Scene3D {
     private isMobile = false;
     private touchPitchInput = 0;
     private touchRollInput = 0;
-    private touchThrust = 0.7;
+    private touchThrust = 0.0;
     private joystickTouchId: number | null = null;
     private joystickOrigin = { x: 0, y: 0 };
     private throttleTouchId: number | null = null;
@@ -687,6 +689,16 @@ export class FlightSceneSimple extends Scene3D {
     private _autopilotNavHold: boolean = false;
     private _autopilotAprHold: boolean = false;
     private _autopilotTargetHdgDeg: number = 0;
+    /** @internal */ public _autopilotAtHold: boolean = false;
+    /** @internal */ public _autopilotAtTargetKts: number = 250;
+    /** @internal */ public _autothrottleKeyLock: boolean = false;
+    /** @internal */ public _failures = {
+        hydraulicFailed: false,
+        iceOnSurfaces: false,
+    };
+    /** @internal */ public _precipitationType: number = 0;
+    /** @internal */ public _precipitationIntensity: number = 0;
+    /** @internal */ public _currentCloudCoverage: number = 0;
     private _autopilotTargetAltFt: number = 0;
     private _autopilotTargetVsFpm:  number = 0;
     private _autopilotLastPitchRad: number = Number.NaN;
@@ -986,9 +998,9 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     update(dt: number): void {
+        if (this.tiles) this.tiles.update();
         if (!this.spawned) return;
         this._frameTick++;
-        if (this.tiles) this.tiles.update();
         if (this._premium.tileFade) this._updateTileFade(dt);
         this._airportOverlaysSystem.update(dt);
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
@@ -1002,18 +1014,18 @@ export class FlightSceneSimple extends Scene3D {
 
         this._handleInput(dt);
 
-        const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
-        if (replayFrame && this.planeRoot && this.planeRoot.rotationQuaternion) {
-            this.planeRoot.position.set(replayFrame.px, replayFrame.py, replayFrame.pz);
-            this.planeRoot.rotationQuaternion.set(replayFrame.qx, replayFrame.qy, replayFrame.qz, replayFrame.qw);
-            this.thrust = replayFrame.throttle;
-            if (!this._replayBuffer.isPlaying()) {
-                this._replayActive = false;
-                console.log('[Replay] Finished');
-            }
-        }
+        // const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
+        // if (replayFrame && this.planeRoot && this.planeRoot.rotationQuaternion) {
+        //     this.planeRoot.position.set(replayFrame.px, replayFrame.py, replayFrame.pz);
+        //     this.planeRoot.rotationQuaternion.set(replayFrame.qx, replayFrame.qy, replayFrame.qz, replayFrame.qw);
+        //     this.thrust = replayFrame.throttle;
+        //     if (!this._replayBuffer.isPlaying()) {
+        //         this._replayActive = false;
+        //         console.log('[Replay] Finished');
+        //     }
+        // }
 
-        const physicsActive = !this._paused && !this._replayActive;
+        const physicsActive = !this._paused;
         const TIME_SCALE_MIN = 0.05;
         const TIME_SCALE_MAX = 8;
         const effectiveTimeScale = physicsActive
@@ -1030,22 +1042,22 @@ export class FlightSceneSimple extends Scene3D {
                 steps++;
             }
             if (this.physicsAccumulator > this.FIXED_DT * maxSteps) {
-                this.physicsAccumulator = 0;
+                this.physicsAccumulator = this.physicsAccumulator % this.FIXED_DT;
             }
         }
         if (Number.isFinite(dt) && dt > 0) {
             this._simTimeOffsetMs += (scaledDt - dt) * 1000;
         }
 
-        if (physicsActive && this.planeRoot && this.planeRoot.rotationQuaternion) {
-            const q = this.planeRoot.rotationQuaternion;
-            const p = this.planeRoot.position;
-            this._replayBuffer.record({
-                px: p.x, py: p.y, pz: p.z,
-                qx: q.x, qy: q.y, qz: q.z, qw: q.w,
-                throttle: this.thrust,
-            });
-        }
+        // if (physicsActive && this.planeRoot && this.planeRoot.rotationQuaternion) {
+        //     const q = this.planeRoot.rotationQuaternion;
+        //     const p = this.planeRoot.position;
+        //     this._replayBuffer.record({
+        //         px: p.x, py: p.y, pz: p.z,
+        //         qx: q.x, qy: q.y, qz: q.z, qw: q.w,
+        //         throttle: this.thrust,
+        //     });
+        // }
         
                 this._sunUpdateTimer += dt;
                 if (this._sunUpdateTimer >= 2.0) {
@@ -1073,7 +1085,9 @@ export class FlightSceneSimple extends Scene3D {
         this._updateLensFlareOcclusion(dt * 1000);
         this._updateMotionBlurAndDof();
         this._updateHUD();
-        this._sendOwnState();
+        if (!this._paused) {
+            this._sendOwnState();
+        }
         this._updateRemotePlayers();
     }
 
@@ -1122,7 +1136,153 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _toggleReplay(): void {
-        this._inputSystem.toggleReplay();
+        // this._inputSystem.toggleReplay();
+    }
+
+    private _toggleAutothrottle(): void {
+        this._autopilotSystem.engageAutothrottle(false);
+    }
+
+    /** Returns aggregated current weather (wind, clouds, precipitation, fog). */
+    public getWeatherSnapshot(): ReturnType<typeof this._weatherService.getSnapshot> {
+        const altMslFt = this.planeRoot
+            ? Math.max(0, (this.refAlt + this.planeRoot.position.y) * 3.28084)
+            : 0;
+        return this._weatherService.getSnapshot(altMslFt);
+    }
+
+    /** Serializes current flight state for save/load. */
+    public serializeFlightState(): Record<string, unknown> | null {
+        if (!this.planeRoot) return null;
+        const pos = this.planeRoot.position;
+        const q = this.planeRoot.rotationQuaternion;
+        const vel = this.velocity;
+        const ang = this.angularVelocity;
+        return {
+            v: 1,
+            ts: Date.now(),
+            pos: { x: pos.x, y: pos.y, z: pos.z },
+            rot: q ? { x: q.x, y: q.y, z: q.z, w: q.w } : null,
+            velocity: { x: vel.x, y: vel.y, z: vel.z },
+            angularVelocity: { x: ang.x, y: ang.y, z: ang.z },
+            thrust: this.thrust,
+            touchThrust: this.touchThrust,
+            fuelRemaining: this.fuelRemaining,
+            trimPitch: this.trimPitch,
+            trimYaw: this.trimYaw,
+            mixtureLevel: this.mixtureLevel,
+            magnetoSwitch: this.magnetoSwitch,
+            engineRpm: this.engineRpm,
+            flapIndex: this.flapIndex,
+            gearState: this.gearState,
+            brakesOn: this.brakesOn,
+            simTimeOffsetMs: this._simTimeOffsetMs,
+            autopilot: {
+                master: this._autopilotMaster,
+                hdgHold: this._autopilotHdgHold,
+                altHold: this._autopilotAltHold,
+                vsHold: this._autopilotVsHold,
+                navHold: this._autopilotNavHold,
+                aprHold: this._autopilotAprHold,
+                targetHdgDeg: this._autopilotTargetHdgDeg,
+                targetAltFt: this._autopilotTargetAltFt,
+                targetVsFpm: this._autopilotTargetVsFpm,
+                atHold: this._autopilotAtHold,
+                atTargetKts: this._autopilotAtTargetKts,
+            },
+            mission: {
+                activeId: this._activeMissionId,
+                userMissionId: this._activeUserMissionId,
+                currentWpIndex: this._missionCurrentWpIndex,
+            },
+        };
+    }
+
+    /** Restores flight state previously saved via serializeFlightState. */
+    public restoreFlightState(state: Record<string, any> | null | undefined): boolean {
+        if (!state || typeof state !== 'object') {
+            console.warn('[SaveLoad] restoreFlightState: invalid state');
+            return false;
+        }
+        if (!this.planeRoot) {
+            console.warn('[SaveLoad] restoreFlightState: planeRoot not ready');
+            return false;
+        }
+        try {
+            if (state.pos && Number.isFinite(state.pos.x)) {
+                this.planeRoot.position.set(state.pos.x, state.pos.y, state.pos.z);
+            }
+            if (state.rot && this.planeRoot.rotationQuaternion) {
+                this.planeRoot.rotationQuaternion.set(state.rot.x, state.rot.y, state.rot.z, state.rot.w);
+            }
+            if (state.velocity) this.velocity.set(state.velocity.x, state.velocity.y, state.velocity.z);
+            if (state.angularVelocity) this.angularVelocity.set(state.angularVelocity.x, state.angularVelocity.y, state.angularVelocity.z);
+            if (Number.isFinite(state.thrust)) this.thrust = state.thrust;
+            if (Number.isFinite(state.touchThrust)) this.touchThrust = state.touchThrust;
+            if (Number.isFinite(state.fuelRemaining)) this.fuelRemaining = state.fuelRemaining;
+            if (Number.isFinite(state.trimPitch)) this.trimPitch = state.trimPitch;
+            if (Number.isFinite(state.trimYaw)) this.trimYaw = state.trimYaw;
+            if (Number.isFinite(state.mixtureLevel)) this.mixtureLevel = state.mixtureLevel;
+            if (Number.isFinite(state.magnetoSwitch)) this.magnetoSwitch = state.magnetoSwitch;
+            if (Number.isFinite(state.engineRpm)) this.engineRpm = state.engineRpm;
+            if (Number.isFinite(state.flapIndex)) this.flapIndex = state.flapIndex;
+            if (Number.isFinite(state.gearState)) this.gearState = state.gearState;
+            if (typeof state.brakesOn === 'boolean') this.brakesOn = state.brakesOn;
+            if (Number.isFinite(state.simTimeOffsetMs)) this._simTimeOffsetMs = state.simTimeOffsetMs;
+            const ap = state.autopilot;
+            if (ap && typeof ap === 'object') {
+                if (typeof ap.master === 'boolean') this._autopilotMaster = ap.master;
+                if (typeof ap.hdgHold === 'boolean') this._autopilotHdgHold = ap.hdgHold;
+                if (typeof ap.altHold === 'boolean') this._autopilotAltHold = ap.altHold;
+                if (typeof ap.vsHold === 'boolean') this._autopilotVsHold = ap.vsHold;
+                if (typeof ap.navHold === 'boolean') this._autopilotNavHold = ap.navHold;
+                if (typeof ap.aprHold === 'boolean') this._autopilotAprHold = ap.aprHold;
+                if (Number.isFinite(ap.targetHdgDeg)) this._autopilotTargetHdgDeg = ap.targetHdgDeg;
+                if (Number.isFinite(ap.targetAltFt)) this._autopilotTargetAltFt = ap.targetAltFt;
+                if (Number.isFinite(ap.targetVsFpm)) this._autopilotTargetVsFpm = ap.targetVsFpm;
+                if (typeof ap.atHold === 'boolean') this._autopilotAtHold = ap.atHold;
+                if (Number.isFinite(ap.atTargetKts)) this._autopilotAtTargetKts = ap.atTargetKts;
+            }
+            const mi = state.mission;
+            if (mi && typeof mi === 'object' && Number.isFinite(mi.currentWpIndex)) {
+                this._missionCurrentWpIndex = mi.currentWpIndex;
+            }
+            console.log('[SaveLoad] Flight state restored');
+            return true;
+        } catch (err) {
+            console.warn('[SaveLoad] restoreFlightState failed:', err);
+            return false;
+        }
+    }
+
+    /** Persists current flight to localStorage under given slot name. */
+    public saveFlightToSlot(slot: string = 'default'): boolean {
+        const state = this.serializeFlightState();
+        if (!state) return false;
+        try {
+            localStorage.setItem(`flight_save_${slot}`, JSON.stringify(state));
+            console.log(`[SaveLoad] Flight saved to slot "${slot}"`);
+            return true;
+        } catch (err) {
+            console.warn('[SaveLoad] saveFlightToSlot failed:', err);
+            return false;
+        }
+    }
+
+    /** Loads flight from localStorage slot, returning true on success. */
+    public loadFlightFromSlot(slot: string = 'default'): boolean {
+        try {
+            const raw = localStorage.getItem(`flight_save_${slot}`);
+            if (!raw) {
+                console.warn(`[SaveLoad] No save found for slot "${slot}"`);
+                return false;
+            }
+            const state = JSON.parse(raw);
+            return this.restoreFlightState(state);
+        } catch (err) {
+            console.warn('[SaveLoad] loadFlightFromSlot failed:', err);
+            return false;
+        }
     }
 
     private _convertSpeedKts(kts: number): { value: number; unit: string } {
@@ -1174,6 +1334,8 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('dbg-panel')?.remove();
         
         document.getElementById('touch-overlay')?.remove();
+        try { this._inputSystem.dispose(); } catch (err) { console.warn('[FlightSimple] InputSystem dispose failed:', err); }
+        try { this._hudSystem.disposeResizeListener(); } catch (err) { console.warn('[FlightSimple] HudSystem resize listener dispose failed:', err); }
         document.getElementById('aircraft-btn')?.remove();
         document.getElementById('aircraft-panel')?.remove();
         try { this._airportOverlaysSystem.dispose(); } catch (err) { console.warn('[FlightSimple] AirportOverlays dispose failed:', err); }
@@ -1212,6 +1374,8 @@ export class FlightSceneSimple extends Scene3D {
         if (this._sunHaloMesh) { try { this._sunHaloMesh.dispose(); } catch (_) { /* ignore */ } this._sunHaloMesh = null; }
         if (this._moonHaloMat) { try { this._moonHaloMat.dispose(true, true); } catch (_) { /* ignore */ } this._moonHaloMat = null; }
         if (this._moonHaloMesh) { try { this._moonHaloMesh.dispose(); } catch (_) { /* ignore */ } this._moonHaloMesh = null; }
+        for (const c of this.cloudInstances) { try { c.mesh.dispose(); } catch (_) { /* ignore */ } }
+        this.cloudInstances = [];
         for (const t of this._cloudTemplates) { try { t.dispose(); } catch (_) { /* ignore */ } }
         this._cloudTemplates = [];
         for (const mat of this._cloudMats) { try { mat.dispose(true, true); } catch (_) { /* ignore */ } }
@@ -1219,6 +1383,41 @@ export class FlightSceneSimple extends Scene3D {
         if (this._overcastMat) { try { this._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this._overcastMat = null; }
         if (this._overcastMesh) { try { this._overcastMesh.dispose(); } catch (_) { /* ignore */ } this._overcastMesh = null; }
         if (this._milkyWayRoot) { try { this._milkyWayRoot.dispose(); } catch (_) { /* ignore */ } this._milkyWayRoot = null; }
+        for (const s of this._starInstances) { try { s.dispose(); } catch (_) { /* ignore */ } }
+        this._starInstances = [];
+        for (const v of this._vegetationInstances) { try { v.dispose(); } catch (_) { /* ignore */ } }
+        this._vegetationInstances = [];
+        for (const v of this._vegetationTemplates) { try { v.dispose(); } catch (_) { /* ignore */ } }
+        this._vegetationTemplates = [];
+        for (const m of this._vegetationMaterials) { try { m.dispose(true, true); } catch (_) { /* ignore */ } }
+        this._vegetationMaterials = [];
+        if (this._godRays) {
+            try {
+                const cam = this.scene?.activeCamera;
+                if (cam) this._godRays.dispose(cam);
+                else (this._godRays as any).dispose();
+            } catch (_) { /* ignore */ }
+            this._godRays = null;
+        }
+        if (this._volumetricCloudsPost) {
+            try {
+                const cam = this.scene?.activeCamera;
+                if (cam) this._volumetricCloudsPost.dispose(cam);
+                else (this._volumetricCloudsPost as any).dispose();
+            } catch (_) { /* ignore */ }
+            this._volumetricCloudsPost = null;
+        }
+        if (this._volumetricNoiseTexture) { try { this._volumetricNoiseTexture.dispose(); } catch (_) { /* ignore */ } this._volumetricNoiseTexture = null; }
+        if (this._volumetricBlueNoiseTexture) { try { this._volumetricBlueNoiseTexture.dispose(); } catch (_) { /* ignore */ } this._volumetricBlueNoiseTexture = null; }
+        if (this._colorLutTexture) { try { this._colorLutTexture.dispose(); } catch (_) { /* ignore */ } this._colorLutTexture = null; }
+        for (const [id, remote] of this.remotePlayers) {
+            try { remote.labelTexture?.dispose(); } catch (_) { /* ignore */ }
+            try { remote.labelPlane?.dispose(); } catch (_) { /* ignore */ }
+            try { remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose()); } catch (_) { /* ignore */ }
+            try { remote.root.dispose(); } catch (_) { /* ignore */ }
+            try { remote.engineSound?.dispose(); } catch (_) { /* ignore */ }
+            this.remotePlayers.delete(id);
+        }
         if (this._shadowGen) { this._shadowGen.dispose(); this._shadowGen = null; }
         if (this.camera) this.camera.detachControl();
     }
@@ -1572,6 +1771,7 @@ export class FlightSceneSimple extends Scene3D {
 
     private _updateAutopilot(dt: number): void {
         this._autopilotSystem.updateAutopilot(dt);
+        this._autopilotSystem.updateAutothrottle(dt);
     }
 
     private _engageAutopilotMaster(): void {

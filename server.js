@@ -41,6 +41,21 @@ const env = loadEnv();
 const DATABASE_URL = process.env.DATABASE_URL || env.DATABASE_URL || '';
 const SECRET_KEY = process.env.SECRET_KEY || env.SECRET_KEY || '';
 const MAIN_API_URL = process.env.MAIN_API_URL || env.MAIN_API_URL || '';
+const ALLOWED_ORIGINS_RAW = process.env.ALLOWED_ORIGINS || env.ALLOWED_ORIGINS || '';
+const ALLOWED_ORIGINS = ALLOWED_ORIGINS_RAW
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+if (ALLOWED_ORIGINS.length === 0) {
+    console.warn('[CORS] ALLOWED_ORIGINS not configured: falling back to "*" (insecure for production)');
+}
+
+function resolveCorsOrigin(reqOrigin) {
+    if (ALLOWED_ORIGINS.length === 0) return '*';
+    if (!reqOrigin) return ALLOWED_ORIGINS[0];
+    if (ALLOWED_ORIGINS.includes(reqOrigin)) return reqOrigin;
+    return ALLOWED_ORIGINS[0];
+}
 
 // ── MySQL pool ───────────────────────────────────────────────────────────────
 let dbPool = null;
@@ -99,9 +114,11 @@ async function initDatabase() {
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 function jsonResponse(res, status, data) {
     const payload = JSON.stringify(data);
+    const reqOrigin = res.req && res.req.headers ? res.req.headers.origin : undefined;
     res.writeHead(status, {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': resolveCorsOrigin(reqOrigin),
+        'Vary': 'Origin',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
@@ -713,17 +730,23 @@ async function recalculateStats(userId) {
 }
 
 // ── HTTP server ──────────────────────────────────────────────────────────────
-const CORS_HEADERS = {
-    'Access-Control-Allow-Origin': '*',
+const CORS_STATIC_HEADERS = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
 };
 
 const server = http.createServer(async (req, res) => {
     // Inject CORS on every response
     const _writeHead = res.writeHead.bind(res);
+    const reqOrigin = req.headers ? req.headers.origin : undefined;
+    const corsOrigin = resolveCorsOrigin(reqOrigin);
     res.writeHead = (status, headers) => {
-        const merged = { ...CORS_HEADERS, ...(typeof headers === 'object' ? headers : {}) };
+        const merged = {
+            ...CORS_STATIC_HEADERS,
+            'Access-Control-Allow-Origin': corsOrigin,
+            ...(typeof headers === 'object' ? headers : {}),
+        };
         return _writeHead(status, merged);
     };
 

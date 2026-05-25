@@ -12,6 +12,7 @@ const MAP_IMG_UPSCALE = 2.0;
 
 export class MiniMapSystem {
     private readonly scene: any;
+    private _gpsCoordsEl: HTMLElement | null = null;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -438,7 +439,9 @@ export class MiniMapSystem {
 
         this.scene._updateNavInfo(lat, lon);
 
-        const coordsEl = document.getElementById('gps-coords');
-        if (coordsEl) coordsEl.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+        if (!this._gpsCoordsEl) {
+            this._gpsCoordsEl = document.getElementById('gps-coords');
+        }
+        if (this._gpsCoordsEl) this._gpsCoordsEl.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     }
 }

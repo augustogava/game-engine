@@ -12,6 +12,18 @@ const authError = document.getElementById('auth-error')!;
 
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token') || localStorage.getItem('auth_token');
+const flightPlanId = params.get('flightPlanId');
+const missionId = params.get('missionId') ?? params.get('mission_id');
+
+if (params.has('token')) {
+    params.delete('token');
+    try {
+        const cleanedSearch = params.toString();
+        history.replaceState(null, '', window.location.pathname + (cleanedSearch ? `?${cleanedSearch}` : ''));
+    } catch (err) {
+        console.warn('[flight-main] Failed to clean token from URL:', err);
+    }
+}
 
 if (!token) {
     if (window.location.hostname.includes('simflightpro.com')) {
@@ -25,12 +37,6 @@ if (token) {
     localStorage.setItem('auth_token', token);
     localStorage.setItem('token', token);
 }
-
-const flightPlanId = params.get('flightPlanId');
-const missionId = params.get('missionId') ?? params.get('mission_id');
-params.delete('token');
-const cleanSearch = params.toString();
-history.replaceState(null, '', window.location.pathname + (cleanSearch ? `?${cleanSearch}` : ''));
 
 const FREE_HOUR_FIRST_DELAY_MS = 2000;
 const FREE_HOUR_INTERVAL_MS = 5 * 60 * 1000;
@@ -312,8 +318,29 @@ scene.onSpawned = () => {
                         }
                         scene.setMissionSpawn(mission, userMissionId);
                     } else if (startRes.status === 409) {
-                        console.log(`[flight-main] Mission ${missionId} already active (race), spawning without userMissionId`);
-                        scene.setMissionSpawn(mission, null);
+                        console.log(`[flight-main] Mission ${missionId} already active (race), fetching active userMissionId`);
+                        let recoveredUserMissionId: number | null = null;
+                        try {
+                            const recoverRes = await fetch('/api/user-missions/active', {
+                                headers: { 'Authorization': `Bearer ${token}` },
+                            });
+                            if (recoverRes.ok) {
+                                const recoverJson = await recoverRes.json();
+                                const recoverList: any[] = Array.isArray(recoverJson?.data) ? recoverJson.data : [];
+                                const existing = recoverList.find((um: any) => Number(um?.mission_id) === missionIdNum);
+                                if (existing && existing.id != null) {
+                                    recoveredUserMissionId = Number(existing.id);
+                                    console.log(`[flight-main] Recovered userMissionId=${recoveredUserMissionId} after 409`);
+                                } else {
+                                    console.warn(`[flight-main] No active user-mission for mission ${missionId} after 409`);
+                                }
+                            } else {
+                                console.warn(`[flight-main] Recover after 409 failed: HTTP ${recoverRes.status}`);
+                            }
+                        } catch (recoverErr) {
+                            console.warn('[flight-main] Recover after 409 error:', recoverErr);
+                        }
+                        scene.setMissionSpawn(mission, recoveredUserMissionId);
                     } else {
                         console.warn(`[flight-main] Mission ${missionId} acquire failed: ${startRes.status}`);
                         scene.setMissionSpawn(mission, null);
