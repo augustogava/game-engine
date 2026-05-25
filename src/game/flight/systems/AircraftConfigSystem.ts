@@ -50,6 +50,8 @@ export class AircraftConfigSystem {
         if (cfg.gear_retractable        == null) {
             cfg.gear_retractable = cfg.engine_type === ENGINE_TYPE_TURBOFAN
                                 || cfg.engine_type === ENGINE_TYPE_TURBOJET;
+        } else {
+            cfg.gear_retractable = cfg.gear_retractable === true || (cfg.gear_retractable as unknown as number) === 1;
         }
         this.scene.aircraftConfig = cfg;
         this._updateTouchGearButtonVisibility(cfg.gear_retractable === true);
