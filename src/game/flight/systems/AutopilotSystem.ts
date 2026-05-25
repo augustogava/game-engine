@@ -12,6 +12,7 @@ import {
     AP_VS_DEFAULT_FPM,
     AP_PITCH_RATE_DAMP_GAIN,
     AP_PITCH_RATE_MAX_RAD_PER_S,
+    AP_PITCH_RATE_FILTER_TAU_S,
     AP_ALT_TO_VS_GAIN_FPM_PER_FT,
     AP_ALT_MAX_VS_FPM,
     AP_NAV_MAX_INTERCEPT_DEG,
@@ -124,7 +125,15 @@ export class AutopilotSystem {
         let pitchRateRadPerS = 0;
         if (Number.isFinite(lastPitchRad)) {
             const raw = (curPitchRad - lastPitchRad) / stepDt;
-            pitchRateRadPerS = Math.max(-AP_PITCH_RATE_MAX_RAD_PER_S, Math.min(AP_PITCH_RATE_MAX_RAD_PER_S, raw));
+            const clamped = Math.max(-AP_PITCH_RATE_MAX_RAD_PER_S, Math.min(AP_PITCH_RATE_MAX_RAD_PER_S, raw));
+            const prevFiltered = this.scene._autopilotPitchRateFiltered;
+            if (Number.isFinite(prevFiltered)) {
+                const alpha = Math.max(0, Math.min(1, stepDt / AP_PITCH_RATE_FILTER_TAU_S));
+                pitchRateRadPerS = prevFiltered + alpha * (clamped - prevFiltered);
+            } else {
+                pitchRateRadPerS = clamped;
+            }
+            this.scene._autopilotPitchRateFiltered = pitchRateRadPerS;
         }
         this.scene._autopilotLastPitchRad = curPitchRad;
 
