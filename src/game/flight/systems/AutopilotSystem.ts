@@ -217,6 +217,7 @@ export class AutopilotSystem {
             this.scene._autopilotVsHold = false;
             this.scene._autopilotAprHold = false;
             this.scene._autopilotLastPitchRad = Number.NaN;
+            this.scene._autopilotPitchRateFiltered = Number.NaN;
             if (this.scene.planeRoot) {
                 this.scene._autopilotTargetAltFt = Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y)) * 3.28084;
             }
@@ -230,6 +231,7 @@ export class AutopilotSystem {
             this.scene._autopilotAltHold = false;
             this.scene._autopilotAprHold = false;
             this.scene._autopilotLastPitchRad = Number.NaN;
+            this.scene._autopilotPitchRateFiltered = Number.NaN;
             const vsFpm = this.scene.velocity.y * 196.85;
             this.scene._autopilotTargetVsFpm = Math.round(vsFpm / 100) * 100;
             if (Math.abs(this.scene._autopilotTargetVsFpm) < 50) {
@@ -264,6 +266,7 @@ export class AutopilotSystem {
             this.scene._autopilotVsHold = false;
             this.scene._autopilotNavHold = false;
             this.scene._autopilotLastPitchRad = Number.NaN;
+            this.scene._autopilotPitchRateFiltered = Number.NaN;
         }
     }
 
