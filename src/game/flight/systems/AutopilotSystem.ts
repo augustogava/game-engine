@@ -104,23 +104,18 @@ export class AutopilotSystem {
         const wm = this.scene.planeRoot.getWorldMatrix();
         const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
         const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm);
-        const curHdgTrueDeg = ((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360;
-        const hereForMagVar = this.apCurrentLatLon();
-        const magVarDeg = hereForMagVar ? this.magneticVariationDeg(hereForMagVar.lat, hereForMagVar.lon) : 0;
-        const curHdgDeg = ((curHdgTrueDeg - magVarDeg) + 360) % 360;
+        const curHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
 
         if ((this.scene._autopilotNavHold || this.scene._autopilotAprHold) && this.scene.surfaces.length >= 4) {
             const target = this.apCurrentNavTarget();
-            const here = hereForMagVar;
+            const here = this.apCurrentLatLon();
             if (target && here) {
-                const desiredBrgTrue = NavMath.initialBearingDeg(here.lat, here.lon, target.lat, target.lon);
-                const desiredBrgMag = ((desiredBrgTrue - magVarDeg) + 360) % 360;
-                const trackDegTrue = (this.scene.groundSpeed > MIN_GS_FOR_ETE_MS
+                const desiredBrg = NavMath.initialBearingDeg(here.lat, here.lon, target.lat, target.lon);
+                const trackDeg = (this.scene.groundSpeed > MIN_GS_FOR_ETE_MS
                     && Number.isFinite(this.scene.velocity.x) && Number.isFinite(this.scene.velocity.z))
-                    ? ((Math.atan2(this.scene.velocity.x, -this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
-                    : curHdgTrueDeg;
-                const trackDeg = ((trackDegTrue - magVarDeg) + 360) % 360;
-                const trackErrDeg = ((desiredBrgMag - trackDeg + 540) % 360) - 180;
+                    ? ((Math.atan2(this.scene.velocity.x, this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
+                    : curHdgDeg;
+                const trackErrDeg = ((desiredBrg - trackDeg + 540) % 360) - 180;
                 const distNm = NavMath.haversineNm(here.lat, here.lon, target.lat, target.lon);
                 const prev = this.apPrevNavLatLon();
                 const xteNm = prev
@@ -130,7 +125,7 @@ export class AutopilotSystem {
                     -AP_NAV_MAX_INTERCEPT_DEG,
                     Math.min(AP_NAV_MAX_INTERCEPT_DEG, xteNm * AP_NAV_XTE_DEG_PER_NM + trackErrDeg * 0.5),
                 );
-                this.scene._autopilotTargetHdgDeg = ((desiredBrgMag + intercept) + 360) % 360;
+                this.scene._autopilotTargetHdgDeg = ((desiredBrg + intercept) + 360) % 360;
             }
         }
 
@@ -266,10 +261,7 @@ export class AutopilotSystem {
             if (this.scene.planeRoot) {
                 const wm = this.scene.planeRoot.getWorldMatrix();
                 const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
-                const trueHdg = ((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360;
-                const here = this.apCurrentLatLon();
-                const magVar = here ? this.magneticVariationDeg(here.lat, here.lon) : 0;
-                this.scene._autopilotTargetHdgDeg = ((trueHdg - magVar) + 360) % 360;
+                this.scene._autopilotTargetHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
             }
         }
     }
