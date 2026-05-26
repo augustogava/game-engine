@@ -47,11 +47,24 @@ import {
     CONTRAIL_ENABLE_MAX_TEMP_C,
     CONTRAIL_ENABLE_MIN_ENGINE_POWER,
     CONTRAIL_EMIT_LERP_RATE,
+    CONTRAIL_MODE_RIBBON,
+    CONTRAIL_MODE_PARTICLES,
+    CONTRAIL_MODE_DEFAULT,
 } from '../constants/index.js';
+import { ContrailRibbonSystem, type ContrailRibbonHandle } from './ContrailRibbonSystem.js';
 
 const COLOR_GRADE_TINT_HUE_EPSILON_DEG = 1.0;
 const COLOR_GRADE_TINT_DENSITY_EPSILON = 0.5;
 const COLOR_GRADE_CONTRAST_EPSILON = 0.01;
+
+export interface ContrailPairResult {
+    emL: BABYLON.TransformNode;
+    emR: BABYLON.TransformNode;
+    psL?: BABYLON.ParticleSystem | null;
+    psR?: BABYLON.ParticleSystem | null;
+    ribL?: ContrailRibbonHandle | null;
+    ribR?: ContrailRibbonHandle | null;
+}
 
 export class VfxSystem {
     private readonly scene: any;
@@ -60,20 +73,52 @@ export class VfxSystem {
     private _lastContrast: number = Number.NaN;
     private _lastColorCurvesEnabled: boolean | null = null;
     private _lastColorGradingEnabled: boolean | null = null;
+    private _ribbonSystem: ContrailRibbonSystem | null = null;
+    private _contrailMode: string = CONTRAIL_MODE_DEFAULT;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
     }
 
+    getContrailMode(): string {
+        return this._contrailMode;
+    }
+
+    setContrailMode(mode: string): void {
+        const normalized = (mode === CONTRAIL_MODE_PARTICLES) ? CONTRAIL_MODE_PARTICLES : CONTRAIL_MODE_RIBBON;
+        if (normalized === this._contrailMode) return;
+        this._contrailMode = normalized;
+        console.debug(`[Contrails] Mode switched to '${normalized}'`);
+    }
+
+    private _getOrCreateRibbonSystem(): ContrailRibbonSystem {
+        if (!this._ribbonSystem) {
+            this._ribbonSystem = new ContrailRibbonSystem(this.scene);
+        }
+        return this._ribbonSystem;
+    }
+
     /**
-     * Build a pair of contrail emitters + particle systems attached to a given root TransformNode.
+     * Build a pair of contrail emitters attached to a given root TransformNode.
      * Reusable for own aircraft and remote multiplayer aircraft.
+     * Dispatches to ribbon-shader or particle implementation based on current contrail mode.
      */
-    buildContrailPair(scene: BABYLON.Scene, parentRoot: BABYLON.TransformNode, halfSpan: number, idTag: string): {
-        emL: BABYLON.TransformNode; emR: BABYLON.TransformNode;
-        psL: BABYLON.ParticleSystem; psR: BABYLON.ParticleSystem;
-    } | null {
+    buildContrailPair(scene: BABYLON.Scene, parentRoot: BABYLON.TransformNode, halfSpan: number, idTag: string): ContrailPairResult | null {
         if (this.scene.isMobile === true) return null;
+        if (this._contrailMode === CONTRAIL_MODE_PARTICLES) {
+            return this._buildContrailPair_particles(scene, parentRoot, halfSpan, idTag);
+        }
+        return this._buildContrailPair_ribbon(scene, parentRoot, halfSpan, idTag);
+    }
+
+    private _buildContrailPair_ribbon(scene: BABYLON.Scene, parentRoot: BABYLON.TransformNode, halfSpan: number, idTag: string): ContrailPairResult | null {
+        const sys = this._getOrCreateRibbonSystem();
+        const pair = sys.buildPair(scene, parentRoot, halfSpan, idTag);
+        if (!pair) return null;
+        return { emL: pair.emL, emR: pair.emR, ribL: pair.ribL, ribR: pair.ribR };
+    }
+
+    private _buildContrailPair_particles(scene: BABYLON.Scene, parentRoot: BABYLON.TransformNode, halfSpan: number, idTag: string): ContrailPairResult | null {
         const safeHalf = Math.max(2, halfSpan);
 
         const makeEmitter = (name: string, x: number): BABYLON.TransformNode => {
@@ -115,6 +160,25 @@ export class VfxSystem {
     }
 
     /**
+     * Drive a single remote-player ribbon pair from the multiplayer update loop.
+     * Safe to call when ribbon mode is inactive (handles will be null).
+     */
+    updateRemoteRibbonPair(ribL: ContrailRibbonHandle | null, ribR: ContrailRibbonHandle | null, dt: number, intensity: number): void {
+        if (!this._ribbonSystem) return;
+        if (ribL) this._ribbonSystem.updatePair(ribL, dt, intensity);
+        if (ribR) this._ribbonSystem.updatePair(ribR, dt, intensity);
+    }
+
+    /**
+     * Dispose a single ribbon pair (used by MultiplayerSystem when a remote leaves).
+     */
+    disposeRibbonPair(ribL: ContrailRibbonHandle | null, ribR: ContrailRibbonHandle | null): void {
+        if (!this._ribbonSystem) return;
+        if (ribL) this._ribbonSystem.disposePair(ribL);
+        if (ribR) this._ribbonSystem.disposePair(ribR);
+    }
+
+    /**
      * Compute the target contrail emit rate for given environmental conditions.
      * Returns 0 if conditions are not met (low altitude, warm air, slow speed, low power).
      */
@@ -143,18 +207,26 @@ export class VfxSystem {
         if (!pair) return;
         this.scene._contrailEmitterLeft  = pair.emL;
         this.scene._contrailEmitterRight = pair.emR;
-        this.scene._contrailPSLeft  = pair.psL;
-        this.scene._contrailPSRight = pair.psR;
-        console.debug(`[Contrails] Built (capacity=${CONTRAIL_PARTICLE_CAPACITY}/side, lifetime=${CONTRAIL_MIN_LIFETIME_S}-${CONTRAIL_MAX_LIFETIME_S}s, halfSpan=${this.scene._contrailHalfSpan.toFixed(1)}m)`);
+        this.scene._contrailPSLeft  = pair.psL ?? null;
+        this.scene._contrailPSRight = pair.psR ?? null;
+        this.scene._contrailRibbonLeft  = pair.ribL ?? null;
+        this.scene._contrailRibbonRight = pair.ribR ?? null;
+        console.debug(`[Contrails] Built mode='${this._contrailMode}' halfSpan=${this.scene._contrailHalfSpan.toFixed(1)}m`);
     }
 
     disposeContrails(): void {
         if (this.scene._contrailPSLeft)  { try { this.scene._contrailPSLeft.dispose();  } catch (_) { /* ignore */ } }
         if (this.scene._contrailPSRight) { try { this.scene._contrailPSRight.dispose(); } catch (_) { /* ignore */ } }
+        if (this._ribbonSystem) {
+            try { this._ribbonSystem.disposePair(this.scene._contrailRibbonLeft);  } catch (_) { /* ignore */ }
+            try { this._ribbonSystem.disposePair(this.scene._contrailRibbonRight); } catch (_) { /* ignore */ }
+        }
         if (this.scene._contrailEmitterLeft)  { try { this.scene._contrailEmitterLeft.dispose();  } catch (_) { /* ignore */ } }
         if (this.scene._contrailEmitterRight) { try { this.scene._contrailEmitterRight.dispose(); } catch (_) { /* ignore */ } }
         this.scene._contrailPSLeft = null;
         this.scene._contrailPSRight = null;
+        this.scene._contrailRibbonLeft = null;
+        this.scene._contrailRibbonRight = null;
         this.scene._contrailEmitterLeft = null;
         this.scene._contrailEmitterRight = null;
     }
@@ -397,17 +469,25 @@ export class VfxSystem {
         }
     }
 
-    updateContrails(_dt: number): void {
-        if (!this.scene._contrailPSLeft || !this.scene._contrailPSRight) return;
+    updateContrails(dt: number): void {
         const altM = this.scene.planeRoot ? Math.max(0, this.scene.refAlt + this.scene.planeRoot.position.y) : 0;
         const tempC = this.isaTempC(altM);
         const speedMs = Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length();
         const enginePower = Number.isFinite(this.scene.enginePower) ? this.scene.enginePower : 0;
         const targetRate = this.computeContrailEmitRate(altM, tempC, speedMs, enginePower);
-        const curL = this.scene._contrailPSLeft.emitRate || 0;
-        const curR = this.scene._contrailPSRight.emitRate || 0;
-        this.scene._contrailPSLeft.emitRate  = curL + (targetRate - curL) * CONTRAIL_EMIT_LERP_RATE;
-        this.scene._contrailPSRight.emitRate = curR + (targetRate - curR) * CONTRAIL_EMIT_LERP_RATE;
+
+        if (this.scene._contrailPSLeft && this.scene._contrailPSRight) {
+            const curL = this.scene._contrailPSLeft.emitRate || 0;
+            const curR = this.scene._contrailPSRight.emitRate || 0;
+            this.scene._contrailPSLeft.emitRate  = curL + (targetRate - curL) * CONTRAIL_EMIT_LERP_RATE;
+            this.scene._contrailPSRight.emitRate = curR + (targetRate - curR) * CONTRAIL_EMIT_LERP_RATE;
+        }
+
+        if (this._ribbonSystem && (this.scene._contrailRibbonLeft || this.scene._contrailRibbonRight)) {
+            const intensity = targetRate > 0 ? Math.min(1, targetRate / Math.max(1, CONTRAIL_EMIT_RATE_MAX)) : 0;
+            this._ribbonSystem.updatePair(this.scene._contrailRibbonLeft,  dt, intensity);
+            this._ribbonSystem.updatePair(this.scene._contrailRibbonRight, dt, intensity);
+        }
     }
 
     setGodRays(scene: BABYLON.Scene, enabled: boolean): void {

@@ -6,7 +6,7 @@ import { fetchAircraftConfig } from '../api/AircraftConfigApi.js';
 import { MultiplayerClient, PlayerState } from '../../MultiplayerClient.js';
 import { EngineSound, ENGINE_SOUND_TYPE_TURBOFAN } from '../../EngineSound.js';
 import { AudioCore } from '../../AudioCore.js';
-import { CONTRAIL_EMIT_LERP_RATE } from '../constants/index.js';
+import { CONTRAIL_EMIT_LERP_RATE, CONTRAIL_EMIT_RATE_MAX } from '../constants/index.js';
 
 const LABEL_TEX_W = 256;
 const LABEL_TEX_H = 80;
@@ -19,6 +19,7 @@ const REMOTE_CONTRAIL_FALLBACK_HALF_SPAN = 8;
 
 export class MultiplayerSystem {
     private readonly scene: any;
+    private _lastUpdateMs: number = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -139,6 +140,7 @@ export class MultiplayerSystem {
             engineSound: null, engineTypeResolved: false,
             contrailEmitterLeft: null, contrailEmitterRight: null,
             contrailPSLeft: null, contrailPSRight: null,
+            contrailRibbonLeft: null, contrailRibbonRight: null,
             modelPivot: null, modelOriginalSize: 0, modelOriginalHalfWidth: 0,
             aircraftConfigCached: null, pendingConfigApply: false,
         };
@@ -287,8 +289,10 @@ export class MultiplayerSystem {
             if (!pair) return;
             remote.contrailEmitterLeft  = pair.emL;
             remote.contrailEmitterRight = pair.emR;
-            remote.contrailPSLeft  = pair.psL;
-            remote.contrailPSRight = pair.psR;
+            remote.contrailPSLeft  = pair.psL ?? null;
+            remote.contrailPSRight = pair.psR ?? null;
+            remote.contrailRibbonLeft  = pair.ribL ?? null;
+            remote.contrailRibbonRight = pair.ribR ?? null;
         } catch (err) {
             console.warn(`[Remote] buildRemoteContrails failed for ${idTag}:`, err);
         }
@@ -297,10 +301,15 @@ export class MultiplayerSystem {
     disposeRemoteContrails(remote: RemotePlayer): void {
         try { remote.contrailPSLeft?.dispose(); } catch (_) { /* ignore */ }
         try { remote.contrailPSRight?.dispose(); } catch (_) { /* ignore */ }
+        try {
+            this.scene._vfxSystem?.disposeRibbonPair?.(remote.contrailRibbonLeft, remote.contrailRibbonRight);
+        } catch (_) { /* ignore */ }
         try { remote.contrailEmitterLeft?.dispose(); } catch (_) { /* ignore */ }
         try { remote.contrailEmitterRight?.dispose(); } catch (_) { /* ignore */ }
         remote.contrailPSLeft = null;
         remote.contrailPSRight = null;
+        remote.contrailRibbonLeft = null;
+        remote.contrailRibbonRight = null;
         remote.contrailEmitterLeft = null;
         remote.contrailEmitterRight = null;
     }
@@ -473,6 +482,8 @@ export class MultiplayerSystem {
 
     updateRemotePlayers(): void {
         const now = performance.now();
+        const dt = this._lastUpdateMs > 0 ? Math.max(0, Math.min(0.25, (now - this._lastUpdateMs) / 1000)) : 0;
+        this._lastUpdateMs = now;
 
         try {
             if (this.scene.camera) {
@@ -532,22 +543,28 @@ export class MultiplayerSystem {
                 } catch (_) { /* ignore */ }
             }
 
-            if (remote.contrailPSLeft && remote.contrailPSRight) {
-                try {
-                    const vfx = this.scene._vfxSystem;
-                    if (vfx) {
-                        const altM = Number.isFinite(ns.alt) ? Math.max(0, ns.alt) : 0;
-                        const tempC = vfx.isaTempC(altM);
-                        const speedMs = Number.isFinite(ns.airspeed) ? ns.airspeed * REMOTE_AIRSPEED_KMH_TO_MS : 0;
-                        const throttle = Number.isFinite(ns.throttle) ? Math.max(0, Math.min(1.5, ns.throttle)) : 0;
-                        const targetRate = ns.onGround ? 0 : vfx.computeContrailEmitRate(altM, tempC, speedMs, throttle);
+            try {
+                const vfx = this.scene._vfxSystem;
+                if (vfx) {
+                    const altM = Number.isFinite(ns.alt) ? Math.max(0, ns.alt) : 0;
+                    const tempC = vfx.isaTempC(altM);
+                    const speedMs = Number.isFinite(ns.airspeed) ? ns.airspeed * REMOTE_AIRSPEED_KMH_TO_MS : 0;
+                    const throttle = Number.isFinite(ns.throttle) ? Math.max(0, Math.min(1.5, ns.throttle)) : 0;
+                    const targetRate = ns.onGround ? 0 : vfx.computeContrailEmitRate(altM, tempC, speedMs, throttle);
+
+                    if (remote.contrailPSLeft && remote.contrailPSRight) {
                         const curL = remote.contrailPSLeft.emitRate || 0;
                         const curR = remote.contrailPSRight.emitRate || 0;
                         remote.contrailPSLeft.emitRate  = curL + (targetRate - curL) * CONTRAIL_EMIT_LERP_RATE;
                         remote.contrailPSRight.emitRate = curR + (targetRate - curR) * CONTRAIL_EMIT_LERP_RATE;
                     }
-                } catch (_) { /* ignore */ }
-            }
+
+                    if ((remote.contrailRibbonLeft || remote.contrailRibbonRight) && typeof vfx.updateRemoteRibbonPair === 'function') {
+                        const intensity = targetRate > 0 ? Math.min(1, targetRate / Math.max(1, CONTRAIL_EMIT_RATE_MAX)) : 0;
+                        vfx.updateRemoteRibbonPair(remote.contrailRibbonLeft, remote.contrailRibbonRight, dt, intensity);
+                    }
+                }
+            } catch (_) { /* ignore */ }
         }
     }
 

@@ -23,6 +23,11 @@ export const COLOR_GRADE_SATURATION_DAY   = 1.05;
 
 export const COLOR_LUT_URL = 'src/game/assets/luts/cinematic_warm.png';
 
+// Contrail render mode (ribbon shader vs legacy particles)
+export const CONTRAIL_MODE_RIBBON = 'ribbon';
+export const CONTRAIL_MODE_PARTICLES = 'particles';
+export const CONTRAIL_MODE_DEFAULT = CONTRAIL_MODE_RIBBON;
+
 // Contrail (high-altitude condensation trail) tuning
 export const CONTRAIL_TEXTURE_URL = 'src/game/assets/textures/contrail_puff.png';
 export const CONTRAIL_PARTICLE_CAPACITY = 20000;

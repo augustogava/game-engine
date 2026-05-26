@@ -779,6 +779,8 @@ export class FlightSceneSimple extends Scene3D {
     private _surfaceFlapNodes:     BABYLON.TransformNode[] = [];
     private _contrailPSLeft:  BABYLON.ParticleSystem | null = null;
     private _contrailPSRight: BABYLON.ParticleSystem | null = null;
+    private _contrailRibbonLeft:  any = null;
+    private _contrailRibbonRight: any = null;
     private _contrailEmitterLeft:  BABYLON.TransformNode | null = null;
     private _contrailEmitterRight: BABYLON.TransformNode | null = null;
     private _contrailHalfSpan: number = 8;
@@ -1747,6 +1749,24 @@ export class FlightSceneSimple extends Scene3D {
 
     private _updateContrails(_dt: number): void {
         this._vfxSystem.updateContrails(_dt);
+    }
+
+    public setContrailMode(mode: 'ribbon' | 'particles'): void {
+        const current = this._vfxSystem.getContrailMode();
+        if (current === mode) return;
+        this._vfxSystem.setContrailMode(mode);
+        try {
+            this._buildContrails(this.scene, this._contrailHalfSpan);
+            for (const [, remote] of this.remotePlayers) {
+                this._multiplayerSystem.buildRemoteContrails(remote, this._contrailHalfSpan, remote.root.name);
+            }
+        } catch (err) {
+            console.warn('[Contrails] setContrailMode rebuild failed:', err);
+        }
+    }
+
+    public getContrailMode(): string {
+        return this._vfxSystem.getContrailMode();
     }
 
     private _playAlertBeep(freq: number, durationMs: number, type: OscillatorType = 'sine', gain: number = 0.18): void {

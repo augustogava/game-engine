@@ -17,6 +17,7 @@ export * from './terrainConstants.js';
 export * from './unitConstants.js';
 export * from './vegetationConstants.js';
 export * from './vfxConstants.js';
+export * from './contrailRibbonConstants.js';
 export * from './volumetricConstants.js';
 export * from './waterConstants.js';
 export * from './windConstants.js';

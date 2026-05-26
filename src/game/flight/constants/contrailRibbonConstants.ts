@@ -1,0 +1,25 @@
+export const CONTRAIL_RIBBON_SHADER_VERTEX_URL = 'src/game/shaders/contrailRibbon.vertex.fx';
+export const CONTRAIL_RIBBON_SHADER_FRAGMENT_URL = 'src/game/shaders/contrailRibbon.fragment.fx';
+
+export const CONTRAIL_RIBBON_MAX_POINTS = 200;
+export const CONTRAIL_RIBBON_MIN_SEGMENT_M = 1.5;
+export const CONTRAIL_RIBBON_MAX_PUSH_DT_S = 0.05;
+export const CONTRAIL_RIBBON_MAX_AGE_S = 60;
+export const CONTRAIL_RIBBON_HEAD_WIDTH_M = 0.6;
+export const CONTRAIL_RIBBON_TAIL_WIDTH_M = 8.0;
+export const CONTRAIL_RIBBON_NOISE_DETAIL_X = 8.0;
+export const CONTRAIL_RIBBON_NOISE_DETAIL_Y = 2.0;
+export const CONTRAIL_RIBBON_NOISE_SCROLL = 0.04;
+export const CONTRAIL_RIBBON_COVER = 0.55;
+export const CONTRAIL_RIBBON_ALPHA = 0.92;
+export const CONTRAIL_RIBBON_REFLECT = 0.20;
+export const CONTRAIL_RIBBON_DIST_FADE_START_M = 6000;
+export const CONTRAIL_RIBBON_DIST_FADE_END_M = 28000;
+export const CONTRAIL_RIBBON_HEAD_FADE_END = 0.04;
+export const CONTRAIL_RIBBON_TAIL_FADE_START = 0.78;
+export const CONTRAIL_RIBBON_MAX_JUMP_M = 500;
+export const CONTRAIL_RIBBON_ALPHA_INDEX = 22;
+
+export const CONTRAIL_RIBBON_DEFAULT_COLOR_R = 0.97;
+export const CONTRAIL_RIBBON_DEFAULT_COLOR_G = 0.98;
+export const CONTRAIL_RIBBON_DEFAULT_COLOR_B = 1.00;

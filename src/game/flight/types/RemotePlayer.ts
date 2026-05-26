@@ -2,6 +2,7 @@ import * as BABYLON from '@babylonjs/core';
 import { EngineSound } from '../../EngineSound.js';
 import { PlayerState } from '../../MultiplayerClient.js';
 import type { AircraftConfig } from './AircraftConfig.js';
+import type { ContrailRibbonHandle } from '../systems/ContrailRibbonSystem.js';
 
 export interface RemotePlayer {
     root: BABYLON.TransformNode;
@@ -20,6 +21,8 @@ export interface RemotePlayer {
     contrailEmitterRight: BABYLON.TransformNode | null;
     contrailPSLeft: BABYLON.ParticleSystem | null;
     contrailPSRight: BABYLON.ParticleSystem | null;
+    contrailRibbonLeft: ContrailRibbonHandle | null;
+    contrailRibbonRight: ContrailRibbonHandle | null;
     modelPivot: BABYLON.TransformNode | null;
     modelOriginalSize: number;
     modelOriginalHalfWidth: number;
