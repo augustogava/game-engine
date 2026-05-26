@@ -87,7 +87,7 @@ export class VfxSystem {
                     const dy = y - cy;
                     const dist = Math.sqrt(dx * dx + dy * dy) / r;
                     const t = Math.max(0, 1 - dist);
-                    const alpha = Math.pow(t, 2.2);
+                    const alpha = Math.pow(t, 1.2);
                     const idx = (y * size + x) * 4;
                     img.data[idx + 0] = 255;
                     img.data[idx + 1] = 255;
