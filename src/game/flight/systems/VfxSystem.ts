@@ -30,7 +30,6 @@ import {
     ISA_SEA_LEVEL_TEMP_K,
     ISA_LAPSE_RATE_K_PER_M,
     COLOR_LUT_URL,
-    CONTRAIL_TEXTURE_URL,
     CONTRAIL_PARTICLE_CAPACITY,
     CONTRAIL_EMIT_RATE_MAX,
     CONTRAIL_MIN_LIFETIME_S,
@@ -65,9 +64,46 @@ export class VfxSystem {
     private _lastContrast: number = Number.NaN;
     private _lastColorCurvesEnabled: boolean | null = null;
     private _lastColorGradingEnabled: boolean | null = null;
+    private _contrailProceduralTex: BABYLON.DynamicTexture | null = null;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    private _getContrailProceduralTexture(scene: BABYLON.Scene): BABYLON.DynamicTexture | null {
+        if (this._contrailProceduralTex) return this._contrailProceduralTex;
+        try {
+            const size = 128;
+            const tex = new BABYLON.DynamicTexture('contrailProceduralTex', { width: size, height: size }, scene, false);
+            tex.hasAlpha = true;
+            const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
+            const cx = size / 2;
+            const cy = size / 2;
+            const r = size / 2;
+            const img = ctx.createImageData(size, size);
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const dx = x - cx;
+                    const dy = y - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy) / r;
+                    const t = Math.max(0, 1 - dist);
+                    const alpha = Math.pow(t, 2.2);
+                    const idx = (y * size + x) * 4;
+                    img.data[idx + 0] = 255;
+                    img.data[idx + 1] = 255;
+                    img.data[idx + 2] = 255;
+                    img.data[idx + 3] = Math.round(alpha * 255);
+                }
+            }
+            ctx.putImageData(img, 0, 0);
+            tex.update();
+            this._contrailProceduralTex = tex;
+            console.debug('[Contrails] Built procedural soft-disc texture (alpha-correct)');
+            return tex;
+        } catch (err) {
+            console.warn('[Contrails] Procedural texture build failed:', err);
+            return null;
+        }
     }
 
     /**
@@ -80,16 +116,10 @@ export class VfxSystem {
     } | null {
         if (this.scene.isMobile === true) return null;
         const safeHalf = Math.max(2, halfSpan);
-        const sharedTex = (() => {
-            try {
-                const t = new BABYLON.Texture(CONTRAIL_TEXTURE_URL, scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
-                t.hasAlpha = true;
-                return t;
-            } catch (err) {
-                console.warn('[Contrails] failed to load custom texture, falling back to cloud puff:', err);
-                try { return new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { return null; }
-            }
-        })();
+        const sharedTex: BABYLON.BaseTexture | null = this._getContrailProceduralTexture(scene);
+        if (!sharedTex) {
+            console.warn('[Contrails] no procedural texture available; particles may look wrong');
+        }
         const makeEmitter = (name: string, x: number): BABYLON.TransformNode => {
             const em = new BABYLON.TransformNode(name, scene);
             em.parent = parentRoot;
@@ -142,16 +172,16 @@ export class VfxSystem {
                 );
             }
 
-            ps.addSizeGradient(0.00, 0.4);
-            ps.addSizeGradient(0.05, 0.7);
-            ps.addSizeGradient(0.20, 1.2);
-            ps.addSizeGradient(0.55, 2.4);
+            ps.addSizeGradient(0.00, 0.5);
+            ps.addSizeGradient(0.15, 0.8);
+            ps.addSizeGradient(0.40, 1.1);
+            ps.addSizeGradient(0.75, 1.6);
             ps.addSizeGradient(1.00, CONTRAIL_FINAL_SIZE_MULTIPLIER);
 
             ps.addColorGradient(0.00, new BABYLON.Color4(1.00, 1.00, 1.00, 0.00));
-            ps.addColorGradient(0.04, new BABYLON.Color4(1.00, 1.00, 1.00, CONTRAIL_INITIAL_ALPHA));
-            ps.addColorGradient(0.45, new BABYLON.Color4(0.99, 0.99, 1.00, CONTRAIL_INITIAL_ALPHA * 0.80));
-            ps.addColorGradient(0.80, new BABYLON.Color4(0.97, 0.98, 1.00, CONTRAIL_INITIAL_ALPHA * 0.30));
+            ps.addColorGradient(0.03, new BABYLON.Color4(1.00, 1.00, 1.00, CONTRAIL_INITIAL_ALPHA));
+            ps.addColorGradient(0.55, new BABYLON.Color4(0.99, 0.99, 1.00, CONTRAIL_INITIAL_ALPHA * 0.75));
+            ps.addColorGradient(0.85, new BABYLON.Color4(0.97, 0.98, 1.00, CONTRAIL_INITIAL_ALPHA * 0.25));
             ps.addColorGradient(1.00, new BABYLON.Color4(0.95, 0.97, 1.00, 0));
 
             ps.start();
@@ -207,6 +237,10 @@ export class VfxSystem {
         this.scene._contrailPSRight = null;
         this.scene._contrailEmitterLeft = null;
         this.scene._contrailEmitterRight = null;
+        if (this._contrailProceduralTex) {
+            try { this._contrailProceduralTex.dispose(); } catch (_) { /* ignore */ }
+            this._contrailProceduralTex = null;
+        }
     }
 
     buildVaporCone(scene: BABYLON.Scene): void {
