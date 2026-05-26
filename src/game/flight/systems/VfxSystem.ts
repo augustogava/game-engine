@@ -40,6 +40,8 @@ import {
     CONTRAIL_INITIAL_ALPHA,
     CONTRAIL_MIN_DRIFT_MS,
     CONTRAIL_MAX_DRIFT_MS,
+    CONTRAIL_LATERAL_SPREAD,
+    CONTRAIL_VERTICAL_SPREAD,
     CONTRAIL_ENABLE_MIN_ALTITUDE_M,
     CONTRAIL_ENABLE_MIN_SPEED_MS,
     CONTRAIL_ENABLE_MAX_TEMP_C,
@@ -97,8 +99,8 @@ export class VfxSystem {
             ps.emitRate = 0;
             ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
             ps.gravity = new BABYLON.Vector3(0, 0, 0);
-            ps.direction1 = new BABYLON.Vector3(0, 0, -1);
-            ps.direction2 = new BABYLON.Vector3(0, 0, -1);
+            ps.direction1 = new BABYLON.Vector3(-CONTRAIL_LATERAL_SPREAD, -CONTRAIL_VERTICAL_SPREAD, -1);
+            ps.direction2 = new BABYLON.Vector3( CONTRAIL_LATERAL_SPREAD,  CONTRAIL_VERTICAL_SPREAD, -1);
             ps.minEmitPower = CONTRAIL_MIN_DRIFT_MS;
             ps.maxEmitPower = CONTRAIL_MAX_DRIFT_MS;
             ps.updateSpeed = 0.015;
