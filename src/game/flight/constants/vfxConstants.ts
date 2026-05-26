@@ -25,13 +25,13 @@ export const COLOR_LUT_URL = 'src/game/assets/luts/cinematic_warm.png';
 
 // Contrail (high-altitude condensation trail) tuning
 export const CONTRAIL_TEXTURE_URL = 'src/game/assets/textures/contrail_puff.png';
-export const CONTRAIL_PARTICLE_CAPACITY = 10000;
-export const CONTRAIL_EMIT_RATE_MAX = 320;
-export const CONTRAIL_MIN_LIFETIME_S = 25;
-export const CONTRAIL_MAX_LIFETIME_S = 40;
-export const CONTRAIL_MIN_SIZE_INITIAL_M = 1.0;
-export const CONTRAIL_MAX_SIZE_INITIAL_M = 1.8;
-export const CONTRAIL_FINAL_SIZE_MULTIPLIER = 3.0;
+export const CONTRAIL_PARTICLE_CAPACITY = 12000;
+export const CONTRAIL_EMIT_RATE_MAX = 380;
+export const CONTRAIL_MIN_LIFETIME_S = 28;
+export const CONTRAIL_MAX_LIFETIME_S = 50;
+export const CONTRAIL_MIN_SIZE_INITIAL_M = 2.5;
+export const CONTRAIL_MAX_SIZE_INITIAL_M = 4.0;
+export const CONTRAIL_FINAL_SIZE_MULTIPLIER = 9.0;
 export const CONTRAIL_INITIAL_ALPHA = 1.00;
 export const CONTRAIL_MIN_DRIFT_MS = 0.01;
 export const CONTRAIL_MAX_DRIFT_MS = 0.05;

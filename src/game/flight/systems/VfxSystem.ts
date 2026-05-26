@@ -172,10 +172,10 @@ export class VfxSystem {
                 );
             }
 
-            ps.addSizeGradient(0.00, 0.5);
-            ps.addSizeGradient(0.15, 0.8);
-            ps.addSizeGradient(0.40, 1.1);
-            ps.addSizeGradient(0.75, 1.6);
+            ps.addSizeGradient(0.00, 0.45);
+            ps.addSizeGradient(0.10, 0.70);
+            ps.addSizeGradient(0.30, 1.40);
+            ps.addSizeGradient(0.60, 3.50);
             ps.addSizeGradient(1.00, CONTRAIL_FINAL_SIZE_MULTIPLIER);
 
             ps.addColorGradient(0.00, new BABYLON.Color4(1.00, 1.00, 1.00, 0.00));

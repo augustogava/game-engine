@@ -181,7 +181,7 @@ export class InputSystem {
             ? cfgSmoothing
             : LATERAL_SMOOTHING_RATE;
         const PITCH_RETURN_RATE    = (cfgSmoothing != null && cfgSmoothing > 0)
-            ? cfgSmoothing * 0.75
+            ? cfgSmoothing * 0.35
             : LATERAL_RETURN_RATE;
         const cfgInputMag = this.scene.aircraftConfig.control_input_magnitude;
         const KEY_PITCH_MAGNITUDE = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.75;
