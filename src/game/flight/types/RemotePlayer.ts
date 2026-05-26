@@ -23,6 +23,7 @@ export interface RemotePlayer {
     contrailPSRight: BABYLON.ParticleSystem | null;
     contrailRibbonLeft: ContrailRibbonHandle | null;
     contrailRibbonRight: ContrailRibbonHandle | null;
+    contrailHalfSpan: number;
     modelPivot: BABYLON.TransformNode | null;
     modelOriginalSize: number;
     modelOriginalHalfWidth: number;

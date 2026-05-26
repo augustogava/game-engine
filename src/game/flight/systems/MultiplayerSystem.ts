@@ -141,6 +141,7 @@ export class MultiplayerSystem {
             contrailEmitterLeft: null, contrailEmitterRight: null,
             contrailPSLeft: null, contrailPSRight: null,
             contrailRibbonLeft: null, contrailRibbonRight: null,
+            contrailHalfSpan: REMOTE_CONTRAIL_FALLBACK_HALF_SPAN,
             modelPivot: null, modelOriginalSize: 0, modelOriginalHalfWidth: 0,
             aircraftConfigCached: null, pendingConfigApply: false,
         };
@@ -285,7 +286,9 @@ export class MultiplayerSystem {
     buildRemoteContrails(remote: RemotePlayer, halfSpan: number, idTag: string): void {
         this.disposeRemoteContrails(remote);
         try {
-            const pair = this.scene._vfxSystem?.buildContrailPair?.(this.scene.scene, remote.root, halfSpan, `remote_${idTag}`);
+            const safeHalf = Number.isFinite(halfSpan) && halfSpan > 0 ? halfSpan : REMOTE_CONTRAIL_FALLBACK_HALF_SPAN;
+            remote.contrailHalfSpan = safeHalf;
+            const pair = this.scene._vfxSystem?.buildContrailPair?.(this.scene.scene, remote.root, safeHalf, `remote_${idTag}`);
             if (!pair) return;
             remote.contrailEmitterLeft  = pair.emL;
             remote.contrailEmitterRight = pair.emR;
@@ -295,6 +298,15 @@ export class MultiplayerSystem {
             remote.contrailRibbonRight = pair.ribR ?? null;
         } catch (err) {
             console.warn(`[Remote] buildRemoteContrails failed for ${idTag}:`, err);
+        }
+    }
+
+    rebuildAllRemoteContrails(): void {
+        for (const [id, remote] of this.scene.remotePlayers) {
+            const halfSpan = Number.isFinite(remote.contrailHalfSpan) && remote.contrailHalfSpan > 0
+                ? remote.contrailHalfSpan
+                : REMOTE_CONTRAIL_FALLBACK_HALF_SPAN;
+            this.buildRemoteContrails(remote, halfSpan, id);
         }
     }
 

@@ -1757,9 +1757,7 @@ export class FlightSceneSimple extends Scene3D {
         this._vfxSystem.setContrailMode(mode);
         try {
             this._buildContrails(this.scene, this._contrailHalfSpan);
-            for (const [, remote] of this.remotePlayers) {
-                this._multiplayerSystem.buildRemoteContrails(remote, this._contrailHalfSpan, remote.root.name);
-            }
+            this._multiplayerSystem.rebuildAllRemoteContrails();
         } catch (err) {
             console.warn('[Contrails] setContrailMode rebuild failed:', err);
         }

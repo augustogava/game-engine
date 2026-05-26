@@ -229,7 +229,6 @@ export class ContrailRibbonSystem {
         if (!handle) return;
         try { handle.material?.dispose(); } catch (_) { /* ignore */ }
         try { handle.mesh?.dispose(); } catch (_) { /* ignore */ }
-        try { handle.emitter?.dispose(); } catch (_) { /* ignore */ }
         handle.material = null;
         handle.mesh = null;
         handle.history.length = 0;
@@ -255,6 +254,7 @@ export class ContrailRibbonSystem {
         }
 
         handle.pushDtAccum += dtClamp;
+        try { handle.emitter.computeWorldMatrix(true); } catch (_) { /* ignore */ }
         const emPos = handle.emitter.getAbsolutePosition();
         const head = handle.history[0];
         let shouldPush = false;
