@@ -30,6 +30,22 @@ import {
     ISA_SEA_LEVEL_TEMP_K,
     ISA_LAPSE_RATE_K_PER_M,
     COLOR_LUT_URL,
+    CONTRAIL_TEXTURE_URL,
+    CONTRAIL_PARTICLE_CAPACITY,
+    CONTRAIL_EMIT_RATE_MAX,
+    CONTRAIL_MIN_LIFETIME_S,
+    CONTRAIL_MAX_LIFETIME_S,
+    CONTRAIL_MIN_SIZE_INITIAL_M,
+    CONTRAIL_MAX_SIZE_INITIAL_M,
+    CONTRAIL_FINAL_SIZE_MULTIPLIER,
+    CONTRAIL_INITIAL_ALPHA,
+    CONTRAIL_MIN_DRIFT_MS,
+    CONTRAIL_MAX_DRIFT_MS,
+    CONTRAIL_ENABLE_MIN_ALTITUDE_M,
+    CONTRAIL_ENABLE_MIN_SPEED_MS,
+    CONTRAIL_ENABLE_MAX_TEMP_C,
+    CONTRAIL_ENABLE_MIN_ENGINE_POWER,
+    CONTRAIL_EMIT_LERP_RATE,
 } from '../constants/index.js';
 
 const COLOR_GRADE_TINT_HUE_EPSILON_DEG = 1.0;
@@ -55,35 +71,58 @@ export class VfxSystem {
             console.info('[Contrails] Skipped on mobile (particle system disabled for performance)');
             return;
         }
-        const makeEmitter = (name: string, x: number) => {
+        const makeEmitter = (name: string, x: number): BABYLON.TransformNode => {
             const em = new BABYLON.TransformNode(name, scene);
             em.parent = this.scene.planeRoot;
             em.position.set(x, 0, -this.scene._contrailHalfSpan * 0.2);
             return em;
         };
-        const buildPs = (name: string, emitter: BABYLON.TransformNode) => {
-            const ps = new BABYLON.ParticleSystem(name, 800, scene);
+        const sharedTex = (() => {
             try {
-                ps.particleTexture = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
-            } catch (_) { /* offline; use plain */ }
+                const t = new BABYLON.Texture(CONTRAIL_TEXTURE_URL, scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+                t.hasAlpha = true;
+                return t;
+            } catch (err) {
+                console.warn('[Contrails] failed to load custom texture, falling back to cloud puff:', err);
+                try { return new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { return null; }
+            }
+        })();
+        const buildPs = (name: string, emitter: BABYLON.TransformNode): BABYLON.ParticleSystem => {
+            const ps = new BABYLON.ParticleSystem(name, CONTRAIL_PARTICLE_CAPACITY, scene);
+            if (sharedTex) ps.particleTexture = sharedTex;
             ps.emitter = emitter as unknown as BABYLON.AbstractMesh;
             ps.minEmitBox = new BABYLON.Vector3(0, 0, 0);
             ps.maxEmitBox = new BABYLON.Vector3(0, 0, 0);
-            ps.color1 = new BABYLON.Color4(1, 1, 1, 0.55);
-            ps.color2 = new BABYLON.Color4(0.9, 0.95, 1, 0.40);
-            ps.colorDead = new BABYLON.Color4(0.8, 0.85, 0.9, 0);
-            ps.minSize = 1.0;
-            ps.maxSize = 2.5;
-            ps.minLifeTime = 6.0;
-            ps.maxLifeTime = 12.0;
+            ps.color1    = new BABYLON.Color4(1.00, 1.00, 1.00, CONTRAIL_INITIAL_ALPHA);
+            ps.color2    = new BABYLON.Color4(0.96, 0.98, 1.00, CONTRAIL_INITIAL_ALPHA * 0.85);
+            ps.colorDead = new BABYLON.Color4(0.95, 0.97, 1.00, 0);
+            ps.minSize = CONTRAIL_MIN_SIZE_INITIAL_M;
+            ps.maxSize = CONTRAIL_MAX_SIZE_INITIAL_M;
+            ps.minLifeTime = CONTRAIL_MIN_LIFETIME_S;
+            ps.maxLifeTime = CONTRAIL_MAX_LIFETIME_S;
             ps.emitRate = 0;
             ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
             ps.gravity = new BABYLON.Vector3(0, 0, 0);
-            ps.direction1 = new BABYLON.Vector3(0, 0, -1);
-            ps.direction2 = new BABYLON.Vector3(0, 0, -1);
-            ps.minEmitPower = 0.3;
-            ps.maxEmitPower = 0.8;
-            ps.updateSpeed = 0.02;
+            ps.direction1 = new BABYLON.Vector3(0, 0, 0);
+            ps.direction2 = new BABYLON.Vector3(0, 0, 0);
+            ps.minEmitPower = CONTRAIL_MIN_DRIFT_MS;
+            ps.maxEmitPower = CONTRAIL_MAX_DRIFT_MS;
+            ps.minAngularSpeed = -0.15;
+            ps.maxAngularSpeed =  0.15;
+            ps.updateSpeed = 0.016;
+            ps.preWarmCycles = 0;
+
+            ps.addSizeGradient(0.00, 1.0);
+            ps.addSizeGradient(0.20, 1.6);
+            ps.addSizeGradient(0.55, 2.6);
+            ps.addSizeGradient(1.00, CONTRAIL_FINAL_SIZE_MULTIPLIER);
+
+            ps.addColorGradient(0.00, new BABYLON.Color4(1.00, 1.00, 1.00, CONTRAIL_INITIAL_ALPHA));
+            ps.addColorGradient(0.15, new BABYLON.Color4(0.99, 0.99, 1.00, CONTRAIL_INITIAL_ALPHA * 0.95));
+            ps.addColorGradient(0.50, new BABYLON.Color4(0.97, 0.98, 1.00, CONTRAIL_INITIAL_ALPHA * 0.55));
+            ps.addColorGradient(0.85, new BABYLON.Color4(0.95, 0.97, 1.00, CONTRAIL_INITIAL_ALPHA * 0.20));
+            ps.addColorGradient(1.00, new BABYLON.Color4(0.95, 0.97, 1.00, 0));
+
             ps.start();
             return ps;
         };
@@ -91,6 +130,7 @@ export class VfxSystem {
         this.scene._contrailEmitterRight = makeEmitter('contrailEmR',  this.scene._contrailHalfSpan * 0.92);
         this.scene._contrailPSLeft  = buildPs('contrailPSL', this.scene._contrailEmitterLeft);
         this.scene._contrailPSRight = buildPs('contrailPSR', this.scene._contrailEmitterRight);
+        console.debug(`[Contrails] Built (capacity=${CONTRAIL_PARTICLE_CAPACITY}/side, lifetime=${CONTRAIL_MIN_LIFETIME_S}-${CONTRAIL_MAX_LIFETIME_S}s, halfSpan=${this.scene._contrailHalfSpan.toFixed(1)}m)`);
     }
 
     disposeContrails(): void {
@@ -350,12 +390,18 @@ export class VfxSystem {
             : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altM);
         const tempC = tempK - 273.15;
         const speedMs = Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length();
-        const enabled = altM > 8000 && tempC < -40 && speedMs > 60 && this.scene.enginePower > 0.2;
-        const targetRate = enabled ? 80 : 0;
+        const enginePower = Number.isFinite(this.scene.enginePower) ? this.scene.enginePower : 0;
+        const altOk = altM > CONTRAIL_ENABLE_MIN_ALTITUDE_M;
+        const tempOk = tempC < CONTRAIL_ENABLE_MAX_TEMP_C;
+        const speedOk = speedMs > CONTRAIL_ENABLE_MIN_SPEED_MS;
+        const powerOk = enginePower > CONTRAIL_ENABLE_MIN_ENGINE_POWER;
+        const enabled = altOk && tempOk && speedOk && powerOk;
+        const powerFactor = Math.max(0, Math.min(1, (enginePower - CONTRAIL_ENABLE_MIN_ENGINE_POWER) / Math.max(0.0001, 1 - CONTRAIL_ENABLE_MIN_ENGINE_POWER)));
+        const targetRate = enabled ? CONTRAIL_EMIT_RATE_MAX * (0.55 + 0.45 * powerFactor) : 0;
         const curL = this.scene._contrailPSLeft.emitRate || 0;
         const curR = this.scene._contrailPSRight.emitRate || 0;
-        this.scene._contrailPSLeft.emitRate  = curL + (targetRate - curL) * 0.05;
-        this.scene._contrailPSRight.emitRate = curR + (targetRate - curR) * 0.05;
+        this.scene._contrailPSLeft.emitRate  = curL + (targetRate - curL) * CONTRAIL_EMIT_LERP_RATE;
+        this.scene._contrailPSRight.emitRate = curR + (targetRate - curR) * CONTRAIL_EMIT_LERP_RATE;
     }
 
     setGodRays(scene: BABYLON.Scene, enabled: boolean): void {
