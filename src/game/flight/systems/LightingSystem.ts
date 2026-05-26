@@ -490,7 +490,7 @@ export class LightingSystem {
         const t = Math.max(0, Math.min(1, (elevation + 6) / 30));
 
         if (this.scene._sunLight) {
-            const newSunIntensity = 0.1 + t * 2.9;
+            const newSunIntensity = 0.02 + t * 2.98;
             if (!Number.isFinite(this._lastSunIntensity) || Math.abs(newSunIntensity - this._lastSunIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
                 this.scene._sunLight.intensity = newSunIntensity;
                 this._lastSunIntensity = newSunIntensity;
@@ -543,7 +543,7 @@ export class LightingSystem {
         }
 
         if (this.scene._fillLight) {
-            const newFillIntensity = 0.05 + t * 0.55;
+            const newFillIntensity = 0.01 + t * 0.59;
             if (!Number.isFinite(this._lastFillIntensity) || Math.abs(newFillIntensity - this._lastFillIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
                 this.scene._fillLight.intensity = newFillIntensity;
                 this._lastFillIntensity = newFillIntensity;
@@ -595,7 +595,7 @@ export class LightingSystem {
             this._lastClearB = clearB;
         }
 
-        const envBase = 0.15 + t * 1.15;
+        const envBase = 0.05 + t * 1.25;
         const newEnvIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
         if (!Number.isFinite(this._lastEnvIntensity) || Math.abs(newEnvIntensity - this._lastEnvIntensity) >= DAYNIGHT_ENV_INTENSITY_EPSILON) {
             scene.environmentIntensity = newEnvIntensity;
@@ -603,7 +603,7 @@ export class LightingSystem {
         }
 
         if (this.scene._pipeline) {
-            const expBase = 0.7 + t * 1.1;
+            const expBase = 0.45 + t * 1.35;
             const newExposure = this.scene.isMobile ? Math.max(expBase * 1.15, 1.2) : expBase;
             if (!Number.isFinite(this._lastExposure) || Math.abs(newExposure - this._lastExposure) >= DAYNIGHT_EXPOSURE_EPSILON) {
                 this.scene._pipeline.imageProcessing.exposure = newExposure;

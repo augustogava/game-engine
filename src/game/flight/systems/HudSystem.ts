@@ -1100,7 +1100,7 @@ export class HudSystem {
 #missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
-#nav-info{top:150px!important;left:2px!important;width:140px!important;font-size:9px!important}
+#nav-info{top:280px!important;left:2px!important;width:140px!important;font-size:9px!important}
 #ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
 #ap-panel .ap-btn{padding:2px 5px!important;font-size:9px!important}
 #ap-panel .ap-units{gap:6px!important}
@@ -1126,7 +1126,7 @@ export class HudSystem {
 #aircraft-panel{top:38px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
 #flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
 #flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
-#nav-info{top:120px!important;left:2px!important;width:110px!important;font-size:8px!important}
+#nav-info{top:220px!important;left:2px!important;width:110px!important;font-size:8px!important}
 #ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
 #ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
 #ap-panel .ap-units{gap:4px!important}
@@ -1427,7 +1427,7 @@ export class HudSystem {
   <div class="panel-resize" data-panel="flight-plans-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
-<div id="nav-info" style="display:none;position:absolute;top:190px;left:4px;width:210px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:6px;padding:6px 8px;font-family:'Inter',sans-serif;color:#fff;font-size:10px;pointer-events:none;box-shadow:0 0 12px rgba(0,255,128,.1)">
+<div id="nav-info" style="display:none;position:absolute;top:340px;left:4px;width:210px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:6px;padding:6px 8px;font-family:'Inter',sans-serif;color:#fff;font-size:10px;cursor:grab;box-shadow:0 0 12px rgba(0,255,128,.1)">
   <div style="font-family:'Orbitron',monospace;font-size:8px;color:#40ffaa;letter-spacing:.15em;margin-bottom:3px">NAV</div>
   <div id="nav-leg-block" style="display:none;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:3px;margin-bottom:3px">
     <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">WPT</span><span id="nav-wpt-name" style="color:#fff">\u2014</span></div>
@@ -1462,6 +1462,8 @@ export class HudSystem {
         if (panelLeft) this.scene._makeDraggable(panelLeft);
         if (panelRight) this.scene._makeDraggable(panelRight);
         if (apPanel) this.scene._makeDraggable(apPanel);
+        const navPanel = hud.querySelector<HTMLElement>('#nav-info');
+        if (navPanel) this.scene._makeDraggable(navPanel);
         this.scene.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
         this.scene.hudCtx    = this.scene.hudCanvas.getContext('2d')!;
         this.scene.hudSpeedVal = document.getElementById('bb-spd-v')!;
@@ -1612,15 +1614,23 @@ export class HudSystem {
         const wpts = this.scene._missionWaypoints;
         const idx = this.scene._missionCurrentWpIndex;
         const legBlock = document.getElementById('nav-leg-block');
-        if (wpts.length > 0 && idx < wpts.length) {
+        const hasActiveWp = wpts.length > 0 && idx < wpts.length;
+        const useArrivalAsLeg = !hasActiveWp && nav.arrival_lat != null && nav.arrival_lon != null;
+        if (hasActiveWp || useArrivalAsLeg) {
             if (legBlock) legBlock.style.display = 'block';
-            const wp = wpts[idx];
+            const wp = hasActiveWp ? wpts[idx] : {
+                name: nav.arrival_icao || 'DEST',
+                order_index: 1,
+                latitude: nav.arrival_lat,
+                longitude: nav.arrival_lon,
+                altitude_ft: null,
+            };
             const wpLat = Number(wp.latitude);
             const wpLon = Number(wp.longitude);
             const legDistNm = this.scene._haversineNm(lat, lon, wpLat, wpLon);
             const legBrgDeg = this.scene._initialBearingDeg(lat, lon, wpLat, wpLon);
             this.scene._setText('nav-wpt-name', wp.name || `WP ${wp.order_index}`);
-            this.scene._setText('nav-leg-idx', `${idx + 1}/${wpts.length}`);
+            this.scene._setText('nav-leg-idx', hasActiveWp ? `${idx + 1}/${wpts.length}` : 'DIRECT');
             this.scene._setText('nav-leg-dist', `${legDistNm.toFixed(1)} nm`);
             const legBrgMag = ((legBrgDeg - magVarHere) + 360) % 360;
             this.scene._setText('nav-leg-brg', `${Math.round(legBrgMag)}\u00B0M`);
@@ -1635,7 +1645,7 @@ export class HudSystem {
             this.scene._setHtml('nav-hdg-delta', `<span style="color:${deltaColor}">${arrow} ${Math.round(absD)}\u00B0</span>`);
 
             let prevLat: number, prevLon: number;
-            if (idx === 0) {
+            if (useArrivalAsLeg || idx === 0) {
                 prevLat = nav.departure_lat;
                 prevLon = nav.departure_lon;
             } else {
