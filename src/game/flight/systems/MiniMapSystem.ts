@@ -9,6 +9,13 @@ const MAP_REQUEST_SCALE = 2;
 const MAP_REFETCH_DRIFT_RATIO = 0.25;
 const MAP_REFETCH_INTERVAL_MS = 5000;
 const MAP_IMG_UPSCALE = 2.0;
+const MINIMAP_TRAFFIC_TRIANGLE_SIZE = 3.5;
+const MINIMAP_TRAFFIC_COLOR = 'rgba(255, 215, 0, 0.9)';
+const MINIMAP_TRAFFIC_OUTLINE = 'rgba(0, 0, 0, 0.6)';
+const MINIMAP_REMOTE_PLAYER_RADIUS = 3.5;
+const MINIMAP_REMOTE_PLAYER_COLOR = 'rgba(255, 140, 0, 0.95)';
+const MINIMAP_REMOTE_PLAYER_OUTLINE = 'rgba(0, 0, 0, 0.7)';
+const MINIMAP_LABEL_FONT = '7px Inter, sans-serif';
 
 export class MiniMapSystem {
     private readonly scene: any;
@@ -313,6 +320,9 @@ export class MiniMapSystem {
 
         ctx.restore();
 
+        this._drawLiveTraffic(ctx, cv, lat, lon, hdg, headingUp, rotXY);
+        this._drawRemotePlayers(ctx, cv, lat, lon, rotXY);
+
         if (this.scene._activeMissionId != null && this.scene._missionWaypoints.length > 0) {
             ctx.save();
             for (let i = 0; i < this.scene._missionWaypoints.length; i++) {
@@ -443,5 +453,95 @@ export class MiniMapSystem {
             this._gpsCoordsEl = document.getElementById('gps-coords');
         }
         if (this._gpsCoordsEl) this._gpsCoordsEl.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    }
+
+    private _drawLiveTraffic(
+        ctx: CanvasRenderingContext2D,
+        cv: HTMLCanvasElement,
+        refLat: number,
+        refLon: number,
+        playerHdgDeg: number,
+        headingUp: boolean,
+        rotXY: (px: number, py: number) => { x: number; y: number },
+    ): void {
+        const liveSystem = this.scene._liveTrafficSystem;
+        if (!liveSystem || typeof liveSystem.getTrafficEntries !== 'function') return;
+        let entries: Array<{ fr24Id: string; callsign: string; lat: number; lon: number; trackDeg: number; altFt: number }>;
+        try {
+            entries = liveSystem.getTrafficEntries();
+        } catch (err) {
+            console.warn('[GPS] getTrafficEntries failed:', err);
+            return;
+        }
+        if (!entries || entries.length === 0) return;
+        const margin = 2;
+        const hdgCorrection = headingUp && Number.isFinite(playerHdgDeg) ? playerHdgDeg : 0;
+        ctx.save();
+        for (const e of entries) {
+            if (!Number.isFinite(e.lat) || !Number.isFinite(e.lon)) continue;
+            const p = this.latLonToMapPx(e.lat, e.lon, refLat, refLon, cv.width);
+            const screen = rotXY(p.x, p.y);
+            if (screen.x < -margin || screen.x > cv.width + margin) continue;
+            if (screen.y < -margin || screen.y > cv.height + margin) continue;
+            const trackEffectiveDeg = (Number.isFinite(e.trackDeg) ? e.trackDeg : 0) - hdgCorrection;
+            const trackRad = trackEffectiveDeg * Math.PI / 180;
+            ctx.save();
+            ctx.translate(screen.x, screen.y);
+            ctx.rotate(trackRad);
+            const s = MINIMAP_TRAFFIC_TRIANGLE_SIZE;
+            ctx.beginPath();
+            ctx.moveTo(0, -s);
+            ctx.lineTo(-s * 0.75, s * 0.75);
+            ctx.lineTo(s * 0.75, s * 0.75);
+            ctx.closePath();
+            ctx.fillStyle = MINIMAP_TRAFFIC_COLOR;
+            ctx.fill();
+            ctx.strokeStyle = MINIMAP_TRAFFIC_OUTLINE;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+            ctx.restore();
+            if (e.callsign) {
+                ctx.font = MINIMAP_LABEL_FONT;
+                ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
+                ctx.fillText(e.callsign, screen.x + 5, screen.y - 4);
+            }
+        }
+        ctx.restore();
+    }
+
+    private _drawRemotePlayers(
+        ctx: CanvasRenderingContext2D,
+        cv: HTMLCanvasElement,
+        refLat: number,
+        refLon: number,
+        rotXY: (px: number, py: number) => { x: number; y: number },
+    ): void {
+        const remotePlayers = this.scene.remotePlayers as Map<string, any> | undefined;
+        if (!remotePlayers || remotePlayers.size === 0) return;
+        const margin = 2;
+        ctx.save();
+        for (const [, remote] of remotePlayers) {
+            const ns = remote?.nextState;
+            if (!ns) continue;
+            if (!Number.isFinite(ns.lat) || !Number.isFinite(ns.lon)) continue;
+            const p = this.latLonToMapPx(ns.lat, ns.lon, refLat, refLon, cv.width);
+            const screen = rotXY(p.x, p.y);
+            if (screen.x < -margin || screen.x > cv.width + margin) continue;
+            if (screen.y < -margin || screen.y > cv.height + margin) continue;
+            ctx.fillStyle = MINIMAP_REMOTE_PLAYER_COLOR;
+            ctx.strokeStyle = MINIMAP_REMOTE_PLAYER_OUTLINE;
+            ctx.lineWidth = 0.6;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, MINIMAP_REMOTE_PLAYER_RADIUS, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            const username = typeof ns.username === 'string' && ns.username ? ns.username : null;
+            if (username) {
+                ctx.font = MINIMAP_LABEL_FONT;
+                ctx.fillStyle = 'rgba(255, 200, 120, 0.95)';
+                ctx.fillText(username, screen.x + 5, screen.y - 4);
+            }
+        }
+        ctx.restore();
     }
 }

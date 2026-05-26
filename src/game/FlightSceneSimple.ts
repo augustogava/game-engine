@@ -382,6 +382,7 @@ import { MultiplayerSystem } from './flight/systems/MultiplayerSystem.js';
 import { MissionSystem } from './flight/systems/MissionSystem.js';
 import { FlightPhysicsSystem } from './flight/systems/FlightPhysicsSystem.js';
 import { MiniMapSystem } from './flight/systems/MiniMapSystem.js';
+import { LiveTrafficSystem } from './flight/systems/LiveTrafficSystem.js';
 import { DebugPanelSystem } from './flight/systems/DebugPanelSystem.js';
 import { InputSystem } from './flight/systems/InputSystem.js';
 import { HudSystem } from './flight/systems/HudSystem.js';
@@ -412,6 +413,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _missionSystem = new MissionSystem(this);
     /** @internal */ private readonly _flightPhysicsSystem = new FlightPhysicsSystem(this);
     /** @internal */ private readonly _miniMapSystem = new MiniMapSystem(this);
+    /** @internal */ private readonly _liveTrafficSystem = new LiveTrafficSystem(this);
     /** @internal */ private readonly _debugPanelSystem = new DebugPanelSystem(this);
     /** @internal */ private readonly _inputSystem = new InputSystem(this);
     /** @internal */ private readonly _hudSystem = new HudSystem(this);
@@ -1089,6 +1091,11 @@ export class FlightSceneSimple extends Scene3D {
             this._sendOwnState();
         }
         this._updateRemotePlayers();
+        try {
+            this._liveTrafficSystem.update(dt);
+        } catch (err) {
+            console.warn('[LiveTraffic] update failed:', err);
+        }
     }
 
     private _updatePropellerAnim(): void {
@@ -1340,6 +1347,7 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('aircraft-panel')?.remove();
         try { this._airportOverlaysSystem.dispose(); } catch (err) { console.warn('[FlightSimple] AirportOverlays dispose failed:', err); }
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
+        try { this._liveTrafficSystem.dispose(); } catch (err) { console.warn('[FlightSimple] LiveTrafficSystem dispose failed:', err); }
         this.mpClient?.dispose();
         this._removeUserGestureListener();
         this._engineSound.dispose();

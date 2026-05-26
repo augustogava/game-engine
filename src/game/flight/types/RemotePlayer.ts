@@ -1,6 +1,7 @@
 import * as BABYLON from '@babylonjs/core';
 import { EngineSound } from '../../EngineSound.js';
 import { PlayerState } from '../../MultiplayerClient.js';
+import type { AircraftConfig } from './AircraftConfig.js';
 
 export interface RemotePlayer {
     root: BABYLON.TransformNode;
@@ -15,4 +16,13 @@ export interface RemotePlayer {
     currentAvatarUrl: string | null;
     engineSound: EngineSound | null;
     engineTypeResolved: boolean;
+    contrailEmitterLeft: BABYLON.TransformNode | null;
+    contrailEmitterRight: BABYLON.TransformNode | null;
+    contrailPSLeft: BABYLON.ParticleSystem | null;
+    contrailPSRight: BABYLON.ParticleSystem | null;
+    modelPivot: BABYLON.TransformNode | null;
+    modelOriginalSize: number;
+    modelOriginalHalfWidth: number;
+    aircraftConfigCached: AircraftConfig | null;
+    pendingConfigApply: boolean;
 }

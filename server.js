@@ -1393,6 +1393,17 @@ const server = http.createServer(async (req, res) => {
         return proxyToMainApi(`/api/user-aircrafts/${routeParams.id}/acquire`, req, res, await parseBody(req));
     }
 
+    // ── Live Traffic API (proxy to main API) ──────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/live-traffic/positions') {
+        const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+        return proxyToMainApi(`/api/live-traffic/positions${qs}`, req, res);
+    }
+
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/live-traffic/airport/:code'))) {
+        return proxyToMainApi(`/api/live-traffic/airport/${encodeURIComponent(routeParams.code)}`, req, res);
+    }
+
     // ── Avatar proxy (same-origin for canvas CORS) ────────────────────────
     if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/avatar/:id'))) {
         if (!MAIN_API_URL) { res.writeHead(404); res.end(); return; }

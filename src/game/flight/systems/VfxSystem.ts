@@ -64,19 +64,16 @@ export class VfxSystem {
         this.scene = scene;
     }
 
-    buildContrails(scene: BABYLON.Scene, halfSpan: number): void {
-        this.disposeContrails();
-        this.scene._contrailHalfSpan = Math.max(2, halfSpan);
-        if (this.scene.isMobile === true) {
-            console.info('[Contrails] Skipped on mobile (particle system disabled for performance)');
-            return;
-        }
-        const makeEmitter = (name: string, x: number): BABYLON.TransformNode => {
-            const em = new BABYLON.TransformNode(name, scene);
-            em.parent = this.scene.planeRoot;
-            em.position.set(x, 0, -this.scene._contrailHalfSpan * 0.2);
-            return em;
-        };
+    /**
+     * Build a pair of contrail emitters + particle systems attached to a given root TransformNode.
+     * Reusable for own aircraft and remote multiplayer aircraft.
+     */
+    buildContrailPair(scene: BABYLON.Scene, parentRoot: BABYLON.TransformNode, halfSpan: number, idTag: string): {
+        emL: BABYLON.TransformNode; emR: BABYLON.TransformNode;
+        psL: BABYLON.ParticleSystem; psR: BABYLON.ParticleSystem;
+    } | null {
+        if (this.scene.isMobile === true) return null;
+        const safeHalf = Math.max(2, halfSpan);
         const sharedTex = (() => {
             try {
                 const t = new BABYLON.Texture(CONTRAIL_TEXTURE_URL, scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
@@ -87,6 +84,12 @@ export class VfxSystem {
                 try { return new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { return null; }
             }
         })();
+        const makeEmitter = (name: string, x: number): BABYLON.TransformNode => {
+            const em = new BABYLON.TransformNode(name, scene);
+            em.parent = parentRoot;
+            em.position.set(x, 0, -safeHalf * 0.2);
+            return em;
+        };
         const buildPs = (name: string, emitter: BABYLON.TransformNode): BABYLON.ParticleSystem => {
             const ps = new BABYLON.ParticleSystem(name, CONTRAIL_PARTICLE_CAPACITY, scene);
             if (sharedTex) ps.particleTexture = sharedTex;
@@ -126,10 +129,44 @@ export class VfxSystem {
             ps.start();
             return ps;
         };
-        this.scene._contrailEmitterLeft  = makeEmitter('contrailEmL', -this.scene._contrailHalfSpan * 0.92);
-        this.scene._contrailEmitterRight = makeEmitter('contrailEmR',  this.scene._contrailHalfSpan * 0.92);
-        this.scene._contrailPSLeft  = buildPs('contrailPSL', this.scene._contrailEmitterLeft);
-        this.scene._contrailPSRight = buildPs('contrailPSR', this.scene._contrailEmitterRight);
+        const emL = makeEmitter(`contrailEmL_${idTag}`, -safeHalf * 0.92);
+        const emR = makeEmitter(`contrailEmR_${idTag}`,  safeHalf * 0.92);
+        const psL = buildPs(`contrailPSL_${idTag}`, emL);
+        const psR = buildPs(`contrailPSR_${idTag}`, emR);
+        return { emL, emR, psL, psR };
+    }
+
+    /**
+     * Compute the target contrail emit rate for given environmental conditions.
+     * Returns 0 if conditions are not met (low altitude, warm air, slow speed, low power).
+     */
+    computeContrailEmitRate(altM: number, tempC: number, speedMs: number, enginePower: number): number {
+        const altOk = altM > CONTRAIL_ENABLE_MIN_ALTITUDE_M;
+        const tempOk = tempC < CONTRAIL_ENABLE_MAX_TEMP_C;
+        const speedOk = speedMs > CONTRAIL_ENABLE_MIN_SPEED_MS;
+        const powerOk = enginePower > CONTRAIL_ENABLE_MIN_ENGINE_POWER;
+        if (!(altOk && tempOk && speedOk && powerOk)) return 0;
+        const powerFactor = Math.max(0, Math.min(1, (enginePower - CONTRAIL_ENABLE_MIN_ENGINE_POWER) / Math.max(0.0001, 1 - CONTRAIL_ENABLE_MIN_ENGINE_POWER)));
+        return CONTRAIL_EMIT_RATE_MAX * (0.55 + 0.45 * powerFactor);
+    }
+
+    /** Standard ISA temperature in °C for a given MSL altitude in meters. */
+    isaTempC(altM: number): number {
+        const tempK = altM > ISA_TROPOPAUSE_M
+            ? ISA_TROPOPAUSE_TEMP_K
+            : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altM);
+        return tempK - 273.15;
+    }
+
+    buildContrails(scene: BABYLON.Scene, halfSpan: number): void {
+        this.disposeContrails();
+        this.scene._contrailHalfSpan = Math.max(2, halfSpan);
+        const pair = this.buildContrailPair(scene, this.scene.planeRoot, this.scene._contrailHalfSpan, 'self');
+        if (!pair) return;
+        this.scene._contrailEmitterLeft  = pair.emL;
+        this.scene._contrailEmitterRight = pair.emR;
+        this.scene._contrailPSLeft  = pair.psL;
+        this.scene._contrailPSRight = pair.psR;
         console.debug(`[Contrails] Built (capacity=${CONTRAIL_PARTICLE_CAPACITY}/side, lifetime=${CONTRAIL_MIN_LIFETIME_S}-${CONTRAIL_MAX_LIFETIME_S}s, halfSpan=${this.scene._contrailHalfSpan.toFixed(1)}m)`);
     }
 
@@ -385,19 +422,10 @@ export class VfxSystem {
     updateContrails(_dt: number): void {
         if (!this.scene._contrailPSLeft || !this.scene._contrailPSRight) return;
         const altM = this.scene.planeRoot ? Math.max(0, this.scene.refAlt + this.scene.planeRoot.position.y) : 0;
-        const tempK = altM > ISA_TROPOPAUSE_M
-            ? ISA_TROPOPAUSE_TEMP_K
-            : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altM);
-        const tempC = tempK - 273.15;
+        const tempC = this.isaTempC(altM);
         const speedMs = Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length();
         const enginePower = Number.isFinite(this.scene.enginePower) ? this.scene.enginePower : 0;
-        const altOk = altM > CONTRAIL_ENABLE_MIN_ALTITUDE_M;
-        const tempOk = tempC < CONTRAIL_ENABLE_MAX_TEMP_C;
-        const speedOk = speedMs > CONTRAIL_ENABLE_MIN_SPEED_MS;
-        const powerOk = enginePower > CONTRAIL_ENABLE_MIN_ENGINE_POWER;
-        const enabled = altOk && tempOk && speedOk && powerOk;
-        const powerFactor = Math.max(0, Math.min(1, (enginePower - CONTRAIL_ENABLE_MIN_ENGINE_POWER) / Math.max(0.0001, 1 - CONTRAIL_ENABLE_MIN_ENGINE_POWER)));
-        const targetRate = enabled ? CONTRAIL_EMIT_RATE_MAX * (0.55 + 0.45 * powerFactor) : 0;
+        const targetRate = this.computeContrailEmitRate(altM, tempC, speedMs, enginePower);
         const curL = this.scene._contrailPSLeft.emitRate || 0;
         const curR = this.scene._contrailPSRight.emitRate || 0;
         this.scene._contrailPSLeft.emitRate  = curL + (targetRate - curL) * CONTRAIL_EMIT_LERP_RATE;

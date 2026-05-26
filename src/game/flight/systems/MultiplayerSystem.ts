@@ -6,6 +6,7 @@ import { fetchAircraftConfig } from '../api/AircraftConfigApi.js';
 import { MultiplayerClient, PlayerState } from '../../MultiplayerClient.js';
 import { EngineSound, ENGINE_SOUND_TYPE_TURBOFAN } from '../../EngineSound.js';
 import { AudioCore } from '../../AudioCore.js';
+import { CONTRAIL_EMIT_LERP_RATE } from '../constants/index.js';
 
 const LABEL_TEX_W = 256;
 const LABEL_TEX_H = 80;
@@ -13,6 +14,8 @@ const LABEL_AVATAR_SIZE = 48;
 const LABEL_PLANE_WIDTH = 18;
 const LABEL_PLANE_HEIGHT = 5.6;
 const LABEL_Y_OFFSET = 10;
+const REMOTE_AIRSPEED_KMH_TO_MS = 1 / 3.6;
+const REMOTE_CONTRAIL_FALLBACK_HALF_SPAN = 8;
 
 export class MultiplayerSystem {
     private readonly scene: any;
@@ -40,6 +43,13 @@ export class MultiplayerSystem {
                     remote.meshes = [];
                     const pivot = remote.root.getChildTransformNodes(true).find((n: BABYLON.TransformNode) => n.name.startsWith('remotePivot_'));
                     if (pivot) pivot.dispose();
+                    this.disposeRemoteContrails(remote);
+                    remote.modelPivot = null;
+                    remote.modelOriginalSize = 0;
+                    remote.modelOriginalHalfWidth = 0;
+                    remote.aircraftConfigCached = null;
+                    remote.engineTypeResolved = false;
+                    remote.pendingConfigApply = false;
                     remote.aircraftCode = remoteModelFile;
                     this.loadRemoteModel(p.userId, remote.root, remote, remoteModelFile);
                 }
@@ -54,6 +64,7 @@ export class MultiplayerSystem {
 
             for (const [id, remote] of this.scene.remotePlayers) {
                 if (!activeIds.has(id)) {
+                    this.disposeRemoteContrails(remote);
                     remote.labelTexture?.dispose();
                     remote.labelPlane?.dispose();
                     remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose());
@@ -80,6 +91,7 @@ export class MultiplayerSystem {
             if (!connected) {
                 try {
                     for (const [id, remote] of this.scene.remotePlayers) {
+                        try { this.disposeRemoteContrails(remote); } catch (_) { /* ignore */ }
                         try { remote.labelTexture?.dispose(); } catch (_) { /* ignore */ }
                         try { remote.labelPlane?.dispose(); } catch (_) { /* ignore */ }
                         try { remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose()); } catch (_) { /* ignore */ }
@@ -125,6 +137,10 @@ export class MultiplayerSystem {
             aircraftCode, labelPlane: null, labelTexture: null,
             currentUsername: null, currentAvatarUrl: null,
             engineSound: null, engineTypeResolved: false,
+            contrailEmitterLeft: null, contrailEmitterRight: null,
+            contrailPSLeft: null, contrailPSRight: null,
+            modelPivot: null, modelOriginalSize: 0, modelOriginalHalfWidth: 0,
+            aircraftConfigCached: null, pendingConfigApply: false,
         };
 
         this.loadRemoteModel(id, root, remote, modelFile || DEFAULT_AIRCRAFT_CONFIG.model_file);
@@ -144,11 +160,22 @@ export class MultiplayerSystem {
     resolveRemoteEngineType(remote: RemotePlayer, aircraftId: number | undefined): void {
         if (remote.engineTypeResolved || !aircraftId || aircraftId <= 0) return;
         remote.engineTypeResolved = true;
+        const remoteId = remote.root.name.replace(/^remote_/, '');
         fetchAircraftConfig(aircraftId).then((cfg) => {
+            remote.aircraftConfigCached = cfg;
             try {
                 remote.engineSound?.setEngineType(this.scene._mapEngineType(cfg.engine_type));
             } catch (err) {
                 console.warn('[Remote] setEngineType failed:', err);
+            }
+            try {
+                if (remote.modelPivot && !remote.modelPivot.isDisposed()) {
+                    this.applyRemoteAircraftConfig(remote, remoteId);
+                } else {
+                    remote.pendingConfigApply = true;
+                }
+            } catch (err) {
+                console.warn('[Remote] applyRemoteAircraftConfig from resolve failed:', err);
             }
         }).catch((err) => {
             console.warn('[Remote] fetch engine type failed:', err);
@@ -186,15 +213,32 @@ export class MultiplayerSystem {
                 glbRoot.rotationQuaternion = null;
                 glbRoot.rotation = BABYLON.Vector3.Zero();
 
-                const targetSize = 40;
+                const cfg = remote.aircraftConfigCached;
+                const targetSize = (cfg && Number.isFinite(cfg.model_target_size) && cfg.model_target_size > 0)
+                    ? cfg.model_target_size
+                    : 40;
+                const rotationY = (cfg && Number.isFinite(cfg.model_rotation_y))
+                    ? cfg.model_rotation_y
+                    : Math.PI;
                 const scaleFactor = targetSize / Math.max(size, 0.1);
                 pivot.scaling.setAll(scaleFactor);
-                pivot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
+                pivot.rotation = new BABYLON.Vector3(0, rotationY, 0);
 
                 meshes.forEach((m) => {
                     m.isPickable = false;
                     remote.meshes.push(m as BABYLON.Mesh);
                 });
+
+                remote.modelPivot = pivot;
+                remote.modelOriginalSize = size;
+                const sizeVec = bb.max.subtract(bb.min);
+                remote.modelOriginalHalfWidth = sizeVec.x / 2;
+                const halfSpan = Math.max(REMOTE_CONTRAIL_FALLBACK_HALF_SPAN, remote.modelOriginalHalfWidth * scaleFactor);
+                this.buildRemoteContrails(remote, halfSpan, id);
+
+                if (remote.pendingConfigApply && remote.aircraftConfigCached) {
+                    this.applyRemoteAircraftConfig(remote, id);
+                }
             },
             null,
             () => {
@@ -204,8 +248,61 @@ export class MultiplayerSystem {
                     return;
                 }
                 this.buildRemoteFallback(id, root, remote);
+                this.buildRemoteContrails(remote, REMOTE_CONTRAIL_FALLBACK_HALF_SPAN, id);
             },
         );
+    }
+
+    /** Apply cached aircraft config (scale + rotation) to the already-loaded remote model pivot and rebuild contrails. */
+    applyRemoteAircraftConfig(remote: RemotePlayer, idTag: string): void {
+        const cfg = remote.aircraftConfigCached;
+        const pivot = remote.modelPivot;
+        if (!cfg || !pivot || pivot.isDisposed() || !(remote.modelOriginalSize > 0)) {
+            remote.pendingConfigApply = !!cfg;
+            return;
+        }
+        try {
+            const targetSize = Number.isFinite(cfg.model_target_size) && cfg.model_target_size > 0
+                ? cfg.model_target_size
+                : 40;
+            const rotationY = Number.isFinite(cfg.model_rotation_y) ? cfg.model_rotation_y : Math.PI;
+            const scaleFactor = targetSize / Math.max(remote.modelOriginalSize, 0.1);
+            pivot.scaling.setAll(scaleFactor);
+            pivot.rotation = new BABYLON.Vector3(0, rotationY, 0);
+
+            const halfSpan = Math.max(REMOTE_CONTRAIL_FALLBACK_HALF_SPAN, remote.modelOriginalHalfWidth * scaleFactor);
+            this.buildRemoteContrails(remote, halfSpan, idTag);
+
+            remote.pendingConfigApply = false;
+            console.debug(`[Remote] Applied aircraft config for ${idTag}: code=${cfg.code} targetSize=${targetSize.toFixed(1)} rotY=${rotationY.toFixed(3)} scale=${scaleFactor.toFixed(3)}`);
+        } catch (err) {
+            console.warn(`[Remote] applyRemoteAircraftConfig failed for ${idTag}:`, err);
+        }
+    }
+
+    buildRemoteContrails(remote: RemotePlayer, halfSpan: number, idTag: string): void {
+        this.disposeRemoteContrails(remote);
+        try {
+            const pair = this.scene._vfxSystem?.buildContrailPair?.(this.scene.scene, remote.root, halfSpan, `remote_${idTag}`);
+            if (!pair) return;
+            remote.contrailEmitterLeft  = pair.emL;
+            remote.contrailEmitterRight = pair.emR;
+            remote.contrailPSLeft  = pair.psL;
+            remote.contrailPSRight = pair.psR;
+        } catch (err) {
+            console.warn(`[Remote] buildRemoteContrails failed for ${idTag}:`, err);
+        }
+    }
+
+    disposeRemoteContrails(remote: RemotePlayer): void {
+        try { remote.contrailPSLeft?.dispose(); } catch (_) { /* ignore */ }
+        try { remote.contrailPSRight?.dispose(); } catch (_) { /* ignore */ }
+        try { remote.contrailEmitterLeft?.dispose(); } catch (_) { /* ignore */ }
+        try { remote.contrailEmitterRight?.dispose(); } catch (_) { /* ignore */ }
+        remote.contrailPSLeft = null;
+        remote.contrailPSRight = null;
+        remote.contrailEmitterLeft = null;
+        remote.contrailEmitterRight = null;
     }
 
     buildRemoteFallback(id: string, root: BABYLON.TransformNode, remote: RemotePlayer): void {
@@ -432,6 +529,23 @@ export class MultiplayerSystem {
                     const estimatedRpm = 600 + tt * 2000;
                     es.setRpm(estimatedRpm);
                     es.update();
+                } catch (_) { /* ignore */ }
+            }
+
+            if (remote.contrailPSLeft && remote.contrailPSRight) {
+                try {
+                    const vfx = this.scene._vfxSystem;
+                    if (vfx) {
+                        const altM = Number.isFinite(ns.alt) ? Math.max(0, ns.alt) : 0;
+                        const tempC = vfx.isaTempC(altM);
+                        const speedMs = Number.isFinite(ns.airspeed) ? ns.airspeed * REMOTE_AIRSPEED_KMH_TO_MS : 0;
+                        const throttle = Number.isFinite(ns.throttle) ? Math.max(0, Math.min(1.5, ns.throttle)) : 0;
+                        const targetRate = ns.onGround ? 0 : vfx.computeContrailEmitRate(altM, tempC, speedMs, throttle);
+                        const curL = remote.contrailPSLeft.emitRate || 0;
+                        const curR = remote.contrailPSRight.emitRate || 0;
+                        remote.contrailPSLeft.emitRate  = curL + (targetRate - curL) * CONTRAIL_EMIT_LERP_RATE;
+                        remote.contrailPSRight.emitRate = curR + (targetRate - curR) * CONTRAIL_EMIT_LERP_RATE;
+                    }
                 } catch (_) { /* ignore */ }
             }
         }
