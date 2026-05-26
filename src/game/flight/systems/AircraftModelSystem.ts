@@ -289,6 +289,7 @@ export class AircraftModelSystem {
                     console.debug(`[Camera] Initial radius set to ${initialRadius.toFixed(1)}m, lowerRadiusLimit=${aircraftMinRadius.toFixed(1)}m for ${cfg.code} (W=${safeW.toFixed(1)}m, H=${safeH.toFixed(1)}m, L=${safeD.toFixed(1)}m)`);
                 }
 
+                this.scene._lightingSystem.registerAircraftMeshes(meshes);
                 this.scene.spawned = true;
                 this.scene._maybeFireSpawned();
                 console.log(`[FlightSimple] Model loaded: ${cfg.code}, scale: ${scaleFactor.toFixed(2)}, dims: ${bbW.toFixed(1)},${bbH.toFixed(1)},${bbD.toFixed(1)}`);
@@ -319,10 +320,12 @@ export class AircraftModelSystem {
         nose.rotation.x = Math.PI / 2;
         nose.position.set(0, 0, 4.5);
 
-        [body, wing, tail, finV, nose].forEach((m) => {
+        const fallbackMeshes = [body, wing, tail, finV, nose];
+        fallbackMeshes.forEach((m) => {
             m.material = mat;
             m.parent = this.scene.planeRoot;
         });
+        this.scene._lightingSystem.registerAircraftMeshes(fallbackMeshes);
         this.scene._buildNavLights(scene, this.scene.planeRoot, {
             halfSpan: 8,
             height: 2.8,

@@ -55,8 +55,16 @@ const DAYNIGHT_SKY_MIE_COEFF_EPSILON = 0.0005;
 const DAYNIGHT_SKY_MIE_G_EPSILON = 0.005;
 const DAYNIGHT_FOG_COLOR_EPSILON = 0.005;
 
+const AIRCRAFT_AMBIENT_NIGHT_INTENSITY = 0.35;
+const AIRCRAFT_AMBIENT_DAY_INTENSITY = 0.0;
+const AIRCRAFT_AMBIENT_COLOR_R = 0.45;
+const AIRCRAFT_AMBIENT_COLOR_G = 0.50;
+const AIRCRAFT_AMBIENT_COLOR_B = 0.65;
+
 export class LightingSystem {
     private readonly scene: any;
+    private _aircraftAmbientLight: BABYLON.HemisphericLight | null = null;
+    private _lastAircraftAmbientIntensity: number = Number.NaN;
     private _originalEnvTexture: BABYLON.BaseTexture | null = null;
     private _hdrTexture: BABYLON.HDRCubeTexture | null = null;
     private _hdrSkyboxTexture: BABYLON.HDRCubeTexture | null = null;
@@ -101,6 +109,11 @@ export class LightingSystem {
         return Number.isFinite(this._lastSunIntensity) ? this._lastSunIntensity : 3.0;
     }
 
+    registerAircraftMeshes(meshes: BABYLON.AbstractMesh[]): void {
+        if (!this._aircraftAmbientLight) return;
+        this._aircraftAmbientLight.includedOnlyMeshes = meshes.slice();
+    }
+
     setupLighting(scene: BABYLON.Scene): void {
         this.scene._hemiLight = new BABYLON.HemisphericLight('sky', new BABYLON.Vector3(0, 1, 0), scene);
         this.scene._hemiLight.intensity = 0.5;
@@ -133,6 +146,13 @@ export class LightingSystem {
         this.scene._shadow = this.scene._shadowGen;
 
         scene.environmentIntensity = 1.3;
+
+        this._aircraftAmbientLight = new BABYLON.HemisphericLight('aircraftAmbient', new BABYLON.Vector3(0, 1, 0), scene);
+        this._aircraftAmbientLight.intensity = 0;
+        this._aircraftAmbientLight.diffuse = new BABYLON.Color3(AIRCRAFT_AMBIENT_COLOR_R, AIRCRAFT_AMBIENT_COLOR_G, AIRCRAFT_AMBIENT_COLOR_B);
+        this._aircraftAmbientLight.groundColor = new BABYLON.Color3(AIRCRAFT_AMBIENT_COLOR_R * 0.4, AIRCRAFT_AMBIENT_COLOR_G * 0.4, AIRCRAFT_AMBIENT_COLOR_B * 0.4);
+        this._aircraftAmbientLight.specular = BABYLON.Color3.Black();
+        this._aircraftAmbientLight.includedOnlyMeshes = [];
 
         this.buildSunMesh(scene);
         this.buildStars(scene);
@@ -511,14 +531,14 @@ export class LightingSystem {
         }
 
         if (this.scene._hemiLight) {
-            const newHemiIntensity = 0.12 + t * 0.38;
+            const newHemiIntensity = 0.03 + t * 0.47;
             if (!Number.isFinite(this._lastHemiIntensity) || Math.abs(newHemiIntensity - this._lastHemiIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
                 this.scene._hemiLight.intensity = newHemiIntensity;
                 this._lastHemiIntensity = newHemiIntensity;
             }
-            const hr = 0.15 + t * 0.45;
-            const hg = 0.17 + t * 0.58;
-            const hb = 0.25 + t * 0.75;
+            const hr = 0.1 + t * 0.5;
+            const hg = 0.12 + t * 0.63;
+            const hb = 0.2 + t * 0.8;
             if (!Number.isFinite(this._lastHemiDiffR)
                 || Math.abs(hr - this._lastHemiDiffR) >= DAYNIGHT_COLOR_EPSILON
                 || Math.abs(hg - this._lastHemiDiffG) >= DAYNIGHT_COLOR_EPSILON
@@ -528,9 +548,9 @@ export class LightingSystem {
                 this._lastHemiDiffG = hg;
                 this._lastHemiDiffB = hb;
             }
-            const gr = 0.06 + t * 0.19;
-            const gg = 0.07 + t * 0.28;
-            const gb = 0.08 + t * 0.10;
+            const gr = 0.02 + t * 0.23;
+            const gg = 0.03 + t * 0.32;
+            const gb = 0.04 + t * 0.14;
             if (!Number.isFinite(this._lastHemiGroundR)
                 || Math.abs(gr - this._lastHemiGroundR) >= DAYNIGHT_COLOR_EPSILON
                 || Math.abs(gg - this._lastHemiGroundG) >= DAYNIGHT_COLOR_EPSILON
@@ -547,6 +567,15 @@ export class LightingSystem {
             if (!Number.isFinite(this._lastFillIntensity) || Math.abs(newFillIntensity - this._lastFillIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
                 this.scene._fillLight.intensity = newFillIntensity;
                 this._lastFillIntensity = newFillIntensity;
+            }
+        }
+
+        if (this._aircraftAmbientLight) {
+            const nightFactor = 1.0 - t;
+            const newIntensity = AIRCRAFT_AMBIENT_DAY_INTENSITY + (AIRCRAFT_AMBIENT_NIGHT_INTENSITY - AIRCRAFT_AMBIENT_DAY_INTENSITY) * nightFactor;
+            if (!Number.isFinite(this._lastAircraftAmbientIntensity) || Math.abs(newIntensity - this._lastAircraftAmbientIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
+                this._aircraftAmbientLight.intensity = newIntensity;
+                this._lastAircraftAmbientIntensity = newIntensity;
             }
         }
 
@@ -595,7 +624,7 @@ export class LightingSystem {
             this._lastClearB = clearB;
         }
 
-        const envBase = 0.12 + t * 1.18;
+        const envBase = 0.10 + t * 1.20;
         const newEnvIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
         if (!Number.isFinite(this._lastEnvIntensity) || Math.abs(newEnvIntensity - this._lastEnvIntensity) >= DAYNIGHT_ENV_INTENSITY_EPSILON) {
             scene.environmentIntensity = newEnvIntensity;
