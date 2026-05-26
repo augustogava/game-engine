@@ -13,3 +13,6 @@ export const LIVE_TRAFFIC_LABEL_TEX_H = 48;
 export const LIVE_TRAFFIC_LABEL_PLANE_WIDTH = 14;
 export const LIVE_TRAFFIC_LABEL_PLANE_HEIGHT = 3.5;
 export const LIVE_TRAFFIC_FALLBACK_TARGET_SIZE_M = 40;
+export const LIVE_TRAFFIC_MODEL_PATH = 'models/plane_boing_737900.glb';
+export const LIVE_TRAFFIC_MODEL_TARGET_SIZE_M = 55;
+export const LIVE_TRAFFIC_MODEL_ROTATION_Y = Math.PI;

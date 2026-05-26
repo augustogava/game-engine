@@ -17,6 +17,9 @@ import {
     LIVE_TRAFFIC_LABEL_TEX_H,
     LIVE_TRAFFIC_LABEL_PLANE_WIDTH,
     LIVE_TRAFFIC_LABEL_PLANE_HEIGHT,
+    LIVE_TRAFFIC_MODEL_PATH,
+    LIVE_TRAFFIC_MODEL_TARGET_SIZE_M,
+    LIVE_TRAFFIC_MODEL_ROTATION_Y,
     FT_TO_M,
     METERS_PER_DEG_LAT,
 } from '../constants/index.js';
@@ -25,8 +28,11 @@ interface LiveTrafficEntity {
     fr24Id: string;
     callsign: string;
     root: BABYLON.TransformNode;
-    meshes: BABYLON.Mesh[];
+    meshes: BABYLON.AbstractMesh[];
     bodyMaterial: BABYLON.PBRMaterial | null;
+    modelPivot: BABYLON.TransformNode | null;
+    animationGroups: BABYLON.AnimationGroup[];
+    usesFallback: boolean;
     labelPlane: BABYLON.Mesh | null;
     labelTexture: BABYLON.DynamicTexture | null;
     labelMaterial: BABYLON.StandardMaterial | null;
@@ -65,6 +71,10 @@ export class LiveTrafficSystem {
     private _fetchInFlight = false;
     private _initStartMs = 0;
     private _disposed = false;
+    private _trafficAssetContainer: BABYLON.AssetContainer | null = null;
+    private _trafficModelLoading = false;
+    private _trafficModelFailed = false;
+    private _trafficModelScale = 1;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -73,6 +83,9 @@ export class LiveTrafficSystem {
     update(_dt: number): void {
         if (this._disposed) return;
         if (!this.scene.spawned) return;
+        if (!this._trafficAssetContainer && !this._trafficModelLoading && !this._trafficModelFailed) {
+            this._ensureModelTemplate();
+        }
         const now = performance.now();
         if (this._initStartMs === 0) this._initStartMs = now;
 
@@ -119,6 +132,10 @@ export class LiveTrafficSystem {
             this._disposeEntity(entity);
         }
         this.entities.clear();
+        if (this._trafficAssetContainer) {
+            try { this._trafficAssetContainer.dispose(); } catch (err) { console.warn('[LiveTraffic] Failed to dispose model asset container:', err); }
+            this._trafficAssetContainer = null;
+        }
     }
 
     private _triggerFetch(now: number): void {
@@ -208,6 +225,9 @@ export class LiveTrafficSystem {
             root,
             meshes: [],
             bodyMaterial: null,
+            modelPivot: null,
+            animationGroups: [],
+            usesFallback: false,
             labelPlane: null,
             labelTexture: null,
             labelMaterial: null,
@@ -230,7 +250,15 @@ export class LiveTrafficSystem {
         };
 
         try {
-            this._buildTrafficFallback(entity);
+            let modelBuilt = false;
+            if (this._trafficAssetContainer) {
+                modelBuilt = this._buildTrafficModelFromTemplate(entity);
+            } else if (!this._trafficModelFailed) {
+                this._ensureModelTemplate();
+            }
+            if (!modelBuilt) {
+                this._buildTrafficFallback(entity);
+            }
             this._createTrafficLabel(entity);
         } catch (err) {
             console.warn(`[LiveTraffic] Failed to build mesh for ${flight.fr24_id}:`, err);
@@ -248,6 +276,7 @@ export class LiveTrafficSystem {
         mat.metallic = 0.55;
         mat.roughness = 0.4;
         entity.bodyMaterial = mat;
+        entity.usesFallback = true;
 
         const body = BABYLON.MeshBuilder.CreateBox(`ltb_${id}`, { width: 2.6, height: 0.75, depth: 9 }, sceneRef);
         const wing = BABYLON.MeshBuilder.CreateBox(`ltw_${id}`, { width: 20, height: 0.25, depth: 3 }, sceneRef);
@@ -267,6 +296,142 @@ export class LiveTrafficSystem {
             m.isPickable = false;
             entity.meshes.push(m);
         }
+    }
+
+    private _ensureModelTemplate(): void {
+        if (this._trafficAssetContainer || this._trafficModelLoading || this._trafficModelFailed) return;
+        const sceneRef = this.scene.scene;
+        if (!sceneRef) return;
+        this._trafficModelLoading = true;
+        const path = LIVE_TRAFFIC_MODEL_PATH;
+        const lastSlash = path.lastIndexOf('/');
+        const folder = lastSlash >= 0 ? path.substring(0, lastSlash + 1) : '';
+        const file = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+        console.log(`[LiveTraffic] Loading model template: ${path}`);
+        BABYLON.SceneLoader.LoadAssetContainerAsync(folder, file, sceneRef).then((container) => {
+            this._trafficModelLoading = false;
+            if (this._disposed) {
+                try { container.dispose(); } catch (_) { /* ignore */ }
+                return;
+            }
+            let minWorld: BABYLON.Vector3 | null = null;
+            let maxWorld: BABYLON.Vector3 | null = null;
+            for (const m of container.meshes) {
+                if (typeof (m as any).getBoundingInfo !== 'function') continue;
+                try {
+                    m.computeWorldMatrix(true);
+                    const bb = m.getBoundingInfo().boundingBox;
+                    const mn = bb.minimumWorld.clone();
+                    const mx = bb.maximumWorld.clone();
+                    if (!minWorld) minWorld = mn; else minWorld.minimizeInPlace(mn);
+                    if (!maxWorld) maxWorld = mx; else maxWorld.maximizeInPlace(mx);
+                } catch (err) {
+                    console.warn(`[LiveTraffic] Failed to read bounding info for template mesh ${m?.name}:`, err);
+                }
+            }
+            if (minWorld && maxWorld) {
+                const size = maxWorld.subtract(minWorld).length();
+                this._trafficModelScale = LIVE_TRAFFIC_MODEL_TARGET_SIZE_M / Math.max(size, 0.1);
+                console.log(`[LiveTraffic] Model template loaded: ${path} size=${size.toFixed(2)}m scale=${this._trafficModelScale.toFixed(4)} meshes=${container.meshes.length}`);
+            } else {
+                console.log(`[LiveTraffic] Model template loaded: ${path} (no bounding info, default scale) meshes=${container.meshes.length}`);
+            }
+            this._trafficAssetContainer = container;
+            this._swapFallbackEntitiesToModel();
+        }).catch((err) => {
+            this._trafficModelLoading = false;
+            this._trafficModelFailed = true;
+            console.warn(`[LiveTraffic] Failed to load model template ${path}; using fallback meshes only:`, err);
+        });
+    }
+
+    private _buildTrafficModelFromTemplate(entity: LiveTrafficEntity): boolean {
+        const sceneRef = this.scene.scene;
+        if (!sceneRef || !this._trafficAssetContainer) return false;
+        let result: BABYLON.InstantiatedEntries;
+        try {
+            result = this._trafficAssetContainer.instantiateModelsToScene(
+                (name) => `liveTrafficModel_${entity.fr24Id}_${name}`,
+                false,
+            );
+        } catch (err) {
+            console.warn(`[LiveTraffic] instantiateModelsToScene failed for ${entity.fr24Id}:`, err);
+            return false;
+        }
+        if (!result || !result.rootNodes || !result.rootNodes.length) {
+            console.warn(`[LiveTraffic] instantiateModelsToScene returned empty root nodes for ${entity.fr24Id}`);
+            return false;
+        }
+
+        const pivot = new BABYLON.TransformNode(`liveTrafficPivot_${entity.fr24Id}`, sceneRef);
+        pivot.parent = entity.root;
+        pivot.scaling.setAll(this._trafficModelScale);
+        pivot.rotation = new BABYLON.Vector3(0, LIVE_TRAFFIC_MODEL_ROTATION_Y, 0);
+
+        const meshes: BABYLON.AbstractMesh[] = [];
+        for (const node of result.rootNodes) {
+            if (node instanceof BABYLON.TransformNode || node instanceof BABYLON.AbstractMesh) {
+                node.parent = pivot;
+            }
+            if (node instanceof BABYLON.AbstractMesh) {
+                node.isPickable = false;
+                meshes.push(node);
+            }
+            const getChildren = (node as any).getChildMeshes;
+            if (typeof getChildren === 'function') {
+                const children: BABYLON.AbstractMesh[] = getChildren.call(node, false);
+                for (const m of children) {
+                    if (m instanceof BABYLON.AbstractMesh) {
+                        m.isPickable = false;
+                        meshes.push(m);
+                    }
+                }
+            }
+        }
+
+        entity.modelPivot = pivot;
+        entity.meshes = meshes;
+        entity.usesFallback = false;
+        entity.animationGroups = result.animationGroups || [];
+        if (entity.animationGroups.length) {
+            entity.animationGroups.forEach((g) => { try { g.stop(); } catch (_) { /* ignore */ } });
+        }
+        return true;
+    }
+
+    private _swapFallbackEntitiesToModel(): void {
+        if (!this._trafficAssetContainer) return;
+        let swapped = 0;
+        for (const [, entity] of this.entities) {
+            if (!entity.usesFallback) continue;
+            this._disposeEntityVisuals(entity);
+            if (this._buildTrafficModelFromTemplate(entity)) {
+                swapped++;
+            } else {
+                this._buildTrafficFallback(entity);
+            }
+        }
+        if (swapped > 0) {
+            console.log(`[LiveTraffic] Swapped ${swapped} fallback entit${swapped === 1 ? 'y' : 'ies'} to GLB model`);
+        }
+    }
+
+    private _disposeEntityVisuals(entity: LiveTrafficEntity): void {
+        for (const m of entity.meshes) {
+            try { m.dispose(); } catch (_) { /* ignore */ }
+        }
+        entity.meshes.length = 0;
+        try { entity.bodyMaterial?.dispose(); } catch (_) { /* ignore */ }
+        entity.bodyMaterial = null;
+        if (entity.animationGroups.length) {
+            entity.animationGroups.forEach((g) => { try { g.dispose(); } catch (_) { /* ignore */ } });
+            entity.animationGroups = [];
+        }
+        if (entity.modelPivot) {
+            try { entity.modelPivot.dispose(); } catch (_) { /* ignore */ }
+            entity.modelPivot = null;
+        }
+        entity.usesFallback = false;
     }
 
     private _createTrafficLabel(entity: LiveTrafficEntity): void {
@@ -382,11 +547,19 @@ export class LiveTrafficSystem {
         try { entity.labelMaterial?.dispose(); } catch (_) { /* ignore */ }
         try { entity.labelTexture?.dispose(); } catch (_) { /* ignore */ }
         try { entity.labelPlane?.dispose(); } catch (_) { /* ignore */ }
+        if (entity.animationGroups.length) {
+            entity.animationGroups.forEach((g) => { try { g.dispose(); } catch (_) { /* ignore */ } });
+            entity.animationGroups = [];
+        }
         for (const m of entity.meshes) {
             try { m.dispose(); } catch (_) { /* ignore */ }
         }
         entity.meshes.length = 0;
         try { entity.bodyMaterial?.dispose(); } catch (_) { /* ignore */ }
+        if (entity.modelPivot) {
+            try { entity.modelPivot.dispose(); } catch (_) { /* ignore */ }
+            entity.modelPivot = null;
+        }
         try { entity.root.dispose(); } catch (_) { /* ignore */ }
         entity.bodyMaterial = null;
         entity.labelMaterial = null;
