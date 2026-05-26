@@ -20,6 +20,8 @@ import {
     LIVE_TRAFFIC_MODEL_PATH,
     LIVE_TRAFFIC_MODEL_TARGET_SIZE_M,
     LIVE_TRAFFIC_MODEL_ROTATION_Y,
+    LIVE_TRAFFIC_MIN_ALT_FT,
+    LIVE_TRAFFIC_MIN_GSPEED_KTS,
     FT_TO_M,
     METERS_PER_DEG_LAT,
 } from '../constants/index.js';
@@ -176,8 +178,18 @@ export class LiveTrafficSystem {
 
     private _onFetchResult(flights: LiveTrafficFlight[]): void {
         const now = performance.now();
+        let skippedGrounded = 0;
         for (const flight of flights) {
             if (!flight.fr24_id) continue;
+            if (!this._isAirborneFlight(flight)) {
+                skippedGrounded++;
+                const existing = this.entities.get(flight.fr24_id);
+                if (existing) {
+                    this._disposeEntity(existing);
+                    this.entities.delete(flight.fr24_id);
+                }
+                continue;
+            }
             const existing = this.entities.get(flight.fr24_id);
             if (existing) {
                 this._refreshEntity(existing, flight, now);
@@ -186,7 +198,16 @@ export class LiveTrafficSystem {
                 if (created) this.entities.set(flight.fr24_id, created);
             }
         }
+        if (skippedGrounded > 0) {
+            console.debug(`[LiveTraffic] Skipped ${skippedGrounded} grounded/slow flight(s) (alt<${LIVE_TRAFFIC_MIN_ALT_FT}ft or gspeed<${LIVE_TRAFFIC_MIN_GSPEED_KTS}kts)`);
+        }
         console.debug(`[LiveTraffic] Active entities: ${this.entities.size}`);
+    }
+
+    private _isAirborneFlight(flight: LiveTrafficFlight): boolean {
+        const alt = Number.isFinite(flight.alt) ? Number(flight.alt) : 0;
+        const gspeed = Number.isFinite(flight.gspeed) ? Number(flight.gspeed) : 0;
+        return alt >= LIVE_TRAFFIC_MIN_ALT_FT && gspeed >= LIVE_TRAFFIC_MIN_GSPEED_KTS;
     }
 
     private _refreshEntity(entity: LiveTrafficEntity, flight: LiveTrafficFlight, now: number): void {

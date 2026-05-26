@@ -104,7 +104,7 @@ export class AutopilotSystem {
         const wm = this.scene.planeRoot.getWorldMatrix();
         const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
         const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm);
-        const curHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
+        const curHdgDeg = ((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360;
 
         if ((this.scene._autopilotNavHold || this.scene._autopilotAprHold) && this.scene.surfaces.length >= 4) {
             const target = this.apCurrentNavTarget();
@@ -113,7 +113,7 @@ export class AutopilotSystem {
                 const desiredBrg = NavMath.initialBearingDeg(here.lat, here.lon, target.lat, target.lon);
                 const trackDeg = (this.scene.groundSpeed > MIN_GS_FOR_ETE_MS
                     && Number.isFinite(this.scene.velocity.x) && Number.isFinite(this.scene.velocity.z))
-                    ? ((Math.atan2(this.scene.velocity.x, this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
+                    ? ((Math.atan2(this.scene.velocity.x, -this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
                     : curHdgDeg;
                 const trackErrDeg = ((desiredBrg - trackDeg + 540) % 360) - 180;
                 const distNm = NavMath.haversineNm(here.lat, here.lon, target.lat, target.lon);
@@ -261,7 +261,7 @@ export class AutopilotSystem {
             if (this.scene.planeRoot) {
                 const wm = this.scene.planeRoot.getWorldMatrix();
                 const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
-                this.scene._autopilotTargetHdgDeg = ((Math.atan2(fwd.x, fwd.z) * 180 / Math.PI) + 360) % 360;
+                this.scene._autopilotTargetHdgDeg = ((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360;
             }
         }
     }

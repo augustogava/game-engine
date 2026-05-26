@@ -16,3 +16,5 @@ export const LIVE_TRAFFIC_FALLBACK_TARGET_SIZE_M = 40;
 export const LIVE_TRAFFIC_MODEL_PATH = 'models/plane_boing_737900.glb';
 export const LIVE_TRAFFIC_MODEL_TARGET_SIZE_M = 55;
 export const LIVE_TRAFFIC_MODEL_ROTATION_Y = Math.PI;
+export const LIVE_TRAFFIC_MIN_ALT_FT = 300;
+export const LIVE_TRAFFIC_MIN_GSPEED_KTS = 80;
