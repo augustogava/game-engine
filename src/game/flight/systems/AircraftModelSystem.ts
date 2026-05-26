@@ -71,6 +71,10 @@ export class AircraftModelSystem {
 
     loadAircraftModel(scene: BABYLON.Scene): void {
         const cfg = this.scene.aircraftConfig;
+        if (this.scene._skipInitialModelLoad) {
+            console.log(`[Aircraft] Skipping initial model load for ${cfg.code} (${cfg.model_file}) — waiting for async config fetch.`);
+            return;
+        }
         const modelPath = cfg.model_file;
         const lastSlash = modelPath.lastIndexOf('/');
         const folder = lastSlash >= 0 ? modelPath.substring(0, lastSlash + 1) : '';

@@ -340,7 +340,7 @@ import {
 
 import type { AircraftSurfaceConfig, AircraftConfig, RemotePlayer } from './flight/types/index.js';
 import { DEFAULT_AIRCRAFT_CONFIG } from './flight/types/AircraftConfig.js';
-import { fetchAircraftConfig, fetchSelectedAircraftConfig } from './flight/api/AircraftConfigApi.js';
+import { fetchAircraftConfig, fetchSelectedAircraftConfig, getCachedSelectedAircraftConfig } from './flight/api/AircraftConfigApi.js';
 
 import {
     G_ACCEL,
@@ -942,8 +942,16 @@ export class FlightSceneSimple extends Scene3D {
         this.velocity        = BABYLON.Vector3.Zero();
         this.angularVelocity = BABYLON.Vector3.Zero();
 
-        this._applyAircraftConfig(DEFAULT_AIRCRAFT_CONFIG);
-        const initialModelFile = DEFAULT_AIRCRAFT_CONFIG.model_file;
+        const cachedAircraftConfig = getCachedSelectedAircraftConfig();
+        const initialAircraftConfig = cachedAircraftConfig || DEFAULT_AIRCRAFT_CONFIG;
+        this._skipInitialModelLoad = !cachedAircraftConfig;
+        if (cachedAircraftConfig) {
+            console.log(`[Aircraft] Using cached config as placeholder: ${cachedAircraftConfig.code} (${cachedAircraftConfig.name}) — model: ${cachedAircraftConfig.model_file}`);
+        } else {
+            console.log('[Aircraft] No cached selected aircraft — deferring initial model load until API fetch resolves.');
+        }
+        this._applyAircraftConfig(initialAircraftConfig);
+        const initialModelFile = initialAircraftConfig.model_file;
 
         fetchSelectedAircraftConfig().then((cfg) => {
             if (this._disposed || !this.scene) {
@@ -952,7 +960,12 @@ export class FlightSceneSimple extends Scene3D {
             }
             this._applyAircraftConfig(cfg);
             this._initSurfaces();
-            if (cfg.model_file !== initialModelFile && this.planeRoot) {
+            const wasDeferred = this._skipInitialModelLoad;
+            this._skipInitialModelLoad = false;
+            if (wasDeferred && this.planeRoot) {
+                console.log(`[Aircraft] Deferred initial model load now starting with ${cfg.code} (${cfg.model_file}).`);
+                this._loadAircraftModel(scene);
+            } else if (cfg.model_file !== initialModelFile && this.planeRoot) {
                 console.log(`[Aircraft] Initial fetch returned ${cfg.code}; reloading model (was ${initialModelFile}).`);
                 this._loadedModelMeshes.forEach((m) => m.dispose());
                 this._loadedModelMeshes = [];
@@ -975,6 +988,7 @@ export class FlightSceneSimple extends Scene3D {
             }
             console.log(`[Aircraft] Loaded: ${cfg.name} (${cfg.code})`);
         }).catch((err) => {
+            this._skipInitialModelLoad = false;
             console.warn('[Aircraft] fetchSelectedAircraftConfig failed:', err);
         });
 
@@ -1646,6 +1660,7 @@ export class FlightSceneSimple extends Scene3D {
     private _loadedAnimGroups: BABYLON.AnimationGroup[] = [];
     private _propellerAnimGroup: BABYLON.AnimationGroup | null = null;
     private _modelLoadVersion = 0;
+    public _skipInitialModelLoad = false;
 
     private _loadAircraftModel(scene: BABYLON.Scene): void {
         this._aircraftModelSystem.loadAircraftModel(scene);
