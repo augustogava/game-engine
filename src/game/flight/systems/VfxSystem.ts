@@ -46,7 +46,13 @@ import {
     CONTRAIL_ENABLE_MAX_TEMP_C,
     CONTRAIL_ENABLE_MIN_ENGINE_POWER,
     CONTRAIL_EMIT_LERP_RATE,
+    CONTRAIL_WAKE_SINK_RATE_MS,
+    CONTRAIL_NOISE_STRENGTH_LATERAL,
+    CONTRAIL_NOISE_STRENGTH_VERTICAL,
+    CONTRAIL_NOISE_ANIMATION_SPEED,
+    CONTRAIL_NOISE_TEXTURE_SIZE,
 } from '../constants/index.js';
+import { NoiseProceduralTexture } from '@babylonjs/core/Materials/Textures/Procedurals/noiseProceduralTexture.js';
 
 const COLOR_GRADE_TINT_HUE_EPSILON_DEG = 1.0;
 const COLOR_GRADE_TINT_DENSITY_EPSILON = 0.5;
@@ -90,14 +96,26 @@ export class VfxSystem {
             em.position.set(x, 0, -safeHalf * 0.2);
             return em;
         };
+        let sharedNoise: NoiseProceduralTexture | null = null;
+        try {
+            sharedNoise = new NoiseProceduralTexture(`contrailNoise_${idTag}`, CONTRAIL_NOISE_TEXTURE_SIZE, scene);
+            sharedNoise.animationSpeedFactor = CONTRAIL_NOISE_ANIMATION_SPEED;
+            sharedNoise.persistence = 1.4;
+            sharedNoise.brightness = 0.5;
+            sharedNoise.octaves = 3;
+        } catch (err) {
+            console.warn('[Contrails] noise texture init failed; turbulence disabled:', err);
+            sharedNoise = null;
+        }
+
         const buildPs = (name: string, emitter: BABYLON.TransformNode): BABYLON.ParticleSystem => {
             const ps = new BABYLON.ParticleSystem(name, CONTRAIL_PARTICLE_CAPACITY, scene);
             if (sharedTex) ps.particleTexture = sharedTex;
             ps.emitter = emitter as unknown as BABYLON.AbstractMesh;
-            ps.minEmitBox = new BABYLON.Vector3(0, 0, 0);
-            ps.maxEmitBox = new BABYLON.Vector3(0, 0, 0);
+            ps.minEmitBox = new BABYLON.Vector3(-0.05, -0.02, 0);
+            ps.maxEmitBox = new BABYLON.Vector3( 0.05,  0.02, 0);
             ps.color1    = new BABYLON.Color4(1.00, 1.00, 1.00, CONTRAIL_INITIAL_ALPHA);
-            ps.color2    = new BABYLON.Color4(0.96, 0.98, 1.00, CONTRAIL_INITIAL_ALPHA * 0.85);
+            ps.color2    = new BABYLON.Color4(0.98, 0.99, 1.00, CONTRAIL_INITIAL_ALPHA * 0.9);
             ps.colorDead = new BABYLON.Color4(0.95, 0.97, 1.00, 0);
             ps.minSize = CONTRAIL_MIN_SIZE_INITIAL_M;
             ps.maxSize = CONTRAIL_MAX_SIZE_INITIAL_M;
@@ -105,25 +123,35 @@ export class VfxSystem {
             ps.maxLifeTime = CONTRAIL_MAX_LIFETIME_S;
             ps.emitRate = 0;
             ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-            ps.gravity = new BABYLON.Vector3(0, 0, 0);
+            ps.gravity = new BABYLON.Vector3(0, -CONTRAIL_WAKE_SINK_RATE_MS, 0);
             ps.direction1 = new BABYLON.Vector3(0, 0, 0);
             ps.direction2 = new BABYLON.Vector3(0, 0, 0);
             ps.minEmitPower = CONTRAIL_MIN_DRIFT_MS;
             ps.maxEmitPower = CONTRAIL_MAX_DRIFT_MS;
-            ps.minAngularSpeed = -0.15;
-            ps.maxAngularSpeed =  0.15;
+            ps.minAngularSpeed = -0.03;
+            ps.maxAngularSpeed =  0.03;
             ps.updateSpeed = 0.016;
             ps.preWarmCycles = 0;
 
-            ps.addSizeGradient(0.00, 1.0);
-            ps.addSizeGradient(0.20, 1.6);
-            ps.addSizeGradient(0.55, 2.6);
+            if (sharedNoise) {
+                ps.noiseTexture = sharedNoise;
+                ps.noiseStrength = new BABYLON.Vector3(
+                    CONTRAIL_NOISE_STRENGTH_LATERAL,
+                    CONTRAIL_NOISE_STRENGTH_VERTICAL,
+                    CONTRAIL_NOISE_STRENGTH_LATERAL,
+                );
+            }
+
+            ps.addSizeGradient(0.00, 0.4);
+            ps.addSizeGradient(0.05, 0.7);
+            ps.addSizeGradient(0.20, 1.2);
+            ps.addSizeGradient(0.55, 2.4);
             ps.addSizeGradient(1.00, CONTRAIL_FINAL_SIZE_MULTIPLIER);
 
-            ps.addColorGradient(0.00, new BABYLON.Color4(1.00, 1.00, 1.00, CONTRAIL_INITIAL_ALPHA));
-            ps.addColorGradient(0.15, new BABYLON.Color4(0.99, 0.99, 1.00, CONTRAIL_INITIAL_ALPHA * 0.95));
-            ps.addColorGradient(0.50, new BABYLON.Color4(0.97, 0.98, 1.00, CONTRAIL_INITIAL_ALPHA * 0.55));
-            ps.addColorGradient(0.85, new BABYLON.Color4(0.95, 0.97, 1.00, CONTRAIL_INITIAL_ALPHA * 0.20));
+            ps.addColorGradient(0.00, new BABYLON.Color4(1.00, 1.00, 1.00, 0.00));
+            ps.addColorGradient(0.04, new BABYLON.Color4(1.00, 1.00, 1.00, CONTRAIL_INITIAL_ALPHA));
+            ps.addColorGradient(0.45, new BABYLON.Color4(0.99, 0.99, 1.00, CONTRAIL_INITIAL_ALPHA * 0.80));
+            ps.addColorGradient(0.80, new BABYLON.Color4(0.97, 0.98, 1.00, CONTRAIL_INITIAL_ALPHA * 0.30));
             ps.addColorGradient(1.00, new BABYLON.Color4(0.95, 0.97, 1.00, 0));
 
             ps.start();

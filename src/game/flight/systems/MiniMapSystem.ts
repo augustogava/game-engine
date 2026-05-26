@@ -12,9 +12,13 @@ const MAP_IMG_UPSCALE = 2.0;
 const MINIMAP_TRAFFIC_TRIANGLE_SIZE = 3.5;
 const MINIMAP_TRAFFIC_COLOR = 'rgba(255, 215, 0, 0.9)';
 const MINIMAP_TRAFFIC_OUTLINE = 'rgba(0, 0, 0, 0.6)';
+const MINIMAP_TRAFFIC_EDGE_INSET_PX = 6;
+const MINIMAP_TRAFFIC_EDGE_SIZE = 3.0;
+const MINIMAP_TRAFFIC_EDGE_COLOR = 'rgba(255, 215, 0, 0.65)';
 const MINIMAP_REMOTE_PLAYER_RADIUS = 3.5;
 const MINIMAP_REMOTE_PLAYER_COLOR = 'rgba(255, 140, 0, 0.95)';
 const MINIMAP_REMOTE_PLAYER_OUTLINE = 'rgba(0, 0, 0, 0.7)';
+const MINIMAP_REMOTE_PLAYER_EDGE_INSET_PX = 6;
 const MINIMAP_LABEL_FONT = '7px Inter, sans-serif';
 
 export class MiniMapSystem {
@@ -455,6 +459,22 @@ export class MiniMapSystem {
         if (this._gpsCoordsEl) this._gpsCoordsEl.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     }
 
+    private _clampToCircleEdge(
+        screenX: number,
+        screenY: number,
+        cx: number,
+        cy: number,
+        radius: number,
+    ): { x: number; y: number; onEdge: boolean } {
+        const dx = screenX - cx;
+        const dy = screenY - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= radius) return { x: screenX, y: screenY, onEdge: false };
+        if (dist < 1e-6) return { x: cx, y: cy, onEdge: false };
+        const k = radius / dist;
+        return { x: cx + dx * k, y: cy + dy * k, onEdge: true };
+    }
+
     private _drawLiveTraffic(
         ctx: CanvasRenderingContext2D,
         cv: HTMLCanvasElement,
@@ -474,36 +494,53 @@ export class MiniMapSystem {
             return;
         }
         if (!entries || entries.length === 0) return;
-        const margin = 2;
+        const cx = cv.width / 2;
+        const cy = cv.height / 2;
+        const edgeRadius = Math.max(8, Math.min(cx, cy) - MINIMAP_TRAFFIC_EDGE_INSET_PX);
         const hdgCorrection = headingUp && Number.isFinite(playerHdgDeg) ? playerHdgDeg : 0;
         ctx.save();
         for (const e of entries) {
             if (!Number.isFinite(e.lat) || !Number.isFinite(e.lon)) continue;
             const p = this.latLonToMapPx(e.lat, e.lon, refLat, refLon, cv.width);
             const screen = rotXY(p.x, p.y);
-            if (screen.x < -margin || screen.x > cv.width + margin) continue;
-            if (screen.y < -margin || screen.y > cv.height + margin) continue;
+            const clamped = this._clampToCircleEdge(screen.x, screen.y, cx, cy, edgeRadius);
             const trackEffectiveDeg = (Number.isFinite(e.trackDeg) ? e.trackDeg : 0) - hdgCorrection;
             const trackRad = trackEffectiveDeg * Math.PI / 180;
+
             ctx.save();
-            ctx.translate(screen.x, screen.y);
+            ctx.translate(clamped.x, clamped.y);
             ctx.rotate(trackRad);
-            const s = MINIMAP_TRAFFIC_TRIANGLE_SIZE;
-            ctx.beginPath();
-            ctx.moveTo(0, -s);
-            ctx.lineTo(-s * 0.75, s * 0.75);
-            ctx.lineTo(s * 0.75, s * 0.75);
-            ctx.closePath();
-            ctx.fillStyle = MINIMAP_TRAFFIC_COLOR;
-            ctx.fill();
-            ctx.strokeStyle = MINIMAP_TRAFFIC_OUTLINE;
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
+            if (clamped.onEdge) {
+                const s = MINIMAP_TRAFFIC_EDGE_SIZE;
+                ctx.beginPath();
+                ctx.moveTo(0, -s);
+                ctx.lineTo(-s * 0.85, s * 0.85);
+                ctx.lineTo(s * 0.85, s * 0.85);
+                ctx.closePath();
+                ctx.fillStyle = MINIMAP_TRAFFIC_EDGE_COLOR;
+                ctx.fill();
+                ctx.strokeStyle = MINIMAP_TRAFFIC_OUTLINE;
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            } else {
+                const s = MINIMAP_TRAFFIC_TRIANGLE_SIZE;
+                ctx.beginPath();
+                ctx.moveTo(0, -s);
+                ctx.lineTo(-s * 0.75, s * 0.75);
+                ctx.lineTo(s * 0.75, s * 0.75);
+                ctx.closePath();
+                ctx.fillStyle = MINIMAP_TRAFFIC_COLOR;
+                ctx.fill();
+                ctx.strokeStyle = MINIMAP_TRAFFIC_OUTLINE;
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
             ctx.restore();
-            if (e.callsign) {
+
+            if (!clamped.onEdge && e.callsign) {
                 ctx.font = MINIMAP_LABEL_FONT;
                 ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
-                ctx.fillText(e.callsign, screen.x + 5, screen.y - 4);
+                ctx.fillText(e.callsign, clamped.x + 5, clamped.y - 4);
             }
         }
         ctx.restore();
@@ -518,7 +555,9 @@ export class MiniMapSystem {
     ): void {
         const remotePlayers = this.scene.remotePlayers as Map<string, any> | undefined;
         if (!remotePlayers || remotePlayers.size === 0) return;
-        const margin = 2;
+        const cx = cv.width / 2;
+        const cy = cv.height / 2;
+        const edgeRadius = Math.max(8, Math.min(cx, cy) - MINIMAP_REMOTE_PLAYER_EDGE_INSET_PX);
         ctx.save();
         for (const [, remote] of remotePlayers) {
             const ns = remote?.nextState;
@@ -526,20 +565,22 @@ export class MiniMapSystem {
             if (!Number.isFinite(ns.lat) || !Number.isFinite(ns.lon)) continue;
             const p = this.latLonToMapPx(ns.lat, ns.lon, refLat, refLon, cv.width);
             const screen = rotXY(p.x, p.y);
-            if (screen.x < -margin || screen.x > cv.width + margin) continue;
-            if (screen.y < -margin || screen.y > cv.height + margin) continue;
+            const clamped = this._clampToCircleEdge(screen.x, screen.y, cx, cy, edgeRadius);
             ctx.fillStyle = MINIMAP_REMOTE_PLAYER_COLOR;
             ctx.strokeStyle = MINIMAP_REMOTE_PLAYER_OUTLINE;
             ctx.lineWidth = 0.6;
             ctx.beginPath();
-            ctx.arc(screen.x, screen.y, MINIMAP_REMOTE_PLAYER_RADIUS, 0, Math.PI * 2);
+            const r = clamped.onEdge ? MINIMAP_REMOTE_PLAYER_RADIUS * 0.7 : MINIMAP_REMOTE_PLAYER_RADIUS;
+            ctx.arc(clamped.x, clamped.y, r, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
-            const username = typeof ns.username === 'string' && ns.username ? ns.username : null;
-            if (username) {
-                ctx.font = MINIMAP_LABEL_FONT;
-                ctx.fillStyle = 'rgba(255, 200, 120, 0.95)';
-                ctx.fillText(username, screen.x + 5, screen.y - 4);
+            if (!clamped.onEdge) {
+                const username = typeof ns.username === 'string' && ns.username ? ns.username : null;
+                if (username) {
+                    ctx.font = MINIMAP_LABEL_FONT;
+                    ctx.fillStyle = 'rgba(255, 200, 120, 0.95)';
+                    ctx.fillText(username, clamped.x + 5, clamped.y - 4);
+                }
             }
         }
         ctx.restore();
