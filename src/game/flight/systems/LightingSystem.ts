@@ -511,14 +511,14 @@ export class LightingSystem {
         }
 
         if (this.scene._hemiLight) {
-            const newHemiIntensity = 0.03 + t * 0.47;
+            const newHemiIntensity = 0.12 + t * 0.38;
             if (!Number.isFinite(this._lastHemiIntensity) || Math.abs(newHemiIntensity - this._lastHemiIntensity) >= DAYNIGHT_LIGHT_INTENSITY_EPSILON) {
                 this.scene._hemiLight.intensity = newHemiIntensity;
                 this._lastHemiIntensity = newHemiIntensity;
             }
-            const hr = 0.1 + t * 0.5;
-            const hg = 0.12 + t * 0.63;
-            const hb = 0.2 + t * 0.8;
+            const hr = 0.15 + t * 0.45;
+            const hg = 0.17 + t * 0.58;
+            const hb = 0.25 + t * 0.75;
             if (!Number.isFinite(this._lastHemiDiffR)
                 || Math.abs(hr - this._lastHemiDiffR) >= DAYNIGHT_COLOR_EPSILON
                 || Math.abs(hg - this._lastHemiDiffG) >= DAYNIGHT_COLOR_EPSILON
@@ -528,9 +528,9 @@ export class LightingSystem {
                 this._lastHemiDiffG = hg;
                 this._lastHemiDiffB = hb;
             }
-            const gr = 0.02 + t * 0.23;
-            const gg = 0.03 + t * 0.32;
-            const gb = 0.04 + t * 0.14;
+            const gr = 0.06 + t * 0.19;
+            const gg = 0.07 + t * 0.28;
+            const gb = 0.08 + t * 0.10;
             if (!Number.isFinite(this._lastHemiGroundR)
                 || Math.abs(gr - this._lastHemiGroundR) >= DAYNIGHT_COLOR_EPSILON
                 || Math.abs(gg - this._lastHemiGroundG) >= DAYNIGHT_COLOR_EPSILON
@@ -595,7 +595,7 @@ export class LightingSystem {
             this._lastClearB = clearB;
         }
 
-        const envBase = 0.05 + t * 1.25;
+        const envBase = 0.12 + t * 1.18;
         const newEnvIntensity = this.scene.isMobile ? Math.max(envBase * 1.35, 0.95) : envBase;
         if (!Number.isFinite(this._lastEnvIntensity) || Math.abs(newEnvIntensity - this._lastEnvIntensity) >= DAYNIGHT_ENV_INTENSITY_EPSILON) {
             scene.environmentIntensity = newEnvIntensity;
