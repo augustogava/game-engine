@@ -8,8 +8,6 @@ import {
     AIRBORNE_MISSION_MIN_OFFSET_M,
     ENGINE_TYPE_PISTON,
     ENGINE_TYPE_TURBOPROP,
-    ENGINE_TYPE_TURBOFAN,
-    ENGINE_TYPE_TURBOJET,
     GEAR_STATE_UP,
     CAMERA_RADIUS_MIN_M,
     CAMERA_RADIUS_MAX_M,
@@ -139,14 +137,13 @@ export class AircraftModelSystem {
                             console.warn(`[FlightSimple] Aircraft ${cfg.code} is a prop engine but no "propeller" animation found in GLB. Available: ${this.scene._loadedAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || '(none)'}`);
                         }
                     }
-                    const isJet = cfg.engine_type === ENGINE_TYPE_TURBOFAN || cfg.engine_type === ENGINE_TYPE_TURBOJET;
-                    if (isJet) {
+                    if (cfg.gear_retractable) {
                         this.scene._gearUpAnimGroups = this.scene._loadedAnimGroups.filter((g: BABYLON.AnimationGroup) => /gear[_\s]?up|gear[_\s]?retract/i.test(g.name));
                         this.scene._gearDownAnimGroups = this.scene._loadedAnimGroups.filter((g: BABYLON.AnimationGroup) => /gear[_\s]?down|gear[_\s]?extend/i.test(g.name));
                         for (const g of this.scene._gearUpAnimGroups) g.loopAnimation = false;
                         for (const g of this.scene._gearDownAnimGroups) g.loopAnimation = false;
                         if (this.scene._gearUpAnimGroups.length === 0 && this.scene._gearDownAnimGroups.length === 0) {
-                            console.log(`[FlightSimple] ${cfg.code}: jet without gear animations — instant transition will be used (G key still works).`);
+                            console.log(`[FlightSimple] ${cfg.code}: retractable gear without animations — instant transition will be used (G key still works).`);
                         } else {
                             const upNames = this.scene._gearUpAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || 'none';
                             const downNames = this.scene._gearDownAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || 'none';
