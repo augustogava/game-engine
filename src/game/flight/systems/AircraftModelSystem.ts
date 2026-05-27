@@ -143,7 +143,8 @@ export class AircraftModelSystem {
                         for (const g of this.scene._gearUpAnimGroups) g.loopAnimation = false;
                         for (const g of this.scene._gearDownAnimGroups) g.loopAnimation = false;
                         if (this.scene._gearUpAnimGroups.length === 0 && this.scene._gearDownAnimGroups.length === 0) {
-                            console.log(`[FlightSimple] ${cfg.code}: retractable gear without animations — instant transition will be used (G key still works).`);
+                            const allNames = this.scene._loadedAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || '(none)';
+                            console.warn(`[FlightSimple] ${cfg.code}: retractable gear without animations — instant transition will be used (G key still works). Available animations: [${allNames}]`);
                         } else {
                             const upNames = this.scene._gearUpAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || 'none';
                             const downNames = this.scene._gearDownAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || 'none';
