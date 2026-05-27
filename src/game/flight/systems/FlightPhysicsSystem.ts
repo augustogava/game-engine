@@ -858,8 +858,18 @@ export class FlightPhysicsSystem {
         } else if (this.scene.gearState === GEAR_STATE_UP) {
             this.scene.gearState = GEAR_STATE_EXTENDING;
             this.scene._gearTransitionStartMs = performance.now();
-            for (const g of this.scene._gearDownAnimGroups) g.start(false, 1.0, g.from, g.to);
-            console.log('[Gear] Extending...');
+            const downGroups = this.scene._gearDownAnimGroups.length > 0
+                ? this.scene._gearDownAnimGroups
+                : this.scene._gearUpAnimGroups;
+            const hasExplicitDown = this.scene._gearDownAnimGroups.length > 0;
+            for (const g of downGroups) {
+                if (hasExplicitDown) {
+                    g.start(false, 1.0, g.from, g.to);
+                } else {
+                    g.start(false, 1.0, g.to, g.from);
+                }
+            }
+            console.log(`[Gear] Extending... (${hasExplicitDown ? 'explicit' : 'reversed gear_up'})`);
         }
     }
 
@@ -879,8 +889,11 @@ export class FlightPhysicsSystem {
                 console.log('[Gear] UP.');
             }
         } else if (this.scene.gearState === GEAR_STATE_EXTENDING) {
-            const hasAnims = this.scene._gearDownAnimGroups.length > 0;
-            const allDone = hasAnims && this.scene._gearDownAnimGroups.every((g) => !g.isPlaying);
+            const downGroups = this.scene._gearDownAnimGroups.length > 0
+                ? this.scene._gearDownAnimGroups
+                : this.scene._gearUpAnimGroups;
+            const hasAnims = downGroups.length > 0;
+            const allDone = hasAnims && downGroups.every((g) => !g.isPlaying);
             const timerDone = (now - this.scene._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
             if (allDone || (!hasAnims && timerDone)) {
                 this.scene.gearState = GEAR_STATE_DOWN;
