@@ -527,8 +527,8 @@ export class FlightSceneSimple extends Scene3D {
     private mixtureKeyLockPlus = false;
     private mixtureKeyLockMinus = false;
     private magnetoKeyLockN = false;
-    private _gearUpAnimGroup: BABYLON.AnimationGroup | null = null;
-    private _gearDownAnimGroup: BABYLON.AnimationGroup | null = null;
+    private _gearUpAnimGroups: BABYLON.AnimationGroup[] = [];
+    private _gearDownAnimGroups: BABYLON.AnimationGroup[] = [];
     private gearState: number = GEAR_STATE_DOWN;
     private gearKeyLockG = false;
     private _gearTransitionStartMs = 0;
@@ -972,14 +972,14 @@ export class FlightSceneSimple extends Scene3D {
                 this._loadedAnimGroups.forEach((g) => g.dispose());
                 this._loadedAnimGroups = [];
                 this._propellerAnimGroup = null;
-                this._gearUpAnimGroup = null;
-                this._gearDownAnimGroup = null;
+                this._gearUpAnimGroups = [];
+                this._gearDownAnimGroups = [];
                 const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
                 if (pivot) pivot.dispose();
                 this._loadAircraftModel(scene);
             }
             if (this.planeRoot) {
-                const modelStillLoading = !this._gearUpAnimGroup && !this._gearDownAnimGroup;
+                const modelStillLoading = this._gearUpAnimGroups.length === 0 && this._gearDownAnimGroups.length === 0;
                 this._spawnPlane();
                 if (this._pendingMissionAirborne && modelStillLoading) {
                     this._pendingAirborneGearRetract = true;

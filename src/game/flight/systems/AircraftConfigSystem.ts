@@ -227,8 +227,8 @@ export class AircraftConfigSystem {
             this.scene._loadedAnimGroups.forEach((g: BABYLON.AnimationGroup) => g.dispose());
             this.scene._loadedAnimGroups = [];
             this.scene._propellerAnimGroup = null;
-            this.scene._gearUpAnimGroup = null;
-            this.scene._gearDownAnimGroup = null;
+            this.scene._gearUpAnimGroups = [];
+            this.scene._gearDownAnimGroups = [];
             const pivot = this.scene.planeRoot.getChildTransformNodes(true).find((n: BABYLON.TransformNode) => n.name === 'modelPivot');
             if (pivot) pivot.dispose();
 

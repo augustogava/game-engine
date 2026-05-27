@@ -170,8 +170,8 @@ export class SpawnSystem {
         this.scene.gearState = GEAR_STATE_DOWN;
         this.scene._gearTransitionStartMs = 0;
         this.scene._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
-        if (this.scene._gearUpAnimGroup) this.scene._gearUpAnimGroup.stop();
-        if (this.scene._gearDownAnimGroup) this.scene._gearDownAnimGroup.stop();
+        for (const g of this.scene._gearUpAnimGroups) g.stop();
+        for (const g of this.scene._gearDownAnimGroups) g.stop();
         if (cfg.engine_type === ENGINE_TYPE_PISTON) {
             this.scene.mixtureLevel = 0.7;
             this.scene.magnetoSwitch = MAGNETO_BOTH;
@@ -194,13 +194,13 @@ export class SpawnSystem {
             this.scene.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
             if (isAirborneMission) {
                 this.scene._spawnSnapFramesLeft = 0;
-                if (this.scene._gearUpAnimGroup) {
+                if (this.scene._gearUpAnimGroups.length > 0) {
                     this.scene.gearState = GEAR_STATE_UP;
-                    this.scene._gearUpAnimGroup.start(false, 100.0, this.scene._gearUpAnimGroup.from, this.scene._gearUpAnimGroup.to);
+                    for (const g of this.scene._gearUpAnimGroups) g.start(false, 100.0, g.from, g.to);
                 }
                 this.scene._pendingAirborneGearRetract = false;
                 const missionAlt = this.scene._pendingMissionAltM ?? 0;
-                const gearLabel = this.scene._gearUpAnimGroup ? 'UP' : 'DOWN(fixed)';
+                const gearLabel = this.scene._gearUpAnimGroups.length > 0 ? 'UP' : 'DOWN(fixed)';
                 console.debug(`[FlightSimple] Airborne mission respawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.scene.refAlt.toFixed(1)}m posY=${this.scene.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapDisabled gear=${gearLabel} terrainY=${this.scene.terrainY.toFixed(1)}m`);
             }
         } else {

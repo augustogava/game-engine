@@ -853,16 +853,12 @@ export class FlightPhysicsSystem {
             }
             this.scene.gearState = GEAR_STATE_RETRACTING;
             this.scene._gearTransitionStartMs = performance.now();
-            if (this.scene._gearUpAnimGroup) {
-                this.scene._gearUpAnimGroup.start(false, 1.0, this.scene._gearUpAnimGroup.from, this.scene._gearUpAnimGroup.to);
-            }
+            for (const g of this.scene._gearUpAnimGroups) g.start(false, 1.0, g.from, g.to);
             console.log('[Gear] Retracting...');
         } else if (this.scene.gearState === GEAR_STATE_UP) {
             this.scene.gearState = GEAR_STATE_EXTENDING;
             this.scene._gearTransitionStartMs = performance.now();
-            if (this.scene._gearDownAnimGroup) {
-                this.scene._gearDownAnimGroup.start(false, 1.0, this.scene._gearDownAnimGroup.from, this.scene._gearDownAnimGroup.to);
-            }
+            for (const g of this.scene._gearDownAnimGroups) g.start(false, 1.0, g.from, g.to);
             console.log('[Gear] Extending...');
         }
     }
@@ -875,16 +871,18 @@ export class FlightPhysicsSystem {
             try { this.scene._flightAudio.setGearTransitioning(transitioning); } catch (_) { /* ignore */ }
         }
         if (this.scene.gearState === GEAR_STATE_RETRACTING) {
-            const animDone = this.scene._gearUpAnimGroup ? !this.scene._gearUpAnimGroup.isPlaying : false;
+            const hasAnims = this.scene._gearUpAnimGroups.length > 0;
+            const allDone = hasAnims && this.scene._gearUpAnimGroups.every((g) => !g.isPlaying);
             const timerDone = (now - this.scene._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
-            if (animDone || (!this.scene._gearUpAnimGroup && timerDone)) {
+            if (allDone || (!hasAnims && timerDone)) {
                 this.scene.gearState = GEAR_STATE_UP;
                 console.log('[Gear] UP.');
             }
         } else if (this.scene.gearState === GEAR_STATE_EXTENDING) {
-            const animDone = this.scene._gearDownAnimGroup ? !this.scene._gearDownAnimGroup.isPlaying : false;
+            const hasAnims = this.scene._gearDownAnimGroups.length > 0;
+            const allDone = hasAnims && this.scene._gearDownAnimGroups.every((g) => !g.isPlaying);
             const timerDone = (now - this.scene._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
-            if (animDone || (!this.scene._gearDownAnimGroup && timerDone)) {
+            if (allDone || (!hasAnims && timerDone)) {
                 this.scene.gearState = GEAR_STATE_DOWN;
                 console.log('[Gear] DOWN.');
             }

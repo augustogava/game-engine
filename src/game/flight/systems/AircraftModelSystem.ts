@@ -122,8 +122,8 @@ export class AircraftModelSystem {
                 }
                 this.scene._loadedAnimGroups = animationGroups || [];
                 this.scene._propellerAnimGroup = null;
-                this.scene._gearUpAnimGroup = null;
-                this.scene._gearDownAnimGroup = null;
+                this.scene._gearUpAnimGroups = [];
+                this.scene._gearDownAnimGroups = [];
                 if (this.scene._loadedAnimGroups.length) {
                     this.scene._loadedAnimGroups.forEach((g: BABYLON.AnimationGroup) => g.stop());
                     const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
@@ -141,21 +141,23 @@ export class AircraftModelSystem {
                     }
                     const isJet = cfg.engine_type === ENGINE_TYPE_TURBOFAN || cfg.engine_type === ENGINE_TYPE_TURBOJET;
                     if (isJet) {
-                        this.scene._gearUpAnimGroup = this.scene._loadedAnimGroups.find((g: BABYLON.AnimationGroup) => /gear[_\s]?up|gear[_\s]?retract/i.test(g.name)) ?? null;
-                        this.scene._gearDownAnimGroup = this.scene._loadedAnimGroups.find((g: BABYLON.AnimationGroup) => /gear[_\s]?down|gear[_\s]?extend/i.test(g.name)) ?? null;
-                        if (this.scene._gearUpAnimGroup) this.scene._gearUpAnimGroup.loopAnimation = false;
-                        if (this.scene._gearDownAnimGroup) this.scene._gearDownAnimGroup.loopAnimation = false;
-                        if (!this.scene._gearUpAnimGroup && !this.scene._gearDownAnimGroup) {
+                        this.scene._gearUpAnimGroups = this.scene._loadedAnimGroups.filter((g: BABYLON.AnimationGroup) => /gear[_\s]?up|gear[_\s]?retract/i.test(g.name));
+                        this.scene._gearDownAnimGroups = this.scene._loadedAnimGroups.filter((g: BABYLON.AnimationGroup) => /gear[_\s]?down|gear[_\s]?extend/i.test(g.name));
+                        for (const g of this.scene._gearUpAnimGroups) g.loopAnimation = false;
+                        for (const g of this.scene._gearDownAnimGroups) g.loopAnimation = false;
+                        if (this.scene._gearUpAnimGroups.length === 0 && this.scene._gearDownAnimGroups.length === 0) {
                             console.log(`[FlightSimple] ${cfg.code}: jet without gear animations — instant transition will be used (G key still works).`);
                         } else {
-                            console.log(`[FlightSimple] Gear animations found: up="${this.scene._gearUpAnimGroup?.name ?? 'none'}", down="${this.scene._gearDownAnimGroup?.name ?? 'none'}"`);
+                            const upNames = this.scene._gearUpAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || 'none';
+                            const downNames = this.scene._gearDownAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ') || 'none';
+                            console.log(`[FlightSimple] Gear animations found: up=[${upNames}], down=[${downNames}]`);
                         }
                     }
                 }
                 if (this.scene._pendingAirborneGearRetract) {
-                    if (this.scene._gearUpAnimGroup) {
+                    if (this.scene._gearUpAnimGroups.length > 0) {
                         this.scene.gearState = GEAR_STATE_UP;
-                        this.scene._gearUpAnimGroup.start(false, 100.0, this.scene._gearUpAnimGroup.from, this.scene._gearUpAnimGroup.to);
+                        for (const g of this.scene._gearUpAnimGroups) g.start(false, 100.0, g.from, g.to);
                         console.debug(`[FlightSimple] Airborne mission: retracting gear (${cfg.code})`);
                     } else {
                         console.debug(`[FlightSimple] Airborne mission: ${cfg.code} has no gear retract animation, gear stays DOWN`);
