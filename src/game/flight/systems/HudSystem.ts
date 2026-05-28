@@ -296,9 +296,9 @@ export class HudSystem {
         if (resetBtn) {
             resetBtn.addEventListener('click', () => {
                 UiPreferences.set({
-                    gpAxisAileron: 0, gpAxisElevator: 1, gpAxisRudder: 2, gpAxisThrottle: 3,
+                    gpAxisAileron: 0, gpAxisElevator: 1, gpAxisRudder: 5, gpAxisThrottle: 2,
                     gpThrottleInverted: true,
-                    gpInvertAileron: false, gpInvertElevator: false, gpInvertRudder: false,
+                    gpInvertAileron: false, gpInvertElevator: true, gpInvertRudder: true,
                     gpBtnGear: 0, gpBtnBrake: 1, gpBtnFlapDown: 2, gpBtnFlapUp: 3,
                     gpBtnCamera: 4, gpBtnRespawn: 5, gpBtnPause: 9,
                 });
