@@ -7,15 +7,15 @@ import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 
 const WORLD_HUD_ANCHOR_DISTANCE_M = 100;
-const WORLD_HUD_LADDER_STEP_DEG = 5;
-const WORLD_HUD_LADDER_LABEL_STEP_DEG = 10;
+const WORLD_HUD_LADDER_STEP_DEG = 2.5;
+const WORLD_HUD_LADDER_LABEL_STEP_DEG = 5;
 const WORLD_HUD_LADDER_MIN_PITCH_DEG = -90;
 const WORLD_HUD_LADDER_MAX_PITCH_DEG = 90;
-const WORLD_HUD_LADDER_HALF_WIDTH_DEG = 5;
-const WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG = 8;
-const WORLD_HUD_VV_RADIUS_PX = 7;
-const WORLD_HUD_VV_WING_PX = 12;
-const WORLD_HUD_VV_TOP_PX = 7;
+const WORLD_HUD_LADDER_HALF_WIDTH_DEG = 3;
+const WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG = 6;
+const WORLD_HUD_VV_RADIUS_PX = 10;
+const WORLD_HUD_VV_WING_PX = 14;
+const WORLD_HUD_VV_TOP_PX = 8;
 const WORLD_HUD_BORESIGHT_HALF_PX = 10;
 const WORLD_HUD_BORESIGHT_TICK_PX = 4;
 const WORLD_HUD_MIN_VELOCITY_MS = 1;
@@ -2462,34 +2462,41 @@ export class HudSystem {
         ctx.font = 'bold 12px monospace';
         ctx.fillText(`${Math.round(hdgDeg)}\u00B0`, cx, hdgY + 26);
 
+        const SIDE_BOX_TOP_Y = cy + 60;
+        const SIDE_BOX_TEXT_Y = SIDE_BOX_TOP_Y + 18;
+        const SIDE_BOX_UNIT_Y = SIDE_BOX_TOP_Y + 28;
+        const SIDE_TICK_CENTER_Y = SIDE_BOX_TOP_Y + 13;
+        const SIDE_TICK_TOP_LIMIT_Y = SIDE_TICK_CENTER_Y - 63;
+        const SIDE_TICK_BOTTOM_LIMIT_Y = SIDE_TICK_CENTER_Y + 67;
+
         ctx.fillStyle = 'rgba(0,10,5,0.5)';
-        ctx.fillRect(8, cy - 30, 52, 26);
-        ctx.fillRect(W - 60, cy - 30, 52, 26);
+        ctx.fillRect(8, SIDE_BOX_TOP_Y, 52, 26);
+        ctx.fillRect(W - 60, SIDE_BOX_TOP_Y, 52, 26);
         ctx.strokeStyle = 'rgba(0,255,100,0.5)';
-        ctx.strokeRect(8, cy - 30, 52, 26);
-        ctx.strokeRect(W - 60, cy - 30, 52, 26);
+        ctx.strokeRect(8, SIDE_BOX_TOP_Y, 52, 26);
+        ctx.strokeRect(W - 60, SIDE_BOX_TOP_Y, 52, 26);
 
         ctx.fillStyle = 'rgba(0,255,100,0.95)';
         ctx.font = 'bold 14px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText(`${speed}`, 54, cy - 12);
+        ctx.fillText(`${speed}`, 54, SIDE_BOX_TEXT_Y);
         ctx.textAlign = 'left';
-        ctx.fillText(`${altitude}`, W - 54, cy - 12);
+        ctx.fillText(`${altitude}`, W - 54, SIDE_BOX_TEXT_Y);
 
         ctx.fillStyle = 'rgba(0,255,100,0.4)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('kts', 54, cy - 2);
+        ctx.fillText('kts', 54, SIDE_BOX_UNIT_Y);
         ctx.textAlign = 'left';
-        ctx.fillText('ft', W - 54, cy - 2);
+        ctx.fillText('ft', W - 54, SIDE_BOX_UNIT_Y);
 
         ctx.strokeStyle = 'rgba(0,255,100,0.3)';
         ctx.lineWidth = 1;
         for (let i = -5; i <= 5; i++) {
             const spdMark = Math.round(speed / 10) * 10 + i * 10;
             if (spdMark < 0) continue;
-            const yOff = cy - 17 + (speed - spdMark) * 1.5;
-            if (yOff < cy - 80 || yOff > cy + 50) continue;
+            const yOff = SIDE_TICK_CENTER_Y + (speed - spdMark) * 1.5;
+            if (yOff < SIDE_TICK_TOP_LIMIT_Y || yOff > SIDE_TICK_BOTTOM_LIMIT_Y) continue;
             ctx.beginPath();
             ctx.moveTo(60, yOff);
             ctx.lineTo(66, yOff);
@@ -2504,8 +2511,8 @@ export class HudSystem {
         for (let i = -5; i <= 5; i++) {
             const altMark = Math.round(altitude / 200) * 200 + i * 200;
             if (altMark < 0) continue;
-            const yOff = cy - 17 + (altitude - altMark) * 0.18;
-            if (yOff < cy - 80 || yOff > cy + 50) continue;
+            const yOff = SIDE_TICK_CENTER_Y + (altitude - altMark) * 0.18;
+            if (yOff < SIDE_TICK_TOP_LIMIT_Y || yOff > SIDE_TICK_BOTTOM_LIMIT_Y) continue;
             ctx.beginPath();
             ctx.moveTo(W - 66, yOff);
             ctx.lineTo(W - 60, yOff);
@@ -2516,6 +2523,15 @@ export class HudSystem {
                 ctx.fillText(`${altMark}`, W - 58, yOff + 3);
             }
         }
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.strokeStyle = 'rgba(0,255,100,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
     }
 
     drawWorldHud(): void {

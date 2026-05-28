@@ -664,7 +664,7 @@ export class LightingSystem {
             const starFade = Math.max(0, Math.min(1, (-elevation + 5) / 12));
             const starsActive = starFade > 0.05;
             this.scene._starRoot.setEnabled(starsActive);
-            if (this.scene._milkyWayRoot) this.scene._milkyWayRoot.setEnabled(starsActive);
+            if (this.scene._milkyWayRoot) this.scene._milkyWayRoot.setEnabled(false);
         }
 
         this.scene._applyCloudTint(elevation);
