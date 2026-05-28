@@ -8,6 +8,14 @@ export const OVER_G_THRESHOLD = 4.0;
 export const G_FORCE_SMOOTHING = 0.15;
 export const HAPTIC_MIN_INTERVAL_MS = 2000;
 
+export const G_BLACKOUT_ONSET_G = 5.0;
+export const G_BLACKOUT_FULL_G = 9.0;
+export const G_REDOUT_ONSET_G = -2.0;
+export const G_REDOUT_FULL_G = -5.0;
+export const G_STRESS_RISE_PER_S = 0.5;
+export const G_STRESS_RECOVER_PER_S = 0.35;
+export const G_STRESS_MAX_OPACITY = 0.92;
+
 export const CINEMATIC_DURATION_MS = 3000;
 export const CINEMATIC_INITIAL_RADIUS_M = 120;
 export const HUD_FADE_IN_MS = 1000;

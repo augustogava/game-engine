@@ -37,3 +37,7 @@ export const SPOOL_TAU_PISTON_S = 0.4;
 export const SPOOL_TAU_TURBOPROP_S = 0.8;
 export const SPOOL_TAU_ELECTRIC_S = 0.1;
 export const SPOOL_TAU_JET_S = 4.0;
+
+export const G_LIMIT_POSITIVE_DEFAULT = 8.0;
+export const G_LIMIT_NEGATIVE_DEFAULT = -3.0;
+export const G_LIMITER_MARGIN_G = 0.5;

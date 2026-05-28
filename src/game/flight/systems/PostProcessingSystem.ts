@@ -70,6 +70,7 @@ export class PostProcessingSystem {
         this.scene._installGamepadListeners();
         this.scene._buildChecklistOverlay();
         this.scene._buildFpsLatencyOverlay();
+        this.scene._buildGEffectsOverlay();
         this.scene._applyAccessibility();
         this.scene._mouseYokeKeyLock = false;
         this.scene._setMouseYoke(UiPreferences.get().mouseYoke);

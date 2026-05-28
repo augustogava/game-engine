@@ -21,6 +21,7 @@ const {
     GEAR_STATE_DOWN, GEAR_STATE_UP, GEAR_STATE_RETRACTING, GEAR_STATE_EXTENDING,
     BANK_COMP_MIN_SIN, BANK_COMP_MAX_PITCH, BANK_COMP_PITCH_GAIN,
     CONTROL_Q_REFERENCE_PA,
+    G_LIMIT_POSITIVE_DEFAULT, G_LIMIT_NEGATIVE_DEFAULT, G_LIMITER_MARGIN_G,
     PINCH_THROTTLE_PX_TO_DELTA,
     TWO_FINGER_SWIPE_MIN_PX, TWO_FINGER_DISTANCE_TOLERANCE_RATIO,
 } = CONST as any;
@@ -507,6 +508,34 @@ export class InputSystem {
                 this.scene.surfaces[1].controlInput *= hydraulicLossScale;
                 this.scene.surfaces[2].controlInput *= hydraulicLossScale;
                 this.scene.surfaces[3].controlInput *= hydraulicLossScale;
+            }
+
+            if (this.scene._gLimiterEnabled === true && this.scene.surfaces.length >= 3) {
+                const cfgGPos = this.scene.aircraftConfig.g_limit_positive;
+                const cfgGNeg = this.scene.aircraftConfig.g_limit_negative;
+                const gPos = (cfgGPos != null && Number.isFinite(cfgGPos) && cfgGPos > 0)
+                    ? cfgGPos
+                    : G_LIMIT_POSITIVE_DEFAULT;
+                const gNegRaw = (cfgGNeg != null && Number.isFinite(cfgGNeg) && cfgGNeg < 0)
+                    ? cfgGNeg
+                    : G_LIMIT_NEGATIVE_DEFAULT;
+                const gNeg = gNegRaw;
+                const margin = Math.max(0.01, G_LIMITER_MARGIN_G);
+                const nz = Number.isFinite(this.scene._gForceVertical) ? this.scene._gForceVertical : 1;
+                const pitchInput = this.scene.surfaces[2].controlInput;
+                if (pitchInput < 0) {
+                    const headroom = gPos - nz;
+                    if (headroom < margin) {
+                        const scale = Math.max(0, headroom / margin);
+                        this.scene.surfaces[2].controlInput *= scale;
+                    }
+                } else if (pitchInput > 0) {
+                    const headroomNeg = nz - gNeg;
+                    if (headroomNeg < margin) {
+                        const scale = Math.max(0, headroomNeg / margin);
+                        this.scene.surfaces[2].controlInput *= scale;
+                    }
+                }
             }
         }
 

@@ -572,6 +572,21 @@ export class FlightPhysicsSystem {
                 const sideForce = -beta * qSide * 0.4;
                 totalForce.addInPlace(toWorld(new BABYLON.Vector3(sideForce, 0, 0)));
                 totalTorque.y += cfg.fuselage_cn_beta * beta * qSide * 5.0;
+
+                const cdVert = (cfg.fuselage_cd_vertical != null && Number.isFinite(cfg.fuselage_cd_vertical))
+                    ? Math.max(0, cfg.fuselage_cd_vertical)
+                    : 0;
+                const planformArea = (cfg.fuselage_planform_area != null && Number.isFinite(cfg.fuselage_planform_area))
+                    ? Math.max(0, cfg.fuselage_planform_area)
+                    : 0;
+                if (cdVert > 0 && planformArea > 0) {
+                    const vy = bodyVelNow.y;
+                    if (Math.abs(vy) >= 1.0) {
+                        const verticalDragMag = 0.5 * airDensity * vy * vy * cdVert * planformArea * machDragMult;
+                        const verticalForceBodyY = -Math.sign(vy) * verticalDragMag;
+                        totalForce.addInPlace(toWorld(new BABYLON.Vector3(0, verticalForceBodyY, 0)));
+                    }
+                }
             }
 
             const _propRotRaw: any = cfg.prop_rotation_dir;
@@ -648,6 +663,9 @@ export class FlightPhysicsSystem {
         const totalGNow = Math.max(0, Math.hypot(avgForce.x, avgForce.y + MASS * gravityAccel, avgForce.z) / (MASS * gravityAccel));
         const gMeasured = Number.isFinite(totalGNow) && totalGNow > 0 ? totalGNow : Math.abs(verticalGNow);
         this.scene._gForce = this.scene._gForce + (gMeasured - this.scene._gForce) * G_FORCE_SMOOTHING;
+        if (Number.isFinite(verticalGNow)) {
+            this.scene._gForceVertical = this.scene._gForceVertical + (verticalGNow - this.scene._gForceVertical) * G_FORCE_SMOOTHING;
+        }
 
         const Iw2   = new BABYLON.Vector3(cIxx * this.scene.angularVelocity.x, cIyy * this.scene.angularVelocity.y, cIzz * this.scene.angularVelocity.z);
         const gyro2 = BABYLON.Vector3.Cross(this.scene.angularVelocity, Iw2);
@@ -888,7 +906,7 @@ export class FlightPhysicsSystem {
         }
         if (this.scene.gearState === GEAR_STATE_RETRACTING) {
             const hasAnims = this.scene._gearUpAnimGroups.length > 0;
-            const allDone = hasAnims && this.scene._gearUpAnimGroups.every((g) => !g.isPlaying);
+            const allDone = hasAnims && this.scene._gearUpAnimGroups.every((g: BABYLON.AnimationGroup) => !g.isPlaying);
             const timerDone = (now - this.scene._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
             if (allDone || (!hasAnims && timerDone)) {
                 this.scene.gearState = GEAR_STATE_UP;
@@ -899,7 +917,7 @@ export class FlightPhysicsSystem {
                 ? this.scene._gearDownAnimGroups
                 : this.scene._gearUpAnimGroups;
             const hasAnims = downGroups.length > 0;
-            const allDone = hasAnims && downGroups.every((g) => !g.isPlaying);
+            const allDone = hasAnims && downGroups.every((g: BABYLON.AnimationGroup) => !g.isPlaying);
             const timerDone = (now - this.scene._gearTransitionStartMs) > GEAR_INSTANT_TRANSITION_MS;
             if (allDone || (!hasAnims && timerDone)) {
                 this.scene.gearState = GEAR_STATE_DOWN;

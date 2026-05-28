@@ -26,6 +26,8 @@ export interface UiPreferencesData {
     showChecklist: boolean;
     showFpsOverlay: boolean;
     showLatencyOverlay: boolean;
+    showGEffects: boolean;
+    gLimiterEnabled: boolean;
     colorblindMode: ColorblindMode;
     fontScale: number;
     contrastBoost: boolean;
@@ -60,6 +62,8 @@ const DEFAULT_PREFS: UiPreferencesData = {
     showChecklist: false,
     showFpsOverlay: true,
     showLatencyOverlay: true,
+    showGEffects: true,
+    gLimiterEnabled: false,
     colorblindMode: COLORBLIND_NONE,
     fontScale: 1.0,
     contrastBoost: false,
@@ -143,6 +147,8 @@ export class UiPreferences {
             showChecklist: typeof input.showChecklist === 'boolean' ? input.showChecklist : DEFAULT_PREFS.showChecklist,
             showFpsOverlay: typeof input.showFpsOverlay === 'boolean' ? input.showFpsOverlay : DEFAULT_PREFS.showFpsOverlay,
             showLatencyOverlay: typeof input.showLatencyOverlay === 'boolean' ? input.showLatencyOverlay : DEFAULT_PREFS.showLatencyOverlay,
+            showGEffects: typeof input.showGEffects === 'boolean' ? input.showGEffects : DEFAULT_PREFS.showGEffects,
+            gLimiterEnabled: typeof input.gLimiterEnabled === 'boolean' ? input.gLimiterEnabled : DEFAULT_PREFS.gLimiterEnabled,
             colorblindMode: isColorblind(input.colorblindMode) ? input.colorblindMode : DEFAULT_PREFS.colorblindMode,
             fontScale: clamp(Number(input.fontScale ?? DEFAULT_PREFS.fontScale), PREF_FONT_SCALE_MIN, PREF_FONT_SCALE_MAX),
             contrastBoost: typeof input.contrastBoost === 'boolean' ? input.contrastBoost : DEFAULT_PREFS.contrastBoost,

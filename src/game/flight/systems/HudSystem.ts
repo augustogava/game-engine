@@ -6,6 +6,26 @@ import { UiPreferences } from '../../UiPreferences.js';
 import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 
+const WORLD_HUD_ANCHOR_DISTANCE_M = 100;
+const WORLD_HUD_LADDER_STEP_DEG = 5;
+const WORLD_HUD_LADDER_LABEL_STEP_DEG = 10;
+const WORLD_HUD_LADDER_MIN_PITCH_DEG = -90;
+const WORLD_HUD_LADDER_MAX_PITCH_DEG = 90;
+const WORLD_HUD_LADDER_HALF_WIDTH_DEG = 5;
+const WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG = 8;
+const WORLD_HUD_VV_RADIUS_PX = 7;
+const WORLD_HUD_VV_WING_PX = 12;
+const WORLD_HUD_VV_TOP_PX = 7;
+const WORLD_HUD_BORESIGHT_HALF_PX = 10;
+const WORLD_HUD_BORESIGHT_TICK_PX = 4;
+const WORLD_HUD_MIN_VELOCITY_MS = 1;
+const WORLD_HUD_SCREEN_MARGIN_PX = 8;
+const WORLD_HUD_COLOR = 'rgba(0,255,100,0.95)';
+const WORLD_HUD_COLOR_DIM = 'rgba(0,255,100,0.7)';
+const WORLD_HUD_LINE_WIDTH = 1.5;
+const WORLD_HUD_FONT = '10px monospace';
+const WORLD_HUD_LADDER_DASH_PATTERN_PX: number[] = [6, 4];
+
 const _C: any = CONST;
 const {
     CAMERA_MODE_TOWER,
@@ -24,6 +44,10 @@ const {
     ISA_TROPOPAUSE_M, ISA_TROPOPAUSE_TEMP_K, ISA_SEA_LEVEL_TEMP_K, ISA_LAPSE_RATE_K_PER_M,
     SPECIFIC_HEAT_RATIO_AIR, GAS_CONSTANT_AIR_J_PER_KG_K,
     OVER_G_THRESHOLD,
+    G_BLACKOUT_ONSET_G, G_BLACKOUT_FULL_G,
+    G_REDOUT_ONSET_G, G_REDOUT_FULL_G,
+    G_STRESS_RISE_PER_S, G_STRESS_RECOVER_PER_S,
+    G_STRESS_MAX_OPACITY,
 } = CONST as any;
 
 export class HudSystem {
@@ -102,6 +126,8 @@ export class HudSystem {
         setCheck('ux-checklist', prefs.showChecklist);
         setCheck('ux-fps-overlay', prefs.showFpsOverlay);
         setCheck('ux-latency-overlay', prefs.showLatencyOverlay);
+        setCheck('ux-g-effects', prefs.showGEffects);
+        setCheck('ux-g-limiter', prefs.gLimiterEnabled);
         setSel('ux-colorblind', prefs.colorblindMode);
         setVal('ux-font-scale', Math.round(prefs.fontScale * 100));
         setCheck('ux-contrast', prefs.contrastBoost);
@@ -145,6 +171,8 @@ export class HudSystem {
         handleCheck('ux-checklist', 'showChecklist');
         handleCheck('ux-fps-overlay', 'showFpsOverlay');
         handleCheck('ux-latency-overlay', 'showLatencyOverlay');
+        handleCheck('ux-g-effects', 'showGEffects');
+        handleCheck('ux-g-limiter', 'gLimiterEnabled');
         handleCheck('ux-contrast', 'contrastBoost');
 
         const handleSelect = (id: string, key: keyof ReturnType<typeof UiPreferences.get>) => {
@@ -160,7 +188,9 @@ export class HudSystem {
 
         UiPreferences.onChange((p) => {
             this.scene._setMouseYoke(p.mouseYoke);
+            this.scene._gLimiterEnabled = p.gLimiterEnabled === true;
         });
+        this.scene._gLimiterEnabled = prefs.gLimiterEnabled === true;
 
         // const replayBtn = document.getElementById('ux-replay-btn');
         // if (replayBtn) replayBtn.addEventListener('click', () => this.scene._toggleReplay());
@@ -495,6 +525,56 @@ export class HudSystem {
         el.style.cssText = 'position:fixed;top:10px;right:10px;z-index:121;background:rgba(0,20,15,.65);border:1px solid rgba(80,255,160,.2);border-radius:6px;padding:4px 8px;font-family:monospace;color:#40ffaa;font-size:10px;backdrop-filter:blur(4px);pointer-events:none;display:none';
         document.body.appendChild(el);
         this.scene._ovrFpsLatencyEl = el;
+    }
+
+    buildGEffectsOverlay(): void {
+        if (this.scene._gEffectsEl) return;
+        const el = document.createElement('div');
+        el.id = 'ux-g-effects';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:200;pointer-events:none;opacity:0;transition:background-color .12s linear;background:radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0) 35%, rgba(0,0,0,1) 100%)';
+        document.body.appendChild(el);
+        this.scene._gEffectsEl = el;
+    }
+
+    updateGEffectsOverlay(dt: number): void {
+        const el = this.scene._gEffectsEl as HTMLElement | null;
+        if (!el) return;
+        const prefs = UiPreferences.get();
+        if (!prefs.showGEffects) {
+            if (el.style.opacity !== '0') el.style.opacity = '0';
+            this.scene._gStress = 0;
+            return;
+        }
+        const nz = Number.isFinite(this.scene._gForceVertical) ? this.scene._gForceVertical : 1;
+        const safeDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.5) : 0;
+
+        let stressDelta = 0;
+        let isRedout = false;
+        if (nz >= G_BLACKOUT_ONSET_G) {
+            const span = Math.max(0.01, G_BLACKOUT_FULL_G - G_BLACKOUT_ONSET_G);
+            const intensity = Math.max(0, Math.min(1, (nz - G_BLACKOUT_ONSET_G) / span));
+            stressDelta = G_STRESS_RISE_PER_S * intensity * safeDt;
+        } else if (nz <= G_REDOUT_ONSET_G) {
+            const span = Math.max(0.01, G_REDOUT_ONSET_G - G_REDOUT_FULL_G);
+            const intensity = Math.max(0, Math.min(1, (G_REDOUT_ONSET_G - nz) / span));
+            stressDelta = G_STRESS_RISE_PER_S * intensity * safeDt;
+            isRedout = true;
+        } else {
+            stressDelta = -G_STRESS_RECOVER_PER_S * safeDt;
+        }
+
+        let stress = (Number.isFinite(this.scene._gStress) ? this.scene._gStress : 0) + stressDelta;
+        if (stress < 0) stress = 0;
+        if (stress > 1) stress = 1;
+        this.scene._gStress = stress;
+
+        const maxOpacity = Math.max(0, Math.min(1, G_STRESS_MAX_OPACITY));
+        const opacity = stress * maxOpacity;
+        const opacityStr = opacity.toFixed(3);
+        if (el.style.opacity !== opacityStr) el.style.opacity = opacityStr;
+
+        const tint = isRedout ? 'rgba(200,0,0,0.65)' : 'rgba(0,0,0,0.85)';
+        if (el.style.backgroundColor !== tint) el.style.backgroundColor = tint;
     }
 
     applyAccessibility(): void {
@@ -1553,7 +1633,8 @@ export class HudSystem {
   </div>
 </div>
 
-<canvas id="flight-pfd" width="350" height="250" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none"></canvas>
+<canvas id="flight-whud" width="800" height="600" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1"></canvas>
+<canvas id="flight-pfd" width="350" height="250" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2"></canvas>
 <div id="gps-map" style="position:absolute;top:4px;left:4px;width:216px;height:216px;border-radius:10px;overflow:hidden;box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6);pointer-events:auto;touch-action:none">
   <img id="gps-map-img" style="position:absolute;top:-50%;left:-50%;width:200%;height:200%;object-fit:cover;opacity:0.9;will-change:transform;pointer-events:none;user-select:none" draggable="false">
   <canvas id="gps-map-hdg" width="216" height="216" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
@@ -1672,6 +1753,14 @@ export class HudSystem {
         if (navPanel) this.scene._makeDraggable(navPanel);
         this.scene.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
         this.scene.hudCtx    = this.scene.hudCanvas.getContext('2d')!;
+        try {
+            this.scene.wHudCanvas = document.getElementById('flight-whud') as HTMLCanvasElement | null;
+            this.scene.wHudCtx    = this.scene.wHudCanvas ? this.scene.wHudCanvas.getContext('2d') : null;
+        } catch (err) {
+            this.scene.wHudCanvas = null;
+            this.scene.wHudCtx = null;
+            console.warn('[WorldHud] init failed:', err);
+        }
         this.scene.hudSpeedVal = document.getElementById('bb-spd-v')!;
         this.scene.hudAltVal   = document.getElementById('bb-alt-v')!;
         this.scene.hudThrottle = document.getElementById('bb-thr')!;
@@ -2254,6 +2343,11 @@ export class HudSystem {
         this.scene._updateTapeMarks(speedKts, altitudeFt);
 
         this.scene._drawFlightHUD();
+        try {
+            this.drawWorldHud();
+        } catch (err) {
+            console.warn('[WorldHud] update failed:', err);
+        }
         this.scene._updateMap();
         this.scene._updateDebugReadouts();
 
@@ -2512,6 +2606,205 @@ export class HudSystem {
                 ctx.fillText(`${altMark}`, W - 58, yOff + 3);
             }
         }
+    }
+
+    drawWorldHud(): void {
+        const canvas = this.scene.wHudCanvas as HTMLCanvasElement | null | undefined;
+        const ctx = this.scene.wHudCtx as CanvasRenderingContext2D | null | undefined;
+        if (!canvas || !ctx) return;
+
+        const camera = this.scene.camera as BABYLON.Camera | null | undefined;
+        const planeRoot = this.scene.planeRoot;
+        if (!camera || !planeRoot) return;
+
+        let bScene: BABYLON.Scene | null = null;
+        try { bScene = camera.getScene(); } catch (_) { bScene = null; }
+        const engine = bScene ? bScene.getEngine() : null;
+        if (!engine) return;
+
+        try {
+            const renderW = Math.max(1, Math.floor(engine.getRenderWidth()));
+            const renderH = Math.max(1, Math.floor(engine.getRenderHeight()));
+            if (canvas.width !== renderW)  canvas.width  = renderW;
+            if (canvas.height !== renderH) canvas.height = renderH;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const transform = camera.getTransformationMatrix();
+            const viewport = new BABYLON.Viewport(0, 0, canvas.width, canvas.height);
+            const identity = BABYLON.Matrix.Identity();
+            const camPos = camera.globalPosition || (camera as any).position;
+            if (!camPos) return;
+
+            const wm = planeRoot.getWorldMatrix();
+            const fwd   = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
+            const worldUp = new BABYLON.Vector3(0, 1, 0);
+
+            const fwdFlat = fwd.subtract(worldUp.scale(BABYLON.Vector3.Dot(fwd, worldUp)));
+            if (fwdFlat.lengthSquared() < 1e-6) return;
+            fwdFlat.normalize();
+            const rightFlat = BABYLON.Vector3.Cross(worldUp, fwdFlat).normalize();
+
+            const camFwd = camera.getForwardRay ? camera.getForwardRay().direction : fwd;
+
+            const projectDir = (dir: BABYLON.Vector3): { x: number; y: number; visible: boolean } => {
+                if (BABYLON.Vector3.Dot(dir, camFwd) <= 0.01) {
+                    return { x: 0, y: 0, visible: false };
+                }
+                const worldPt = camPos.add(dir.scale(WORLD_HUD_ANCHOR_DISTANCE_M));
+                const p = BABYLON.Vector3.Project(worldPt, identity, transform, viewport);
+                if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return { x: 0, y: 0, visible: false };
+                if (p.z < 0 || p.z > 1) return { x: p.x, y: p.y, visible: false };
+                return { x: p.x, y: p.y, visible: true };
+            };
+
+            const pitchOffsetDir = (angleDeg: number, lateralDeg: number): BABYLON.Vector3 => {
+                const aRad = angleDeg * Math.PI / 180;
+                const lRad = lateralDeg * Math.PI / 180;
+                const cosA = Math.cos(aRad), sinA = Math.sin(aRad);
+                const cosL = Math.cos(lRad), sinL = Math.sin(lRad);
+                const fwdScale = cosA * cosL;
+                const rightScale = cosA * sinL;
+                return new BABYLON.Vector3(
+                    fwdFlat.x * fwdScale + rightFlat.x * rightScale + worldUp.x * sinA,
+                    fwdFlat.y * fwdScale + rightFlat.y * rightScale + worldUp.y * sinA,
+                    fwdFlat.z * fwdScale + rightFlat.z * rightScale + worldUp.z * sinA,
+                );
+            };
+
+            ctx.lineWidth = WORLD_HUD_LINE_WIDTH;
+            ctx.font = WORLD_HUD_FONT;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            this._drawWorldHudLadder(ctx, canvas.width, canvas.height, pitchOffsetDir, projectDir);
+            this._drawWorldHudBoresight(ctx, projectDir, fwd);
+            this._drawWorldHudVelocityVector(ctx, projectDir);
+        } catch (err) {
+            console.warn('[WorldHud] draw failed:', err);
+        }
+    }
+
+    private _drawWorldHudBoresight(
+        ctx: CanvasRenderingContext2D,
+        projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
+        fwd: BABYLON.Vector3,
+    ): void {
+        const p = projectDir(fwd);
+        if (!p.visible) return;
+        const half = WORLD_HUD_BORESIGHT_HALF_PX;
+        const tick = WORLD_HUD_BORESIGHT_TICK_PX;
+        ctx.strokeStyle = WORLD_HUD_COLOR;
+        ctx.beginPath();
+        ctx.moveTo(p.x - half, p.y);
+        ctx.lineTo(p.x - half * 0.3, p.y);
+        ctx.moveTo(p.x + half * 0.3, p.y);
+        ctx.lineTo(p.x + half, p.y);
+        ctx.moveTo(p.x - half, p.y);
+        ctx.lineTo(p.x - half, p.y + tick);
+        ctx.moveTo(p.x + half, p.y);
+        ctx.lineTo(p.x + half, p.y + tick);
+        ctx.stroke();
+    }
+
+    private _drawWorldHudVelocityVector(
+        ctx: CanvasRenderingContext2D,
+        projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
+    ): void {
+        const v = this.scene.velocity as BABYLON.Vector3 | null | undefined;
+        if (!v) return;
+        const speed = v.length();
+        if (!(speed > WORLD_HUD_MIN_VELOCITY_MS)) return;
+        const velDir = v.scale(1 / speed);
+        const p = projectDir(velDir);
+        if (!p.visible) return;
+
+        const r = WORLD_HUD_VV_RADIUS_PX;
+        const wing = WORLD_HUD_VV_WING_PX;
+        const top = WORLD_HUD_VV_TOP_PX;
+        ctx.strokeStyle = WORLD_HUD_COLOR;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p.x - r, p.y);
+        ctx.lineTo(p.x - r - wing, p.y);
+        ctx.moveTo(p.x + r, p.y);
+        ctx.lineTo(p.x + r + wing, p.y);
+        ctx.moveTo(p.x, p.y - r);
+        ctx.lineTo(p.x, p.y - r - top);
+        ctx.stroke();
+    }
+
+    private _drawWorldHudLadder(
+        ctx: CanvasRenderingContext2D,
+        canvasW: number,
+        canvasH: number,
+        pitchOffsetDir: (angleDeg: number, lateralDeg: number) => BABYLON.Vector3,
+        projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
+    ): void {
+        const halfDeg = WORLD_HUD_LADDER_HALF_WIDTH_DEG;
+        const halfLabelDeg = WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG;
+        const margin = WORLD_HUD_SCREEN_MARGIN_PX;
+
+        for (let deg = WORLD_HUD_LADDER_MIN_PITCH_DEG; deg <= WORLD_HUD_LADDER_MAX_PITCH_DEG; deg += WORLD_HUD_LADDER_STEP_DEG) {
+            const isLabelLine = (deg % WORLD_HUD_LADDER_LABEL_STEP_DEG) === 0;
+            const useHalf = isLabelLine ? halfLabelDeg : halfDeg;
+
+            const leftDir  = pitchOffsetDir(deg, -useHalf);
+            const rightDir = pitchOffsetDir(deg,  useHalf);
+            const pL = projectDir(leftDir);
+            const pR = projectDir(rightDir);
+            if (!pL.visible || !pR.visible) continue;
+
+            const onScreen =
+                Math.max(pL.x, pR.x) >= -margin &&
+                Math.min(pL.x, pR.x) <= canvasW + margin &&
+                Math.max(pL.y, pR.y) >= -margin &&
+                Math.min(pL.y, pR.y) <= canvasH + margin;
+            if (!onScreen) continue;
+
+            const isHorizon = deg === 0;
+            const isBelow = deg < 0;
+
+            ctx.strokeStyle = isHorizon ? WORLD_HUD_COLOR : WORLD_HUD_COLOR_DIM;
+            ctx.lineWidth = isHorizon ? WORLD_HUD_LINE_WIDTH + 0.5 : WORLD_HUD_LINE_WIDTH;
+
+            if (isBelow) {
+                ctx.setLineDash(WORLD_HUD_LADDER_DASH_PATTERN_PX);
+            } else {
+                ctx.setLineDash([]);
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(pL.x, pL.y);
+            ctx.lineTo(pR.x, pR.y);
+            ctx.stroke();
+
+            if (isLabelLine && !isHorizon) {
+                ctx.setLineDash([]);
+                const dx = pR.x - pL.x;
+                const dy = pR.y - pL.y;
+                const len = Math.hypot(dx, dy);
+                if (len > 1) {
+                    const nx = -dy / len;
+                    const ny =  dx / len;
+                    const tickSign = isBelow ? -1 : 1;
+                    const tickLen = 6;
+                    ctx.beginPath();
+                    ctx.moveTo(pL.x, pL.y);
+                    ctx.lineTo(pL.x + nx * tickLen * tickSign, pL.y + ny * tickLen * tickSign);
+                    ctx.moveTo(pR.x, pR.y);
+                    ctx.lineTo(pR.x + nx * tickLen * tickSign, pR.y + ny * tickLen * tickSign);
+                    ctx.stroke();
+                }
+                ctx.fillStyle = WORLD_HUD_COLOR_DIM;
+                const labelOffset = 16;
+                ctx.fillText(`${deg}`, pL.x - labelOffset, pL.y);
+                ctx.fillText(`${deg}`, pR.x + labelOffset, pR.y);
+            }
+        }
+        ctx.setLineDash([]);
     }
 
 }

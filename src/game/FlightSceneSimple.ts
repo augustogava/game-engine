@@ -425,6 +425,9 @@ export class FlightSceneSimple extends Scene3D {
     private spawned  = false;
     public groundSpeed: number = 0;
     private _gForce: number = 1;
+    private _gForceVertical: number = 1;
+    private _gStress: number = 0;
+    private _gLimiterEnabled: boolean = false;
     private _cameraMode: number = CAMERA_MODE_CHASE;
     private _cameraModeKeyLock = false;
     private _cinematicActive = false;
@@ -558,6 +561,7 @@ export class FlightSceneSimple extends Scene3D {
     private _checklistEl: HTMLElement | null = null;
     private _checklistPhase: string = '';
     private _ovrFpsLatencyEl: HTMLElement | null = null;
+    private _gEffectsEl: HTMLElement | null = null;
     private _replayActive: boolean = false;
     private _keysHelperHandled: boolean = false;
     private _pauseKeyLock = false;
@@ -1103,6 +1107,7 @@ export class FlightSceneSimple extends Scene3D {
         this._updateLensFlareOcclusion(dt * 1000);
         this._updateMotionBlurAndDof();
         this._updateHUD();
+        this._updateGEffectsOverlay(dt);
         if (!this._paused) {
             this._sendOwnState();
         }
@@ -1973,6 +1978,14 @@ export class FlightSceneSimple extends Scene3D {
 
     private _buildFpsLatencyOverlay(): void {
         this._hudSystem.buildFpsLatencyOverlay();
+    }
+
+    private _buildGEffectsOverlay(): void {
+        this._hudSystem.buildGEffectsOverlay();
+    }
+
+    private _updateGEffectsOverlay(dt: number): void {
+        this._hudSystem.updateGEffectsOverlay(dt);
     }
 
     private _applyAccessibility(): void {

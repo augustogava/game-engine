@@ -81,6 +81,10 @@ export interface AircraftConfig {
     spoiler_lift_loss?: number | null;
     ground_spoilers_auto?: boolean | null;
     gear_retractable?: boolean | null;
+    g_limit_positive?: number | null;
+    g_limit_negative?: number | null;
+    fuselage_cd_vertical?: number | null;
+    fuselage_planform_area?: number | null;
 }
 
 export const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {
