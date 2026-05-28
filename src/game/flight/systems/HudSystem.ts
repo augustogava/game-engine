@@ -13,6 +13,7 @@ const WORLD_HUD_LADDER_MIN_PITCH_DEG = -90;
 const WORLD_HUD_LADDER_MAX_PITCH_DEG = 90;
 const WORLD_HUD_LADDER_HALF_WIDTH_DEG = 3;
 const WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG = 6;
+const WORLD_HUD_LADDER_PITCH_COMPRESS = 0.5;
 const WORLD_HUD_VV_RADIUS_PX = 10;
 const WORLD_HUD_VV_WING_PX = 14;
 const WORLD_HUD_VV_TOP_PX = 8;
@@ -2402,11 +2403,12 @@ export class HudSystem {
         const bankR = 80;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.strokeStyle = 'rgba(0,255,100,0.4)';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(0,255,100,0.8)';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(0, 0, bankR, Math.PI + 0.35, -0.35);
         ctx.stroke();
+        ctx.lineWidth = 1;
         for (const a of [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60]) {
             const rad = (-90 + a) * Math.PI / 180;
             const inner = a % 30 === 0 ? bankR - 10 : bankR - 6;
@@ -2466,8 +2468,8 @@ export class HudSystem {
         const SIDE_BOX_TEXT_Y = SIDE_BOX_TOP_Y + 18;
         const SIDE_BOX_UNIT_Y = SIDE_BOX_TOP_Y + 28;
         const SIDE_TICK_CENTER_Y = SIDE_BOX_TOP_Y + 13;
-        const SIDE_TICK_TOP_LIMIT_Y = SIDE_TICK_CENTER_Y - 63;
-        const SIDE_TICK_BOTTOM_LIMIT_Y = SIDE_TICK_CENTER_Y + 67;
+        const SIDE_TICK_TOP_LIMIT_Y = SIDE_BOX_TOP_Y - 8;
+        const SIDE_TICK_BOTTOM_LIMIT_Y = SIDE_BOX_TOP_Y + 60;
 
         ctx.fillStyle = 'rgba(0,10,5,0.5)';
         ctx.fillRect(8, SIDE_BOX_TOP_Y, 52, 26);
@@ -2709,9 +2711,10 @@ export class HudSystem {
         for (let deg = WORLD_HUD_LADDER_MIN_PITCH_DEG; deg <= WORLD_HUD_LADDER_MAX_PITCH_DEG; deg += WORLD_HUD_LADDER_STEP_DEG) {
             const isLabelLine = (deg % WORLD_HUD_LADDER_LABEL_STEP_DEG) === 0;
             const useHalf = isLabelLine ? halfLabelDeg : halfDeg;
+            const placeDeg = deg * WORLD_HUD_LADDER_PITCH_COMPRESS;
 
-            const leftDir  = pitchOffsetDir(deg, -useHalf);
-            const rightDir = pitchOffsetDir(deg,  useHalf);
+            const leftDir  = pitchOffsetDir(placeDeg, -useHalf);
+            const rightDir = pitchOffsetDir(placeDeg,  useHalf);
             const pL = projectDir(leftDir);
             const pR = projectDir(rightDir);
             if (!pL.visible || !pR.visible) continue;
