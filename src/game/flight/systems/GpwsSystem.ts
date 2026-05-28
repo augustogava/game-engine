@@ -78,7 +78,12 @@ export class GpwsSystem {
         const mmo = this.resolveMmo();
         const overByIas = Number.isFinite(speedKtsIas) && speedKtsIas > vne;
         const overByMach = Number.isFinite(mach) && mach > mmo;
-        const active = overByIas || overByMach;
+        const flapDeg = Number.isFinite(this.scene.currentFlapDeg) ? this.scene.currentFlapDeg : 0;
+        const vfe = cfg.vfe_kts;
+        const overByVfe = flapDeg > 0
+            && vfe != null && Number.isFinite(vfe) && vfe > 0
+            && Number.isFinite(speedKtsIas) && speedKtsIas > vfe;
+        const active = overByIas || overByMach || overByVfe;
         this.scene._overspeedActive = active;
         if (!active) return;
         const nowMs = performance.now();

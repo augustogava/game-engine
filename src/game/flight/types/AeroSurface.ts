@@ -13,4 +13,5 @@ export interface AeroSurface {
     oswaldE:      number;
     flapFraction: number;
     controlInput: number;
+    zeroLiftCm:   number;
 }

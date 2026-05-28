@@ -98,6 +98,7 @@ export class AircraftConfigSystem {
             liftSlope: cfg.lift_slope, skinFriction: cfg.skin_friction,
             stallAlpha: cfg.stall_alpha_rad, zeroLiftAoA: s.zero_lift_aoa,
             oswaldE: cfg.oswald_efficiency, flapFraction: s.flap_fraction, controlInput: 0,
+            zeroLiftCm: (s.zero_lift_cm != null && Number.isFinite(s.zero_lift_cm)) ? s.zero_lift_cm : 0,
         }));
         const leftWing = cfg.surfaces.find((s: any) => s.label === 'left_wing');
         if (leftWing) {

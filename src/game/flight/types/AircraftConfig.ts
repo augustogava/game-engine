@@ -13,6 +13,7 @@ export interface AircraftSurfaceConfig {
     aspect_ratio: number;
     zero_lift_aoa: number;
     flap_fraction: number;
+    zero_lift_cm?: number;
 }
 
 export interface AircraftConfig {
@@ -76,6 +77,7 @@ export interface AircraftConfig {
     control_input_magnitude?: number | null;
     control_smoothing_rate?: number | null;
     vne_kts?: number | null;
+    vfe_kts?: number | null;
     mmo?: number | null;
     spoiler_drag_cd?: number | null;
     spoiler_lift_loss?: number | null;

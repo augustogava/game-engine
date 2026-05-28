@@ -20,6 +20,11 @@ const WORLD_HUD_BORESIGHT_HALF_PX = 10;
 const WORLD_HUD_BORESIGHT_TICK_PX = 4;
 const WORLD_HUD_MIN_VELOCITY_MS = 1;
 const WORLD_HUD_SCREEN_MARGIN_PX = 8;
+const WORLD_HUD_VIEW_RADIUS_FRAC = 0.22;
+const WORLD_HUD_VIEW_RADIUS_MIN_PX = 120;
+const WORLD_HUD_VIEW_RADIUS_MAX_PX = 260;
+const WORLD_HUD_CENTER_X_FRAC = 0.50;
+const WORLD_HUD_CENTER_Y_FRAC = 0.35;
 const WORLD_HUD_COLOR = 'rgba(0,255,100,0.95)';
 const WORLD_HUD_COLOR_DIM = 'rgba(0,255,100,0.7)';
 const WORLD_HUD_LINE_WIDTH = 1.5;
@@ -2379,9 +2384,7 @@ export class HudSystem {
         const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
         const up    = new BABYLON.Vector3(0, 1, 0);
 
-        const pitchRad = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(fwd, up))));
         const rollRad  = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(right, up))));
-        const pitchDeg = pitchRad * 180 / Math.PI;
         const rollDeg  = rollRad * 180 / Math.PI;
 
         const fwdFlat = fwd.subtract(up.scale(BABYLON.Vector3.Dot(fwd, up)));
@@ -2395,99 +2398,6 @@ export class HudSystem {
         const speed    = Math.round(this.scene.velocity.length() * 3.6 * 0.539957);
         const pPos = this.scene.planeRoot.position;
         const altitude = Math.round(Math.max(0, this.scene.refAlt + pPos.y) * 3.28084);
-        const ppd = 4;
-
-        ctx.save();
-        ctx.translate(cx, cy);
-
-        const horizonY = pitchDeg * ppd;
-        const attR = 100;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(0, 0, attR, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.fillStyle = 'rgba(30,120,220,0.12)';
-        ctx.fillRect(-attR, -attR, attR * 2, horizonY + attR);
-        ctx.fillStyle = 'rgba(120,80,30,0.10)';
-        ctx.fillRect(-attR, horizonY, attR * 2, attR * 2);
-        ctx.restore();
-
-        ctx.strokeStyle = 'rgba(0,255,100,0.9)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(-120, horizonY);
-        ctx.lineTo(-20, horizonY);
-        ctx.moveTo(20, horizonY);
-        ctx.lineTo(120, horizonY);
-        ctx.stroke();
-
-        ctx.restore();
-
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.strokeStyle = 'rgba(0,255,100,0.6)';
-        ctx.lineWidth = 1;
-        ctx.font = '10px monospace';
-        ctx.fillStyle = 'rgba(0,255,100,0.7)';
-        ctx.textAlign = 'center';
-
-        for (let deg = -45; deg <= 90; deg += 5) {
-            if (deg === 0) continue;
-            const yOff = (pitchDeg - deg) * ppd;
-            if (Math.abs(yOff) > cy - 20) continue;
-
-            const halfW = deg % 10 === 0 ? 55 : 30;
-            const isDashed = deg < 0;
-
-            ctx.beginPath();
-            if (isDashed) {
-                for (let x = -halfW; x < halfW; x += 12) {
-                    ctx.moveTo(x, yOff);
-                    ctx.lineTo(Math.min(x + 7, halfW), yOff);
-                }
-            } else {
-                ctx.moveTo(-halfW, yOff);
-                ctx.lineTo(halfW, yOff);
-            }
-
-            if (deg % 10 === 0) {
-                const tickH = deg < 0 ? -5 : 5;
-                ctx.moveTo(-halfW, yOff);
-                ctx.lineTo(-halfW, yOff + tickH);
-                ctx.moveTo(halfW, yOff);
-                ctx.lineTo(halfW, yOff + tickH);
-            }
-            ctx.stroke();
-
-            if (deg % 10 === 0) {
-                ctx.fillText(`${deg}`, -halfW - 16, yOff + 3);
-                ctx.fillText(`${deg}`, halfW + 16, yOff + 3);
-            }
-        }
-
-        ctx.restore();
-
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate(rollRad);
-        ctx.strokeStyle = 'rgba(0,255,100,0.9)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(-80, 0);
-        ctx.lineTo(-15, 0);
-        ctx.lineTo(-15, 6);
-        ctx.moveTo(15, 0);
-        ctx.lineTo(80, 0);
-        ctx.moveTo(15, 0);
-        ctx.lineTo(15, 6);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(0, 0, 3, 0, Math.PI * 2);
-        ctx.moveTo(0, -5);
-        ctx.lineTo(0, -2);
-        ctx.stroke();
-        ctx.restore();
 
         const bankR = 80;
         ctx.save();
@@ -2677,9 +2587,26 @@ export class HudSystem {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            this._drawWorldHudLadder(ctx, canvas.width, canvas.height, pitchOffsetDir, projectDir);
-            this._drawWorldHudBoresight(ctx, projectDir, fwd);
-            this._drawWorldHudVelocityVector(ctx, projectDir);
+            const viewCx = canvas.width  * WORLD_HUD_CENTER_X_FRAC;
+            const viewCy = canvas.height * WORLD_HUD_CENTER_Y_FRAC;
+            const viewRadius = Math.max(
+                WORLD_HUD_VIEW_RADIUS_MIN_PX,
+                Math.min(
+                    WORLD_HUD_VIEW_RADIUS_MAX_PX,
+                    Math.min(canvas.width, canvas.height) * WORLD_HUD_VIEW_RADIUS_FRAC,
+                ),
+            );
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(viewCx, viewCy, viewRadius, 0, Math.PI * 2);
+            ctx.clip();
+
+            this._drawWorldHudLadder(ctx, viewCx, viewCy, viewRadius, pitchOffsetDir, projectDir);
+            this._drawWorldHudBoresight(ctx, projectDir, fwd, viewCx, viewCy, viewRadius);
+            this._drawWorldHudVelocityVector(ctx, projectDir, viewCx, viewCy, viewRadius);
+
+            ctx.restore();
         } catch (err) {
             console.warn('[WorldHud] draw failed:', err);
         }
@@ -2689,9 +2616,16 @@ export class HudSystem {
         ctx: CanvasRenderingContext2D,
         projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
         fwd: BABYLON.Vector3,
+        viewCx: number,
+        viewCy: number,
+        viewRadius: number,
     ): void {
         const p = projectDir(fwd);
         if (!p.visible) return;
+        const dx = p.x - viewCx;
+        const dy = p.y - viewCy;
+        const reach = viewRadius + WORLD_HUD_BORESIGHT_HALF_PX;
+        if ((dx * dx + dy * dy) > reach * reach) return;
         const half = WORLD_HUD_BORESIGHT_HALF_PX;
         const tick = WORLD_HUD_BORESIGHT_TICK_PX;
         ctx.strokeStyle = WORLD_HUD_COLOR;
@@ -2710,6 +2644,9 @@ export class HudSystem {
     private _drawWorldHudVelocityVector(
         ctx: CanvasRenderingContext2D,
         projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
+        viewCx: number,
+        viewCy: number,
+        viewRadius: number,
     ): void {
         const v = this.scene.velocity as BABYLON.Vector3 | null | undefined;
         if (!v) return;
@@ -2718,6 +2655,10 @@ export class HudSystem {
         const velDir = v.scale(1 / speed);
         const p = projectDir(velDir);
         if (!p.visible) return;
+        const dx = p.x - viewCx;
+        const dy = p.y - viewCy;
+        const reach = viewRadius + WORLD_HUD_VV_RADIUS_PX + WORLD_HUD_VV_WING_PX;
+        if ((dx * dx + dy * dy) > reach * reach) return;
 
         const r = WORLD_HUD_VV_RADIUS_PX;
         const wing = WORLD_HUD_VV_WING_PX;
@@ -2738,14 +2679,16 @@ export class HudSystem {
 
     private _drawWorldHudLadder(
         ctx: CanvasRenderingContext2D,
-        canvasW: number,
-        canvasH: number,
+        viewCx: number,
+        viewCy: number,
+        viewRadius: number,
         pitchOffsetDir: (angleDeg: number, lateralDeg: number) => BABYLON.Vector3,
         projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
     ): void {
         const halfDeg = WORLD_HUD_LADDER_HALF_WIDTH_DEG;
         const halfLabelDeg = WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG;
-        const margin = WORLD_HUD_SCREEN_MARGIN_PX;
+        const reach = viewRadius + WORLD_HUD_SCREEN_MARGIN_PX;
+        const reachSq = reach * reach;
 
         for (let deg = WORLD_HUD_LADDER_MIN_PITCH_DEG; deg <= WORLD_HUD_LADDER_MAX_PITCH_DEG; deg += WORLD_HUD_LADDER_STEP_DEG) {
             const isLabelLine = (deg % WORLD_HUD_LADDER_LABEL_STEP_DEG) === 0;
@@ -2757,12 +2700,16 @@ export class HudSystem {
             const pR = projectDir(rightDir);
             if (!pL.visible || !pR.visible) continue;
 
-            const onScreen =
-                Math.max(pL.x, pR.x) >= -margin &&
-                Math.min(pL.x, pR.x) <= canvasW + margin &&
-                Math.max(pL.y, pR.y) >= -margin &&
-                Math.min(pL.y, pR.y) <= canvasH + margin;
-            if (!onScreen) continue;
+            const dLx = pL.x - viewCx;
+            const dLy = pL.y - viewCy;
+            const dRx = pR.x - viewCx;
+            const dRy = pR.y - viewCy;
+            const insideL = (dLx * dLx + dLy * dLy) <= reachSq;
+            const insideR = (dRx * dRx + dRy * dRy) <= reachSq;
+            const midX = (pL.x + pR.x) * 0.5 - viewCx;
+            const midY = (pL.y + pR.y) * 0.5 - viewCy;
+            const midInside = (midX * midX + midY * midY) <= reachSq;
+            if (!insideL && !insideR && !midInside) continue;
 
             const isHorizon = deg === 0;
             const isBelow = deg < 0;
