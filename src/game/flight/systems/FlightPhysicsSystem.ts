@@ -524,11 +524,10 @@ export class FlightPhysicsSystem {
             }
             this.scene._lastAoaRad = primaryAlpha;
 
-            // Fuselage parasite drag (+ gear drag when deployed, + spoilers) — air-relative
+            // Fuselage parasite drag (+ gear drag when deployed) — air-relative
             const spd = airVelWorld.length();
             if (spd >= 1.0) {
-                const spoilerCd = (cfg.spoiler_drag_cd ?? SPOILER_DEFAULT_DRAG_CD) * this.scene._spoilerDeflection;
-                const baseCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0) + spoilerCd;
+                const baseCd0 = cfg.fuselage_cd0 + (gearDeployed ? (cfg.gear_drag_cd ?? 0) : 0);
                 const tempK = altitude > ISA_TROPOPAUSE_M
                     ? ISA_TROPOPAUSE_TEMP_K
                     : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
@@ -551,8 +550,15 @@ export class FlightPhysicsSystem {
                 const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area * machDragMult;
                 totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-qBody));
 
+                const wingAreaTotal = (cfg.surfaces[0]?.area ?? 0) + (cfg.surfaces[1]?.area ?? 0);
+                if (this.scene._spoilerDeflection > 0) {
+                    const spoilerCd = (cfg.spoiler_drag_cd ?? SPOILER_DEFAULT_DRAG_CD) * this.scene._spoilerDeflection;
+                    const spoilerRefArea = wingAreaTotal > 0 ? wingAreaTotal : cfg.fuselage_ref_area;
+                    const qSpoiler = 0.5 * airDensity * spd * spd * spoilerCd * spoilerRefArea * machDragMult;
+                    totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-qSpoiler));
+                }
+
                 if (machExcess > 0) {
-                    const wingAreaTotal = (cfg.surfaces[0]?.area ?? 0) + (cfg.surfaces[1]?.area ?? 0);
                     if (wingAreaTotal > 0) {
                         const wingWaveDrag = 0.5 * airDensity * spd * spd * cfg.skin_friction * wingAreaTotal * (machDragMult - 1.0);
                         totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-wingWaveDrag));
