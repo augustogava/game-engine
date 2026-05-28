@@ -31,6 +31,18 @@ export interface UiPreferencesData {
     contrastBoost: boolean;
     pauseTimeScale: number;
     gamepadEnabled: boolean;
+    gpAxisAileron: number;
+    gpAxisElevator: number;
+    gpAxisRudder: number;
+    gpAxisThrottle: number;
+    gpThrottleInverted: boolean;
+    gpBtnGear: number;
+    gpBtnBrake: number;
+    gpBtnFlapDown: number;
+    gpBtnFlapUp: number;
+    gpBtnCamera: number;
+    gpBtnRespawn: number;
+    gpBtnPause: number;
 }
 
 const DEFAULT_PREFS: UiPreferencesData = {
@@ -50,7 +62,22 @@ const DEFAULT_PREFS: UiPreferencesData = {
     contrastBoost: false,
     pauseTimeScale: 1.0,
     gamepadEnabled: true,
+    gpAxisAileron: 0,
+    gpAxisElevator: 1,
+    gpAxisRudder: 2,
+    gpAxisThrottle: 3,
+    gpThrottleInverted: true,
+    gpBtnGear: 0,
+    gpBtnBrake: 1,
+    gpBtnFlapDown: 2,
+    gpBtnFlapUp: 3,
+    gpBtnCamera: 4,
+    gpBtnRespawn: 5,
+    gpBtnPause: 9,
 };
+
+const PREF_GP_AXIS_MAX = 15;
+const PREF_GP_BTN_MAX = 31;
 
 const PREF_FONT_SCALE_MIN = 0.7;
 const PREF_FONT_SCALE_MAX = 1.6;
@@ -115,6 +142,18 @@ export class UiPreferences {
             contrastBoost: typeof input.contrastBoost === 'boolean' ? input.contrastBoost : DEFAULT_PREFS.contrastBoost,
             pauseTimeScale: clamp(Number(input.pauseTimeScale ?? DEFAULT_PREFS.pauseTimeScale), PREF_TIME_SCALE_MIN, PREF_TIME_SCALE_MAX),
             gamepadEnabled: typeof input.gamepadEnabled === 'boolean' ? input.gamepadEnabled : DEFAULT_PREFS.gamepadEnabled,
+            gpAxisAileron: clamp(Math.round(Number(input.gpAxisAileron ?? DEFAULT_PREFS.gpAxisAileron)), 0, PREF_GP_AXIS_MAX),
+            gpAxisElevator: clamp(Math.round(Number(input.gpAxisElevator ?? DEFAULT_PREFS.gpAxisElevator)), 0, PREF_GP_AXIS_MAX),
+            gpAxisRudder: clamp(Math.round(Number(input.gpAxisRudder ?? DEFAULT_PREFS.gpAxisRudder)), 0, PREF_GP_AXIS_MAX),
+            gpAxisThrottle: clamp(Math.round(Number(input.gpAxisThrottle ?? DEFAULT_PREFS.gpAxisThrottle)), 0, PREF_GP_AXIS_MAX),
+            gpThrottleInverted: typeof input.gpThrottleInverted === 'boolean' ? input.gpThrottleInverted : DEFAULT_PREFS.gpThrottleInverted,
+            gpBtnGear: clamp(Math.round(Number(input.gpBtnGear ?? DEFAULT_PREFS.gpBtnGear)), 0, PREF_GP_BTN_MAX),
+            gpBtnBrake: clamp(Math.round(Number(input.gpBtnBrake ?? DEFAULT_PREFS.gpBtnBrake)), 0, PREF_GP_BTN_MAX),
+            gpBtnFlapDown: clamp(Math.round(Number(input.gpBtnFlapDown ?? DEFAULT_PREFS.gpBtnFlapDown)), 0, PREF_GP_BTN_MAX),
+            gpBtnFlapUp: clamp(Math.round(Number(input.gpBtnFlapUp ?? DEFAULT_PREFS.gpBtnFlapUp)), 0, PREF_GP_BTN_MAX),
+            gpBtnCamera: clamp(Math.round(Number(input.gpBtnCamera ?? DEFAULT_PREFS.gpBtnCamera)), 0, PREF_GP_BTN_MAX),
+            gpBtnRespawn: clamp(Math.round(Number(input.gpBtnRespawn ?? DEFAULT_PREFS.gpBtnRespawn)), 0, PREF_GP_BTN_MAX),
+            gpBtnPause: clamp(Math.round(Number(input.gpBtnPause ?? DEFAULT_PREFS.gpBtnPause)), 0, PREF_GP_BTN_MAX),
         };
     }
 

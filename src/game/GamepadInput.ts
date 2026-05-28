@@ -1,15 +1,5 @@
-const GAMEPAD_AXIS_AILERON = 0;
-const GAMEPAD_AXIS_ELEVATOR = 1;
-const GAMEPAD_AXIS_RUDDER = 2;
-const GAMEPAD_AXIS_THROTTLE = 3;
-const GAMEPAD_THROTTLE_INVERTED_DEFAULT = true;
-const GAMEPAD_BUTTON_GEAR = 0;
-const GAMEPAD_BUTTON_BRAKE = 1;
-const GAMEPAD_BUTTON_FLAP_DOWN = 2;
-const GAMEPAD_BUTTON_FLAP_UP = 3;
-const GAMEPAD_BUTTON_CAMERA = 4;
-const GAMEPAD_BUTTON_RESPAWN = 5;
-const GAMEPAD_BUTTON_PAUSE = 9;
+import { UiPreferences } from './UiPreferences';
+
 const GAMEPAD_DEFAULT_DEADZONE = 0.08;
 
 export interface GamepadAxes {
@@ -81,12 +71,13 @@ export class GamepadInput {
                 if (this._onConnect) this._onConnect(pad.id);
                 console.log(`[Gamepad] Connected: ${pad.id}`);
             }
+            const prefs = UiPreferences.get();
             const axes = pad.axes;
-            const aileron = this._applyExpo(this._applyDeadzone(axes[GAMEPAD_AXIS_AILERON] ?? 0, deadzone), expo) * sensitivity;
-            const elevator = this._applyExpo(this._applyDeadzone(axes[GAMEPAD_AXIS_ELEVATOR] ?? 0, deadzone), expo) * sensitivity;
-            const rudder = this._applyExpo(this._applyDeadzone(axes[GAMEPAD_AXIS_RUDDER] ?? 0, deadzone), expo) * sensitivity;
-            let thrRaw = axes[GAMEPAD_AXIS_THROTTLE] ?? 0;
-            if (GAMEPAD_THROTTLE_INVERTED_DEFAULT) thrRaw = -thrRaw;
+            const aileron = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisAileron] ?? 0, deadzone), expo) * sensitivity;
+            const elevator = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisElevator] ?? 0, deadzone), expo) * sensitivity;
+            const rudder = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisRudder] ?? 0, deadzone), expo) * sensitivity;
+            let thrRaw = axes[prefs.gpAxisThrottle] ?? 0;
+            if (prefs.gpThrottleInverted) thrRaw = -thrRaw;
             const throttle = Math.max(0, Math.min(1, (thrRaw + 1) * 0.5));
             return {
                 aileron: Math.max(-1, Math.min(1, aileron)),
@@ -116,14 +107,15 @@ export class GamepadInput {
                 const prev = !!this._prevButtons[idx];
                 return cur && !prev;
             };
+            const prefs = UiPreferences.get();
             const result: GamepadEdges = {
-                gear: edge(GAMEPAD_BUTTON_GEAR),
-                brake: edge(GAMEPAD_BUTTON_BRAKE),
-                flapDown: edge(GAMEPAD_BUTTON_FLAP_DOWN),
-                flapUp: edge(GAMEPAD_BUTTON_FLAP_UP),
-                camera: edge(GAMEPAD_BUTTON_CAMERA),
-                respawn: edge(GAMEPAD_BUTTON_RESPAWN),
-                pause: edge(GAMEPAD_BUTTON_PAUSE),
+                gear: edge(prefs.gpBtnGear),
+                brake: edge(prefs.gpBtnBrake),
+                flapDown: edge(prefs.gpBtnFlapDown),
+                flapUp: edge(prefs.gpBtnFlapUp),
+                camera: edge(prefs.gpBtnCamera),
+                respawn: edge(prefs.gpBtnRespawn),
+                pause: edge(prefs.gpBtnPause),
             };
             this._prevButtons = buttons;
             return result;

@@ -175,6 +175,7 @@ export class HudSystem {
         if (resetKeysBtn) resetKeysBtn.addEventListener('click', () => InputBindings.reset());
 
         this.scene._buildKeymapList();
+        this._initGamepadMapping();
 
         const uxHeader = document.getElementById('ux-header');
         const uxBody = document.getElementById('ux-settings');
@@ -186,6 +187,105 @@ export class HudSystem {
                 if (h3) h3.textContent = visible ? 'UX \u25B8' : 'UX \u25BE';
             });
         }
+    }
+
+    private _gpLiveRafId = 0;
+
+    private _initGamepadMapping(): void {
+        const prefs = UiPreferences.get();
+
+        const gpAxisFields: { id: string; key: keyof ReturnType<typeof UiPreferences.get> }[] = [
+            { id: 'gp-axis-aileron', key: 'gpAxisAileron' },
+            { id: 'gp-axis-elevator', key: 'gpAxisElevator' },
+            { id: 'gp-axis-rudder', key: 'gpAxisRudder' },
+            { id: 'gp-axis-throttle', key: 'gpAxisThrottle' },
+        ];
+        for (const f of gpAxisFields) {
+            const el = document.getElementById(f.id) as HTMLInputElement | null;
+            if (!el) continue;
+            el.value = String((prefs as unknown as Record<string, unknown>)[f.key] ?? 0);
+            el.addEventListener('change', () => {
+                UiPreferences.set({ [f.key]: parseInt(el.value, 10) || 0 } as Partial<ReturnType<typeof UiPreferences.get>>);
+            });
+        }
+
+        const gpBtnFields: { id: string; key: keyof ReturnType<typeof UiPreferences.get> }[] = [
+            { id: 'gp-btn-gear', key: 'gpBtnGear' },
+            { id: 'gp-btn-brake', key: 'gpBtnBrake' },
+            { id: 'gp-btn-flapdown', key: 'gpBtnFlapDown' },
+            { id: 'gp-btn-flapup', key: 'gpBtnFlapUp' },
+            { id: 'gp-btn-camera', key: 'gpBtnCamera' },
+            { id: 'gp-btn-respawn', key: 'gpBtnRespawn' },
+            { id: 'gp-btn-pause', key: 'gpBtnPause' },
+        ];
+        for (const f of gpBtnFields) {
+            const el = document.getElementById(f.id) as HTMLInputElement | null;
+            if (!el) continue;
+            el.value = String((prefs as unknown as Record<string, unknown>)[f.key] ?? 0);
+            el.addEventListener('change', () => {
+                UiPreferences.set({ [f.key]: parseInt(el.value, 10) || 0 } as Partial<ReturnType<typeof UiPreferences.get>>);
+            });
+        }
+
+        const invEl = document.getElementById('gp-throttle-inv') as HTMLInputElement | null;
+        if (invEl) {
+            invEl.checked = prefs.gpThrottleInverted;
+            invEl.addEventListener('change', () => {
+                UiPreferences.set({ gpThrottleInverted: invEl.checked });
+            });
+        }
+
+        const resetBtn = document.getElementById('gp-reset-btn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                UiPreferences.set({
+                    gpAxisAileron: 0, gpAxisElevator: 1, gpAxisRudder: 2, gpAxisThrottle: 3,
+                    gpThrottleInverted: true,
+                    gpBtnGear: 0, gpBtnBrake: 1, gpBtnFlapDown: 2, gpBtnFlapUp: 3,
+                    gpBtnCamera: 4, gpBtnRespawn: 5, gpBtnPause: 9,
+                });
+                const fresh = UiPreferences.get();
+                for (const f of gpAxisFields) {
+                    const el = document.getElementById(f.id) as HTMLInputElement | null;
+                    if (el) el.value = String((fresh as unknown as Record<string, unknown>)[f.key] ?? 0);
+                }
+                for (const f of gpBtnFields) {
+                    const el = document.getElementById(f.id) as HTMLInputElement | null;
+                    if (el) el.value = String((fresh as unknown as Record<string, unknown>)[f.key] ?? 0);
+                }
+                if (invEl) invEl.checked = fresh.gpThrottleInverted;
+            });
+        }
+
+        const statusEl = document.getElementById('gp-status');
+        const liveBar = document.getElementById('gp-live-bar');
+        const updateLiveBar = () => {
+            try {
+                if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
+                const pads = navigator.getGamepads();
+                let pad: Gamepad | null = null;
+                if (pads) for (const p of pads) { if (p && p.connected) { pad = p; break; } }
+                if (!pad) {
+                    if (statusEl) statusEl.textContent = 'Desconectado';
+                    if (liveBar) liveBar.style.display = 'none';
+                } else {
+                    if (statusEl) statusEl.textContent = pad.id.substring(0, 30);
+                    if (liveBar) {
+                        liveBar.style.display = '';
+                        const parts: string[] = [];
+                        for (let i = 0; i < Math.min(pad.axes.length, 8); i++) {
+                            parts.push(`A${i}:${pad.axes[i].toFixed(2)}`);
+                        }
+                        for (let i = 0; i < Math.min(pad.buttons.length, 16); i++) {
+                            if (pad.buttons[i].pressed) parts.push(`B${i}`);
+                        }
+                        liveBar.textContent = parts.join(' | ');
+                    }
+                }
+            } catch { /* ignore */ }
+            this._gpLiveRafId = requestAnimationFrame(updateLiveBar);
+        };
+        updateLiveBar();
     }
 
     buildKeymapList(): void {
