@@ -577,25 +577,6 @@
                     <input type="number" id="ux-auto-thr" min="60" max="600" value="250" style="width:80px;font-size:11px">
                 </div>
                 <div class="row" style="align-items:center;gap:8px">
-                    <label style="flex:1;margin:0;font-size:11px">Habilitar Gamepad</label>
-                    <input type="checkbox" id="ux-gamepad" checked>
-                </div>
-                <div class="row" style="align-items:center;gap:8px">
-                    <label style="flex:1;margin:0;font-size:11px">Curva (expo)</label>
-                    <input type="range" id="ux-expo" min="1" max="4" step="0.1" value="1.5" style="width:100px">
-                    <span id="ux-expo-val" style="font-size:10px;color:#40ffaa;min-width:30px">1.5x</span>
-                </div>
-                <div class="row" style="align-items:center;gap:8px">
-                    <label style="flex:1;margin:0;font-size:11px">Zona morta</label>
-                    <input type="range" id="ux-deadzone" min="0" max="40" value="5" style="width:100px">
-                    <span id="ux-deadzone-val" style="font-size:10px;color:#40ffaa;min-width:30px">5%</span>
-                </div>
-                <div class="row" style="align-items:center;gap:8px">
-                    <label style="flex:1;margin:0;font-size:11px">Sensibilidade</label>
-                    <input type="range" id="ux-sensitivity" min="30" max="300" value="100" style="width:100px">
-                    <span id="ux-sensitivity-val" style="font-size:10px;color:#40ffaa;min-width:30px">100%</span>
-                </div>
-                <div class="row" style="align-items:center;gap:8px">
                     <label style="flex:1;margin:0;font-size:11px">Checklist por fase</label>
                     <input type="checkbox" id="ux-checklist">
                 </div>
@@ -606,68 +587,6 @@
                 <div class="row" style="align-items:center;gap:8px">
                     <label style="flex:1;margin:0;font-size:11px">Latencia overlay</label>
                     <input type="checkbox" id="ux-latency-overlay" checked>
-                </div>
-
-                <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15)">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                        <span style="font-family:'Orbitron',monospace;font-size:10px;color:rgba(125,249,200,.7)">GAMEPAD MAPPING</span>
-                        <span id="gp-status" style="font-size:9px;color:rgba(255,255,255,.35)"></span>
-                    </div>
-                    <div id="gp-live-bar" style="display:none;margin-bottom:6px;padding:4px 6px;background:rgba(0,0,0,.35);border-radius:4px;font-size:9px;font-family:monospace;color:rgba(255,255,255,.5);white-space:nowrap;overflow-x:auto">
-                    </div>
-                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-bottom:4px">EIXOS (Axes)</div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Aileron</label>
-                        <input type="number" id="gp-axis-aileron" min="0" max="15" value="0" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Elevator</label>
-                        <input type="number" id="gp-axis-elevator" min="0" max="15" value="1" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Rudder</label>
-                        <input type="number" id="gp-axis-rudder" min="0" max="15" value="2" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Throttle</label>
-                        <input type="number" id="gp-axis-throttle" min="0" max="15" value="3" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Throttle invertido</label>
-                        <input type="checkbox" id="gp-throttle-inv" checked>
-                    </div>
-                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:6px;margin-bottom:4px">BOTÕES (Buttons)</div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Gear</label>
-                        <input type="number" id="gp-btn-gear" min="0" max="31" value="0" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Brake</label>
-                        <input type="number" id="gp-btn-brake" min="0" max="31" value="1" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Flap Down</label>
-                        <input type="number" id="gp-btn-flapdown" min="0" max="31" value="2" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Flap Up</label>
-                        <input type="number" id="gp-btn-flapup" min="0" max="31" value="3" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Camera</label>
-                        <input type="number" id="gp-btn-camera" min="0" max="31" value="4" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Respawn</label>
-                        <input type="number" id="gp-btn-respawn" min="0" max="31" value="5" style="width:50px;font-size:10px">
-                    </div>
-                    <div class="row" style="align-items:center;gap:8px">
-                        <label style="flex:1;margin:0;font-size:10px">Pause</label>
-                        <input type="number" id="gp-btn-pause" min="0" max="31" value="9" style="width:50px;font-size:10px">
-                    </div>
-                    <div style="margin-top:4px">
-                        <button id="gp-reset-btn" class="debug-btn" style="font-size:9px;padding:3px 8px">RESET GAMEPAD</button>
-                    </div>
                 </div>
 
                 <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15)">
@@ -704,6 +623,102 @@
                         <button id="ux-keys-reset" class="debug-btn" style="font-size:9px;padding:3px 8px">RESET</button>
                     </div>
                     <div id="ux-keymap-list" style="max-height:200px;overflow-y:auto"></div>
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top:1px solid rgba(64,255,170,.15);margin-top:12px;padding-top:12px">
+            <header style="cursor:pointer;user-select:none" id="controls-header">
+                <h3 style="font-family:'Orbitron',monospace;font-size:12px;color:#40ffaa;margin:0">CONTROLS &#9656;</h3>
+            </header>
+            <div id="controls-settings" class="debug-form" style="margin-top:8px;display:none">
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Habilitar Gamepad</label>
+                    <input type="checkbox" id="ux-gamepad" checked>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Curva (expo)</label>
+                    <input type="range" id="ux-expo" min="1" max="4" step="0.1" value="1.5" style="width:100px">
+                    <span id="ux-expo-val" style="font-size:10px;color:#40ffaa;min-width:30px">1.5x</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Zona morta</label>
+                    <input type="range" id="ux-deadzone" min="0" max="40" value="5" style="width:100px">
+                    <span id="ux-deadzone-val" style="font-size:10px;color:#40ffaa;min-width:30px">5%</span>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:11px">Sensibilidade</label>
+                    <input type="range" id="ux-sensitivity" min="30" max="300" value="100" style="width:100px">
+                    <span id="ux-sensitivity-val" style="font-size:10px;color:#40ffaa;min-width:30px">100%</span>
+                </div>
+
+                <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15)">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                        <span style="font-family:'Orbitron',monospace;font-size:10px;color:rgba(125,249,200,.7)">GAMEPAD MAPPING</span>
+                        <span id="gp-status" style="font-size:9px;color:rgba(255,255,255,.35)"></span>
+                    </div>
+                    <div id="gp-live-bar" style="display:none;margin-bottom:6px;padding:4px 6px;background:rgba(0,0,0,.35);border-radius:4px;font-size:9px;font-family:monospace;color:rgba(255,255,255,.5);white-space:nowrap;overflow-x:auto">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                        <select id="gp-preset-sel" style="flex:1;font-size:10px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);color:#fff;padding:3px 6px;border-radius:3px">
+                            <option value="">-- Preset --</option>
+                        </select>
+                        <button id="gp-preset-save" class="debug-btn" style="font-size:9px;padding:3px 6px">SAVE</button>
+                        <button id="gp-preset-del" class="debug-btn" style="font-size:9px;padding:3px 6px">DEL</button>
+                    </div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-bottom:4px">EIXOS (Axes)</div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Aileron</label>
+                        <span style="font-size:9px;color:rgba(255,255,255,.35)">inv</span><input type="checkbox" id="gp-inv-aileron">
+                        <input type="number" id="gp-axis-aileron" min="0" max="15" value="0" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Elevator</label>
+                        <span style="font-size:9px;color:rgba(255,255,255,.35)">inv</span><input type="checkbox" id="gp-inv-elevator">
+                        <input type="number" id="gp-axis-elevator" min="0" max="15" value="1" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Rudder</label>
+                        <span style="font-size:9px;color:rgba(255,255,255,.35)">inv</span><input type="checkbox" id="gp-inv-rudder">
+                        <input type="number" id="gp-axis-rudder" min="0" max="15" value="2" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Throttle</label>
+                        <span style="font-size:9px;color:rgba(255,255,255,.35)">inv</span><input type="checkbox" id="gp-throttle-inv" checked>
+                        <input type="number" id="gp-axis-throttle" min="0" max="15" value="3" style="width:50px;font-size:10px">
+                    </div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:6px;margin-bottom:4px">BOTÕES (Buttons)</div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Gear</label>
+                        <input type="number" id="gp-btn-gear" min="0" max="31" value="0" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Brake</label>
+                        <input type="number" id="gp-btn-brake" min="0" max="31" value="1" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Flap Down</label>
+                        <input type="number" id="gp-btn-flapdown" min="0" max="31" value="2" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Flap Up</label>
+                        <input type="number" id="gp-btn-flapup" min="0" max="31" value="3" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Camera</label>
+                        <input type="number" id="gp-btn-camera" min="0" max="31" value="4" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Respawn</label>
+                        <input type="number" id="gp-btn-respawn" min="0" max="31" value="5" style="width:50px;font-size:10px">
+                    </div>
+                    <div class="row" style="align-items:center;gap:8px">
+                        <label style="flex:1;margin:0;font-size:10px">Pause</label>
+                        <input type="number" id="gp-btn-pause" min="0" max="31" value="9" style="width:50px;font-size:10px">
+                    </div>
+                    <div style="margin-top:4px">
+                        <button id="gp-reset-btn" class="debug-btn" style="font-size:9px;padding:3px 8px">RESET GAMEPAD</button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -187,14 +187,64 @@ export class HudSystem {
                 if (h3) h3.textContent = visible ? 'UX \u25B8' : 'UX \u25BE';
             });
         }
+
+        const ctrlHeader = document.getElementById('controls-header');
+        const ctrlBody = document.getElementById('controls-settings');
+        if (ctrlHeader && ctrlBody) {
+            ctrlHeader.addEventListener('click', () => {
+                const visible = ctrlBody.style.display !== 'none';
+                ctrlBody.style.display = visible ? 'none' : '';
+                const h3 = ctrlHeader.querySelector('h3');
+                if (h3) h3.textContent = visible ? 'CONTROLS \u25B8' : 'CONTROLS \u25BE';
+            });
+        }
     }
 
     private _gpLiveRafId = 0;
 
+    private static readonly GP_PRESETS_KEY = 'flight_gp_presets_v1';
+
+    private _gpFieldKeys() {
+        return [
+            'gpAxisAileron', 'gpAxisElevator', 'gpAxisRudder', 'gpAxisThrottle',
+            'gpThrottleInverted', 'gpInvertAileron', 'gpInvertElevator', 'gpInvertRudder',
+            'gpBtnGear', 'gpBtnBrake', 'gpBtnFlapDown', 'gpBtnFlapUp',
+            'gpBtnCamera', 'gpBtnRespawn', 'gpBtnPause',
+        ] as const;
+    }
+
+    private _loadGpPresets(): Record<string, Record<string, unknown>> {
+        try {
+            const raw = localStorage.getItem(HudSystem.GP_PRESETS_KEY);
+            if (!raw) return {};
+            return JSON.parse(raw) as Record<string, Record<string, unknown>>;
+        } catch { return {}; }
+    }
+
+    private _saveGpPresets(presets: Record<string, Record<string, unknown>>): void {
+        try { localStorage.setItem(HudSystem.GP_PRESETS_KEY, JSON.stringify(presets)); } catch { /* ignore */ }
+    }
+
+    private _refreshGpUi(gpAxisFields: { id: string; key: string }[], gpBtnFields: { id: string; key: string }[], invFields: { id: string; key: string }[]): void {
+        const fresh = UiPreferences.get() as unknown as Record<string, unknown>;
+        for (const f of gpAxisFields) {
+            const el = document.getElementById(f.id) as HTMLInputElement | null;
+            if (el) el.value = String(fresh[f.key] ?? 0);
+        }
+        for (const f of gpBtnFields) {
+            const el = document.getElementById(f.id) as HTMLInputElement | null;
+            if (el) el.value = String(fresh[f.key] ?? 0);
+        }
+        for (const f of invFields) {
+            const el = document.getElementById(f.id) as HTMLInputElement | null;
+            if (el) el.checked = !!fresh[f.key];
+        }
+    }
+
     private _initGamepadMapping(): void {
         const prefs = UiPreferences.get();
 
-        const gpAxisFields: { id: string; key: keyof ReturnType<typeof UiPreferences.get> }[] = [
+        const gpAxisFields = [
             { id: 'gp-axis-aileron', key: 'gpAxisAileron' },
             { id: 'gp-axis-elevator', key: 'gpAxisElevator' },
             { id: 'gp-axis-rudder', key: 'gpAxisRudder' },
@@ -209,7 +259,7 @@ export class HudSystem {
             });
         }
 
-        const gpBtnFields: { id: string; key: keyof ReturnType<typeof UiPreferences.get> }[] = [
+        const gpBtnFields = [
             { id: 'gp-btn-gear', key: 'gpBtnGear' },
             { id: 'gp-btn-brake', key: 'gpBtnBrake' },
             { id: 'gp-btn-flapdown', key: 'gpBtnFlapDown' },
@@ -227,11 +277,18 @@ export class HudSystem {
             });
         }
 
-        const invEl = document.getElementById('gp-throttle-inv') as HTMLInputElement | null;
-        if (invEl) {
-            invEl.checked = prefs.gpThrottleInverted;
-            invEl.addEventListener('change', () => {
-                UiPreferences.set({ gpThrottleInverted: invEl.checked });
+        const invFields = [
+            { id: 'gp-inv-aileron', key: 'gpInvertAileron' },
+            { id: 'gp-inv-elevator', key: 'gpInvertElevator' },
+            { id: 'gp-inv-rudder', key: 'gpInvertRudder' },
+            { id: 'gp-throttle-inv', key: 'gpThrottleInverted' },
+        ];
+        for (const f of invFields) {
+            const el = document.getElementById(f.id) as HTMLInputElement | null;
+            if (!el) continue;
+            el.checked = !!(prefs as unknown as Record<string, unknown>)[f.key];
+            el.addEventListener('change', () => {
+                UiPreferences.set({ [f.key]: el.checked } as Partial<ReturnType<typeof UiPreferences.get>>);
             });
         }
 
@@ -241,19 +298,68 @@ export class HudSystem {
                 UiPreferences.set({
                     gpAxisAileron: 0, gpAxisElevator: 1, gpAxisRudder: 2, gpAxisThrottle: 3,
                     gpThrottleInverted: true,
+                    gpInvertAileron: false, gpInvertElevator: false, gpInvertRudder: false,
                     gpBtnGear: 0, gpBtnBrake: 1, gpBtnFlapDown: 2, gpBtnFlapUp: 3,
                     gpBtnCamera: 4, gpBtnRespawn: 5, gpBtnPause: 9,
                 });
-                const fresh = UiPreferences.get();
-                for (const f of gpAxisFields) {
-                    const el = document.getElementById(f.id) as HTMLInputElement | null;
-                    if (el) el.value = String((fresh as unknown as Record<string, unknown>)[f.key] ?? 0);
-                }
-                for (const f of gpBtnFields) {
-                    const el = document.getElementById(f.id) as HTMLInputElement | null;
-                    if (el) el.value = String((fresh as unknown as Record<string, unknown>)[f.key] ?? 0);
-                }
-                if (invEl) invEl.checked = fresh.gpThrottleInverted;
+                this._refreshGpUi(gpAxisFields, gpBtnFields, invFields);
+            });
+        }
+
+        const presetSel = document.getElementById('gp-preset-sel') as HTMLSelectElement | null;
+        const refreshPresetList = () => {
+            if (!presetSel) return;
+            const saved = this._loadGpPresets();
+            const cur = presetSel.value;
+            presetSel.innerHTML = '<option value="">-- Preset --</option>';
+            for (const name of Object.keys(saved).sort()) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                presetSel.appendChild(opt);
+            }
+            presetSel.value = cur;
+        };
+        refreshPresetList();
+
+        if (presetSel) {
+            presetSel.addEventListener('change', () => {
+                const name = presetSel.value;
+                if (!name) return;
+                const saved = this._loadGpPresets();
+                const preset = saved[name];
+                if (!preset) return;
+                UiPreferences.set(preset as Partial<ReturnType<typeof UiPreferences.get>>);
+                this._refreshGpUi(gpAxisFields, gpBtnFields, invFields);
+            });
+        }
+
+        const presetSaveBtn = document.getElementById('gp-preset-save');
+        if (presetSaveBtn) {
+            presetSaveBtn.addEventListener('click', () => {
+                const name = prompt('Nome do preset:');
+                if (!name || !name.trim()) return;
+                const cur = UiPreferences.get() as unknown as Record<string, unknown>;
+                const keys = this._gpFieldKeys();
+                const data: Record<string, unknown> = {};
+                for (const k of keys) data[k] = cur[k];
+                const saved = this._loadGpPresets();
+                saved[name.trim()] = data;
+                this._saveGpPresets(saved);
+                refreshPresetList();
+                if (presetSel) presetSel.value = name.trim();
+            });
+        }
+
+        const presetDelBtn = document.getElementById('gp-preset-del');
+        if (presetDelBtn) {
+            presetDelBtn.addEventListener('click', () => {
+                if (!presetSel || !presetSel.value) return;
+                const saved = this._loadGpPresets();
+                delete saved[presetSel.value];
+                this._saveGpPresets(saved);
+                presetSel.value = '';
+                refreshPresetList();
             });
         }
 

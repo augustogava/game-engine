@@ -73,9 +73,9 @@ export class GamepadInput {
             }
             const prefs = UiPreferences.get();
             const axes = pad.axes;
-            const aileron = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisAileron] ?? 0, deadzone), expo) * sensitivity;
-            const elevator = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisElevator] ?? 0, deadzone), expo) * sensitivity;
-            const rudder = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisRudder] ?? 0, deadzone), expo) * sensitivity;
+            const aileron = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisAileron] ?? 0, deadzone), expo) * sensitivity * (prefs.gpInvertAileron ? -1 : 1);
+            const elevator = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisElevator] ?? 0, deadzone), expo) * sensitivity * (prefs.gpInvertElevator ? -1 : 1);
+            const rudder = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisRudder] ?? 0, deadzone), expo) * sensitivity * (prefs.gpInvertRudder ? -1 : 1);
             let thrRaw = axes[prefs.gpAxisThrottle] ?? 0;
             if (prefs.gpThrottleInverted) thrRaw = -thrRaw;
             const throttle = Math.max(0, Math.min(1, (thrRaw + 1) * 0.5));

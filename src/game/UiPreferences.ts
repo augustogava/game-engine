@@ -36,6 +36,9 @@ export interface UiPreferencesData {
     gpAxisRudder: number;
     gpAxisThrottle: number;
     gpThrottleInverted: boolean;
+    gpInvertAileron: boolean;
+    gpInvertElevator: boolean;
+    gpInvertRudder: boolean;
     gpBtnGear: number;
     gpBtnBrake: number;
     gpBtnFlapDown: number;
@@ -67,6 +70,9 @@ const DEFAULT_PREFS: UiPreferencesData = {
     gpAxisRudder: 2,
     gpAxisThrottle: 3,
     gpThrottleInverted: true,
+    gpInvertAileron: false,
+    gpInvertElevator: false,
+    gpInvertRudder: false,
     gpBtnGear: 0,
     gpBtnBrake: 1,
     gpBtnFlapDown: 2,
@@ -147,6 +153,9 @@ export class UiPreferences {
             gpAxisRudder: clamp(Math.round(Number(input.gpAxisRudder ?? DEFAULT_PREFS.gpAxisRudder)), 0, PREF_GP_AXIS_MAX),
             gpAxisThrottle: clamp(Math.round(Number(input.gpAxisThrottle ?? DEFAULT_PREFS.gpAxisThrottle)), 0, PREF_GP_AXIS_MAX),
             gpThrottleInverted: typeof input.gpThrottleInverted === 'boolean' ? input.gpThrottleInverted : DEFAULT_PREFS.gpThrottleInverted,
+            gpInvertAileron: typeof input.gpInvertAileron === 'boolean' ? input.gpInvertAileron : DEFAULT_PREFS.gpInvertAileron,
+            gpInvertElevator: typeof input.gpInvertElevator === 'boolean' ? input.gpInvertElevator : DEFAULT_PREFS.gpInvertElevator,
+            gpInvertRudder: typeof input.gpInvertRudder === 'boolean' ? input.gpInvertRudder : DEFAULT_PREFS.gpInvertRudder,
             gpBtnGear: clamp(Math.round(Number(input.gpBtnGear ?? DEFAULT_PREFS.gpBtnGear)), 0, PREF_GP_BTN_MAX),
             gpBtnBrake: clamp(Math.round(Number(input.gpBtnBrake ?? DEFAULT_PREFS.gpBtnBrake)), 0, PREF_GP_BTN_MAX),
             gpBtnFlapDown: clamp(Math.round(Number(input.gpBtnFlapDown ?? DEFAULT_PREFS.gpBtnFlapDown)), 0, PREF_GP_BTN_MAX),
