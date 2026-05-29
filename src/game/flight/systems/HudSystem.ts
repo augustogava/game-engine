@@ -3538,9 +3538,15 @@ export class HudSystem {
         const halfPx = PFD_FULL_VSI_HALF_PX;
         const maxFpm = PFD_FULL_VSI_MAX_FPM;
         const top = ay - halfPx;
+        const bottom = ay + halfPx;
 
         ctx.fillStyle = PFD_TAPE_BG_COLOR;
         ctx.fillRect(x, top, w, halfPx * 2);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, top, w, halfPx * 2);
+        ctx.clip();
 
         ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
         ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
@@ -3558,21 +3564,30 @@ export class HudSystem {
             if (major && f !== 0) ctx.fillText(`${Math.abs(f) / 1000}`, x + w - 7, y);
         }
 
-        const clamped = Math.max(-maxFpm, Math.min(maxFpm, vsFpm));
-        const py = ay - (clamped / maxFpm) * halfPx;
-        ctx.strokeStyle = PFD_PRIMARY_COLOR;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(x + w, ay);
-        ctx.lineTo(x, py);
+        ctx.moveTo(x, ay);
+        ctx.lineTo(x + w, ay);
         ctx.stroke();
+
+        const clamped = Math.max(-maxFpm, Math.min(maxFpm, vsFpm));
+        const py = Math.max(top + 3, Math.min(bottom - 3, ay - (clamped / maxFpm) * halfPx));
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(x + 1, py);
+        ctx.lineTo(x + w - 1, py);
+        ctx.stroke();
+
+        ctx.restore();
 
         if (Math.abs(vsFpm) >= 100) {
             ctx.fillStyle = PFD_PRIMARY_COLOR;
             ctx.font = 'bold 9px monospace';
             ctx.textAlign = 'left';
             ctx.textBaseline = vsFpm >= 0 ? 'bottom' : 'top';
-            ctx.fillText(`${Math.round(vsFpm / 50) * 50}`, x, py + (vsFpm >= 0 ? -2 : 2));
+            ctx.fillText(`${Math.round(vsFpm / 50) * 50}`, x + w + 2, py + (vsFpm >= 0 ? -2 : 2));
         }
     }
 
