@@ -6,8 +6,24 @@ import { UiPreferences } from '../../UiPreferences.js';
 import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 
-const PFD_ATTITUDE_CENTER_Y_FRAC = 0.34;
+const PFD_ATTITUDE_CENTER_Y_FRAC = 0.25;
 const PFD_ATTITUDE_RADIUS_PX = 110;
+const PFD_TAPE_HALF_HEIGHT_PX = 96;
+const PFD_TAPE_WIDTH_PX = 50;
+const PFD_TAPE_EDGE_GAP_PX = 6;
+const PFD_TAPE_BG_COLOR = 'rgba(0,0,0,0.5)';
+const PFD_TAPE_READOUT_BG_COLOR = 'rgba(0,0,0,0.85)';
+const PFD_TAPE_READOUT_H_PX = 28;
+const PFD_TAPE_READOUT_W_PX = 50;
+const PFD_TAPE_NOTCH_PX = 7;
+const PFD_SPD_PX_PER_KT = 1.5;
+const PFD_SPD_MINOR_STEP_KT = 10;
+const PFD_SPD_MAJOR_STEP_KT = 20;
+const PFD_ALT_PX_PER_FT = 0.2;
+const PFD_ALT_MINOR_STEP_FT = 100;
+const PFD_ALT_MAJOR_STEP_FT = 500;
+const PFD_VNE_COLOR = '#ff5555';
+const PFD_VFE_COLOR = '#79e7ff';
 const PFD_PIXELS_PER_PITCH_DEG = 3.4;
 const PFD_LADDER_MIN_PITCH_DEG = -90;
 const PFD_LADDER_MAX_PITCH_DEG = 90;
@@ -22,8 +38,16 @@ const PFD_PRIMARY_COLOR_DIM = 'rgba(255,255,255,0.7)';
 const PFD_SELECTED_COLOR = '#79e7ff';
 const PFD_BUG_COLOR = '#e070e0';
 const PFD_BANK_RADIUS_PX = 96;
-const PFD_HSI_CENTER_Y_FRAC = 0.80;
+const PFD_HSI_CENTER_Y_FRAC = 0.71;
 const PFD_HSI_RADIUS_PX = 80;
+const PFD_AP_ACTIVE_COLOR = '#40ffaa';
+const PFD_FULL_ATT_CY_PX = 175;
+const PFD_FULL_HSI_CY_PX = 432;
+const PFD_FULL_FMA_H_PX = 20;
+const PFD_FULL_VSI_WIDTH_PX = 16;
+const PFD_FULL_VSI_MAX_FPM = 2000;
+const PFD_FULL_VSI_HALF_PX = 96;
+const PFD_MS_TO_FPM = 196.850394;
 
 const _C: any = CONST;
 const {
@@ -1392,6 +1416,8 @@ export class HudSystem {
 #ap-panel .ap-display{font-size:10px!important;min-width:46px!important;padding:1px 4px!important}
 #ap-panel .ap-knob{width:22px!important;height:22px!important}
 #ap-panel .ap-knob-tick{height:7px!important;top:2px!important}
+#instrument-dock{bottom:8px!important;left:8px!important;transform:none!important;padding:4px!important}
+#pfd-panel{width:300px!important}
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
@@ -1418,6 +1444,8 @@ export class HudSystem {
 #ap-panel .ap-display{font-size:9px!important;min-width:40px!important;padding:1px 3px!important}
 #ap-panel .ap-knob{width:20px!important;height:20px!important}
 #ap-panel .ap-knob-tick{height:6px!important;top:2px!important;width:2px!important}
+#instrument-dock{bottom:8px!important;left:6px!important;transform:none!important;padding:3px!important;gap:4px!important}
+#pfd-panel{width:240px!important}
 }
 @media(max-height:440px){
 #flight-pfd{top:50%!important;width:228px!important;height:288px!important}
@@ -1425,6 +1453,9 @@ export class HudSystem {
 #hud-utc{font-size:7px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom right}
+#instrument-dock{bottom:6px!important;left:6px!important;transform:none!important}
+#pfd-panel{bottom:6px!important}
+#pfd-panel-canvas{width:auto!important;height:auto!important;max-height:78vh!important}
 }
 
 </style>
@@ -1712,6 +1743,24 @@ export class HudSystem {
   <div class="panel-resize" data-panel="flight-plans-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
+<div id="instrument-dock" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:6px;background:rgba(2,10,20,.85);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;box-shadow:0 0 12px rgba(0,255,128,.1);z-index:250">
+  <div id="pfd-btn" style="width:32px;height:32px;background:rgba(2,10,20,.6);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="PFD (Shift+I)">
+    <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><path d="M3.6 12a8.4 8.4 0 0 1 16.8 0z" fill="#2e6db4"/><path d="M3.6 12a8.4 8.4 0 0 0 16.8 0z" fill="#6b4a2a"/><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><line x1="7" y1="12" x2="17" y2="12" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="12" r="1.2" fill="#fff"/></svg>
+  </div>
+</div>
+
+<div id="pfd-panel" class="game-panel" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);width:494px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="pfd-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">PFD</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-close" data-panel="pfd-panel" data-btn="pfd-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="padding:10px;display:flex;align-items:center;justify-content:center">
+    <canvas id="pfd-panel-canvas" width="470" height="560" style="display:block;max-width:100%;height:auto"></canvas>
+  </div>
+</div>
+
 <div id="nav-info" style="display:none;position:absolute;top:340px;left:4px;width:210px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:6px;padding:6px 8px;font-family:'Inter',sans-serif;color:#fff;font-size:10px;cursor:grab;box-shadow:0 0 12px rgba(0,255,128,.1)">
   <div style="font-family:'Orbitron',monospace;font-size:8px;color:#40ffaa;letter-spacing:.15em;margin-bottom:3px">NAV</div>
   <div id="nav-leg-block" style="display:none;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:3px;margin-bottom:3px">
@@ -1829,6 +1878,7 @@ export class HudSystem {
         this.scene._setupFlightPlansBtn();
 
         this.scene._setupPanelControls();
+        this.setupPfdPanel();
 
         this.scene._navInfoEl = document.getElementById('nav-info');
         this.scene._navDestEl = document.getElementById('nav-dest');
@@ -2333,6 +2383,9 @@ export class HudSystem {
         this.scene._updateTapeMarks(speedKts, altitudeFt);
 
         this.scene._drawFlightHUD();
+        if (this.scene._pfdPanelEl && this.scene._pfdPanelEl.style.display !== 'none') {
+            this.drawFullPfd(this.scene._pfdPanelCtx, this.scene._pfdPanelCanvas);
+        }
         this.scene._updateMap();
         this.scene._updateDebugReadouts();
 
@@ -2350,11 +2403,73 @@ export class HudSystem {
         }
     }
 
-    drawFlightHUD(): void {
-        const ctx = this.scene.hudCtx;
-        if (!ctx) return;
-        const W = this.scene.hudCanvas.width;
-        const H = this.scene.hudCanvas.height;
+    setupPfdPanel(): void {
+        const panel = document.getElementById('pfd-panel');
+        const handle = document.getElementById('pfd-panel-handle');
+        const btn = document.getElementById('pfd-btn');
+        const canvas = document.getElementById('pfd-panel-canvas') as HTMLCanvasElement | null;
+        if (!panel || !btn || !canvas) {
+            console.warn('[PFD Panel] Missing DOM elements; setup skipped');
+            return;
+        }
+        this.scene._pfdPanelEl = panel;
+        this.scene._pfdPanelCanvas = canvas;
+        this.scene._pfdPanelCtx = canvas.getContext('2d');
+
+        if (handle) this.scene._wirePanelDrag(panel, handle);
+
+        const setActive = (active: boolean): void => {
+            btn.style.borderColor = active ? 'rgba(80,255,160,.9)' : 'rgba(80,255,160,.3)';
+            btn.style.boxShadow = active ? '0 0 12px rgba(0,255,128,.35)' : 'none';
+        };
+        const togglePanel = (): void => {
+            const visible = panel.style.display !== 'none';
+            panel.style.display = visible ? 'none' : 'block';
+            setActive(!visible);
+            console.log(`[PFD Panel] ${visible ? 'closed' : 'opened'}`);
+        };
+
+        btn.addEventListener('mouseenter', () => {
+            if (panel.style.display === 'none') {
+                btn.style.borderColor = 'rgba(80,255,160,.7)';
+                btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)';
+            }
+        });
+        btn.addEventListener('mouseleave', () => {
+            if (panel.style.display === 'none') setActive(false);
+        });
+        btn.addEventListener('click', (ev) => { ev.stopPropagation(); togglePanel(); });
+
+        const closeBtn = panel.querySelector<HTMLButtonElement>('.panel-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                panel.style.display = 'none';
+                setActive(false);
+            });
+        }
+
+        if (!this.scene._pfdPanelKeydownHandler) {
+            this.scene._pfdPanelKeydownHandler = (e: KeyboardEvent) => {
+                if (this.scene._disposed) return;
+                if (!(e.shiftKey && e.code === 'KeyI')) return;
+                const ae = document.activeElement;
+                const tag = ae ? ae.tagName : '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || this.scene._apEditingField) return;
+                e.preventDefault();
+                togglePanel();
+            };
+            window.addEventListener('keydown', this.scene._pfdPanelKeydownHandler);
+        }
+    }
+
+    drawFlightHUD(
+        ctx: CanvasRenderingContext2D | null = this.scene.hudCtx,
+        canvas: HTMLCanvasElement = this.scene.hudCanvas,
+    ): void {
+        if (!ctx || !canvas) return;
+        const W = canvas.width;
+        const H = canvas.height;
         const cx = W / 2;
         ctx.clearRect(0, 0, W, H);
 
@@ -2376,9 +2491,9 @@ export class HudSystem {
         );
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
-        const speed    = Math.round(this.scene.velocity.length() * 3.6 * 0.539957);
+        const speed    = this.scene.velocity.length() * 3.6 * 0.539957;
         const pPos = this.scene.planeRoot.position;
-        const altitude = Math.round(Math.max(0, this.scene.refAlt + pPos.y) * 3.28084);
+        const altitude = Math.max(0, this.scene.refAlt + pPos.y) * 3.28084;
 
         const ay = H * PFD_ATTITUDE_CENTER_Y_FRAC;
         const hy = H * PFD_HSI_CENTER_Y_FRAC;
@@ -2520,65 +2635,202 @@ export class HudSystem {
         speed: number,
         altitude: number,
     ): void {
-        const boxW = 52;
-        const boxH = 26;
-        const spdX = 2;
-        const altX = W - boxW - 2;
-        const boxY = ay - boxH / 2;
-        const tickTop = ay - 52;
-        const tickBot = ay + 52;
+        const spdX = PFD_TAPE_EDGE_GAP_PX;
+        const altX = W - PFD_TAPE_WIDTH_PX - PFD_TAPE_EDGE_GAP_PX;
 
-        ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
-        ctx.lineWidth = 1;
-        ctx.font = '9px monospace';
+        const cfg = this.scene.aircraftConfig ?? null;
+        const spdMarkers: { value: number; color: string }[] = [];
+        const vne = cfg?.vne_kts;
+        const vfe = cfg?.vfe_kts;
+        if (typeof vfe === 'number' && Number.isFinite(vfe) && vfe > 0) spdMarkers.push({ value: vfe, color: PFD_VFE_COLOR });
+        if (typeof vne === 'number' && Number.isFinite(vne) && vne > 0) spdMarkers.push({ value: vne, color: PFD_VNE_COLOR });
+        const atActive = this.scene._autopilotAtHold === true;
+        const selSpeed = atActive && Number.isFinite(this.scene._autopilotAtTargetKts) ? this.scene._autopilotAtTargetKts : null;
+
+        const altActive = this.scene._autopilotAltHold === true;
+        const selAlt = altActive && Number.isFinite(this.scene._autopilotTargetAltFt) ? this.scene._autopilotTargetAltFt : null;
+
+        this._drawPfdTape(ctx, spdX, ay, 'left', speed, PFD_SPD_PX_PER_KT, PFD_SPD_MINOR_STEP_KT, PFD_SPD_MAJOR_STEP_KT, spdMarkers, selSpeed, PFD_BUG_COLOR);
+        this._drawPfdTape(ctx, altX, ay, 'right', altitude, PFD_ALT_PX_PER_FT, PFD_ALT_MINOR_STEP_FT, PFD_ALT_MAJOR_STEP_FT, [], selAlt, PFD_BUG_COLOR);
+
+        if (selAlt !== null) {
+            const selText = `${Math.round(selAlt)}`;
+            const bx = altX;
+            const by = ay - PFD_TAPE_HALF_HEIGHT_PX - 20;
+            ctx.fillStyle = PFD_TAPE_READOUT_BG_COLOR;
+            ctx.fillRect(bx, by, PFD_TAPE_WIDTH_PX, 16);
+            ctx.strokeStyle = PFD_BUG_COLOR;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(bx, by, PFD_TAPE_WIDTH_PX, 16);
+            ctx.fillStyle = PFD_BUG_COLOR;
+            ctx.font = 'bold 11px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(selText, bx + PFD_TAPE_WIDTH_PX / 2, by + 8);
+        }
+    }
+
+    private _drawPfdTape(
+        ctx: CanvasRenderingContext2D,
+        x: number,
+        ay: number,
+        side: 'left' | 'right',
+        value: number,
+        pxPerUnit: number,
+        minorStep: number,
+        majorStep: number,
+        markers: { value: number; color: string }[],
+        selValue: number | null,
+        selColor: string,
+    ): void {
+        const tapeW = PFD_TAPE_WIDTH_PX;
+        const halfH = PFD_TAPE_HALF_HEIGHT_PX;
+        const top = ay - halfH;
+        const bottom = ay + halfH;
+        const innerEdge = side === 'left' ? x + tapeW : x;
+        const tickDir = side === 'left' ? -1 : 1;
+
+        ctx.fillStyle = PFD_TAPE_BG_COLOR;
+        ctx.fillRect(x, top, tapeW, halfH * 2);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, top, tapeW, halfH * 2);
+        ctx.clip();
+
+        ctx.font = '10px monospace';
         ctx.textBaseline = 'middle';
-        for (let i = -5; i <= 5; i++) {
-            const m = Math.round(speed / 10) * 10 + i * 10;
+        const lowest = Math.floor((value - halfH / pxPerUnit) / minorStep) * minorStep;
+        const highest = Math.ceil((value + halfH / pxPerUnit) / minorStep) * minorStep;
+        for (let m = lowest; m <= highest; m += minorStep) {
             if (m < 0) continue;
-            const y = ay + (speed - m) * 1.5;
-            if (y < tickTop || y > tickBot) continue;
+            const y = ay + (value - m) * pxPerUnit;
+            if (y < top - 1 || y > bottom + 1) continue;
+            const major = m % majorStep === 0;
+            const len = major ? 9 : 5;
             ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(spdX + boxW + 2, y);
-            ctx.lineTo(spdX + boxW + 7, y);
+            ctx.moveTo(innerEdge, y);
+            ctx.lineTo(innerEdge + tickDir * len, y);
             ctx.stroke();
-            if (m % 20 === 0) {
+            if (major) {
                 ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
-                ctx.textAlign = 'left';
-                ctx.fillText(`${m}`, spdX + boxW + 9, y);
-            }
-        }
-        for (let i = -5; i <= 5; i++) {
-            const m = Math.round(altitude / 200) * 200 + i * 200;
-            if (m < 0) continue;
-            const y = ay + (altitude - m) * 0.18;
-            if (y < tickTop || y > tickBot) continue;
-            ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
-            ctx.beginPath();
-            ctx.moveTo(altX - 7, y);
-            ctx.lineTo(altX - 2, y);
-            ctx.stroke();
-            if (m % 500 === 0) {
-                ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
-                ctx.textAlign = 'right';
-                ctx.fillText(`${m}`, altX - 9, y);
+                ctx.textAlign = side === 'left' ? 'right' : 'left';
+                const lx = side === 'left' ? innerEdge + tickDir * (len + 3) : innerEdge + tickDir * (len + 3);
+                ctx.fillText(`${m}`, lx, y);
             }
         }
 
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(spdX, boxY, boxW, boxH);
-        ctx.fillRect(altX, boxY, boxW, boxH);
+        for (const mk of markers) {
+            const y = ay + (value - mk.value) * pxPerUnit;
+            if (y < top - 1 || y > bottom + 1) continue;
+            ctx.strokeStyle = mk.color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(innerEdge, y);
+            ctx.lineTo(innerEdge + tickDir * 9, y);
+            ctx.stroke();
+        }
+
+        if (selValue !== null) {
+            let by = ay + (value - selValue) * pxPerUnit;
+            by = Math.max(top + 4, Math.min(bottom - 4, by));
+            const bw = 8;
+            const bx0 = side === 'left' ? x + tapeW - bw : x;
+            ctx.fillStyle = selColor;
+            ctx.beginPath();
+            ctx.moveTo(bx0 + (side === 'left' ? bw : 0), by - 6);
+            ctx.lineTo(bx0 + (side === 'left' ? 0 : bw), by - 6);
+            ctx.lineTo(bx0 + (side === 'left' ? 0 : bw), by + 6);
+            ctx.lineTo(bx0 + (side === 'left' ? bw : 0), by + 6);
+            ctx.lineTo(bx0 + (side === 'left' ? bw : 0), by + 3);
+            ctx.lineTo(bx0 + (side === 'left' ? bw - 4 : 4), by);
+            ctx.lineTo(bx0 + (side === 'left' ? bw : 0), by - 3);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.restore();
+
         ctx.strokeStyle = PFD_PRIMARY_COLOR;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(spdX, boxY, boxW, boxH);
-        ctx.strokeRect(altX, boxY, boxW, boxH);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(innerEdge, top);
+        ctx.lineTo(innerEdge, bottom);
+        ctx.stroke();
 
+        this._drawPfdRollingReadout(ctx, x, ay, side, value);
+    }
+
+    private _drawPfdRollingReadout(
+        ctx: CanvasRenderingContext2D,
+        x: number,
+        ay: number,
+        side: 'left' | 'right',
+        value: number,
+    ): void {
+        const w = PFD_TAPE_READOUT_W_PX;
+        const h = PFD_TAPE_READOUT_H_PX;
+        const boxX = side === 'left' ? x : x + PFD_TAPE_WIDTH_PX - w;
+        const boxY = ay - h / 2;
+        const notch = PFD_TAPE_NOTCH_PX;
+
+        ctx.fillStyle = PFD_TAPE_READOUT_BG_COLOR;
+        ctx.beginPath();
+        if (side === 'left') {
+            ctx.moveTo(boxX, boxY);
+            ctx.lineTo(boxX + w, boxY);
+            ctx.lineTo(boxX + w, ay - notch);
+            ctx.lineTo(boxX + w + notch, ay);
+            ctx.lineTo(boxX + w, ay + notch);
+            ctx.lineTo(boxX + w, boxY + h);
+            ctx.lineTo(boxX, boxY + h);
+        } else {
+            ctx.moveTo(boxX + w, boxY);
+            ctx.lineTo(boxX, boxY);
+            ctx.lineTo(boxX, ay - notch);
+            ctx.lineTo(boxX - notch, ay);
+            ctx.lineTo(boxX, ay + notch);
+            ctx.lineTo(boxX, boxY + h);
+            ctx.lineTo(boxX + w, boxY + h);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        const fontPx = 16;
+        const charW = fontPx * 0.6;
+        const intVal = Math.max(0, Math.floor(value));
+        const frac = value - Math.floor(value);
+        const text = `${intVal}`;
+        const lead = text.length > 1 ? text.slice(0, -1) : '';
+        const lastDigit = intVal % 10;
+
+        const rightX = boxX + w - 5;
+        const digitCenterX = rightX - charW / 2;
+        const leadRightX = rightX - charW;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(boxX, boxY + 1, w, h - 2);
+        ctx.clip();
         ctx.fillStyle = PFD_PRIMARY_COLOR;
-        ctx.font = 'bold 14px monospace';
-        ctx.textAlign = 'center';
+        ctx.font = `bold ${fontPx}px monospace`;
         ctx.textBaseline = 'middle';
-        ctx.fillText(`${speed}`, spdX + boxW / 2, ay);
-        ctx.fillText(`${altitude}`, altX + boxW / 2, ay);
+        if (lead) {
+            ctx.textAlign = 'right';
+            ctx.fillText(lead, leadRightX, ay);
+        }
+        ctx.textAlign = 'center';
+        const lineH = fontPx;
+        const curY = ay - frac * lineH;
+        ctx.fillText(`${lastDigit}`, digitCenterX, curY);
+        ctx.fillText(`${(lastDigit + 1) % 10}`, digitCenterX, curY + lineH);
+        ctx.fillText(`${(lastDigit + 9) % 10}`, digitCenterX, curY - lineH);
+        ctx.restore();
     }
 
     private _drawPfdHsi(
@@ -2668,6 +2920,163 @@ export class HudSystem {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${String(Math.round(hdgDeg) % 360).padStart(3, '0')}`, cx, hy - R - 17);
+    }
+
+    drawFullPfd(ctx: CanvasRenderingContext2D | null, canvas: HTMLCanvasElement | null): void {
+        if (!ctx || !canvas) return;
+        const W = canvas.width;
+        const cx = W / 2;
+        ctx.clearRect(0, 0, W, canvas.height);
+
+        const wm = this.scene.planeRoot.getWorldMatrix();
+        const fwd   = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
+        const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
+        const up    = new BABYLON.Vector3(0, 1, 0);
+
+        const pitchRad = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(fwd, up))));
+        const rollRad  = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(right, up))));
+        const pitchDeg = pitchRad * 180 / Math.PI;
+        const rollDeg  = rollRad * 180 / Math.PI;
+
+        const fwdFlat = fwd.subtract(up.scale(BABYLON.Vector3.Dot(fwd, up)));
+        if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
+        const hdgRad = Math.atan2(
+            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
+            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, 1)),
+        );
+        const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
+
+        const speed    = this.scene.velocity.length() * 3.6 * 0.539957;
+        const pPos     = this.scene.planeRoot.position;
+        const altitude = Math.max(0, this.scene.refAlt + pPos.y) * 3.28084;
+        const vsFpm    = this.scene.velocity.y * PFD_MS_TO_FPM;
+
+        const ay = PFD_FULL_ATT_CY_PX;
+        const hy = PFD_FULL_HSI_CY_PX;
+        const altX = W - PFD_TAPE_WIDTH_PX - PFD_TAPE_EDGE_GAP_PX;
+
+        this._drawPfdAttitude(ctx, cx, ay, pitchDeg, rollRad, rollDeg);
+        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude);
+        this._drawPfdVsi(ctx, altX - PFD_FULL_VSI_WIDTH_PX, ay, vsFpm);
+        this._drawPfdFma(ctx, W);
+        this._drawPfdBaro(ctx, altX, ay + PFD_TAPE_HALF_HEIGHT_PX + 6);
+        this._drawPfdAnnunciators(ctx, PFD_TAPE_EDGE_GAP_PX, ay + PFD_TAPE_HALF_HEIGHT_PX + 12);
+        this._drawPfdHsi(ctx, cx, hy, hdgDeg);
+    }
+
+    private _drawPfdVsi(ctx: CanvasRenderingContext2D, x: number, ay: number, vsFpm: number): void {
+        const w = PFD_FULL_VSI_WIDTH_PX;
+        const halfPx = PFD_FULL_VSI_HALF_PX;
+        const maxFpm = PFD_FULL_VSI_MAX_FPM;
+        const top = ay - halfPx;
+
+        ctx.fillStyle = PFD_TAPE_BG_COLOR;
+        ctx.fillRect(x, top, w, halfPx * 2);
+
+        ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+        ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
+        ctx.lineWidth = 1;
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (let f = -maxFpm; f <= maxFpm; f += 500) {
+            const y = ay - (f / maxFpm) * halfPx;
+            const major = f % 1000 === 0;
+            ctx.beginPath();
+            ctx.moveTo(x + w, y);
+            ctx.lineTo(x + w - (major ? 6 : 4), y);
+            ctx.stroke();
+            if (major && f !== 0) ctx.fillText(`${Math.abs(f) / 1000}`, x + w - 7, y);
+        }
+
+        const clamped = Math.max(-maxFpm, Math.min(maxFpm, vsFpm));
+        const py = ay - (clamped / maxFpm) * halfPx;
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + w, ay);
+        ctx.lineTo(x, py);
+        ctx.stroke();
+
+        if (Math.abs(vsFpm) >= 100) {
+            ctx.fillStyle = PFD_PRIMARY_COLOR;
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = vsFpm >= 0 ? 'bottom' : 'top';
+            ctx.fillText(`${Math.round(vsFpm / 50) * 50}`, x, py + (vsFpm >= 0 ? -2 : 2));
+        }
+    }
+
+    private _drawPfdFma(ctx: CanvasRenderingContext2D, W: number): void {
+        const h = PFD_FULL_FMA_H_PX;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, W, h);
+        ctx.strokeStyle = 'rgba(80,255,160,0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        ctx.lineTo(W, h);
+        ctx.stroke();
+
+        const s = this.scene;
+        const apOn = s._autopilotMaster === true;
+        const lateral = s._autopilotNavHold === true ? 'NAV'
+            : s._autopilotAprHold === true ? 'APR'
+            : s._autopilotHdgHold === true ? 'HDG'
+            : 'ROL';
+        const vertical = s._autopilotAltHold === true ? 'ALT'
+            : s._autopilotVsHold === true ? 'VS'
+            : 'PIT';
+        const color = apOn ? PFD_AP_ACTIVE_COLOR : PFD_PRIMARY_COLOR_DIM;
+
+        ctx.font = 'bold 11px monospace';
+        ctx.textBaseline = 'middle';
+        const my = h / 2;
+        ctx.fillStyle = color;
+        ctx.textAlign = 'left';
+        ctx.fillText(lateral, 10, my);
+        ctx.textAlign = 'center';
+        ctx.fillText(apOn ? 'AP' : 'FD', W / 2, my);
+        ctx.textAlign = 'right';
+        ctx.fillText(vertical, W - 10, my);
+    }
+
+    private _drawPfdBaro(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+        const w = PFD_TAPE_WIDTH_PX;
+        const baroText = (this.scene.hudBaroVal && this.scene.hudBaroVal.textContent)
+            ? this.scene.hudBaroVal.textContent
+            : '29.92';
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x, y, w, 16);
+        ctx.strokeStyle = 'rgba(80,255,160,0.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, w, 16);
+        ctx.fillStyle = PFD_SELECTED_COLOR;
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${baroText} IN`, x + w / 2, y + 8);
+    }
+
+    private _drawPfdAnnunciators(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+        const flapSteps = this.scene.FLAP_STEPS as number[] | undefined;
+        const flapDeg = flapSteps && flapSteps.length > this.scene.flapIndex ? flapSteps[this.scene.flapIndex] : 0;
+        const flapText = flapDeg > 0 ? `FLAPS ${flapDeg}\u00B0` : 'FLAPS UP';
+
+        const gs = this.scene.gearState;
+        let gearText = 'GEAR ?';
+        let gearColor = PFD_PRIMARY_COLOR_DIM;
+        if (gs === GEAR_STATE_DOWN) { gearText = 'GEAR DOWN'; gearColor = PFD_AP_ACTIVE_COLOR; }
+        else if (gs === GEAR_STATE_UP) { gearText = 'GEAR UP'; gearColor = PFD_PRIMARY_COLOR_DIM; }
+        else if (gs === GEAR_STATE_RETRACTING || gs === GEAR_STATE_EXTENDING) { gearText = 'GEAR \u2022\u2022'; gearColor = '#ffcc00'; }
+
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = flapDeg > 0 ? PFD_AP_ACTIVE_COLOR : PFD_PRIMARY_COLOR_DIM;
+        ctx.fillText(flapText, x, y);
+        ctx.fillStyle = gearColor;
+        ctx.fillText(gearText, x, y + 14);
     }
 
 }
