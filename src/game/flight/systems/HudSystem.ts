@@ -35,6 +35,7 @@ const PFD_LADDER_HALF_WIDTH_MINOR_PX = 14;
 const PFD_LADDER_DASH_PATTERN_PX: number[] = [6, 5];
 const PFD_SKY_COLOR = '#2e6db4';
 const PFD_GROUND_COLOR = '#6b4a2a';
+const PFD_FULL_GROUND_COLOR = '#2d5c2d';
 const PFD_PRIMARY_COLOR = 'rgba(255,255,255,0.95)';
 const PFD_PRIMARY_COLOR_DIM = 'rgba(255,255,255,0.7)';
 const PFD_SELECTED_COLOR = '#79e7ff';
@@ -71,6 +72,9 @@ const PFD_TREND_COLOR = '#e070e0';
 const PFD_BAND_LOWSPEED_COLOR = '#ff3030';
 const PFD_BAND_GREEN_COLOR = '#19c219';
 const PFD_BAND_WHITE_COLOR = '#f0f0f0';
+const PFD_BARBER_POLE_RED = '#ff3030';
+const PFD_BARBER_POLE_WHITE = '#ffffff';
+const PFD_BARBER_POLE_STRIPE_PX = 4;
 const PFD_BEARING_PTR_COLOR = '#79e7ff';
 const PFD_HSI_TERM_RANGE_NM = 30;
 const PFD_HSI_DISK_COLOR = 'rgba(0,0,0,0.45)';
@@ -2577,7 +2581,7 @@ export class HudSystem {
         ctx.globalAlpha = rectFull ? 1 : fillAlpha;
         ctx.fillStyle = PFD_SKY_COLOR;
         ctx.fillRect(-big, -big, big * 2, big + horizonY);
-        ctx.fillStyle = PFD_GROUND_COLOR;
+        ctx.fillStyle = rectFull ? PFD_FULL_GROUND_COLOR : PFD_GROUND_COLOR;
         ctx.fillRect(-big, horizonY, big * 2, big);
         ctx.restore();
 
@@ -2767,10 +2771,15 @@ export class HudSystem {
         const selSpeed = atActive && Number.isFinite(this.scene._autopilotAtTargetKts) ? this.scene._autopilotAtTargetKts : null;
 
         const altActive = this.scene._autopilotAltHold === true;
-        const selAlt = altActive && Number.isFinite(this.scene._autopilotTargetAltFt) ? this.scene._autopilotTargetAltFt : null;
+        const targetAltFt = Number.isFinite(this.scene._autopilotTargetAltFt) ? this.scene._autopilotTargetAltFt : null;
+        const selAlt = showSpdEnhancements
+            ? targetAltFt
+            : (altActive ? targetAltFt : null);
+        const altSelColor = showSpdEnhancements ? PFD_SELECTED_COLOR : PFD_BUG_COLOR;
+        const barberPoleKts = showSpdEnhancements && typeof vne === 'number' && Number.isFinite(vne) && vne > 0 ? vne : null;
 
-        this._drawPfdTape(ctx, spdX, ay, 'left', speed, PFD_SPD_PX_PER_KT, PFD_SPD_MINOR_STEP_KT, PFD_SPD_MAJOR_STEP_KT, spdMarkers, selSpeed, PFD_BUG_COLOR, tapeBg, spdBands, showSpdEnhancements ? spdTrendKt : null);
-        this._drawPfdTape(ctx, altX, ay, 'right', altitude, PFD_ALT_PX_PER_FT, PFD_ALT_MINOR_STEP_FT, PFD_ALT_MAJOR_STEP_FT, [], selAlt, PFD_BUG_COLOR, tapeBg);
+        this._drawPfdTape(ctx, spdX, ay, 'left', speed, PFD_SPD_PX_PER_KT, PFD_SPD_MINOR_STEP_KT, PFD_SPD_MAJOR_STEP_KT, spdMarkers, selSpeed, PFD_BUG_COLOR, tapeBg, spdBands, showSpdEnhancements ? spdTrendKt : null, barberPoleKts);
+        this._drawPfdTape(ctx, altX, ay, 'right', altitude, PFD_ALT_PX_PER_FT, PFD_ALT_MINOR_STEP_FT, PFD_ALT_MAJOR_STEP_FT, [], selAlt, altSelColor, tapeBg);
 
         if (selAlt !== null) {
             const selText = `${Math.round(selAlt)}`;
@@ -2778,10 +2787,10 @@ export class HudSystem {
             const by = ay - PFD_TAPE_HALF_HEIGHT_PX - 20;
             ctx.fillStyle = PFD_TAPE_READOUT_BG_COLOR;
             ctx.fillRect(bx, by, PFD_TAPE_WIDTH_PX, 16);
-            ctx.strokeStyle = PFD_BUG_COLOR;
+            ctx.strokeStyle = altSelColor;
             ctx.lineWidth = 1;
             ctx.strokeRect(bx, by, PFD_TAPE_WIDTH_PX, 16);
-            ctx.fillStyle = PFD_BUG_COLOR;
+            ctx.fillStyle = altSelColor;
             ctx.font = 'bold 11px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -2804,6 +2813,7 @@ export class HudSystem {
         tapeBg: string | null = PFD_TAPE_BG_COLOR,
         bands: { from: number; to: number; color: string; lane?: number }[] = [],
         trendKt: number | null = null,
+        barberPoleAboveKts: number | null = null,
     ): void {
         const tapeW = PFD_TAPE_WIDTH_PX;
         const halfH = PFD_TAPE_HALF_HEIGHT_PX;
@@ -2835,6 +2845,17 @@ export class HudSystem {
                 : innerEdge + stripW * lane;
             ctx.fillStyle = band.color;
             ctx.fillRect(bx, bTop, stripW, bH);
+        }
+
+        if (barberPoleAboveKts !== null && side === 'left') {
+            const yVne = ay + (value - barberPoleAboveKts) * pxPerUnit;
+            const poleTop = top;
+            const poleBot = Math.max(top, Math.min(bottom, yVne));
+            if (poleBot > poleTop + 1) {
+                const stripW = 5;
+                const bx = innerEdge - stripW;
+                this._drawPfdBarberPole(ctx, bx, poleTop, stripW, poleBot - poleTop);
+            }
         }
 
         if (trendKt !== null && Math.abs(trendKt) >= 1) {
@@ -2922,6 +2943,17 @@ export class HudSystem {
         ctx.stroke();
 
         this._drawPfdRollingReadout(ctx, x, ay, side, value);
+    }
+
+    private _drawPfdBarberPole(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+        const stripe = PFD_BARBER_POLE_STRIPE_PX;
+        for (let sy = y; sy < y + h; sy += stripe) {
+            for (let sx = x; sx < x + w; sx += stripe) {
+                const diag = Math.floor((sx - x + sy - y) / stripe) % 2 === 0;
+                ctx.fillStyle = diag ? PFD_BARBER_POLE_RED : PFD_BARBER_POLE_WHITE;
+                ctx.fillRect(sx, sy, stripe, stripe);
+            }
+        }
     }
 
     private _drawPfdRollingReadout(
@@ -3204,7 +3236,7 @@ export class HudSystem {
         this._drawPfdHsi(ctx, cx, hy, hdgDeg, navInfo ? navInfo.brgDeg : null, hsiAnnun);
         this._drawPfdSelHdg(ctx, cx - 150, hy + 70, this.scene._autopilotTargetHdgDeg);
         if (navInfo) {
-            this._drawPfdSelCrs(ctx, cx + 92, hy + 70, navInfo.crsDeg);
+            this._drawPfdSelDtk(ctx, cx + 92, hy + 70, navInfo.crsDeg);
             this._drawPfdWptInfo(ctx, cx, PFD_FULL_FMA_H_PX + 14, navInfo.distNm, navInfo.brgDeg);
             this._drawPfdCdi(ctx, cx, hy, hdgDeg, navInfo.crsDeg, navInfo.xteNm);
         }
@@ -3417,13 +3449,13 @@ export class HudSystem {
         ctx.fillText(`HDG ${String(Math.round(hdgSel) % 360).padStart(3, '0')}\u00B0`, x, y);
     }
 
-    private _drawPfdSelCrs(ctx: CanvasRenderingContext2D, x: number, y: number, crsDeg: number): void {
-        if (!Number.isFinite(crsDeg)) return;
-        ctx.fillStyle = PFD_CRS_COLOR;
+    private _drawPfdSelDtk(ctx: CanvasRenderingContext2D, x: number, y: number, dtkDeg: number): void {
+        if (!Number.isFinite(dtkDeg)) return;
+        ctx.fillStyle = PFD_BUG_COLOR;
         ctx.font = 'bold 11px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`CRS ${String(Math.round(crsDeg) % 360).padStart(3, '0')}\u00B0`, x, y);
+        ctx.fillText(`DTK ${String(Math.round(dtkDeg) % 360).padStart(3, '0')}\u00B0`, x, y);
     }
 
     private _drawPfdWptInfo(ctx: CanvasRenderingContext2D, cx: number, y: number, distNm: number, brgDeg: number): void {
