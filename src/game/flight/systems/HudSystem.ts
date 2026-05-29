@@ -1754,7 +1754,7 @@ export class HudSystem {
   </div>
 </div>
 
-<div id="pfd-panel" class="game-panel" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);width:520px;aspect-ratio:1024 / 652;background:url('src/game/assets/textures/g1000_bezel.png') center/100% 100% no-repeat;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;filter:drop-shadow(0 8px 32px rgba(0,0,0,.6));z-index:300">
+<div id="pfd-panel" class="game-panel" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);width:800px;aspect-ratio:1024 / 652;background:url('src/game/assets/textures/g1000_bezel.png') center/100% 100% no-repeat;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;filter:drop-shadow(0 8px 32px rgba(0,0,0,.6));z-index:300">
   <div class="panel-handle" id="pfd-panel-handle" style="position:absolute;top:0;left:12.4%;width:75.1%;height:9%;cursor:grab;user-select:none;touch-action:none"></div>
   <button class="panel-close" data-panel="pfd-panel" data-btn="pfd-btn" title="Fechar" style="position:absolute;top:1.5%;right:1.5%;width:18px;height:18px;padding:0;border:1px solid rgba(80,255,160,.45);background:rgba(0,20,15,.65);color:#40ffaa;font-size:11px;line-height:1;cursor:pointer;border-radius:3px;z-index:2">\u00D7</button>
   <canvas id="pfd-panel-canvas" width="769" height="517" style="position:absolute;left:12.40%;top:10.12%;width:75.10%;height:79.29%;display:block"></canvas>
@@ -2497,7 +2497,7 @@ export class HudSystem {
         const ay = H * PFD_ATTITUDE_CENTER_Y_FRAC;
 
         this._drawPfdAttitude(ctx, cx, ay, pitchDeg, rollRad, rollDeg, PFD_ATTITUDE_FILL_ALPHA);
-        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude);
+        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude, undefined, undefined, null);
         this._drawHsiCanvas(hdgDeg);
     }
 
@@ -2653,6 +2653,7 @@ export class HudSystem {
         altitude: number,
         spdXOverride?: number,
         altXOverride?: number,
+        tapeBg: string | null = PFD_TAPE_BG_COLOR,
     ): void {
         const spdX = spdXOverride ?? PFD_TAPE_EDGE_GAP_PX;
         const altX = altXOverride ?? (W - PFD_TAPE_WIDTH_PX - PFD_TAPE_EDGE_GAP_PX);
@@ -2669,8 +2670,8 @@ export class HudSystem {
         const altActive = this.scene._autopilotAltHold === true;
         const selAlt = altActive && Number.isFinite(this.scene._autopilotTargetAltFt) ? this.scene._autopilotTargetAltFt : null;
 
-        this._drawPfdTape(ctx, spdX, ay, 'left', speed, PFD_SPD_PX_PER_KT, PFD_SPD_MINOR_STEP_KT, PFD_SPD_MAJOR_STEP_KT, spdMarkers, selSpeed, PFD_BUG_COLOR);
-        this._drawPfdTape(ctx, altX, ay, 'right', altitude, PFD_ALT_PX_PER_FT, PFD_ALT_MINOR_STEP_FT, PFD_ALT_MAJOR_STEP_FT, [], selAlt, PFD_BUG_COLOR);
+        this._drawPfdTape(ctx, spdX, ay, 'left', speed, PFD_SPD_PX_PER_KT, PFD_SPD_MINOR_STEP_KT, PFD_SPD_MAJOR_STEP_KT, spdMarkers, selSpeed, PFD_BUG_COLOR, tapeBg);
+        this._drawPfdTape(ctx, altX, ay, 'right', altitude, PFD_ALT_PX_PER_FT, PFD_ALT_MINOR_STEP_FT, PFD_ALT_MAJOR_STEP_FT, [], selAlt, PFD_BUG_COLOR, tapeBg);
 
         if (selAlt !== null) {
             const selText = `${Math.round(selAlt)}`;
@@ -2701,6 +2702,7 @@ export class HudSystem {
         markers: { value: number; color: string }[],
         selValue: number | null,
         selColor: string,
+        tapeBg: string | null = PFD_TAPE_BG_COLOR,
     ): void {
         const tapeW = PFD_TAPE_WIDTH_PX;
         const halfH = PFD_TAPE_HALF_HEIGHT_PX;
@@ -2709,14 +2711,18 @@ export class HudSystem {
         const innerEdge = side === 'left' ? x + tapeW : x;
         const tickDir = side === 'left' ? -1 : 1;
 
-        ctx.fillStyle = PFD_TAPE_BG_COLOR;
-        ctx.fillRect(x, top, tapeW, halfH * 2);
+        if (tapeBg) {
+            ctx.fillStyle = tapeBg;
+            ctx.fillRect(x, top, tapeW, halfH * 2);
+        }
 
         ctx.save();
         ctx.beginPath();
         ctx.rect(x, top, tapeW, halfH * 2);
         ctx.clip();
 
+        ctx.shadowColor = 'rgba(0,0,0,0.95)';
+        ctx.shadowBlur = 3;
         ctx.font = '10px monospace';
         ctx.textBaseline = 'middle';
         const lowest = Math.floor((value - halfH / pxPerUnit) / minorStep) * minorStep;
@@ -2727,14 +2733,14 @@ export class HudSystem {
             if (y < top - 1 || y > bottom + 1) continue;
             const major = m % majorStep === 0;
             const len = major ? 9 : 5;
-            ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = PFD_PRIMARY_COLOR;
+            ctx.lineWidth = 1.4;
             ctx.beginPath();
             ctx.moveTo(innerEdge, y);
             ctx.lineTo(innerEdge + tickDir * len, y);
             ctx.stroke();
             if (major) {
-                ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
+                ctx.fillStyle = PFD_PRIMARY_COLOR;
                 ctx.textAlign = side === 'left' ? 'right' : 'left';
                 const lx = side === 'left' ? innerEdge + tickDir * (len + 3) : innerEdge + tickDir * (len + 3);
                 ctx.fillText(`${m}`, lx, y);
