@@ -54,9 +54,11 @@ const PFD_CDI_FULLSCALE_NM = 2.0;
 const PFD_GS_FULLSCALE_FT = 120;
 const PFD_RA_DISPLAY_MAX_FT = 2500;
 const PFD_MACH_DISPLAY_MIN = 0.40;
-const PFD_FULL_ATT_CY_PX = 175;
-const PFD_FULL_HSI_CY_PX = 420;
+const PFD_FULL_ATT_CY_PX = 165;
+const PFD_FULL_HSI_CY_PX = 410;
 const PFD_FULL_FMA_H_PX = 20;
+const PFD_FULL_ATT_BOTTOM_PX = 300;
+const PFD_LOWER_BG_COLOR = '#15191c';
 const PFD_FULL_VSI_WIDTH_PX = 16;
 const PFD_FULL_TAPE_BALL_GAP_PX = 16;
 const PFD_FULL_VSI_MAX_FPM = 2000;
@@ -3172,7 +3174,10 @@ export class HudSystem {
         }
         const spdTrendKt = this._computeSpeedTrendKt(speed);
 
-        const attRect = { x0: 0, y0: PFD_FULL_FMA_H_PX, w: W, h: canvas.height - PFD_FULL_FMA_H_PX };
+        ctx.fillStyle = PFD_LOWER_BG_COLOR;
+        ctx.fillRect(0, PFD_FULL_ATT_BOTTOM_PX, W, canvas.height - PFD_FULL_ATT_BOTTOM_PX);
+
+        const attRect = { x0: 0, y0: PFD_FULL_FMA_H_PX, w: W, h: PFD_FULL_ATT_BOTTOM_PX - PFD_FULL_FMA_H_PX };
         this._drawPfdAttitude(ctx, cx, ay, pitchDeg, rollRad, rollDeg, 1, attRect, slipDeg);
         this._drawPfdSideReadouts(ctx, W, ay, speed, altitude, spdX, altX, PFD_TAPE_BG_COLOR, true, spdTrendKt);
         this._drawPfdVsi(ctx, altX + PFD_TAPE_WIDTH_PX + 3, ay, vsFpm);
