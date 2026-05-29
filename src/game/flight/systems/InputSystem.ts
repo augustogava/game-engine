@@ -685,6 +685,11 @@ export class InputSystem {
                 const r = pfd.getBoundingClientRect();
                 if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
             }
+            const hsi = document.getElementById('flight-hsi');
+            if (hsi) {
+                const r = hsi.getBoundingClientRect();
+                if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+            }
             return false;
         };
 
