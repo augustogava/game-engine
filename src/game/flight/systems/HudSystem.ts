@@ -7,7 +7,7 @@ import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 
 const PFD_ATTITUDE_CENTER_Y_FRAC = 0.5;
-const PFD_ATTITUDE_FILL_ALPHA = 0.4;
+const PFD_ATTITUDE_FILL_ALPHA = 0;
 const HSI_CANVAS_CENTER_Y_PX = 108;
 const PFD_ATTITUDE_RADIUS_PX = 110;
 const PFD_TAPE_HALF_HEIGHT_PX = 96;
@@ -2577,13 +2577,15 @@ export class HudSystem {
         ctx.rotate(-rollRad);
 
         const horizonY = pitchDeg * ppd;
-        ctx.save();
-        ctx.globalAlpha = rectFull ? 1 : fillAlpha;
-        ctx.fillStyle = PFD_SKY_COLOR;
-        ctx.fillRect(-big, -big, big * 2, big + horizonY);
-        ctx.fillStyle = rectFull ? PFD_FULL_GROUND_COLOR : PFD_GROUND_COLOR;
-        ctx.fillRect(-big, horizonY, big * 2, big);
-        ctx.restore();
+        if (rectFull || fillAlpha > 0) {
+            ctx.save();
+            ctx.globalAlpha = rectFull ? 1 : fillAlpha;
+            ctx.fillStyle = PFD_SKY_COLOR;
+            ctx.fillRect(-big, -big, big * 2, big + horizonY);
+            ctx.fillStyle = rectFull ? PFD_FULL_GROUND_COLOR : PFD_GROUND_COLOR;
+            ctx.fillRect(-big, horizonY, big * 2, big);
+            ctx.restore();
+        }
 
         ctx.strokeStyle = PFD_PRIMARY_COLOR;
         ctx.lineWidth = 2;
