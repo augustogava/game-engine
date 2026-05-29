@@ -6,31 +6,24 @@ import { UiPreferences } from '../../UiPreferences.js';
 import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 
-const WORLD_HUD_ANCHOR_DISTANCE_M = 100;
-const WORLD_HUD_LADDER_STEP_DEG = 2.5;
-const WORLD_HUD_LADDER_LABEL_STEP_DEG = 5;
-const WORLD_HUD_LADDER_MIN_PITCH_DEG = -90;
-const WORLD_HUD_LADDER_MAX_PITCH_DEG = 90;
-const WORLD_HUD_LADDER_HALF_WIDTH_DEG = 3;
-const WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG = 6;
-const WORLD_HUD_LADDER_PITCH_COMPRESS = 0.28;
-const WORLD_HUD_VV_RADIUS_PX = 10;
-const WORLD_HUD_VV_WING_PX = 14;
-const WORLD_HUD_VV_TOP_PX = 8;
-const WORLD_HUD_BORESIGHT_HALF_PX = 10;
-const WORLD_HUD_BORESIGHT_TICK_PX = 4;
-const WORLD_HUD_MIN_VELOCITY_MS = 1;
-const WORLD_HUD_SCREEN_MARGIN_PX = 8;
-const WORLD_HUD_VIEW_RADIUS_FRAC = 0.16;
-const WORLD_HUD_VIEW_RADIUS_MIN_PX = 100;
-const WORLD_HUD_VIEW_RADIUS_MAX_PX = 180;
-const WORLD_HUD_CENTER_X_FRAC = 0.50;
-const WORLD_HUD_CENTER_Y_FRAC = 0.35;
-const WORLD_HUD_COLOR = 'rgba(0,255,100,0.95)';
-const WORLD_HUD_COLOR_DIM = 'rgba(0,255,100,0.7)';
-const WORLD_HUD_LINE_WIDTH = 1.5;
-const WORLD_HUD_FONT = '10px monospace';
-const WORLD_HUD_LADDER_DASH_PATTERN_PX: number[] = [6, 4];
+const PFD_ATTITUDE_CENTER_Y_FRAC = 0.34;
+const PFD_ATTITUDE_RADIUS_PX = 110;
+const PFD_PIXELS_PER_PITCH_DEG = 3.4;
+const PFD_LADDER_MIN_PITCH_DEG = -90;
+const PFD_LADDER_MAX_PITCH_DEG = 90;
+const PFD_LADDER_STEP_DEG = 5;
+const PFD_LADDER_HALF_WIDTH_PX = 26;
+const PFD_LADDER_HALF_WIDTH_MINOR_PX = 14;
+const PFD_LADDER_DASH_PATTERN_PX: number[] = [6, 5];
+const PFD_SKY_COLOR = '#2e6db4';
+const PFD_GROUND_COLOR = '#6b4a2a';
+const PFD_PRIMARY_COLOR = 'rgba(255,255,255,0.95)';
+const PFD_PRIMARY_COLOR_DIM = 'rgba(255,255,255,0.7)';
+const PFD_SELECTED_COLOR = '#79e7ff';
+const PFD_BUG_COLOR = '#e070e0';
+const PFD_BANK_RADIUS_PX = 96;
+const PFD_HSI_CENTER_Y_FRAC = 0.80;
+const PFD_HSI_RADIUS_PX = 80;
 
 const _C: any = CONST;
 const {
@@ -1296,8 +1289,8 @@ export class HudSystem {
 .hud-tape-section{display:flex;align-items:stretch;overflow:visible;position:relative}
 .hud-tape-wrapper{position:relative;display:block;height:180px;overflow:visible;width:64px;background:linear-gradient(to right,rgba(0,0,0,.55),rgba(0,0,0,.35));border:1px solid rgba(255,255,255,.12)}
 .hud-tape{position:absolute;right:0;top:0;bottom:0;width:6px;background:linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,.5));overflow:hidden}
-.hud-tape-fill-spd{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#c8a030,#e8c860);transition:height .15s}
-.hud-tape-fill-alt{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#3090c8,#50b0e8);transition:height .15s}
+.hud-tape-fill-spd{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(255,255,255,.10),rgba(255,255,255,.20));transition:height .15s}
+.hud-tape-fill-alt{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(255,255,255,.10),rgba(255,255,255,.20));transition:height .15s}
 .hud-tape-marks{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:18px;pointer-events:none;left:0;right:8px;align-items:flex-end;overflow:visible}
 .hud-tape-marks-left,.hud-tape-marks-right{left:0;right:8px;align-items:flex-end}
 .hud-tape-mark{display:flex;align-items:center;gap:3px;justify-content:flex-end;white-space:nowrap}
@@ -1375,7 +1368,7 @@ export class HudSystem {
 @media(max-width:768px){
 #hfps{display:none}
 #hud-utc{font-size:8px!important;letter-spacing:.08em!important}
-#flight-pfd{top:28%!important;transform:translate(-50%,-50%)!important;width:260px;height:185px}
+#flight-pfd{top:50%!important;transform:translate(-50%,-50%)!important;width:272px;height:344px}
 #gps-map{width:168px!important;height:168px!important;top:2px!important;left:2px!important}
 .hud-panel-left{left:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom right}
@@ -1402,7 +1395,7 @@ export class HudSystem {
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
-#flight-pfd{top:22%!important;width:200px!important;height:140px!important}
+#flight-pfd{top:50%!important;width:212px!important;height:268px!important}
 #gps-map{width:132px!important;height:132px!important;top:4px!important;left:2px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom right}
@@ -1427,7 +1420,7 @@ export class HudSystem {
 #ap-panel .ap-knob-tick{height:6px!important;top:2px!important;width:2px!important}
 }
 @media(max-height:440px){
-#flight-pfd{top:30%!important;width:220px!important;height:150px!important}
+#flight-pfd{top:50%!important;width:228px!important;height:288px!important}
 #gps-map{width:120px!important;height:120px!important;top:2px!important;left:2px!important}
 #hud-utc{font-size:7px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom left}
@@ -1639,8 +1632,7 @@ export class HudSystem {
   </div>
 </div>
 
-<canvas id="flight-whud" width="800" height="600" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1"></canvas>
-<canvas id="flight-pfd" width="350" height="250" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2"></canvas>
+<canvas id="flight-pfd" width="340" height="430" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2"></canvas>
 <div id="gps-map" style="position:absolute;top:4px;left:4px;width:216px;height:216px;border-radius:10px;overflow:hidden;box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6);pointer-events:auto;touch-action:none">
   <img id="gps-map-img" style="position:absolute;top:-50%;left:-50%;width:200%;height:200%;object-fit:cover;opacity:0.9;will-change:transform;pointer-events:none;user-select:none" draggable="false">
   <canvas id="gps-map-hdg" width="216" height="216" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
@@ -1759,14 +1751,6 @@ export class HudSystem {
         if (navPanel) this.scene._makeDraggable(navPanel);
         this.scene.hudCanvas = document.getElementById('flight-pfd') as HTMLCanvasElement;
         this.scene.hudCtx    = this.scene.hudCanvas.getContext('2d')!;
-        try {
-            this.scene.wHudCanvas = document.getElementById('flight-whud') as HTMLCanvasElement | null;
-            this.scene.wHudCtx    = this.scene.wHudCanvas ? this.scene.wHudCanvas.getContext('2d') : null;
-        } catch (err) {
-            this.scene.wHudCanvas = null;
-            this.scene.wHudCtx = null;
-            console.warn('[WorldHud] init failed:', err);
-        }
         this.scene.hudSpeedVal = document.getElementById('bb-spd-v')!;
         this.scene.hudAltVal   = document.getElementById('bb-alt-v')!;
         this.scene.hudThrottle = document.getElementById('bb-thr')!;
@@ -2349,11 +2333,6 @@ export class HudSystem {
         this.scene._updateTapeMarks(speedKts, altitudeFt);
 
         this.scene._drawFlightHUD();
-        try {
-            this.drawWorldHud();
-        } catch (err) {
-            console.warn('[WorldHud] update failed:', err);
-        }
         this.scene._updateMap();
         this.scene._updateDebugReadouts();
 
@@ -2377,7 +2356,6 @@ export class HudSystem {
         const W = this.scene.hudCanvas.width;
         const H = this.scene.hudCanvas.height;
         const cx = W / 2;
-        const cy = H / 2;
         ctx.clearRect(0, 0, W, H);
 
         const wm = this.scene.planeRoot.getWorldMatrix();
@@ -2385,7 +2363,9 @@ export class HudSystem {
         const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
         const up    = new BABYLON.Vector3(0, 1, 0);
 
+        const pitchRad = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(fwd, up))));
         const rollRad  = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(right, up))));
+        const pitchDeg = pitchRad * 180 / Math.PI;
         const rollDeg  = rollRad * 180 / Math.PI;
 
         const fwdFlat = fwd.subtract(up.scale(BABYLON.Vector3.Dot(fwd, up)));
@@ -2400,10 +2380,90 @@ export class HudSystem {
         const pPos = this.scene.planeRoot.position;
         const altitude = Math.round(Math.max(0, this.scene.refAlt + pPos.y) * 3.28084);
 
-        const bankR = 80;
+        const ay = H * PFD_ATTITUDE_CENTER_Y_FRAC;
+        const hy = H * PFD_HSI_CENTER_Y_FRAC;
+
+        this._drawPfdAttitude(ctx, cx, ay, pitchDeg, rollRad, rollDeg);
+        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude);
+        this._drawPfdHsi(ctx, cx, hy, hdgDeg);
+    }
+
+    private _drawPfdAttitude(
+        ctx: CanvasRenderingContext2D,
+        ax: number,
+        ay: number,
+        pitchDeg: number,
+        rollRad: number,
+        rollDeg: number,
+    ): void {
+        const R = PFD_ATTITUDE_RADIUS_PX;
+        const ppd = PFD_PIXELS_PER_PITCH_DEG;
+
         ctx.save();
-        ctx.translate(cx, cy);
-        ctx.strokeStyle = 'rgba(0,255,100,0.8)';
+        ctx.translate(ax, ay);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, R, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.rotate(rollRad);
+
+        const horizonY = pitchDeg * ppd;
+        const big = R * 3;
+        ctx.fillStyle = PFD_SKY_COLOR;
+        ctx.fillRect(-big, -big, big * 2, big + horizonY);
+        ctx.fillStyle = PFD_GROUND_COLOR;
+        ctx.fillRect(-big, horizonY, big * 2, big);
+
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-R, horizonY);
+        ctx.lineTo(R, horizonY);
+        ctx.stroke();
+
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (let deg = PFD_LADDER_MIN_PITCH_DEG; deg <= PFD_LADDER_MAX_PITCH_DEG; deg += PFD_LADDER_STEP_DEG) {
+            if (deg === 0) continue;
+            const yOff = (pitchDeg - deg) * ppd;
+            if (Math.abs(yOff) > R - 4) continue;
+            const isLabel = deg % 10 === 0;
+            const halfW = isLabel ? PFD_LADDER_HALF_WIDTH_PX : PFD_LADDER_HALF_WIDTH_MINOR_PX;
+            const isBelow = deg < 0;
+            ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash(isBelow ? PFD_LADDER_DASH_PATTERN_PX : []);
+            ctx.beginPath();
+            ctx.moveTo(-halfW, yOff);
+            ctx.lineTo(halfW, yOff);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            if (isLabel) {
+                const tickH = isBelow ? -4 : 4;
+                ctx.beginPath();
+                ctx.moveTo(-halfW, yOff);
+                ctx.lineTo(-halfW, yOff + tickH);
+                ctx.moveTo(halfW, yOff);
+                ctx.lineTo(halfW, yOff + tickH);
+                ctx.stroke();
+                ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
+                const lbl = `${Math.abs(deg)}`;
+                ctx.fillText(lbl, -halfW - 12, yOff);
+                ctx.fillText(lbl, halfW + 12, yOff);
+            }
+        }
+        ctx.restore();
+
+        ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, R, 0, Math.PI * 2);
+        ctx.stroke();
+
+        const bankR = PFD_BANK_RADIUS_PX;
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(0, 0, bankR, Math.PI + 0.35, -0.35);
@@ -2411,366 +2471,203 @@ export class HudSystem {
         ctx.lineWidth = 1;
         for (const a of [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60]) {
             const rad = (-90 + a) * Math.PI / 180;
-            const inner = a % 30 === 0 ? bankR - 10 : bankR - 6;
+            const inner = a % 30 === 0 ? bankR - 9 : bankR - 5;
             ctx.beginPath();
             ctx.moveTo(Math.cos(rad) * inner, Math.sin(rad) * inner);
             ctx.lineTo(Math.cos(rad) * bankR, Math.sin(rad) * bankR);
             ctx.stroke();
         }
-        const bankPtr = (-90 - rollDeg) * Math.PI / 180;
-        ctx.fillStyle = 'rgba(0,255,100,0.8)';
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(bankPtr) * (bankR + 2), Math.sin(bankPtr) * (bankR + 2));
-        ctx.lineTo(Math.cos(bankPtr - 0.06) * (bankR + 10), Math.sin(bankPtr - 0.06) * (bankR + 10));
-        ctx.lineTo(Math.cos(bankPtr + 0.06) * (bankR + 10), Math.sin(bankPtr + 0.06) * (bankR + 10));
-        ctx.fill();
-        ctx.restore();
 
-        ctx.fillStyle = 'rgba(0,255,100,0.85)';
-        ctx.font = 'bold 13px monospace';
-        ctx.textAlign = 'center';
-
-        const hdgY = 18;
-        ctx.strokeStyle = 'rgba(0,255,100,0.3)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(cx - 100, hdgY + 6);
-        ctx.lineTo(cx + 100, hdgY + 6);
-        ctx.stroke();
-
-        const hdgLabels = ['N', '30', '60', 'E', '120', '150', 'S', '210', '240', 'W', '300', '330'];
-        for (let d = -60; d <= 60; d += 10) {
-            const showDeg = (Math.round(hdgDeg / 10) * 10 + d + 360) % 360;
-            const xOff = cx + (d - (hdgDeg % 10 - (hdgDeg % 10 > 5 ? 10 : 0))) * 2.5;
-            if (xOff < cx - 100 || xOff > cx + 100) continue;
-
-            ctx.beginPath();
-            ctx.moveTo(xOff, hdgY);
-            ctx.lineTo(xOff, hdgY + 6);
-            ctx.stroke();
-
-            if (showDeg % 30 === 0) {
-                const idx = showDeg / 30;
-                ctx.fillText(hdgLabels[idx] || `${showDeg}`, xOff, hdgY - 2);
-            }
-        }
-
-        ctx.fillStyle = 'rgba(0,255,100,0.9)';
-        ctx.beginPath();
-        ctx.moveTo(cx, hdgY + 8);
-        ctx.lineTo(cx - 4, hdgY + 14);
-        ctx.lineTo(cx + 4, hdgY + 14);
-        ctx.fill();
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText(`${Math.round(hdgDeg)}\u00B0`, cx, hdgY + 26);
-
-        const SIDE_BOX_TOP_Y = cy + 60;
-        const SIDE_BOX_TEXT_Y = SIDE_BOX_TOP_Y + 18;
-        const SIDE_BOX_UNIT_Y = SIDE_BOX_TOP_Y + 28;
-        const SIDE_TICK_CENTER_Y = SIDE_BOX_TOP_Y + 13;
-        const SIDE_TICK_TOP_LIMIT_Y = SIDE_BOX_TOP_Y - 8;
-        const SIDE_TICK_BOTTOM_LIMIT_Y = SIDE_BOX_TOP_Y + 60;
-
-        ctx.fillStyle = 'rgba(0,10,5,0.5)';
-        ctx.fillRect(8, SIDE_BOX_TOP_Y, 52, 26);
-        ctx.fillRect(W - 60, SIDE_BOX_TOP_Y, 52, 26);
-        ctx.strokeStyle = 'rgba(0,255,100,0.5)';
-        ctx.strokeRect(8, SIDE_BOX_TOP_Y, 52, 26);
-        ctx.strokeRect(W - 60, SIDE_BOX_TOP_Y, 52, 26);
-
-        ctx.fillStyle = 'rgba(0,255,100,0.95)';
-        ctx.font = 'bold 14px monospace';
-        ctx.textAlign = 'right';
-        ctx.fillText(`${speed}`, 54, SIDE_BOX_TEXT_Y);
-        ctx.textAlign = 'left';
-        ctx.fillText(`${altitude}`, W - 54, SIDE_BOX_TEXT_Y);
-
-        ctx.fillStyle = 'rgba(0,255,100,0.4)';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'right';
-        ctx.fillText('kts', 54, SIDE_BOX_UNIT_Y);
-        ctx.textAlign = 'left';
-        ctx.fillText('ft', W - 54, SIDE_BOX_UNIT_Y);
-
-        ctx.strokeStyle = 'rgba(0,255,100,0.3)';
-        ctx.lineWidth = 1;
-        for (let i = -5; i <= 5; i++) {
-            const spdMark = Math.round(speed / 10) * 10 + i * 10;
-            if (spdMark < 0) continue;
-            const yOff = SIDE_TICK_CENTER_Y + (speed - spdMark) * 1.5;
-            if (yOff < SIDE_TICK_TOP_LIMIT_Y || yOff > SIDE_TICK_BOTTOM_LIMIT_Y) continue;
-            ctx.beginPath();
-            ctx.moveTo(60, yOff);
-            ctx.lineTo(66, yOff);
-            ctx.stroke();
-            if (spdMark % 20 === 0) {
-                ctx.fillStyle = 'rgba(0,255,100,0.5)';
-                ctx.textAlign = 'right';
-                ctx.fillText(`${spdMark}`, 58, yOff + 3);
-            }
-        }
-
-        for (let i = -5; i <= 5; i++) {
-            const altMark = Math.round(altitude / 200) * 200 + i * 200;
-            if (altMark < 0) continue;
-            const yOff = SIDE_TICK_CENTER_Y + (altitude - altMark) * 0.18;
-            if (yOff < SIDE_TICK_TOP_LIMIT_Y || yOff > SIDE_TICK_BOTTOM_LIMIT_Y) continue;
-            ctx.beginPath();
-            ctx.moveTo(W - 66, yOff);
-            ctx.lineTo(W - 60, yOff);
-            ctx.stroke();
-            if (altMark % 500 === 0) {
-                ctx.fillStyle = 'rgba(0,255,100,0.5)';
-                ctx.textAlign = 'left';
-                ctx.fillText(`${altMark}`, W - 58, yOff + 3);
-            }
-        }
-
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.strokeStyle = 'rgba(0,255,100,0.9)';
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.moveTo(0, -bankR);
+        ctx.lineTo(-6, -bankR - 9);
+        ctx.lineTo(6, -bankR - 9);
+        ctx.closePath();
         ctx.stroke();
+
+        const bankPtr = (-90 - rollDeg) * Math.PI / 180;
+        ctx.fillStyle = PFD_PRIMARY_COLOR;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(bankPtr) * (bankR - 2), Math.sin(bankPtr) * (bankR - 2));
+        ctx.lineTo(Math.cos(bankPtr - 0.05) * (bankR - 11), Math.sin(bankPtr - 0.05) * (bankR - 11));
+        ctx.lineTo(Math.cos(bankPtr + 0.05) * (bankR - 11), Math.sin(bankPtr + 0.05) * (bankR - 11));
+        ctx.fill();
+
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-44, 0);
+        ctx.lineTo(-18, 0);
+        ctx.lineTo(-18, 9);
+        ctx.moveTo(44, 0);
+        ctx.lineTo(18, 0);
+        ctx.lineTo(18, 9);
+        ctx.stroke();
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+        ctx.stroke();
+
         ctx.restore();
     }
 
-    drawWorldHud(): void {
-        const canvas = this.scene.wHudCanvas as HTMLCanvasElement | null | undefined;
-        const ctx = this.scene.wHudCtx as CanvasRenderingContext2D | null | undefined;
-        if (!canvas || !ctx) return;
+    private _drawPfdSideReadouts(
+        ctx: CanvasRenderingContext2D,
+        W: number,
+        ay: number,
+        speed: number,
+        altitude: number,
+    ): void {
+        const boxW = 52;
+        const boxH = 26;
+        const spdX = 2;
+        const altX = W - boxW - 2;
+        const boxY = ay - boxH / 2;
+        const tickTop = ay - 52;
+        const tickBot = ay + 52;
 
-        const camera = this.scene.camera as BABYLON.Camera | null | undefined;
-        const planeRoot = this.scene.planeRoot;
-        if (!camera || !planeRoot) return;
-
-        let bScene: BABYLON.Scene | null = null;
-        try { bScene = camera.getScene(); } catch (_) { bScene = null; }
-        const engine = bScene ? bScene.getEngine() : null;
-        if (!engine) return;
-
-        try {
-            const renderW = Math.max(1, Math.floor(engine.getRenderWidth()));
-            const renderH = Math.max(1, Math.floor(engine.getRenderHeight()));
-            if (canvas.width !== renderW)  canvas.width  = renderW;
-            if (canvas.height !== renderH) canvas.height = renderH;
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            const transform = camera.getTransformationMatrix();
-            const viewport = new BABYLON.Viewport(0, 0, canvas.width, canvas.height);
-            const identity = BABYLON.Matrix.Identity();
-            const camPos = camera.globalPosition || (camera as any).position;
-            if (!camPos) return;
-
-            const wm = planeRoot.getWorldMatrix();
-            const fwd   = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
-            const worldUp = new BABYLON.Vector3(0, 1, 0);
-
-            const fwdFlat = fwd.subtract(worldUp.scale(BABYLON.Vector3.Dot(fwd, worldUp)));
-            if (fwdFlat.lengthSquared() < 1e-6) return;
-            fwdFlat.normalize();
-            const rightFlat = BABYLON.Vector3.Cross(worldUp, fwdFlat).normalize();
-
-            const camFwd = camera.getForwardRay ? camera.getForwardRay().direction : fwd;
-
-            const projectDir = (dir: BABYLON.Vector3): { x: number; y: number; visible: boolean } => {
-                if (BABYLON.Vector3.Dot(dir, camFwd) <= 0.01) {
-                    return { x: 0, y: 0, visible: false };
-                }
-                const worldPt = camPos.add(dir.scale(WORLD_HUD_ANCHOR_DISTANCE_M));
-                const p = BABYLON.Vector3.Project(worldPt, identity, transform, viewport);
-                if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return { x: 0, y: 0, visible: false };
-                if (p.z < 0 || p.z > 1) return { x: p.x, y: p.y, visible: false };
-                return { x: p.x, y: p.y, visible: true };
-            };
-
-            const pitchOffsetDir = (angleDeg: number, lateralDeg: number): BABYLON.Vector3 => {
-                const aRad = angleDeg * Math.PI / 180;
-                const lRad = lateralDeg * Math.PI / 180;
-                const cosA = Math.cos(aRad), sinA = Math.sin(aRad);
-                const cosL = Math.cos(lRad), sinL = Math.sin(lRad);
-                const fwdScale = cosA * cosL;
-                const rightScale = cosA * sinL;
-                return new BABYLON.Vector3(
-                    fwdFlat.x * fwdScale + rightFlat.x * rightScale + worldUp.x * sinA,
-                    fwdFlat.y * fwdScale + rightFlat.y * rightScale + worldUp.y * sinA,
-                    fwdFlat.z * fwdScale + rightFlat.z * rightScale + worldUp.z * sinA,
-                );
-            };
-
-            ctx.lineWidth = WORLD_HUD_LINE_WIDTH;
-            ctx.font = WORLD_HUD_FONT;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            const viewCx = canvas.width  * WORLD_HUD_CENTER_X_FRAC;
-            const viewCy = canvas.height * WORLD_HUD_CENTER_Y_FRAC;
-            const viewRadius = Math.max(
-                WORLD_HUD_VIEW_RADIUS_MIN_PX,
-                Math.min(
-                    WORLD_HUD_VIEW_RADIUS_MAX_PX,
-                    Math.min(canvas.width, canvas.height) * WORLD_HUD_VIEW_RADIUS_FRAC,
-                ),
-            );
-
-            ctx.save();
+        ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+        ctx.lineWidth = 1;
+        ctx.font = '9px monospace';
+        ctx.textBaseline = 'middle';
+        for (let i = -5; i <= 5; i++) {
+            const m = Math.round(speed / 10) * 10 + i * 10;
+            if (m < 0) continue;
+            const y = ay + (speed - m) * 1.5;
+            if (y < tickTop || y > tickBot) continue;
+            ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
             ctx.beginPath();
-            ctx.arc(viewCx, viewCy, viewRadius, 0, Math.PI * 2);
-            ctx.clip();
-
-            this._drawWorldHudLadder(ctx, viewCx, viewCy, viewRadius, pitchOffsetDir, projectDir);
-            this._drawWorldHudBoresight(ctx, projectDir, fwd, viewCx, viewCy, viewRadius);
-            this._drawWorldHudVelocityVector(ctx, projectDir, viewCx, viewCy, viewRadius);
-
-            ctx.restore();
-        } catch (err) {
-            console.warn('[WorldHud] draw failed:', err);
-        }
-    }
-
-    private _drawWorldHudBoresight(
-        ctx: CanvasRenderingContext2D,
-        projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
-        fwd: BABYLON.Vector3,
-        viewCx: number,
-        viewCy: number,
-        viewRadius: number,
-    ): void {
-        const p = projectDir(fwd);
-        if (!p.visible) return;
-        const dx = p.x - viewCx;
-        const dy = p.y - viewCy;
-        const reach = viewRadius + WORLD_HUD_BORESIGHT_HALF_PX;
-        if ((dx * dx + dy * dy) > reach * reach) return;
-        const half = WORLD_HUD_BORESIGHT_HALF_PX;
-        const tick = WORLD_HUD_BORESIGHT_TICK_PX;
-        ctx.strokeStyle = WORLD_HUD_COLOR;
-        ctx.beginPath();
-        ctx.moveTo(p.x - half, p.y);
-        ctx.lineTo(p.x - half * 0.3, p.y);
-        ctx.moveTo(p.x + half * 0.3, p.y);
-        ctx.lineTo(p.x + half, p.y);
-        ctx.moveTo(p.x - half, p.y);
-        ctx.lineTo(p.x - half, p.y + tick);
-        ctx.moveTo(p.x + half, p.y);
-        ctx.lineTo(p.x + half, p.y + tick);
-        ctx.stroke();
-    }
-
-    private _drawWorldHudVelocityVector(
-        ctx: CanvasRenderingContext2D,
-        projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
-        viewCx: number,
-        viewCy: number,
-        viewRadius: number,
-    ): void {
-        const v = this.scene.velocity as BABYLON.Vector3 | null | undefined;
-        if (!v) return;
-        const speed = v.length();
-        if (!(speed > WORLD_HUD_MIN_VELOCITY_MS)) return;
-        const velDir = v.scale(1 / speed);
-        const p = projectDir(velDir);
-        if (!p.visible) return;
-        const dx = p.x - viewCx;
-        const dy = p.y - viewCy;
-        const reach = viewRadius + WORLD_HUD_VV_RADIUS_PX + WORLD_HUD_VV_WING_PX;
-        if ((dx * dx + dy * dy) > reach * reach) return;
-
-        const r = WORLD_HUD_VV_RADIUS_PX;
-        const wing = WORLD_HUD_VV_WING_PX;
-        const top = WORLD_HUD_VV_TOP_PX;
-        ctx.strokeStyle = WORLD_HUD_COLOR;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(p.x - r, p.y);
-        ctx.lineTo(p.x - r - wing, p.y);
-        ctx.moveTo(p.x + r, p.y);
-        ctx.lineTo(p.x + r + wing, p.y);
-        ctx.moveTo(p.x, p.y - r);
-        ctx.lineTo(p.x, p.y - r - top);
-        ctx.stroke();
-    }
-
-    private _drawWorldHudLadder(
-        ctx: CanvasRenderingContext2D,
-        viewCx: number,
-        viewCy: number,
-        viewRadius: number,
-        pitchOffsetDir: (angleDeg: number, lateralDeg: number) => BABYLON.Vector3,
-        projectDir: (dir: BABYLON.Vector3) => { x: number; y: number; visible: boolean },
-    ): void {
-        const halfDeg = WORLD_HUD_LADDER_HALF_WIDTH_DEG;
-        const halfLabelDeg = WORLD_HUD_LADDER_HALF_WIDTH_LABEL_DEG;
-        const reach = viewRadius + WORLD_HUD_SCREEN_MARGIN_PX;
-        const reachSq = reach * reach;
-
-        for (let deg = WORLD_HUD_LADDER_MIN_PITCH_DEG; deg <= WORLD_HUD_LADDER_MAX_PITCH_DEG; deg += WORLD_HUD_LADDER_STEP_DEG) {
-            const isLabelLine = (deg % WORLD_HUD_LADDER_LABEL_STEP_DEG) === 0;
-            const useHalf = isLabelLine ? halfLabelDeg : halfDeg;
-            const placeDeg = deg * WORLD_HUD_LADDER_PITCH_COMPRESS;
-
-            const leftDir  = pitchOffsetDir(placeDeg, -useHalf);
-            const rightDir = pitchOffsetDir(placeDeg,  useHalf);
-            const pL = projectDir(leftDir);
-            const pR = projectDir(rightDir);
-            if (!pL.visible || !pR.visible) continue;
-
-            const dLx = pL.x - viewCx;
-            const dLy = pL.y - viewCy;
-            const dRx = pR.x - viewCx;
-            const dRy = pR.y - viewCy;
-            const insideL = (dLx * dLx + dLy * dLy) <= reachSq;
-            const insideR = (dRx * dRx + dRy * dRy) <= reachSq;
-            const midX = (pL.x + pR.x) * 0.5 - viewCx;
-            const midY = (pL.y + pR.y) * 0.5 - viewCy;
-            const midInside = (midX * midX + midY * midY) <= reachSq;
-            if (!insideL && !insideR && !midInside) continue;
-
-            const isHorizon = deg === 0;
-            const isBelow = deg < 0;
-
-            ctx.strokeStyle = isHorizon ? WORLD_HUD_COLOR : WORLD_HUD_COLOR_DIM;
-            ctx.lineWidth = isHorizon ? WORLD_HUD_LINE_WIDTH + 0.5 : WORLD_HUD_LINE_WIDTH;
-
-            if (isBelow) {
-                ctx.setLineDash(WORLD_HUD_LADDER_DASH_PATTERN_PX);
-            } else {
-                ctx.setLineDash([]);
-            }
-
-            ctx.beginPath();
-            ctx.moveTo(pL.x, pL.y);
-            ctx.lineTo(pR.x, pR.y);
+            ctx.moveTo(spdX + boxW + 2, y);
+            ctx.lineTo(spdX + boxW + 7, y);
             ctx.stroke();
-
-            if (isLabelLine && !isHorizon) {
-                ctx.setLineDash([]);
-                const dx = pR.x - pL.x;
-                const dy = pR.y - pL.y;
-                const len = Math.hypot(dx, dy);
-                if (len > 1) {
-                    const nx = -dy / len;
-                    const ny =  dx / len;
-                    const tickSign = isBelow ? -1 : 1;
-                    const tickLen = 6;
-                    ctx.beginPath();
-                    ctx.moveTo(pL.x, pL.y);
-                    ctx.lineTo(pL.x + nx * tickLen * tickSign, pL.y + ny * tickLen * tickSign);
-                    ctx.moveTo(pR.x, pR.y);
-                    ctx.lineTo(pR.x + nx * tickLen * tickSign, pR.y + ny * tickLen * tickSign);
-                    ctx.stroke();
-                }
-                ctx.fillStyle = WORLD_HUD_COLOR_DIM;
-                const labelOffset = 16;
-                ctx.fillText(`${deg}`, pL.x - labelOffset, pL.y);
-                ctx.fillText(`${deg}`, pR.x + labelOffset, pR.y);
+            if (m % 20 === 0) {
+                ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
+                ctx.textAlign = 'left';
+                ctx.fillText(`${m}`, spdX + boxW + 9, y);
             }
         }
-        ctx.setLineDash([]);
+        for (let i = -5; i <= 5; i++) {
+            const m = Math.round(altitude / 200) * 200 + i * 200;
+            if (m < 0) continue;
+            const y = ay + (altitude - m) * 0.18;
+            if (y < tickTop || y > tickBot) continue;
+            ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+            ctx.beginPath();
+            ctx.moveTo(altX - 7, y);
+            ctx.lineTo(altX - 2, y);
+            ctx.stroke();
+            if (m % 500 === 0) {
+                ctx.fillStyle = PFD_PRIMARY_COLOR_DIM;
+                ctx.textAlign = 'right';
+                ctx.fillText(`${m}`, altX - 9, y);
+            }
+        }
+
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(spdX, boxY, boxW, boxH);
+        ctx.fillRect(altX, boxY, boxW, boxH);
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(spdX, boxY, boxW, boxH);
+        ctx.strokeRect(altX, boxY, boxW, boxH);
+
+        ctx.fillStyle = PFD_PRIMARY_COLOR;
+        ctx.font = 'bold 14px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${speed}`, spdX + boxW / 2, ay);
+        ctx.fillText(`${altitude}`, altX + boxW / 2, ay);
+    }
+
+    private _drawPfdHsi(
+        ctx: CanvasRenderingContext2D,
+        cx: number,
+        hy: number,
+        hdgDeg: number,
+    ): void {
+        const R = PFD_HSI_RADIUS_PX;
+        const cardinals: Record<number, string> = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
+
+        ctx.save();
+        ctx.translate(cx, hy);
+
+        ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, R, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (let b = 0; b < 360; b += 10) {
+            const rel = (b - hdgDeg) * Math.PI / 180;
+            const ox = Math.sin(rel);
+            const oy = -Math.cos(rel);
+            const major = b % 30 === 0;
+            const len = major ? 10 : 6;
+            ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(ox * R, oy * R);
+            ctx.lineTo(ox * (R - len), oy * (R - len));
+            ctx.stroke();
+            if (major) {
+                const lbl = cardinals[b] || `${b / 10}`;
+                ctx.fillStyle = cardinals[b] ? PFD_PRIMARY_COLOR : PFD_PRIMARY_COLOR_DIM;
+                ctx.fillText(lbl, ox * (R - 20), oy * (R - 20));
+            }
+        }
+
+        const apHdg = this.scene._autopilotTargetHdgDeg;
+        if (typeof apHdg === 'number' && Number.isFinite(apHdg)) {
+            const rel = (apHdg - hdgDeg) * Math.PI / 180;
+            const ox = Math.sin(rel);
+            const oy = -Math.cos(rel);
+            const tx = -oy;
+            const ty = ox;
+            ctx.fillStyle = PFD_BUG_COLOR;
+            ctx.beginPath();
+            ctx.moveTo(ox * (R + 7), oy * (R + 7));
+            ctx.lineTo(ox * R + tx * 5, oy * R + ty * 5);
+            ctx.lineTo(ox * R - tx * 5, oy * R - ty * 5);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -14);
+        ctx.lineTo(0, 10);
+        ctx.moveTo(-10, 0);
+        ctx.lineTo(10, 0);
+        ctx.moveTo(-7, 10);
+        ctx.lineTo(7, 10);
+        ctx.stroke();
+
+        ctx.restore();
+
+        ctx.fillStyle = PFD_PRIMARY_COLOR;
+        ctx.beginPath();
+        ctx.moveTo(cx, hy - R);
+        ctx.lineTo(cx - 5, hy - R - 7);
+        ctx.lineTo(cx + 5, hy - R - 7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(cx - 22, hy - R - 26, 44, 17);
+        ctx.strokeStyle = PFD_PRIMARY_COLOR;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(cx - 22, hy - R - 26, 44, 17);
+        ctx.fillStyle = PFD_PRIMARY_COLOR;
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${String(Math.round(hdgDeg) % 360).padStart(3, '0')}`, cx, hy - R - 17);
     }
 
 }
