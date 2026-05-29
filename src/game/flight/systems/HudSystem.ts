@@ -7,7 +7,7 @@ import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 
 const PFD_ATTITUDE_CENTER_Y_FRAC = 0.5;
-const PFD_ATTITUDE_FILL_ALPHA = 0.5;
+const PFD_ATTITUDE_FILL_ALPHA = 0.4;
 const HSI_CANVAS_CENTER_Y_PX = 108;
 const PFD_ATTITUDE_RADIUS_PX = 110;
 const PFD_TAPE_HALF_HEIGHT_PX = 96;
@@ -46,6 +46,7 @@ const PFD_FULL_ATT_CY_PX = 175;
 const PFD_FULL_HSI_CY_PX = 420;
 const PFD_FULL_FMA_H_PX = 20;
 const PFD_FULL_VSI_WIDTH_PX = 16;
+const PFD_FULL_TAPE_BALL_GAP_PX = 16;
 const PFD_FULL_VSI_MAX_FPM = 2000;
 const PFD_FULL_VSI_HALF_PX = 96;
 const PFD_MS_TO_FPM = 196.850394;
@@ -1393,8 +1394,8 @@ export class HudSystem {
 @media(max-width:768px){
 #hfps{display:none}
 #hud-utc{font-size:8px!important;letter-spacing:.08em!important}
-#flight-pfd{top:33%!important;transform:translate(-50%,-50%)!important;width:272px;height:184px}
-#flight-hsi{top:68%!important;width:172px!important;height:172px!important}
+#flight-pfd{top:26%!important;transform:translate(-50%,-50%)!important;width:272px;height:184px}
+#flight-hsi{top:75%!important;width:172px!important;height:172px!important}
 #gps-map{width:168px!important;height:168px!important;top:2px!important;left:2px!important}
 .hud-panel-left{left:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom right}
@@ -1423,8 +1424,8 @@ export class HudSystem {
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
-#flight-pfd{top:29%!important;width:212px!important;height:143px!important}
-#flight-hsi{top:64%!important;width:150px!important;height:150px!important}
+#flight-pfd{top:22%!important;width:212px!important;height:143px!important}
+#flight-hsi{top:73%!important;width:150px!important;height:150px!important}
 #gps-map{width:132px!important;height:132px!important;top:4px!important;left:2px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom right}
@@ -1451,8 +1452,8 @@ export class HudSystem {
 #pfd-panel{width:380px!important}
 }
 @media(max-height:440px){
-#flight-pfd{top:31%!important;width:228px!important;height:154px!important}
-#flight-hsi{top:66%!important;width:160px!important;height:160px!important}
+#flight-pfd{top:24%!important;width:228px!important;height:154px!important}
+#flight-hsi{top:72%!important;width:160px!important;height:160px!important}
 #gps-map{width:120px!important;height:120px!important;top:2px!important;left:2px!important}
 #hud-utc{font-size:7px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom left}
@@ -1666,8 +1667,8 @@ export class HudSystem {
   </div>
 </div>
 
-<canvas id="flight-pfd" width="340" height="230" style="position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;opacity:.82"></canvas>
-<canvas id="flight-hsi" width="200" height="200" style="position:absolute;top:70%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;opacity:.9"></canvas>
+<canvas id="flight-pfd" width="340" height="230" style="position:absolute;top:28%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;opacity:.72"></canvas>
+<canvas id="flight-hsi" width="200" height="200" style="position:absolute;top:77%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;opacity:.82"></canvas>
 <div id="gps-map" style="position:absolute;top:4px;left:4px;width:216px;height:216px;border-radius:10px;overflow:hidden;box-shadow:0 0 20px rgba(0,255,128,.12);background:rgba(0,20,15,.6);pointer-events:auto;touch-action:none">
   <img id="gps-map-img" style="position:absolute;top:-50%;left:-50%;width:200%;height:200%;object-fit:cover;opacity:0.9;will-change:transform;pointer-events:none;user-select:none" draggable="false">
   <canvas id="gps-map-hdg" width="216" height="216" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
@@ -1753,7 +1754,7 @@ export class HudSystem {
   </div>
 </div>
 
-<div id="pfd-panel" class="game-panel" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);width:700px;aspect-ratio:1024 / 652;background:url('src/game/assets/textures/g1000_bezel.png') center/100% 100% no-repeat;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;filter:drop-shadow(0 8px 32px rgba(0,0,0,.6));z-index:300">
+<div id="pfd-panel" class="game-panel" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);width:520px;aspect-ratio:1024 / 652;background:url('src/game/assets/textures/g1000_bezel.png') center/100% 100% no-repeat;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;filter:drop-shadow(0 8px 32px rgba(0,0,0,.6));z-index:300">
   <div class="panel-handle" id="pfd-panel-handle" style="position:absolute;top:0;left:12.4%;width:75.1%;height:9%;cursor:grab;user-select:none;touch-action:none"></div>
   <button class="panel-close" data-panel="pfd-panel" data-btn="pfd-btn" title="Fechar" style="position:absolute;top:1.5%;right:1.5%;width:18px;height:18px;padding:0;border:1px solid rgba(80,255,160,.45);background:rgba(0,20,15,.65);color:#40ffaa;font-size:11px;line-height:1;cursor:pointer;border-radius:3px;z-index:2">\u00D7</button>
   <canvas id="pfd-panel-canvas" width="769" height="517" style="position:absolute;left:12.40%;top:10.12%;width:75.10%;height:79.29%;display:block"></canvas>
@@ -2650,9 +2651,11 @@ export class HudSystem {
         ay: number,
         speed: number,
         altitude: number,
+        spdXOverride?: number,
+        altXOverride?: number,
     ): void {
-        const spdX = PFD_TAPE_EDGE_GAP_PX;
-        const altX = W - PFD_TAPE_WIDTH_PX - PFD_TAPE_EDGE_GAP_PX;
+        const spdX = spdXOverride ?? PFD_TAPE_EDGE_GAP_PX;
+        const altX = altXOverride ?? (W - PFD_TAPE_WIDTH_PX - PFD_TAPE_EDGE_GAP_PX);
 
         const cfg = this.scene.aircraftConfig ?? null;
         const spdMarkers: { value: number; color: string }[] = [];
@@ -2969,14 +2972,15 @@ export class HudSystem {
 
         const ay = PFD_FULL_ATT_CY_PX;
         const hy = PFD_FULL_HSI_CY_PX;
-        const altX = W - PFD_TAPE_WIDTH_PX - PFD_TAPE_EDGE_GAP_PX;
+        const spdX = cx - PFD_ATTITUDE_RADIUS_PX - PFD_FULL_TAPE_BALL_GAP_PX - PFD_TAPE_WIDTH_PX;
+        const altX = cx + PFD_ATTITUDE_RADIUS_PX + PFD_FULL_TAPE_BALL_GAP_PX;
 
         this._drawPfdAttitude(ctx, cx, ay, pitchDeg, rollRad, rollDeg);
-        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude);
-        this._drawPfdVsi(ctx, altX - PFD_FULL_VSI_WIDTH_PX, ay, vsFpm);
+        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude, spdX, altX);
+        this._drawPfdVsi(ctx, altX + PFD_TAPE_WIDTH_PX + 3, ay, vsFpm);
         this._drawPfdFma(ctx, W);
         this._drawPfdBaro(ctx, altX, ay + PFD_TAPE_HALF_HEIGHT_PX + 6);
-        this._drawPfdAnnunciators(ctx, PFD_TAPE_EDGE_GAP_PX, ay + PFD_TAPE_HALF_HEIGHT_PX + 12);
+        this._drawPfdAnnunciators(ctx, spdX, ay + PFD_TAPE_HALF_HEIGHT_PX + 12);
         this._drawPfdHsi(ctx, cx, hy, hdgDeg);
     }
 

@@ -180,6 +180,8 @@ export class DebugPanelSystem {
             panel.style.left = `${newX}px`;
             panel.style.top = `${newY}px`;
             panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            panel.style.transform = 'none';
         });
         const endDrag = (ev: PointerEvent) => {
             const st = this.scene._panelDragState;
