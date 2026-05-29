@@ -62,6 +62,18 @@ const PFD_FULL_TAPE_BALL_GAP_PX = 16;
 const PFD_FULL_VSI_MAX_FPM = 2000;
 const PFD_FULL_VSI_HALF_PX = 96;
 const PFD_MS_TO_FPM = 196.850394;
+const PFD_SLIP_PX_PER_DEG = 2.6;
+const PFD_SLIP_MAX_PX = 16;
+const PFD_TREND_SECONDS = 6;
+const PFD_TREND_FILTER_TAU_S = 0.8;
+const PFD_TREND_COLOR = '#e070e0';
+const PFD_BAND_LOWSPEED_COLOR = '#ff3030';
+const PFD_BAND_GREEN_COLOR = '#19c219';
+const PFD_BAND_WHITE_COLOR = '#f0f0f0';
+const PFD_BEARING_PTR_COLOR = '#79e7ff';
+const PFD_HSI_TERM_RANGE_NM = 30;
+const PFD_HSI_DISK_COLOR = 'rgba(0,0,0,0.45)';
+const PFD_NAV_BLOCK_LABEL_COLOR = 'rgba(255,255,255,0.55)';
 
 const _C: any = CONST;
 const {
@@ -2537,23 +2549,31 @@ export class HudSystem {
         rollRad: number,
         rollDeg: number,
         fillAlpha: number = 1,
+        rectFull: { x0: number; y0: number; w: number; h: number } | null = null,
+        slipDeg: number | null = null,
     ): void {
         const R = PFD_ATTITUDE_RADIUS_PX;
         const ppd = PFD_PIXELS_PER_PITCH_DEG;
+        const big = rectFull ? (rectFull.w + rectFull.h) * 2 : R * 3;
+        const lineHalfW = rectFull ? big : R;
+        const ladderClip = rectFull ? big : R - 4;
 
         ctx.save();
         ctx.translate(ax, ay);
 
         ctx.save();
         ctx.beginPath();
-        ctx.arc(0, 0, R, 0, Math.PI * 2);
+        if (rectFull) {
+            ctx.rect(rectFull.x0 - ax, rectFull.y0 - ay, rectFull.w, rectFull.h);
+        } else {
+            ctx.arc(0, 0, R, 0, Math.PI * 2);
+        }
         ctx.clip();
-        ctx.rotate(rollRad);
+        ctx.rotate(-rollRad);
 
         const horizonY = pitchDeg * ppd;
-        const big = R * 3;
         ctx.save();
-        ctx.globalAlpha = fillAlpha;
+        ctx.globalAlpha = rectFull ? 1 : fillAlpha;
         ctx.fillStyle = PFD_SKY_COLOR;
         ctx.fillRect(-big, -big, big * 2, big + horizonY);
         ctx.fillStyle = PFD_GROUND_COLOR;
@@ -2563,8 +2583,8 @@ export class HudSystem {
         ctx.strokeStyle = PFD_PRIMARY_COLOR;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(-R, horizonY);
-        ctx.lineTo(R, horizonY);
+        ctx.moveTo(-lineHalfW, horizonY);
+        ctx.lineTo(lineHalfW, horizonY);
         ctx.stroke();
 
         ctx.font = '9px monospace';
@@ -2573,7 +2593,7 @@ export class HudSystem {
         for (let deg = PFD_LADDER_MIN_PITCH_DEG; deg <= PFD_LADDER_MAX_PITCH_DEG; deg += PFD_LADDER_STEP_DEG) {
             if (deg === 0) continue;
             const yOff = (pitchDeg - deg) * ppd;
-            if (Math.abs(yOff) > R - 4) continue;
+            if (Math.abs(yOff) > ladderClip) continue;
             const isLabel = deg % 10 === 0;
             const halfW = isLabel ? PFD_LADDER_HALF_WIDTH_PX : PFD_LADDER_HALF_WIDTH_MINOR_PX;
             const isBelow = deg < 0;
@@ -2601,11 +2621,13 @@ export class HudSystem {
         }
         ctx.restore();
 
-        ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(0, 0, R, 0, Math.PI * 2);
-        ctx.stroke();
+        if (!rectFull) {
+            ctx.strokeStyle = PFD_PRIMARY_COLOR_DIM;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(0, 0, R, 0, Math.PI * 2);
+            ctx.stroke();
+        }
 
         const bankR = PFD_BANK_RADIUS_PX;
         ctx.strokeStyle = PFD_PRIMARY_COLOR;
@@ -2639,6 +2661,23 @@ export class HudSystem {
         ctx.lineTo(Math.cos(bankPtr - 0.05) * (bankR - 11), Math.sin(bankPtr - 0.05) * (bankR - 11));
         ctx.lineTo(Math.cos(bankPtr + 0.05) * (bankR - 11), Math.sin(bankPtr + 0.05) * (bankR - 11));
         ctx.fill();
+
+        if (Number.isFinite(slipDeg)) {
+            const sOff = Math.max(-PFD_SLIP_MAX_PX, Math.min(PFD_SLIP_MAX_PX, (slipDeg as number) * PFD_SLIP_PX_PER_DEG));
+            const syTop = -(bankR - 13);
+            const syBot = syTop + 6;
+            ctx.fillStyle = PFD_PRIMARY_COLOR;
+            ctx.strokeStyle = PFD_AIRCRAFT_SYMBOL_OUTLINE;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(-7 + sOff, syTop);
+            ctx.lineTo(7 + sOff, syTop);
+            ctx.lineTo(9 + sOff, syBot);
+            ctx.lineTo(-9 + sOff, syBot);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
 
         if (this.scene._fdActive === true) {
             const cmdPitchDeg = Number.isFinite(this.scene._fdCmdPitchDeg) ? this.scene._fdCmdPitchDeg : pitchDeg;
@@ -2699,6 +2738,8 @@ export class HudSystem {
         spdXOverride?: number,
         altXOverride?: number,
         tapeBg: string | null = PFD_TAPE_BG_COLOR,
+        showSpdEnhancements: boolean = false,
+        spdTrendKt: number | null = null,
     ): void {
         const spdX = spdXOverride ?? PFD_TAPE_EDGE_GAP_PX;
         const altX = altXOverride ?? (W - PFD_TAPE_WIDTH_PX - PFD_TAPE_EDGE_GAP_PX);
@@ -2707,15 +2748,27 @@ export class HudSystem {
         const spdMarkers: { value: number; color: string }[] = [];
         const vne = cfg?.vne_kts;
         const vfe = cfg?.vfe_kts;
+        const stall = cfg?.stall_speed_kts;
         if (typeof vfe === 'number' && Number.isFinite(vfe) && vfe > 0) spdMarkers.push({ value: vfe, color: PFD_VFE_COLOR });
         if (typeof vne === 'number' && Number.isFinite(vne) && vne > 0) spdMarkers.push({ value: vne, color: PFD_VNE_COLOR });
+
+        const spdBands: { from: number; to: number; color: string; lane?: number }[] = [];
+        if (showSpdEnhancements && typeof stall === 'number' && Number.isFinite(stall) && stall > 0) {
+            spdBands.push({ from: 0, to: stall, color: PFD_BAND_LOWSPEED_COLOR });
+            if (typeof vne === 'number' && Number.isFinite(vne) && vne > stall) {
+                spdBands.push({ from: stall, to: vne, color: PFD_BAND_GREEN_COLOR });
+            }
+            if (typeof vfe === 'number' && Number.isFinite(vfe) && vfe > stall) {
+                spdBands.push({ from: stall, to: vfe, color: PFD_BAND_WHITE_COLOR, lane: 1 });
+            }
+        }
         const atActive = this.scene._autopilotAtHold === true;
         const selSpeed = atActive && Number.isFinite(this.scene._autopilotAtTargetKts) ? this.scene._autopilotAtTargetKts : null;
 
         const altActive = this.scene._autopilotAltHold === true;
         const selAlt = altActive && Number.isFinite(this.scene._autopilotTargetAltFt) ? this.scene._autopilotTargetAltFt : null;
 
-        this._drawPfdTape(ctx, spdX, ay, 'left', speed, PFD_SPD_PX_PER_KT, PFD_SPD_MINOR_STEP_KT, PFD_SPD_MAJOR_STEP_KT, spdMarkers, selSpeed, PFD_BUG_COLOR, tapeBg);
+        this._drawPfdTape(ctx, spdX, ay, 'left', speed, PFD_SPD_PX_PER_KT, PFD_SPD_MINOR_STEP_KT, PFD_SPD_MAJOR_STEP_KT, spdMarkers, selSpeed, PFD_BUG_COLOR, tapeBg, spdBands, showSpdEnhancements ? spdTrendKt : null);
         this._drawPfdTape(ctx, altX, ay, 'right', altitude, PFD_ALT_PX_PER_FT, PFD_ALT_MINOR_STEP_FT, PFD_ALT_MAJOR_STEP_FT, [], selAlt, PFD_BUG_COLOR, tapeBg);
 
         if (selAlt !== null) {
@@ -2748,6 +2801,8 @@ export class HudSystem {
         selValue: number | null,
         selColor: string,
         tapeBg: string | null = PFD_TAPE_BG_COLOR,
+        bands: { from: number; to: number; color: string; lane?: number }[] = [],
+        trendKt: number | null = null,
     ): void {
         const tapeW = PFD_TAPE_WIDTH_PX;
         const halfH = PFD_TAPE_HALF_HEIGHT_PX;
@@ -2765,6 +2820,41 @@ export class HudSystem {
         ctx.beginPath();
         ctx.rect(x, top, tapeW, halfH * 2);
         ctx.clip();
+
+        for (const band of bands) {
+            const yFrom = Math.min(bottom, Math.max(top, ay + (value - band.from) * pxPerUnit));
+            const yTo = Math.min(bottom, Math.max(top, ay + (value - band.to) * pxPerUnit));
+            const bTop = Math.min(yFrom, yTo);
+            const bH = Math.abs(yFrom - yTo);
+            if (bH < 0.5) continue;
+            const lane = band.lane ?? 0;
+            const stripW = 5;
+            const bx = side === 'left'
+                ? innerEdge - stripW * (lane + 1)
+                : innerEdge + stripW * lane;
+            ctx.fillStyle = band.color;
+            ctx.fillRect(bx, bTop, stripW, bH);
+        }
+
+        if (trendKt !== null && Math.abs(trendKt) >= 1) {
+            const ty = ay - trendKt * pxPerUnit;
+            const tyClamped = Math.min(bottom, Math.max(top, ty));
+            const tx = side === 'left' ? innerEdge - 2 : innerEdge + 2;
+            ctx.strokeStyle = PFD_TREND_COLOR;
+            ctx.fillStyle = PFD_TREND_COLOR;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(tx, ay);
+            ctx.lineTo(tx, tyClamped);
+            ctx.stroke();
+            const dir = trendKt >= 0 ? -1 : 1;
+            ctx.beginPath();
+            ctx.moveTo(tx, tyClamped);
+            ctx.lineTo(tx - 3, tyClamped - dir * 4);
+            ctx.lineTo(tx + 3, tyClamped - dir * 4);
+            ctx.closePath();
+            ctx.fill();
+        }
 
         ctx.shadowColor = 'rgba(0,0,0,0.95)';
         ctx.shadowBlur = 3;
@@ -2908,6 +2998,8 @@ export class HudSystem {
         cx: number,
         hy: number,
         hdgDeg: number,
+        brgToWptDeg: number | null = null,
+        annun: string | null = null,
     ): void {
         const R = PFD_HSI_RADIUS_PX;
         const cardinals: Record<number, string> = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
@@ -2959,6 +3051,27 @@ export class HudSystem {
             ctx.fill();
         }
 
+        if (brgToWptDeg !== null && Number.isFinite(brgToWptDeg)) {
+            const rel = (brgToWptDeg - hdgDeg) * Math.PI / 180;
+            const ox = Math.sin(rel);
+            const oy = -Math.cos(rel);
+            ctx.strokeStyle = PFD_BEARING_PTR_COLOR;
+            ctx.fillStyle = PFD_BEARING_PTR_COLOR;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(ox * (R - 12), oy * (R - 12));
+            ctx.lineTo(ox * 22, oy * 22);
+            ctx.stroke();
+            const tx = -oy;
+            const ty = ox;
+            ctx.beginPath();
+            ctx.moveTo(ox * (R - 4), oy * (R - 4));
+            ctx.lineTo(ox * (R - 14) + tx * 5, oy * (R - 14) + ty * 5);
+            ctx.lineTo(ox * (R - 14) - tx * 5, oy * (R - 14) - ty * 5);
+            ctx.closePath();
+            ctx.fill();
+        }
+
         ctx.strokeStyle = PFD_PRIMARY_COLOR;
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -2969,6 +3082,16 @@ export class HudSystem {
         ctx.moveTo(-7, 10);
         ctx.lineTo(7, 10);
         ctx.stroke();
+
+        if (annun) {
+            ctx.fillStyle = PFD_CRS_COLOR;
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('GPS', -R * 0.42, -8);
+            ctx.fillStyle = PFD_BUG_COLOR;
+            ctx.fillText(annun, R * 0.42, -8);
+        }
 
         ctx.restore();
 
@@ -3040,8 +3163,18 @@ export class HudSystem {
         const aglFt = Math.max(0, pPos.y - groundY) * 3.28084;
         const navInfo = this._getPfdNavInfo();
 
-        this._drawPfdAttitude(ctx, cx, ay, pitchDeg, rollRad, rollDeg);
-        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude, spdX, altX);
+        const vel = this.scene.velocity;
+        const speedMs = vel ? vel.length() : 0;
+        let slipDeg: number | null = null;
+        if (speedMs > 2) {
+            const lateral = BABYLON.Vector3.Dot(vel, right) / speedMs;
+            slipDeg = Math.asin(Math.max(-1, Math.min(1, lateral))) * 180 / Math.PI;
+        }
+        const spdTrendKt = this._computeSpeedTrendKt(speed);
+
+        const attRect = { x0: 0, y0: PFD_FULL_FMA_H_PX, w: W, h: canvas.height - PFD_FULL_FMA_H_PX };
+        this._drawPfdAttitude(ctx, cx, ay, pitchDeg, rollRad, rollDeg, 1, attRect, slipDeg);
+        this._drawPfdSideReadouts(ctx, W, ay, speed, altitude, spdX, altX, PFD_TAPE_BG_COLOR, true, spdTrendKt);
         this._drawPfdVsi(ctx, altX + PFD_TAPE_WIDTH_PX + 3, ay, vsFpm);
         if (this.scene._autopilotVsHold === true && Number.isFinite(this.scene._autopilotTargetVsFpm)) {
             this._drawPfdVsiBug(ctx, altX + PFD_TAPE_WIDTH_PX + 3, ay, this.scene._autopilotTargetVsFpm);
@@ -3058,12 +3191,105 @@ export class HudSystem {
         this._drawPfdAnnunciators(ctx, spdX, ay + PFD_TAPE_HALF_HEIGHT_PX + 12);
         this._drawPfdDataBlock(ctx, 8, canvas.height - 8, tasKt, gsKt, oatC);
         this._drawPfdWind(ctx, 12, PFD_FULL_FMA_H_PX + 24, wind, hdgDeg);
-        this._drawPfdHsi(ctx, cx, hy, hdgDeg);
+        ctx.fillStyle = PFD_HSI_DISK_COLOR;
+        ctx.beginPath();
+        ctx.arc(cx, hy, PFD_HSI_RADIUS_PX + 8, 0, Math.PI * 2);
+        ctx.fill();
+        let hsiAnnun: string | null = null;
+        if (navInfo) {
+            hsiAnnun = this.scene._autopilotAprHold === true ? 'APR'
+                : navInfo.distNm < PFD_HSI_TERM_RANGE_NM ? 'TERM' : 'ENR';
+        }
+        this._drawPfdHsi(ctx, cx, hy, hdgDeg, navInfo ? navInfo.brgDeg : null, hsiAnnun);
         this._drawPfdSelHdg(ctx, cx - 150, hy + 70, this.scene._autopilotTargetHdgDeg);
         if (navInfo) {
             this._drawPfdSelCrs(ctx, cx + 92, hy + 70, navInfo.crsDeg);
             this._drawPfdWptInfo(ctx, cx, PFD_FULL_FMA_H_PX + 14, navInfo.distNm, navInfo.brgDeg);
             this._drawPfdCdi(ctx, cx, hy, hdgDeg, navInfo.crsDeg, navInfo.xteNm);
+        }
+        this._drawPfdNavBlock(ctx, canvas);
+    }
+
+    private _spdTrendPrevKt: number = NaN;
+    private _spdTrendPrevMs: number = 0;
+    private _spdTrendFilteredKt: number = 0;
+
+    private _computeSpeedTrendKt(speedKt: number): number | null {
+        const nowMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        if (!Number.isFinite(this._spdTrendPrevKt)) {
+            this._spdTrendPrevKt = speedKt;
+            this._spdTrendPrevMs = nowMs;
+            return null;
+        }
+        const dtS = (nowMs - this._spdTrendPrevMs) / 1000;
+        if (dtS < 0.05) return this._spdTrendFilteredKt;
+        const accelKtPerS = (speedKt - this._spdTrendPrevKt) / dtS;
+        this._spdTrendPrevKt = speedKt;
+        this._spdTrendPrevMs = nowMs;
+        const rawTrend = accelKtPerS * PFD_TREND_SECONDS;
+        const alpha = Math.max(0, Math.min(1, dtS / PFD_TREND_FILTER_TAU_S));
+        this._spdTrendFilteredKt += alpha * (rawTrend - this._spdTrendFilteredKt);
+        return this._spdTrendFilteredKt;
+    }
+
+    private _navText(id: string): string {
+        const el = document.getElementById(id);
+        const t = el && el.textContent ? el.textContent.trim() : '';
+        return t || '\u2014';
+    }
+
+    private _drawPfdNavBlock(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement): void {
+        const navEl = this.scene._navInfoEl as HTMLElement | null;
+        if (!navEl || navEl.style.display === 'none') return;
+        const legBlock = document.getElementById('nav-leg-block');
+        const legVisible = !!legBlock && legBlock.style.display !== 'none';
+        const rows: { label: string; value: string }[] = [];
+        if (legVisible) {
+            rows.push({ label: 'WPT', value: this._navText('nav-wpt-name') });
+            rows.push({ label: 'LEG', value: this._navText('nav-leg-idx') });
+            rows.push({ label: 'DIST', value: this._navText('nav-leg-dist') });
+            rows.push({ label: 'BRG', value: this._navText('nav-leg-brg') });
+            rows.push({ label: 'HDG\u0394', value: this._navText('nav-hdg-delta') });
+            rows.push({ label: 'XTE', value: this._navText('nav-xte-val') });
+            rows.push({ label: 'ETE', value: this._navText('nav-ete') });
+            rows.push({ label: 'ETA', value: this._navText('nav-eta') });
+        }
+        rows.push({ label: 'DEST', value: this._navText('nav-dest') });
+        rows.push({ label: 'DIST', value: this._navText('nav-dist') });
+        rows.push({ label: 'TOTAL', value: this._navText('nav-total-dist') });
+        rows.push({ label: 'WIND', value: this._navText('nav-wind') });
+        rows.push({ label: 'GS', value: this._navText('nav-gs') });
+
+        const rowH = 13;
+        const padX = 6;
+        const headerH = 14;
+        const boxW = 168;
+        const boxH = headerH + rows.length * rowH + 6;
+        const boxX = canvas.width - boxW - 4;
+        const boxY = canvas.height - boxH - 4;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(boxX, boxY, boxW, boxH);
+        ctx.strokeStyle = 'rgba(80,255,160,0.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 9px monospace';
+        ctx.fillStyle = PFD_AP_ACTIVE_COLOR;
+        ctx.textAlign = 'left';
+        ctx.fillText('FLIGHT PLAN', boxX + padX, boxY + headerH / 2 + 2);
+
+        let ry = boxY + headerH + rowH / 2 + 2;
+        ctx.font = '9px monospace';
+        for (const r of rows) {
+            ctx.fillStyle = PFD_NAV_BLOCK_LABEL_COLOR;
+            ctx.textAlign = 'left';
+            ctx.fillText(r.label, boxX + padX, ry);
+            ctx.fillStyle = PFD_AP_ACTIVE_COLOR;
+            ctx.textAlign = 'right';
+            ctx.fillText(r.value, boxX + boxW - padX, ry);
+            ry += rowH;
         }
     }
 
