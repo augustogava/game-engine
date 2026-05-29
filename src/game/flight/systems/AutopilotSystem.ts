@@ -32,6 +32,9 @@ import {
     METERS_PER_DEG_LAT,
 } from '../constants/index.js';
 
+const FD_VS_ERR_TO_PITCH_DEG_PER_FPM = 0.004;
+const FD_PITCH_CMD_LIMIT_DEG = 12;
+
 export class AutopilotSystem {
     private readonly scene: any;
 
@@ -99,7 +102,10 @@ export class AutopilotSystem {
     }
 
     updateAutopilot(dt: number): void {
-        if (!this.scene._autopilotMaster || !this.scene.planeRoot || !this.scene.planeRoot.rotationQuaternion) return;
+        if (!this.scene._autopilotMaster || !this.scene.planeRoot || !this.scene.planeRoot.rotationQuaternion) {
+            this.scene._fdActive = false;
+            return;
+        }
         const stepDt = Math.max(0.001, Math.min(0.1, dt));
         const wm = this.scene.planeRoot.getWorldMatrix();
         const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
@@ -129,9 +135,11 @@ export class AutopilotSystem {
             }
         }
 
+        let fdBankDeg = 0;
         if ((this.scene._autopilotHdgHold || this.scene._autopilotNavHold || this.scene._autopilotAprHold) && this.scene.surfaces.length >= 2) {
             const delta = ((this.scene._autopilotTargetHdgDeg - curHdgDeg + 540) % 360) - 180;
             const targetBank = Math.max(-AP_HDG_MAX_BANK_DEG, Math.min(AP_HDG_MAX_BANK_DEG, delta * AP_HDG_BANK_GAIN * AP_HDG_MAX_BANK_DEG));
+            fdBankDeg = targetBank;
             const sinBank = Math.max(-1, Math.min(1, right.y));
             const curBankDeg = -Math.asin(sinBank) * 180 / Math.PI;
             const rollErr = targetBank - curBankDeg;
@@ -184,12 +192,20 @@ export class AutopilotSystem {
             pitchMax = AP_ALT_PITCH_MAX;
         }
 
+        const curPitchDeg = curPitchRad * 180 / Math.PI;
+        let fdPitchDeg = curPitchDeg;
         if (targetVsFpm !== null) {
             const errFpm = targetVsFpm - vsFpmNow;
             const pitchCmd = Math.max(-pitchMax, Math.min(pitchMax,
                 errFpm * AP_VS_PITCH_GAIN - pitchRateRadPerS * AP_PITCH_RATE_DAMP_GAIN));
             this.scene.surfaces[2].controlInput = -pitchCmd;
+            fdPitchDeg = curPitchDeg + Math.max(-FD_PITCH_CMD_LIMIT_DEG, Math.min(FD_PITCH_CMD_LIMIT_DEG,
+                errFpm * FD_VS_ERR_TO_PITCH_DEG_PER_FPM));
         }
+
+        this.scene._fdActive = true;
+        this.scene._fdCmdRollDeg = fdBankDeg;
+        this.scene._fdCmdPitchDeg = fdPitchDeg;
 
         if ((this.scene._autopilotAltHold || this.scene._autopilotVsHold || this.scene._autopilotAprHold) && this.scene.surfaces.length >= 3) {
             const elevatorCmd = this.scene.surfaces[2].controlInput;
