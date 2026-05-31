@@ -17,8 +17,7 @@ import {
     NAV_STROBE_DOUBLE_GAP_S,
     NAV_ANTICOL_PERIOD_S,
     NAV_ANTICOL_ON_FRAC,
-    GEAR_STATE_DOWN,
-    GEAR_STATE_EXTENDING,
+    CAMERA_MODE_COCKPIT,
 } from '../constants/index.js';
 
 export class NavLightsSystem {
@@ -124,8 +123,8 @@ export class NavLightsSystem {
         if (this.scene._navLights.length === 0) return;
         this.scene._navStrobeTimer += dt;
         const t = this.scene._navStrobeTimer;
-        const gearDown = this.scene.gearState === GEAR_STATE_DOWN || this.scene.gearState === GEAR_STATE_EXTENDING;
-        const landingOn = this.scene._landingLightsOn || gearDown;
+        const frontView = this.scene._cameraMode === CAMERA_MODE_COCKPIT;
+        const landingOn = this.scene._landingLightsOn;
         for (const nav of this.scene._navLights) {
             let on = true;
             switch (nav.kind) {
@@ -151,6 +150,7 @@ export class NavLightsSystem {
                 default:
                     on = true;
             }
+            if (frontView) on = false;
             nav.light.intensity = on ? nav.maxIntensity : 0;
             nav.core.isVisible = on;
         }
