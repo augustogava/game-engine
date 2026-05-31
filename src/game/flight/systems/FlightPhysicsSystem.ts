@@ -76,6 +76,8 @@ const {
     CINEMATIC_DURATION_MS,
     CAMERA_RADIUS_MIN_M,
     CAMERA_RADIUS_MAX_M,
+    CAMERA_COCKPIT_RADIUS_M,
+    CAMERA_COCKPIT_LOWER_RADIUS_M,
     CINEMATIC_INITIAL_RADIUS_M,
     CAMERA_MODE_COCKPIT,
     CAMERA_MODE_FLYBY,
@@ -810,6 +812,8 @@ export class FlightPhysicsSystem {
             BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this.scene._tmpFwd);
             const targetAlpha = Math.atan2(-this.scene._tmpFwd.z, -this.scene._tmpFwd.x);
             this.scene.camera.alpha = targetAlpha;
+            this.scene.camera.lowerRadiusLimit = CAMERA_COCKPIT_LOWER_RADIUS_M;
+            this.scene.camera.radius = CAMERA_COCKPIT_RADIUS_M;
         } else if (this.scene._cameraMode === CAMERA_MODE_FLYBY) {
             this.scene.camera.target.copyFrom(pos);
         } else if (this.scene._cameraMode === CAMERA_MODE_TOWER) {
