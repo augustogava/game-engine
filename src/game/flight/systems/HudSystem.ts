@@ -1460,7 +1460,7 @@ export class HudSystem {
 #ap-panel .ap-display{font-size:10px!important;min-width:46px!important;padding:1px 4px!important}
 #ap-panel .ap-knob{width:22px!important;height:22px!important}
 #ap-panel .ap-knob-tick{height:7px!important;top:2px!important}
-#instrument-dock{bottom:8px!important;left:8px!important;transform:none!important;padding:4px!important}
+#instrument-dock{bottom:8px!important;right:8px!important;left:auto!important;transform:none!important;padding:4px!important}
 #pfd-panel{width:480px!important}
 }
 @media(max-width:480px){
@@ -1489,7 +1489,7 @@ export class HudSystem {
 #ap-panel .ap-display{font-size:9px!important;min-width:40px!important;padding:1px 3px!important}
 #ap-panel .ap-knob{width:20px!important;height:20px!important}
 #ap-panel .ap-knob-tick{height:6px!important;top:2px!important;width:2px!important}
-#instrument-dock{bottom:8px!important;left:6px!important;transform:none!important;padding:3px!important;gap:4px!important}
+#instrument-dock{bottom:8px!important;right:6px!important;left:auto!important;transform:none!important;padding:3px!important;gap:4px!important}
 #pfd-panel{width:380px!important}
 }
 @media(max-height:440px){
@@ -1499,7 +1499,7 @@ export class HudSystem {
 #hud-utc{font-size:7px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom right}
-#instrument-dock{bottom:6px!important;left:6px!important;transform:none!important}
+#instrument-dock{bottom:6px!important;right:6px!important;left:auto!important;transform:none!important}
 #pfd-panel{bottom:6px!important;width:560px!important}
 }
 
@@ -1793,6 +1793,7 @@ export class HudSystem {
   <div id="pfd-btn" style="width:32px;height:32px;background:rgba(2,10,20,.6);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="PFD (Shift+I)">
     <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><path d="M3.6 12a8.4 8.4 0 0 1 16.8 0z" fill="#2e6db4"/><path d="M3.6 12a8.4 8.4 0 0 0 16.8 0z" fill="#6b4a2a"/><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><line x1="7" y1="12" x2="17" y2="12" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="12" r="1.2" fill="#fff"/></svg>
   </div>
+  <div id="ap-toggle-btn" style="width:32px;height:32px;background:rgba(2,10,20,.6);border:1px solid rgba(80,180,255,.4);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;font-family:'Orbitron',monospace;font-size:11px;letter-spacing:.04em;color:#9cf;transition:border-color .2s,box-shadow .2s,color .2s" title="Piloto autom\u00E1tico (AP)">AP</div>
 </div>
 
 <div id="pfd-panel" class="game-panel" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);width:800px;aspect-ratio:1024 / 652;background:url('src/game/assets/textures/g1000_bezel.png') center/100% 100% no-repeat;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;filter:drop-shadow(0 8px 32px rgba(0,0,0,.6));z-index:300">
@@ -1919,6 +1920,7 @@ export class HudSystem {
 
         this.scene._setupPanelControls();
         this.setupPfdPanel();
+        this.setupAutopilotToggle();
 
         this.scene._navInfoEl = document.getElementById('nav-info');
         this.scene._navDestEl = document.getElementById('nav-dest');
@@ -2501,6 +2503,41 @@ export class HudSystem {
             };
             window.addEventListener('keydown', this.scene._pfdPanelKeydownHandler);
         }
+    }
+
+    setupAutopilotToggle(): void {
+        const panel = document.getElementById('ap-panel');
+        const btn = document.getElementById('ap-toggle-btn');
+        if (!panel || !btn) {
+            console.warn('[AP Panel] Missing DOM elements; autopilot toggle setup skipped');
+            return;
+        }
+        const setActive = (active: boolean): void => {
+            btn.style.borderColor = active ? 'rgba(80,180,255,.9)' : 'rgba(80,180,255,.4)';
+            btn.style.boxShadow = active ? '0 0 12px rgba(80,180,255,.35)' : 'none';
+            btn.style.color = active ? '#cfe6ff' : '#9cf';
+        };
+        const applyVisible = (visible: boolean): void => {
+            panel.style.display = visible ? 'flex' : 'none';
+            setActive(visible);
+        };
+        applyVisible(panel.style.display !== 'none');
+
+        btn.addEventListener('mouseenter', () => {
+            if (panel.style.display === 'none') {
+                btn.style.borderColor = 'rgba(80,180,255,.7)';
+                btn.style.boxShadow = '0 0 8px rgba(80,180,255,.2)';
+            }
+        });
+        btn.addEventListener('mouseleave', () => {
+            if (panel.style.display === 'none') setActive(false);
+        });
+        btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const visible = panel.style.display !== 'none';
+            applyVisible(!visible);
+            console.log(`[AP Panel] ${visible ? 'closed' : 'opened'}`);
+        });
     }
 
     drawFlightHUD(

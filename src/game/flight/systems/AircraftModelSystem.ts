@@ -18,6 +18,8 @@ import {
     AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS,
 } from '../constants/index.js';
 
+const AIRCRAFT_TEXTURE_ANISOTROPY = 8;
+
 export class AircraftModelSystem {
     private readonly scene: any;
 
@@ -194,6 +196,25 @@ export class AircraftModelSystem {
                     meshes.forEach((m: BABYLON.AbstractMesh) => {
                         shadow.addShadowCaster(m, true);
                     });
+                }
+
+                try {
+                    const caps = scene.getEngine().getCaps();
+                    const maxAniso = caps && Number.isFinite(caps.maxAnisotropy) ? caps.maxAnisotropy : 1;
+                    const targetAniso = Math.max(1, Math.min(AIRCRAFT_TEXTURE_ANISOTROPY, maxAniso));
+                    const seenAnisoTex = new Set<BABYLON.BaseTexture>();
+                    meshes.forEach((m: BABYLON.AbstractMesh) => {
+                        const mat = m.material as any;
+                        if (!mat || typeof mat.getActiveTextures !== 'function') return;
+                        for (const tex of mat.getActiveTextures()) {
+                            if (tex && !seenAnisoTex.has(tex) && typeof tex.anisotropicFilteringLevel === 'number' && tex.anisotropicFilteringLevel < targetAniso) {
+                                seenAnisoTex.add(tex);
+                                tex.anisotropicFilteringLevel = targetAniso;
+                            }
+                        }
+                    });
+                } catch (anisoErr) {
+                    console.warn('[FlightSimple] Aircraft anisotropic filtering set failed:', anisoErr);
                 }
 
                 const savedPlaneQuat = this.scene.planeRoot.rotationQuaternion?.clone() || null;

@@ -15,6 +15,7 @@ declare const __GOOGLE_MAPS_API_KEY__: string;
 
 const TILES_ERROR_TARGET_MOBILE = 2;
 const TILES_ERROR_TARGET_DESKTOP = 6;
+const TILE_TEXTURE_ANISOTROPY = 8;
 
 export class TerrainTilesSystem {
     private readonly scene: any;
@@ -121,6 +122,12 @@ export class TerrainTilesSystem {
                         ? (tileScene as any).getChildMeshes(false)
                         : [];
                     const wantShadows = !!this.scene._premium.tileShadows;
+                    let maxAniso = 1;
+                    try {
+                        const caps = this.scene.scene?.getEngine()?.getCaps();
+                        if (caps && Number.isFinite(caps.maxAnisotropy)) maxAniso = caps.maxAnisotropy;
+                    } catch (_) { /* ignore */ }
+                    const targetAniso = Math.max(1, Math.min(TILE_TEXTURE_ANISOTROPY, maxAniso));
                     const seenMats = new Set<BABYLON.Material>();
                     const clipZones = this.scene._airportClipZones as
                         | { centerVec: BABYLON.Vector3; clipRadiusM: number; clipMaxAltM: number }[]
@@ -148,6 +155,16 @@ export class TerrainTilesSystem {
                                 if (pbr.roughness !== null && pbr.roughness !== undefined && pbr.roughness < TILE_PBR_ROUGHNESS_FLOOR) {
                                     pbr.roughness = TILE_PBR_ROUGHNESS_FLOOR;
                                 }
+                            }
+                            try {
+                                const texs = (mat as any).getActiveTextures ? (mat as any).getActiveTextures() : [];
+                                for (const tex of texs) {
+                                    if (tex && typeof tex.anisotropicFilteringLevel === 'number' && tex.anisotropicFilteringLevel < targetAniso) {
+                                        tex.anisotropicFilteringLevel = targetAniso;
+                                    }
+                                }
+                            } catch (anisoErr) {
+                                console.warn('[3DTiles] Anisotropic filtering set failed:', anisoErr);
                             }
                         } catch (innerErr) {
                             console.warn('[3DTiles] Failed to polish tile mesh:', innerErr);

@@ -8,6 +8,7 @@ export const JOYSTICK_MAX_EXPO = 3.0;
 export const JOYSTICK_MIN_EXPO = 1.0;
 
 export const PINCH_THROTTLE_PX_TO_DELTA = 0.005;
+export const PINCH_ZOOM_PX_TO_RADIUS = 0.35;
 export const TWO_FINGER_SWIPE_MIN_PX = 50;
 export const TWO_FINGER_DISTANCE_TOLERANCE_RATIO = 0.20;
 export const CAMERA_CYCLE_COOLDOWN_MS = 600;

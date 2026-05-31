@@ -117,9 +117,22 @@ export class CameraSystem {
                     break;
             }
             if (safeMode !== CAMERA_MODE_TOWER) this.scene._towerCameraSet = false;
+            this.setAircraftModelVisible(safeMode !== CAMERA_MODE_COCKPIT);
             console.log(`[Camera] Mode changed to ${safeMode}`);
         } catch (err) {
             console.warn('[Camera] Failed to set mode:', err);
+        }
+    }
+
+    setAircraftModelVisible(visible: boolean): void {
+        const meshes = this.scene._loadedModelMeshes;
+        if (!Array.isArray(meshes)) return;
+        for (const mesh of meshes) {
+            try {
+                if (mesh) mesh.isVisible = visible;
+            } catch (err) {
+                console.warn('[Camera] Failed to toggle aircraft mesh visibility:', err);
+            }
         }
     }
 

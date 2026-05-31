@@ -1,6 +1,6 @@
 export const CAMERA_RADIUS_LENGTH_FACTOR = 3;
 export const CAMERA_RADIUS_MIN_M = 15;
-export const CAMERA_RADIUS_MAX_M = 65;
+export const CAMERA_RADIUS_MAX_M = 130;
 export const CAMERA_LOWER_RADIUS_LIMIT_M = 8;
 export const CAMERA_UPPER_RADIUS_LIMIT_M = 500;
 export const CAMERA_LOWER_RADIUS_AIRCRAFT_FACTOR = 0.55;

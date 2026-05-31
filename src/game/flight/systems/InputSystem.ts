@@ -23,6 +23,7 @@ const {
     CONTROL_Q_REFERENCE_PA,
     G_LIMIT_POSITIVE_DEFAULT, G_LIMIT_NEGATIVE_DEFAULT, G_LIMITER_MARGIN_G,
     PINCH_THROTTLE_PX_TO_DELTA,
+    PINCH_ZOOM_PX_TO_RADIUS,
     TWO_FINGER_SWIPE_MIN_PX, TWO_FINGER_DISTANCE_TOLERANCE_RATIO,
 } = CONST as any;
 
@@ -587,7 +588,7 @@ export class InputSystem {
 </style>
 <div id="touch-joy"><div id="touch-joy-deadzone"></div><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
-<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button><button id="touch-spl" title="Spoilers (toque longo: arma)">SPL</button><button id="touch-lgt" title="Luzes de pouso">LGT</button></div>
+<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button><button id="touch-spl" title="Spoilers (toque longo: arma)">SPL</button><button id="touch-lgt" title="Luzes de pouso">LGT</button><button id="touch-cam" title="Trocar c\u00E2mera">CAM</button></div>
 <button id="touch-controls-btn" title="Controles">\u2699</button>
 <div id="touch-controls-panel">
   <div style="font-family:'Orbitron',monospace;font-size:10px;color:#40ffaa;letter-spacing:.12em;margin-bottom:8px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:4px">CONTROLES</div>
@@ -775,9 +776,21 @@ export class InputSystem {
                     const dy = b.clientY - a.clientY;
                     const dist = Math.hypot(dx, dy);
                     const distDelta = dist - this.scene._twoFingerLastDist;
-                    this.scene.touchThrust = Math.max(0, Math.min(1, this.scene.touchThrust + distDelta * PINCH_THROTTLE_PX_TO_DELTA));
+                    const leftSide = this.scene._twoFingerStartMidX < window.innerWidth * 0.5;
+                    if (leftSide) {
+                        this.scene.touchThrust = Math.max(0, Math.min(1, this.scene.touchThrust + distDelta * PINCH_THROTTLE_PX_TO_DELTA));
+                        updateThrVisual();
+                    } else {
+                        const cam = this.scene.camera;
+                        if (cam) {
+                            const lowerLimit = Number.isFinite(cam.lowerRadiusLimit) ? cam.lowerRadiusLimit : 1;
+                            const upperLimit = Number.isFinite(cam.upperRadiusLimit) ? cam.upperRadiusLimit : 1000;
+                            const currentRadius = Number.isFinite(cam.radius) ? cam.radius : lowerLimit;
+                            const nextRadius = currentRadius - distDelta * PINCH_ZOOM_PX_TO_RADIUS;
+                            cam.radius = Math.max(lowerLimit, Math.min(upperLimit, nextRadius));
+                        }
+                    }
                     this.scene._twoFingerLastDist = dist;
-                    updateThrVisual();
 
                     const midX = (a.clientX + b.clientX) * 0.5;
                     const midY = (a.clientY + b.clientY) * 0.5;
@@ -939,6 +952,15 @@ export class InputSystem {
             }, { passive: false });
         } else {
             console.warn('[Touch] #touch-lgt element not found');
+        }
+        const camBtn = document.getElementById('touch-cam');
+        if (camBtn) {
+            camBtn.addEventListener('touchstart', (ev: TouchEvent) => {
+                ev.preventDefault();
+                this.scene._cycleCameraMode();
+            }, { passive: false });
+        } else {
+            console.warn('[Touch] #touch-cam element not found');
         }
     }
 
