@@ -445,6 +445,7 @@ export class FlightSceneSimple extends Scene3D {
     private _mapImgLoadHandler: (() => void) | null = null;
     private _mapImgErrorHandler: ((ev: Event) => void) | null = null;
     private _lastCameraCycleMs = 0;
+    private _aircraftMinRadius: number = CAMERA_LOWER_RADIUS_FALLBACK_M;
     private camera!: BABYLON.ArcRotateCamera;
     private surfaces: AeroSurface[] = [];
     private ground!: BABYLON.Mesh;

@@ -24,7 +24,6 @@ import {
     MOTION_BLUR_MAX_STRENGTH,
     MOTION_BLUR_SAMPLES,
     MOTION_BLUR_TRIGGER_G,
-    CAMERA_MODE_COCKPIT,
     ISA_TROPOPAUSE_M,
     ISA_TROPOPAUSE_TEMP_K,
     ISA_SEA_LEVEL_TEMP_K,
@@ -451,21 +450,13 @@ export class VfxSystem {
         const gAbs = Math.abs(Number.isFinite(this.scene._gForce) ? this.scene._gForce : 1);
         const wantMb = gAbs > MOTION_BLUR_TRIGGER_G;
         this.ensureMotionBlur(wantMb);
-        if (this.scene._pipeline) {
-            const isCockpit = this.scene._cameraMode === CAMERA_MODE_COCKPIT;
-            if (isCockpit !== this.scene._dofEnabledInCockpit) {
-                this.scene._dofEnabledInCockpit = isCockpit;
-                try {
-                    this.scene._pipeline.depthOfFieldEnabled = isCockpit;
-                    if (isCockpit) {
-                        this.scene._pipeline.depthOfField.focalLength = 50;
-                        this.scene._pipeline.depthOfField.fStop = 1.8;
-                        this.scene._pipeline.depthOfField.focusDistance = 800;
-                    }
-                } catch (err) {
-                    console.warn('[DOF] toggle failed:', err);
-                }
+        if (this.scene._pipeline && this.scene._dofEnabledInCockpit) {
+            try {
+                this.scene._pipeline.depthOfFieldEnabled = false;
+            } catch (err) {
+                console.warn('[DOF] disable failed:', err);
             }
+            this.scene._dofEnabledInCockpit = false;
         }
     }
 

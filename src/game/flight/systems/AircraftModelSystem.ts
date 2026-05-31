@@ -303,6 +303,7 @@ export class AircraftModelSystem {
                         safeH * CAMERA_LOWER_RADIUS_HEIGHT_FACTOR,
                         CAMERA_LOWER_RADIUS_FALLBACK_M,
                     );
+                    this.scene._aircraftMinRadius = aircraftMinRadius;
                     this.scene.camera.lowerRadiusLimit = aircraftMinRadius;
                     if (this.scene.camera.radius < aircraftMinRadius) {
                         this.scene.camera.radius = aircraftMinRadius;

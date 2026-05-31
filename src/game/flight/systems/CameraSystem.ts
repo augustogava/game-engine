@@ -13,6 +13,8 @@ import {
     CAMERA_MODE_TOWER,
     CAMERA_RADIUS_MIN_M,
     CAMERA_RADIUS_MAX_M,
+    CAMERA_COCKPIT_RADIUS_M,
+    CAMERA_COCKPIT_LOWER_RADIUS_M,
     CAMERA_CYCLE_COOLDOWN_MS,
     TOWER_CAMERA_HEIGHT_M,
     TOWER_CAMERA_BETA_RAD,
@@ -91,6 +93,9 @@ export class CameraSystem {
         this.scene._cameraMode = safeMode;
         const target = this.scene.planeRoot.position.clone();
         try {
+            this.scene.camera.lowerRadiusLimit = safeMode === CAMERA_MODE_COCKPIT
+                ? CAMERA_COCKPIT_LOWER_RADIUS_M
+                : this.scene._aircraftMinRadius;
             switch (safeMode) {
                 case CAMERA_MODE_CHASE:
                     this.scene.camera.beta = 1.50;
@@ -99,7 +104,7 @@ export class CameraSystem {
                     break;
                 case CAMERA_MODE_COCKPIT:
                     this.scene.camera.beta = Math.PI / 2;
-                    this.scene.camera.radius = 0.5;
+                    this.scene.camera.radius = CAMERA_COCKPIT_RADIUS_M;
                     this.scene.camera.target.copyFrom(target);
                     break;
                 case CAMERA_MODE_EXTERNAL_FIXED:
