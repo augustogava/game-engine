@@ -1081,16 +1081,18 @@ export class FlightSceneSimple extends Scene3D {
         //     });
         // }
         
-                this._sunUpdateTimer += dt;
-                if (this._sunUpdateTimer >= 2.0) {
-            this._sunUpdateTimer = 0;
-            const scene = this.planeRoot.getScene();
-            if (scene) this._applyDayNightCycle(scene);
-        }
+                if (!this.isMobile) {
+                    this._sunUpdateTimer += dt;
+                    if (this._sunUpdateTimer >= 2.0) {
+                        this._sunUpdateTimer = 0;
+                        const scene = this.planeRoot.getScene();
+                        if (scene) this._applyDayNightCycle(scene);
+                    }
+                }
         if (this._skyMaterial && this.camera) {
             this._skyMaterial.cameraOffset.y = this.camera.position.y;
         }
-        this._updateStarTwinkle(dt);
+        if (!this.isMobile) this._updateStarTwinkle(dt);
         const aglForTurb = this.planeRoot
             ? Math.max(0, this.planeRoot.position.y - (this.tiles ? this.terrainY : GROUND_Y))
             : 0;

@@ -24,6 +24,7 @@ const PERF_BENCHMARK_WARMUP_MS = 1500;
 const PERF_PRESET_LOW_FPS = 25;
 const PERF_PRESET_MED_FPS = 45;
 const PERF_DETECTED_PRESET_KEY = 'perf_detected_preset_v1';
+const MOBILE_MAX_DPR = 3;
 
 export class GameCore3D {
     readonly engine: any; // BABYLON.Engine
@@ -34,6 +35,9 @@ export class GameCore3D {
     private _lastTime: number = 0;
     private _renderPaused: boolean = false;
     private _visibilityHandler: (() => void) | null = null;
+    private _contextLostHandler: ((e: Event) => void) | null = null;
+    private _contextRestoredHandler: (() => void) | null = null;
+    private _canvasEl: HTMLCanvasElement | null = null;
     private _perfStartedAt: number = 0;
     private _perfSamples: number[] = [];
     private _perfBenchmarkDone: boolean = false;
@@ -43,20 +47,21 @@ export class GameCore3D {
 
     constructor(config: GameCore3DConfig) {
         const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-        const antialias = isMobile ? false : (config.antialias ?? true);
+        const antialias = config.antialias ?? true;
 
         this.engine = new BABYLON.Engine(config.canvas, antialias, {
-            preserveDrawingBuffer: true,
+            preserveDrawingBuffer: !isMobile,
             stencil: true,
             disableWebGL2Support: false,
         });
 
         if (isMobile) {
-            const maxDpr = 2;
-            const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
+            const dpr = Math.min(window.devicePixelRatio || 1, MOBILE_MAX_DPR);
             this.engine.setHardwareScalingLevel(1 / dpr);
-            console.info(`[GameCore3D] Mobile detected — DPR capped at ${maxDpr}, effective hardware scaling = ${(1 / dpr).toFixed(3)}`);
+            console.info(`[GameCore3D] Mobile detected — DPR capped at ${MOBILE_MAX_DPR}, effective hardware scaling = ${(1 / dpr).toFixed(3)}`);
         }
+
+        this._registerContextLossHandlers(config.canvas);
 
         this.input = new InputManager(config.canvas);
 
@@ -145,11 +150,42 @@ export class GameCore3D {
         }
     }
 
+    private _registerContextLossHandlers(canvas: HTMLCanvasElement): void {
+        this._canvasEl = canvas;
+        this._contextLostHandler = (e: Event) => {
+            try { e.preventDefault(); } catch (_) { /* ignore */ }
+            this._renderPaused = true;
+            console.warn('[GameCore3D] WebGL context lost — render loop paused');
+        };
+        this._contextRestoredHandler = () => {
+            this._renderPaused = document.visibilityState === 'hidden';
+            this._lastTime = performance.now();
+            console.warn('[GameCore3D] WebGL context restored — render loop resumed');
+        };
+        try {
+            canvas.addEventListener('webglcontextlost', this._contextLostHandler, false);
+            canvas.addEventListener('webglcontextrestored', this._contextRestoredHandler, false);
+        } catch (err) {
+            console.warn('[GameCore3D] Failed to register WebGL context-loss handlers:', err);
+        }
+    }
+
     /** Stop the render loop and release everything */
     dispose(): void {
         if (this._visibilityHandler) {
             try { document.removeEventListener('visibilitychange', this._visibilityHandler); } catch (_) { /* ignore */ }
             this._visibilityHandler = null;
+        }
+        if (this._canvasEl) {
+            if (this._contextLostHandler) {
+                try { this._canvasEl.removeEventListener('webglcontextlost', this._contextLostHandler); } catch (_) { /* ignore */ }
+                this._contextLostHandler = null;
+            }
+            if (this._contextRestoredHandler) {
+                try { this._canvasEl.removeEventListener('webglcontextrestored', this._contextRestoredHandler); } catch (_) { /* ignore */ }
+                this._contextRestoredHandler = null;
+            }
+            this._canvasEl = null;
         }
         this.engine.stopRenderLoop();
         this._scene3D?.onDispose();

@@ -190,7 +190,7 @@ export class AircraftModelSystem {
                 modelPivot.rotation = new BABYLON.Vector3(0, cfg.model_rotation_y, 0);
 
                 const shadow = (this.scene as any)._shadow;
-                if (shadow && !this.scene.isMobile) {
+                if (shadow) {
                     meshes.forEach((m: BABYLON.AbstractMesh) => {
                         shadow.addShadowCaster(m, true);
                     });

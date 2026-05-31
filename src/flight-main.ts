@@ -411,6 +411,20 @@ scene.onSpawned = () => {
     }
 })();
 
+let disposed = false;
+function disposeGame(reason: string): void {
+    if (disposed) return;
+    disposed = true;
+    try {
+        console.debug(`[flight-main] Disposing game to free WebGL/tiles memory (reason=${reason})`);
+        game.dispose();
+    } catch (err) {
+        console.warn('[flight-main] Game dispose on unload failed:', err);
+    }
+}
+window.addEventListener('pagehide', () => disposeGame('pagehide'));
+window.addEventListener('beforeunload', () => disposeGame('beforeunload'));
+
 setInterval(() => {
     if (!sceneReady && (scene as any).spawned) {
         sceneReady = true;

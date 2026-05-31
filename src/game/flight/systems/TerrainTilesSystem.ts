@@ -13,6 +13,9 @@ import {
 
 declare const __GOOGLE_MAPS_API_KEY__: string;
 
+const TILES_ERROR_TARGET_MOBILE = 2;
+const TILES_ERROR_TARGET_DESKTOP = 6;
+
 export class TerrainTilesSystem {
     private readonly scene: any;
 
@@ -58,7 +61,7 @@ export class TerrainTilesSystem {
         const url = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${apiKey}`;
         this.scene.tiles = new TilesRenderer(url, scene);
         const isMobile = this.scene.isMobile === true;
-        this.scene.tiles.errorTarget = isMobile ? 3 : 6;
+        this.scene.tiles.errorTarget = isMobile ? TILES_ERROR_TARGET_MOBILE : TILES_ERROR_TARGET_DESKTOP;
         (this.scene.tiles as any).maxDepth = 100;
         (this.scene.tiles as any).errorThreshold = 60;
         this.scene.tiles.lruCache.maxSize = 2000;

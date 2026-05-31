@@ -1111,10 +1111,21 @@ export class HudSystem {
             applySettings();
         };
 
+        const MOBILE_QUALITY_RENDER_SCALE = 100;
+        const MOBILE_QUALITY_SHADOW_QUALITY = '1024';
+        const MOBILE_QUALITY_AA = '2';
+
         const isMobile = this.scene.isMobile === true;
         if (isMobile && Object.keys(cfg).length === 0) {
-            console.info('[GFX] Mobile detected, first visit — applying "low" preset');
+            console.info('[GFX] Mobile detected, first visit — applying "low" preset with quality overrides (render scale, shadows, AA)');
             applyPreset('low');
+            const setCheckMobile = (id: string, val: boolean) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.checked = val; };
+            const setValMobile = (id: string, val: any) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(val); };
+            setValMobile('gfx-render-scale', MOBILE_QUALITY_RENDER_SCALE);
+            setCheckMobile('gfx-shadows', true);
+            setValMobile('gfx-shadow-quality', MOBILE_QUALITY_SHADOW_QUALITY);
+            setValMobile('gfx-aa', MOBILE_QUALITY_AA);
+            applySettings();
             const presetEl2 = document.getElementById('gfx-preset') as HTMLSelectElement | null;
             if (presetEl2) presetEl2.value = 'low';
         }
