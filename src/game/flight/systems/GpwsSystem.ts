@@ -5,6 +5,9 @@ import {
     MMO_FALLBACK_DEFAULT,
     VNE_FALLBACK_MULT_OF_STALL,
     OVERSPEED_CLACKER_INTERVAL_MS,
+    OVERSPEED_SUPERSONIC_MMO_MIN,
+    OVERSPEED_VNE_CROSSOVER_ALT_FT,
+    OVERSPEED_MACH_IAS_CROSSOVER,
     GPWS_PULL_UP_VS_FPM,
     GPWS_SINK_RATE_VS_FPM,
     GPWS_MIN_VS_FOR_CALLOUT_FPM,
@@ -76,8 +79,15 @@ export class GpwsSystem {
             ? cfg.vne_kts
             : Math.max(1, cfg.stall_speed_kts) * VNE_FALLBACK_MULT_OF_STALL;
         const mmo = this.resolveMmo();
-        const overByIas = Number.isFinite(speedKtsIas) && speedKtsIas > vne;
+        let overByIas = Number.isFinite(speedKtsIas) && speedKtsIas > vne;
         const overByMach = Number.isFinite(mach) && mach > mmo;
+        const isSupersonicCapable = mmo > OVERSPEED_SUPERSONIC_MMO_MIN;
+        if (overByIas && isSupersonicCapable && this.scene.planeRoot) {
+            const altMslFt = Math.max(0, ((this.scene.refAlt ?? 0) + this.scene.planeRoot.position.y) * 3.28084);
+            if (altMslFt > OVERSPEED_VNE_CROSSOVER_ALT_FT || mach >= OVERSPEED_MACH_IAS_CROSSOVER) {
+                overByIas = false;
+            }
+        }
         const flapDeg = Number.isFinite(this.scene.currentFlapDeg) ? this.scene.currentFlapDeg : 0;
         const vfe = cfg.vfe_kts;
         const overByVfe = flapDeg > 0
