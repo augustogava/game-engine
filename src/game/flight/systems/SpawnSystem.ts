@@ -18,7 +18,6 @@ import {
     CAMERA_MODE_CHASE,
     CAMERA_RADIUS_MIN_M,
     CAMERA_RADIUS_MAX_M,
-    MOBILE_CHASE_RADIUS_FACTOR,
     CINEMATIC_DURATION_MS,
     HUD_FADE_IN_MS,
     ENGINE_SOUND_FADE_IN_MS,
@@ -129,9 +128,8 @@ export class SpawnSystem {
             this.scene._cinematicActive = true;
             this.scene._cinematicStartMs = performance.now();
             const currentRadius = (this.scene.camera && Number.isFinite(this.scene.camera.radius)) ? this.scene.camera.radius : 35;
-            const desiredRadius = this.scene.isMobile === true ? currentRadius * MOBILE_CHASE_RADIUS_FACTOR : currentRadius;
-            this.scene._cinematicTargetRadius = Math.max(CAMERA_RADIUS_MIN_M, Math.min(CAMERA_RADIUS_MAX_M, desiredRadius));
-            console.log(`[Cinematic] Starting spawn fly-in (target radius=${this.scene._cinematicTargetRadius.toFixed(1)}m, mobile=${this.scene.isMobile === true})`);
+            this.scene._cinematicTargetRadius = Math.max(CAMERA_RADIUS_MIN_M, Math.min(CAMERA_RADIUS_MAX_M, currentRadius));
+            console.log(`[Cinematic] Starting spawn fly-in (target radius=${this.scene._cinematicTargetRadius.toFixed(1)}m)`);
             try {
                 this.scene._engineSound.start();
                 this.scene._engineSound.fadeIn(ENGINE_SOUND_FADE_IN_MS);

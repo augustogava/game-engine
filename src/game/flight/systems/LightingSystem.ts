@@ -4,7 +4,6 @@ import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { getSunPosition } from '../physics/SolarPosition.js';
 import {
     SUN_DIAMETER,
-    SUN_TEXTURE_PATH,
     SUN_HALO_SIZE,
     SUN_HALO_TEX_SIZE,
     SUN_DISTANCE,
@@ -161,26 +160,38 @@ export class LightingSystem {
     }
 
     buildSunMesh(scene: BABYLON.Scene): void {
-        this.scene._sunMesh = BABYLON.MeshBuilder.CreateSphere('sunMesh', { diameter: SUN_DIAMETER, segments: 32 }, scene);
+        this.scene._sunMesh = BABYLON.MeshBuilder.CreatePlane('sunMesh', { size: SUN_DIAMETER }, scene);
         this.scene._sunMesh.isPickable = false;
         this.scene._sunMesh.infiniteDistance = true;
         this.scene._sunMesh.applyFog = false;
+        this.scene._sunMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
         this.scene._sunMesh.renderingGroupId = 0;
 
+        const discTex = new BABYLON.DynamicTexture('sunDiscTex', { width: SUN_HALO_TEX_SIZE, height: SUN_HALO_TEX_SIZE }, scene, true);
+        const ctx = discTex.getContext() as CanvasRenderingContext2D;
+        const cx = SUN_HALO_TEX_SIZE / 2;
+        const cy = SUN_HALO_TEX_SIZE / 2;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cx);
+        grad.addColorStop(0.00, 'rgba(255, 255, 255, 1.00)');
+        grad.addColorStop(0.55, 'rgba(255, 253, 245, 1.00)');
+        grad.addColorStop(0.80, 'rgba(255, 245, 225, 0.55)');
+        grad.addColorStop(1.00, 'rgba(255, 235, 205, 0.00)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, SUN_HALO_TEX_SIZE, SUN_HALO_TEX_SIZE);
+        discTex.hasAlpha = true;
+        discTex.update();
+
         this.scene._sunMeshMat = new BABYLON.StandardMaterial('sunMeshMat', scene);
-        try {
-            const tex = new BABYLON.Texture(SUN_TEXTURE_PATH, scene);
-            tex.hasAlpha = false;
-            this.scene._sunMeshMat.emissiveTexture = tex;
-            this.scene._sunMeshMat.diffuseTexture = tex;
-        } catch (err) {
-            console.warn('[Sky] Failed to load sun texture, falling back to plain emissive', err);
-        }
-        this.scene._sunMeshMat.emissiveColor = new BABYLON.Color3(1.0, 0.95, 0.85);
+        this.scene._sunMeshMat.emissiveTexture = discTex;
+        this.scene._sunMeshMat.opacityTexture = discTex;
+        this.scene._sunMeshMat.emissiveColor = new BABYLON.Color3(1.0, 0.98, 0.95);
         this.scene._sunMeshMat.diffuseColor = new BABYLON.Color3(0, 0, 0);
         this.scene._sunMeshMat.specularColor = new BABYLON.Color3(0, 0, 0);
         this.scene._sunMeshMat.disableLighting = true;
-        this.scene._sunMeshMat.backFaceCulling = true;
+        this.scene._sunMeshMat.backFaceCulling = false;
+        this.scene._sunMeshMat.disableDepthWrite = true;
+        this.scene._sunMeshMat.alphaMode = BABYLON.Engine.ALPHA_ADD;
+        this.scene._sunMeshMat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
         this.scene._sunMesh.material = this.scene._sunMeshMat;
 
         this.buildSunHalo(scene);
@@ -199,10 +210,10 @@ export class LightingSystem {
         const cx = SUN_HALO_TEX_SIZE / 2;
         const cy = SUN_HALO_TEX_SIZE / 2;
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cx);
-        grad.addColorStop(0.00, 'rgba(255, 240, 200, 1.00)');
-        grad.addColorStop(0.18, 'rgba(255, 215, 140, 0.65)');
-        grad.addColorStop(0.45, 'rgba(255, 180, 120, 0.22)');
-        grad.addColorStop(1.00, 'rgba(255, 160,  90, 0.00)');
+        grad.addColorStop(0.00, 'rgba(255, 252, 245, 1.00)');
+        grad.addColorStop(0.18, 'rgba(255, 248, 235, 0.60)');
+        grad.addColorStop(0.45, 'rgba(255, 240, 220, 0.20)');
+        grad.addColorStop(1.00, 'rgba(255, 235, 210, 0.00)');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, SUN_HALO_TEX_SIZE, SUN_HALO_TEX_SIZE);
         haloTex.hasAlpha = true;
@@ -581,7 +592,7 @@ export class LightingSystem {
 
         if (this.scene._sunMeshMat) {
             const warmth = Math.max(0, Math.min(1, elevation / 15));
-            this.scene._sunMeshMat.emissiveColor.set(1.0, 0.92 + warmth * 0.05, 0.80 + warmth * 0.10);
+            this.scene._sunMeshMat.emissiveColor.set(1.0, 0.93 + warmth * 0.05, 0.82 + warmth * 0.13);
         }
 
         let fogR = 0.02 + t * 0.53;

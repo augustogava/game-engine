@@ -152,7 +152,7 @@ export class NavLightsSystem {
             }
             if (frontView) on = false;
             nav.light.intensity = on ? nav.maxIntensity : 0;
-            nav.core.isVisible = on;
+            nav.core.isVisible = false;
         }
     }
 }

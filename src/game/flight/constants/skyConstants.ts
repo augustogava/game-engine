@@ -1,6 +1,6 @@
 export const SUN_TEXTURE_PATH = 'src/game/assets/sun.png';
 export const MOON_TEXTURE_PATH = 'src/game/assets/moon.png';
-export const SUN_DIAMETER = 600;
+export const SUN_DIAMETER = 260;
 export const SUN_HALO_SIZE = 2400;
 export const SUN_DISTANCE = 10000;
 export const SUN_ROTATION_RAD_PER_S = 0.02;
