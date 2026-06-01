@@ -2414,7 +2414,7 @@ export class HudSystem {
             if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
             const hdgRad = Math.atan2(
                 BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
-                BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, 1)),
+                BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, -1)),
             );
             const hdgTrueDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
             const here = this.scene._apCurrentLatLon();
@@ -2569,7 +2569,7 @@ export class HudSystem {
         if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
         const hdgRad = Math.atan2(
             BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
-            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, 1)),
+            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, -1)),
         );
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
@@ -3223,7 +3223,7 @@ export class HudSystem {
         if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
         const hdgRad = Math.atan2(
             BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
-            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, 1)),
+            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, -1)),
         );
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
