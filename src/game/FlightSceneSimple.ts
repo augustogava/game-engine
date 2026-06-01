@@ -723,6 +723,7 @@ export class FlightSceneSimple extends Scene3D {
     private _spoilerKeyLock = false;
     private _spoilerArmed = false;
     private _engineAlive: boolean[] = [];
+    private _engineSpool: number[] = [];
     private _killEngineKeyLock: boolean[] = [false, false, false, false];
     private _trimWheelTarget: number = 0;
     private _trimKeyLockPgUp = false;

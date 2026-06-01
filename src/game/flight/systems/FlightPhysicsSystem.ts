@@ -156,6 +156,7 @@ export class FlightPhysicsSystem {
     resetEngines(): void {
         const cnt = Math.max(1, this.scene.aircraftConfig?.engine_count ?? 1);
         this.scene._engineAlive = new Array(cnt).fill(true);
+        this.scene._engineSpool = new Array(cnt).fill(1);
     }
 
     applyFlaps(dt: number): void {
@@ -420,14 +421,22 @@ export class FlightPhysicsSystem {
         if (!Array.isArray(this.scene._engineAlive) || this.scene._engineAlive.length !== engineCountTotal) {
             this.scene._engineAlive = new Array(engineCountTotal).fill(true);
         }
-        let aliveCount = 0;
-        for (let e = 0; e < engineCountTotal; e++) if (this.scene._engineAlive[e]) aliveCount++;
-        const aliveThrustRatio = engineCountTotal > 0 ? aliveCount / engineCountTotal : 0;
+        if (!Array.isArray(this.scene._engineSpool) || this.scene._engineSpool.length !== engineCountTotal) {
+            this.scene._engineSpool = this.scene._engineAlive.map((alive: boolean) => (alive ? 1 : 0));
+        }
+        const engineSpoolAlpha = Math.max(0, Math.min(1, dt / Math.max(0.01, spoolTauS)));
+        for (let e = 0; e < engineCountTotal; e++) {
+            const target = this.scene._engineAlive[e] ? 1 : 0;
+            this.scene._engineSpool[e] += (target - this.scene._engineSpool[e]) * engineSpoolAlpha;
+        }
+        let spoolSum = 0;
+        for (let e = 0; e < engineCountTotal; e++) spoolSum += this.scene._engineSpool[e];
+        const aliveThrustRatio = engineCountTotal > 0 ? spoolSum / engineCountTotal : 0;
         const thrustVec = this.scene._tmpFwd;
         thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * aliveThrustRatio);
 
         let asymYawTorqueBody = 0;
-        if (aliveCount > 0 && aliveCount < engineCountTotal) {
+        {
             const halfSpanForEngines = (this.scene.wingSpan || 16) * 0.5;
             const enginePositions: number[] = [];
             if (engineCountTotal === 2)      enginePositions.push(-halfSpanForEngines * 0.45,  halfSpanForEngines * 0.45);
@@ -438,8 +447,7 @@ export class FlightPhysicsSystem {
                 ? (effectiveThrust * cfg.max_thrust_n) / engineCountTotal
                 : 0;
             for (let e = 0; e < engineCountTotal && e < enginePositions.length; e++) {
-                if (!this.scene._engineAlive[e]) continue;
-                asymYawTorqueBody += enginePositions[e] * thrustPerEngine;
+                asymYawTorqueBody += enginePositions[e] * thrustPerEngine * this.scene._engineSpool[e];
             }
         }
 
