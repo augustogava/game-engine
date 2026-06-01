@@ -13,8 +13,12 @@ import {
 
 declare const __GOOGLE_MAPS_API_KEY__: string;
 
-const TILES_ERROR_TARGET_MOBILE = 2;
+const TILES_ERROR_TARGET_MOBILE = 12;
 const TILES_ERROR_TARGET_DESKTOP = 6;
+const TILES_LRU_MAX_SIZE_MOBILE = 800;
+const TILES_LRU_MIN_SIZE_MOBILE = 300;
+const TILES_LRU_MAX_SIZE_DESKTOP = 2000;
+const TILES_LRU_MIN_SIZE_DESKTOP = 800;
 const TILE_TEXTURE_ANISOTROPY = 8;
 
 export class TerrainTilesSystem {
@@ -65,9 +69,9 @@ export class TerrainTilesSystem {
         this.scene.tiles.errorTarget = isMobile ? TILES_ERROR_TARGET_MOBILE : TILES_ERROR_TARGET_DESKTOP;
         (this.scene.tiles as any).maxDepth = 100;
         (this.scene.tiles as any).errorThreshold = 60;
-        this.scene.tiles.lruCache.maxSize = 2000;
-        this.scene.tiles.lruCache.minSize = 800;
-        console.info(`[3DTiles] errorTarget=${this.scene.tiles.errorTarget} (mobile=${isMobile})`);
+        this.scene.tiles.lruCache.maxSize = isMobile ? TILES_LRU_MAX_SIZE_MOBILE : TILES_LRU_MAX_SIZE_DESKTOP;
+        this.scene.tiles.lruCache.minSize = isMobile ? TILES_LRU_MIN_SIZE_MOBILE : TILES_LRU_MIN_SIZE_DESKTOP;
+        console.info(`[3DTiles] errorTarget=${this.scene.tiles.errorTarget} lruMax=${this.scene.tiles.lruCache.maxSize} (mobile=${isMobile})`);
         try {
             this.scene.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
         } catch (e) { console.warn('[3DTiles] Auth plugin failed:', e); }

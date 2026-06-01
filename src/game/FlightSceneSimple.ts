@@ -432,6 +432,7 @@ export class FlightSceneSimple extends Scene3D {
     private _cameraModeKeyLock = false;
     private _cinematicActive = false;
     private _cinematicStartMs = 0;
+    private _cinematicTargetRadius = 0;
     private _hudFadeStartMs = 0;
     private _hudFadeActive = false;
     private _lastHapticMs = 0;

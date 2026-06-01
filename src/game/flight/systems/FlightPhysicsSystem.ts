@@ -793,7 +793,10 @@ export class FlightPhysicsSystem {
             const t = Math.max(0, Math.min(1, elapsed / CINEMATIC_DURATION_MS));
             this.scene.camera.target.copyFrom(pos);
             this.scene.camera.alpha = -Math.PI / 2 + t * Math.PI * 2;
-            const targetRadius = Math.max(CAMERA_RADIUS_MIN_M, Math.min(CAMERA_RADIUS_MAX_M, this.scene.camera.radius || 35));
+            const capturedTarget = Number.isFinite(this.scene._cinematicTargetRadius) && this.scene._cinematicTargetRadius > 0
+                ? this.scene._cinematicTargetRadius
+                : 35;
+            const targetRadius = Math.max(CAMERA_RADIUS_MIN_M, Math.min(CAMERA_RADIUS_MAX_M, capturedTarget));
             this.scene.camera.radius = CINEMATIC_INITIAL_RADIUS_M + (targetRadius - CINEMATIC_INITIAL_RADIUS_M) * t;
             this.scene.camera.beta = 1.20 + (1.50 - 1.20) * t;
         } else if (this.scene._cameraMode === CAMERA_MODE_CHASE) {

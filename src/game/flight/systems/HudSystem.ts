@@ -1113,11 +1113,11 @@ export class HudSystem {
 
         const MOBILE_QUALITY_RENDER_SCALE = 100;
         const MOBILE_QUALITY_SHADOW_QUALITY = '1024';
-        const MOBILE_QUALITY_AA = '2';
+        const MOBILE_QUALITY_AA = '1';
 
         const isMobile = this.scene.isMobile === true;
         if (isMobile && Object.keys(cfg).length === 0) {
-            console.info('[GFX] Mobile detected, first visit — applying "low" preset with quality overrides (render scale, shadows, AA)');
+            console.info('[GFX] Mobile detected, first visit — applying "low" preset with quality overrides (render scale, shadows, FXAA)');
             applyPreset('low');
             const setCheckMobile = (id: string, val: boolean) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.checked = val; };
             const setValMobile = (id: string, val: any) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(val); };
@@ -1125,6 +1125,7 @@ export class HudSystem {
             setCheckMobile('gfx-shadows', true);
             setValMobile('gfx-shadow-quality', MOBILE_QUALITY_SHADOW_QUALITY);
             setValMobile('gfx-aa', MOBILE_QUALITY_AA);
+            this.scene._premium.fxaaFallback = true;
             applySettings();
             const presetEl2 = document.getElementById('gfx-preset') as HTMLSelectElement | null;
             if (presetEl2) presetEl2.value = 'low';
@@ -1453,7 +1454,7 @@ export class HudSystem {
 #missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
-#nav-info{top:280px!important;left:2px!important;width:140px!important;font-size:9px!important}
+#nav-info{top:140px!important;left:auto!important;right:2px!important;width:140px!important;font-size:9px!important}
 #ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
 #ap-panel .ap-btn{padding:2px 5px!important;font-size:9px!important}
 #ap-panel .ap-units{gap:6px!important}
@@ -1482,7 +1483,7 @@ export class HudSystem {
 #aircraft-panel{top:38px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
 #flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
 #flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
-#nav-info{top:220px!important;left:2px!important;width:110px!important;font-size:8px!important}
+#nav-info{top:108px!important;left:auto!important;right:2px!important;width:110px!important;font-size:8px!important}
 #ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
 #ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
 #ap-panel .ap-units{gap:4px!important}

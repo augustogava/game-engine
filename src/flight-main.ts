@@ -425,6 +425,29 @@ function disposeGame(reason: string): void {
 window.addEventListener('pagehide', () => disposeGame('pagehide'));
 window.addEventListener('beforeunload', () => disposeGame('beforeunload'));
 
+const MEMORY_DIAGNOSTIC_INTERVAL_MS = 15000;
+const BYTES_PER_MB = 1048576;
+function logMemorySnapshot(context: string): void {
+    try {
+        const mem = (performance as any)?.memory;
+        if (mem && typeof mem.usedJSHeapSize === 'number') {
+            const used = (mem.usedJSHeapSize / BYTES_PER_MB).toFixed(1);
+            const total = (mem.totalJSHeapSize / BYTES_PER_MB).toFixed(1);
+            const limit = (mem.jsHeapSizeLimit / BYTES_PER_MB).toFixed(1);
+            console.debug(`[Memory] ${context}: usedJSHeap=${used}MB totalJSHeap=${total}MB heapLimit=${limit}MB visibility=${document.visibilityState}`);
+        } else {
+            console.debug(`[Memory] ${context}: heap metrics unavailable (non-Chromium) visibility=${document.visibilityState}`);
+        }
+    } catch (err) {
+        console.warn('[Memory] Snapshot failed:', err);
+    }
+}
+setInterval(() => logMemorySnapshot('periodic'), MEMORY_DIAGNOSTIC_INTERVAL_MS);
+document.addEventListener('visibilitychange', () => logMemorySnapshot(`visibilitychange:${document.visibilityState}`));
+window.addEventListener('pagehide', () => logMemorySnapshot('pagehide'));
+document.addEventListener('freeze', () => logMemorySnapshot('freeze'));
+document.addEventListener('resume', () => logMemorySnapshot('resume'));
+
 setInterval(() => {
     if (!sceneReady && (scene as any).spawned) {
         sceneReady = true;

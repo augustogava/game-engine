@@ -24,7 +24,6 @@ const PERF_BENCHMARK_WARMUP_MS = 1500;
 const PERF_PRESET_LOW_FPS = 25;
 const PERF_PRESET_MED_FPS = 45;
 const PERF_DETECTED_PRESET_KEY = 'perf_detected_preset_v1';
-const MOBILE_MAX_DPR = 3;
 
 export class GameCore3D {
     readonly engine: any; // BABYLON.Engine
@@ -56,9 +55,7 @@ export class GameCore3D {
         });
 
         if (isMobile) {
-            const dpr = Math.min(window.devicePixelRatio || 1, MOBILE_MAX_DPR);
-            this.engine.setHardwareScalingLevel(1 / dpr);
-            console.info(`[GameCore3D] Mobile detected — DPR capped at ${MOBILE_MAX_DPR}, effective hardware scaling = ${(1 / dpr).toFixed(3)}`);
+            console.debug('[GameCore3D] Mobile detected — hardware scaling deferred to graphics render-scale setting');
         }
 
         this._registerContextLossHandlers(config.canvas);
