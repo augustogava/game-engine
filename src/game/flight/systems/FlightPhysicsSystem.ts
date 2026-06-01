@@ -50,6 +50,8 @@ const {
     SPOOL_TAU_TURBOPROP_S,
     SPOOL_TAU_ELECTRIC_S,
     SPOOL_TAU_JET_S,
+    ASYM_YAW_TORQUE_SCALE,
+    YAW_RATE_DAMP_COEF,
     SEA_LEVEL_AIR_DENSITY_KG_PER_M3,
     BEST_POWER_MIX,
     MAGNETO_LEFT,
@@ -449,6 +451,7 @@ export class FlightPhysicsSystem {
             for (let e = 0; e < engineCountTotal && e < enginePositions.length; e++) {
                 asymYawTorqueBody += enginePositions[e] * thrustPerEngine * this.scene._engineSpool[e];
             }
+            asymYawTorqueBody *= ASYM_YAW_TORQUE_SCALE;
         }
 
         // ── Ground effect ────────────────────────────────────────────────────
@@ -582,6 +585,10 @@ export class FlightPhysicsSystem {
                 const sideForce = -beta * qSide * 0.4;
                 totalForce.addInPlace(toWorld(new BABYLON.Vector3(sideForce, 0, 0)));
                 totalTorque.y += cfg.fuselage_cn_beta * beta * qSide * 5.0;
+
+                const halfSpanYawDamp = (this.scene.wingSpan || 16) * 0.5;
+                const yawRateNondim = (angVel.y * halfSpanYawDamp) / Math.max(1, spd);
+                totalTorque.y -= YAW_RATE_DAMP_COEF * yawRateNondim * qSide * halfSpanYawDamp;
 
                 const cdVert = (cfg.fuselage_cd_vertical != null && Number.isFinite(cfg.fuselage_cd_vertical))
                     ? Math.max(0, cfg.fuselage_cd_vertical)
