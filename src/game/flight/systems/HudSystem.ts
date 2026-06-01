@@ -1454,14 +1454,14 @@ export class HudSystem {
 #missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
-#nav-info{top:140px!important;left:auto!important;right:2px!important;width:140px!important;font-size:9px!important}
-#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
+#nav-info{top:185px!important;left:auto!important;right:2px!important;width:140px!important;font-size:9px!important}
+#ap-panel{top:auto!important;bottom:60px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
 #ap-panel .ap-btn{padding:2px 5px!important;font-size:9px!important}
 #ap-panel .ap-units{gap:6px!important}
 #ap-panel .ap-display{font-size:10px!important;min-width:46px!important;padding:1px 4px!important}
 #ap-panel .ap-knob{width:22px!important;height:22px!important}
 #ap-panel .ap-knob-tick{height:7px!important;top:2px!important}
-#instrument-dock{bottom:8px!important;right:8px!important;left:auto!important;transform:none!important;padding:4px!important}
+#instrument-dock{bottom:10px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:4px!important}
 #pfd-panel{width:480px!important}
 }
 @media(max-width:480px){
@@ -1483,14 +1483,14 @@ export class HudSystem {
 #aircraft-panel{top:38px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
 #flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
 #flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
-#nav-info{top:108px!important;left:auto!important;right:2px!important;width:110px!important;font-size:8px!important}
-#ap-panel{top:auto!important;bottom:6px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
+#nav-info{top:150px!important;left:auto!important;right:2px!important;width:110px!important;font-size:8px!important}
+#ap-panel{top:auto!important;bottom:58px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
 #ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
 #ap-panel .ap-units{gap:4px!important}
 #ap-panel .ap-display{font-size:9px!important;min-width:40px!important;padding:1px 3px!important}
 #ap-panel .ap-knob{width:20px!important;height:20px!important}
 #ap-panel .ap-knob-tick{height:6px!important;top:2px!important;width:2px!important}
-#instrument-dock{bottom:8px!important;right:6px!important;left:auto!important;transform:none!important;padding:3px!important;gap:4px!important}
+#instrument-dock{bottom:10px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:3px!important;gap:4px!important}
 #pfd-panel{width:380px!important}
 }
 @media(max-height:440px){
@@ -1500,7 +1500,7 @@ export class HudSystem {
 #hud-utc{font-size:7px!important}
 .hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom left}
 .hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom right}
-#instrument-dock{bottom:6px!important;right:6px!important;left:auto!important;transform:none!important}
+#instrument-dock{bottom:8px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important}
 #pfd-panel{bottom:6px!important;width:560px!important}
 }
 
@@ -2522,6 +2522,10 @@ export class HudSystem {
             panel.style.display = visible ? 'flex' : 'none';
             setActive(visible);
         };
+        if (this.scene.isMobile === true) {
+            panel.style.display = 'none';
+            console.debug('[AP Panel] Mobile detected — autopilot panel hidden by default');
+        }
         applyVisible(panel.style.display !== 'none');
 
         btn.addEventListener('mouseenter', () => {
