@@ -135,15 +135,23 @@ export class AutopilotSystem {
             }
         }
 
+        const sinBank = Math.max(-1, Math.min(1, right.y));
+        const curBankDeg = Math.asin(sinBank) * 180 / Math.PI;
+        const curPitchDegAtt = Math.asin(Math.max(-1, Math.min(1, fwd.y))) * 180 / Math.PI;
+        const attitudeExtreme = Math.abs(curPitchDegAtt) > 55 || Math.abs(curBankDeg) > 70;
+
         let fdBankDeg = 0;
-        if ((this.scene._autopilotHdgHold || this.scene._autopilotNavHold || this.scene._autopilotAprHold) && this.scene.surfaces.length >= 2) {
+        if (!attitudeExtreme
+            && (this.scene._autopilotHdgHold || this.scene._autopilotNavHold || this.scene._autopilotAprHold)
+            && this.scene.surfaces.length >= 2) {
             const delta = ((this.scene._autopilotTargetHdgDeg - curHdgDeg + 540) % 360) - 180;
-            const targetBank = Math.max(-AP_HDG_MAX_BANK_DEG, Math.min(AP_HDG_MAX_BANK_DEG, delta * AP_HDG_BANK_GAIN * AP_HDG_MAX_BANK_DEG));
+            const targetBank = Math.max(
+                -AP_HDG_MAX_BANK_DEG,
+                Math.min(AP_HDG_MAX_BANK_DEG, -delta * AP_HDG_BANK_GAIN * AP_HDG_MAX_BANK_DEG),
+            );
             fdBankDeg = targetBank;
-            const sinBank = Math.max(-1, Math.min(1, right.y));
-            const curBankDeg = -Math.asin(sinBank) * 180 / Math.PI;
             const rollErr = targetBank - curBankDeg;
-            const rollCmd = Math.max(-0.7, Math.min(0.7, -rollErr * AP_HDG_ROLL_RATE_GAIN / AP_HDG_MAX_BANK_DEG));
+            const rollCmd = Math.max(-0.7, Math.min(0.7, rollErr * AP_HDG_ROLL_RATE_GAIN / AP_HDG_MAX_BANK_DEG));
             this.scene.surfaces[0].controlInput = rollCmd;
             this.scene.surfaces[1].controlInput = -rollCmd;
         }
@@ -194,7 +202,7 @@ export class AutopilotSystem {
 
         const curPitchDeg = curPitchRad * 180 / Math.PI;
         let fdPitchDeg = curPitchDeg;
-        if (targetVsFpm !== null) {
+        if (!attitudeExtreme && targetVsFpm !== null) {
             const errFpm = targetVsFpm - vsFpmNow;
             const pitchCmd = Math.max(-pitchMax, Math.min(pitchMax,
                 errFpm * AP_VS_PITCH_GAIN - pitchRateRadPerS * AP_PITCH_RATE_DAMP_GAIN));
@@ -207,22 +215,17 @@ export class AutopilotSystem {
         this.scene._fdCmdRollDeg = fdBankDeg;
         this.scene._fdCmdPitchDeg = fdPitchDeg;
 
-        if ((this.scene._autopilotAltHold || this.scene._autopilotVsHold || this.scene._autopilotAprHold) && this.scene.surfaces.length >= 3) {
-            const elevatorCmd = this.scene.surfaces[2].controlInput;
-            if (Math.abs(elevatorCmd) > AUTOTRIM_DEADBAND) {
-                const trimDir = -Math.sign(elevatorCmd);
-                this.scene.trimPitch = Math.max(-AUTOTRIM_MAX, Math.min(AUTOTRIM_MAX,
-                    this.scene.trimPitch + trimDir * AUTOTRIM_RATE_PER_S * stepDt));
-            }
-        }
     }
 
     engageAutopilotMaster(): void {
         this.scene._autopilotMaster = !this.scene._autopilotMaster;
         if (this.scene._autopilotMaster) {
-            if (!this.scene._autopilotHdgHold) this.engageAutopilotHdgHold(true);
-            if (!this.scene._autopilotAltHold) this.engageAutopilotAltHold(true);
-            console.log('[AP] Master ON');
+            this.scene.trimPitch = 0;
+            this.scene._autopilotLastPitchRad = Number.NaN;
+            this.scene._autopilotPitchRateFiltered = Number.NaN;
+            this.engageAutopilotHdgHold(true);
+            this.engageAutopilotAltHold(true);
+            console.log('[AP] Master ON — HDG/ALT synced, trim reset');
         } else {
             this.scene._autopilotHdgHold = false;
             this.scene._autopilotAltHold = false;
