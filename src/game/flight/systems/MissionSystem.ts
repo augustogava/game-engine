@@ -1,6 +1,7 @@
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { MISSION_TOAST_VISIBLE_MS, MISSION_TOAST_FADE_MS } from '../constants/index.js';
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
+import { initialBearingDeg } from '../physics/NavMath.js';
 
 function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -94,14 +95,29 @@ export class MissionSystem {
         this.scene._activeMissionId = Number(mission.id);
         this.scene._activeUserMissionId = userMissionId;
 
-        const isDiscovery = mission.type === 'discovery';
-        const isFreeFlight = mission.type === 'free_flight';
-        const isRoute = mission.type === 'route';
+        this.scene._pendingFlightPlanLat = null;
+        this.scene._pendingFlightPlanLon = null;
+        this.scene._pendingFlightPlanHdg = null;
+        this.scene._pendingFlightPlanAltM = null;
 
-        const firstWp = Array.isArray(mission.waypoints) && mission.waypoints.length > 0 ? mission.waypoints[0] : null;
-        const firstWpLat = firstWp && firstWp.latitude != null ? Number(firstWp.latitude) : null;
-        const firstWpLon = firstWp && firstWp.longitude != null ? Number(firstWp.longitude) : null;
-        const hasFirstWp = firstWpLat != null && Number.isFinite(firstWpLat) && firstWpLon != null && Number.isFinite(firstWpLon);
+        const missionType = String(mission.type ?? '').toLowerCase();
+        const isDiscovery = missionType === 'discovery';
+        const isFreeFlight = missionType === 'free_flight';
+        const isRoute = missionType === 'route';
+
+        const waypoints = this.normalizeMissionWaypoints(mission.waypoints);
+        this.scene._missionWaypoints = waypoints;
+        this.scene._missionCurrentWpIndex = 0;
+
+        const firstWp = waypoints.length > 0 ? waypoints[0] : null;
+        const firstWpLat = firstWp ? firstWp.latitude : null;
+        const firstWpLon = firstWp ? firstWp.longitude : null;
+        const hasFirstWp = firstWpLat != null && firstWpLon != null;
+
+        const headingToFirstWp = (fromLat: number, fromLon: number): number => {
+            if (!hasFirstWp || firstWpLat == null || firstWpLon == null) return 0;
+            return initialBearingDeg(fromLat, fromLon, firstWpLat, firstWpLon);
+        };
 
         if ((isDiscovery || isFreeFlight) && mission.spawn_latitude != null && mission.spawn_longitude != null) {
             const spawnLat = Number(mission.spawn_latitude);
@@ -109,15 +125,20 @@ export class MissionSystem {
             this.scene._pendingMissionLat = spawnLat;
             this.scene._pendingMissionLon = spawnLon;
             this.scene._pendingMissionAltM = mission.spawn_altitude_ft != null ? Number(mission.spawn_altitude_ft) * 0.3048 : 1000;
-            this.scene._pendingMissionHdg = hasFirstWp ? this.computeBearingDeg(spawnLat, spawnLon, firstWpLat!, firstWpLon!) : 0;
+            this.scene._pendingMissionHdg = headingToFirstWp(spawnLat, spawnLon);
             this.scene._pendingMissionAirborne = true;
             if (hasFirstWp) {
-                console.debug(`[Mission] Spawn heading aligned to next waypoint: hdg=${this.scene._pendingMissionHdg.toFixed(1)}° → wp lat=${firstWpLat} lon=${firstWpLon}`);
+                console.debug(`[Mission] Spawn heading aligned to next waypoint: hdg=${this.scene._pendingMissionHdg.toFixed(1)}° → wp lat=${firstWpLat} lon=${firstWpLon} order=${firstWp?.order_index}`);
+            } else if (waypoints.length > 0) {
+                console.warn(`[Mission] Mission ${mission.id} has waypoints but first waypoint coordinates are invalid — spawn heading defaults to 0°`);
             }
         } else if (isRoute && mission.dep_rwy_latitude != null && mission.dep_rwy_longitude != null) {
             this.scene._pendingMissionLat = Number(mission.dep_rwy_latitude);
             this.scene._pendingMissionLon = Number(mission.dep_rwy_longitude);
-            this.scene._pendingMissionHdg = mission.dep_rwy_heading != null ? Number(mission.dep_rwy_heading) : 0;
+            const rwyHdg = mission.dep_rwy_heading != null ? Number(mission.dep_rwy_heading) : null;
+            this.scene._pendingMissionHdg = rwyHdg != null && Number.isFinite(rwyHdg)
+                ? rwyHdg
+                : headingToFirstWp(this.scene._pendingMissionLat, this.scene._pendingMissionLon);
             this.scene._pendingMissionAltM = mission.dep_rwy_elevation_ft != null ? Number(mission.dep_rwy_elevation_ft) * 0.3048 : 0;
             this.scene._pendingMissionAirborne = false;
             console.log(`[Mission] Spawning at runway centerline lat=${this.scene._pendingMissionLat} lon=${this.scene._pendingMissionLon} hdg=${this.scene._pendingMissionHdg}`);
@@ -126,7 +147,7 @@ export class MissionSystem {
             const depLon = Number(mission.departure_lon);
             this.scene._pendingMissionLat = depLat;
             this.scene._pendingMissionLon = depLon;
-            this.scene._pendingMissionHdg = hasFirstWp ? this.computeBearingDeg(depLat, depLon, firstWpLat!, firstWpLon!) : 0;
+            this.scene._pendingMissionHdg = headingToFirstWp(depLat, depLon);
             this.scene._pendingMissionAltM = 0;
             this.scene._pendingMissionAirborne = false;
             console.warn('[Mission] Route mission has no runway centerline — falling back to airport center');
@@ -147,21 +168,30 @@ export class MissionSystem {
             };
         }
 
-        this.scene._missionWaypoints = Array.isArray(mission.waypoints) ? mission.waypoints : [];
-        this.scene._missionCurrentWpIndex = 0;
+        if (this.scene._pendingMissionHdg != null && Number.isFinite(this.scene._pendingMissionHdg)) {
+            this.scene.initialHeading = this.scene._pendingMissionHdg;
+        }
 
-        console.log(`[Mission] Active mission id=${this.scene._activeMissionId}, type=${mission.type}, spawn lat=${this.scene._pendingMissionLat} lon=${this.scene._pendingMissionLon} airborne=${this.scene._pendingMissionAirborne} waypoints=${this.scene._missionWaypoints.length}`);
+        console.log(`[Mission] Active mission id=${this.scene._activeMissionId}, type=${mission.type}, spawn lat=${this.scene._pendingMissionLat} lon=${this.scene._pendingMissionLon} hdg=${this.scene._pendingMissionHdg} airborne=${this.scene._pendingMissionAirborne} waypoints=${waypoints.length}`);
+    }
+
+    private normalizeMissionWaypoints(raw: unknown): Array<{ id: number; order_index: number; name: string | null; latitude: number; longitude: number; altitude_ft: number | null }> {
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .map((wp: any, i: number) => ({
+                id: Number(wp.id ?? i),
+                order_index: Number(wp.order_index ?? i + 1),
+                name: wp.name ?? null,
+                latitude: Number(wp.latitude ?? wp.lat),
+                longitude: Number(wp.longitude ?? wp.lon),
+                altitude_ft: wp.altitude_ft != null ? Number(wp.altitude_ft) : null,
+            }))
+            .filter((wp) => Number.isFinite(wp.latitude) && Number.isFinite(wp.longitude))
+            .sort((a, b) => a.order_index - b.order_index);
     }
 
     private computeBearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        const toRad = (d: number) => (d * Math.PI) / 180;
-        const phi1 = toRad(lat1);
-        const phi2 = toRad(lat2);
-        const dLambda = toRad(lon2 - lon1);
-        const y = Math.sin(dLambda) * Math.cos(phi2);
-        const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
-        const theta = Math.atan2(y, x);
-        return ((theta * 180) / Math.PI + 360) % 360;
+        return initialBearingDeg(lat1, lon1, lat2, lon2);
     }
 
     checkWaypointProgress(lat: number, lon: number): void {

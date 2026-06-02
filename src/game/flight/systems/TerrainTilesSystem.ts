@@ -39,16 +39,17 @@ export class TerrainTilesSystem {
         const hasPlan = this.scene._pendingFlightPlanLat != null;
         const hasMission = this.scene._pendingMissionLat != null;
         let lat: number, lon: number, alt: number;
-        if (hasPlan) {
+        if (hasMission) {
+            lat = this.scene._pendingMissionLat!;
+            lon = this.scene._pendingMissionLon!;
+            alt = (this.scene._pendingMissionAltM || 0) + GROUND_Y;
+            const missionHdg = this.scene._pendingMissionHdg;
+            this.scene.initialHeading = missionHdg != null && Number.isFinite(missionHdg) ? missionHdg : 0;
+        } else if (hasPlan) {
             lat = this.scene._pendingFlightPlanLat!;
             lon = this.scene._pendingFlightPlanLon!;
             alt = this.scene._pendingFlightPlanAltM! + GROUND_Y;
             this.scene.initialHeading = this.scene._pendingFlightPlanHdg!;
-        } else if (hasMission) {
-            lat = this.scene._pendingMissionLat!;
-            lon = this.scene._pendingMissionLon!;
-            alt = (this.scene._pendingMissionAltM || 0) + GROUND_Y;
-            this.scene.initialHeading = this.scene._pendingMissionHdg || 0;
         } else {
             lat = parseFloat(params.get('lat') || '-23.4341');
             lon = parseFloat(params.get('lng') || '-46.4825');

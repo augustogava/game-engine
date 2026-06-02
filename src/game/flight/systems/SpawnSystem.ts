@@ -31,6 +31,14 @@ export class SpawnSystem {
         this.scene = scene;
     }
 
+    private resolveSpawnHeadingDeg(): number {
+        const missionHdg = this.scene._pendingMissionHdg;
+        if (this.scene._pendingMissionLat != null && missionHdg != null && Number.isFinite(missionHdg)) {
+            return missionHdg;
+        }
+        return this.scene.initialHeading;
+    }
+
     tickWorldReadyProbe(): void {
         if (this.scene._worldReady) return;
         if (this.scene._worldReadyStartMs === 0) {
@@ -162,7 +170,8 @@ export class SpawnSystem {
     spawnPlane(forceGround: boolean = false): void {
         if (!this.scene.planeRoot) return;
         const cfg = this.scene.aircraftConfig;
-        const yawRad = (180 - this.scene.initialHeading) * Math.PI / 180;
+        const spawnHdg = this.resolveSpawnHeadingDeg();
+        const yawRad = (180 - spawnHdg) * Math.PI / 180;
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.scene.planeRoot.rotationQuaternion!);
         this.scene.angularVelocity.set(0, 0, 0);
         this.scene.terrainY = GROUND_Y;

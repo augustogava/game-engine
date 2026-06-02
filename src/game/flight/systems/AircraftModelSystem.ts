@@ -27,10 +27,19 @@ export class AircraftModelSystem {
         this.scene = scene;
     }
 
+    private resolveSpawnHeadingDeg(): number {
+        const missionHdg = this.scene._pendingMissionHdg;
+        if (this.scene._pendingMissionLat != null && missionHdg != null && Number.isFinite(missionHdg)) {
+            return missionHdg;
+        }
+        return this.scene.initialHeading;
+    }
+
     buildPlane(scene: BABYLON.Scene): void {
         const cfg = this.scene.aircraftConfig;
         this.scene.planeRoot = new BABYLON.TransformNode('planeRoot', scene);
-        const yawRad = (180 - this.scene.initialHeading) * Math.PI / 180;
+        const spawnHdg = this.resolveSpawnHeadingDeg();
+        const yawRad = (180 - spawnHdg) * Math.PI / 180;
         this.scene.planeRoot.rotationQuaternion = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
         this.scene.angularVelocity.set(0, 0, 0);
         this.scene.gearCompression = new Array(cfg.gear_positions.length).fill(0);
