@@ -129,7 +129,7 @@ export class AutopilotSystem {
                     : Math.sin(trackErrDeg * Math.PI / 180) * Math.max(0.1, distNm);
                 const intercept = Math.max(
                     -AP_NAV_MAX_INTERCEPT_DEG,
-                    Math.min(AP_NAV_MAX_INTERCEPT_DEG, xteNm * AP_NAV_XTE_DEG_PER_NM + trackErrDeg * 0.5),
+                    Math.min(AP_NAV_MAX_INTERCEPT_DEG, -xteNm * AP_NAV_XTE_DEG_PER_NM + trackErrDeg * 0.5),
                 );
                 this.scene._autopilotTargetHdgDeg = ((desiredBrg + intercept) + 360) % 360;
             }
@@ -143,7 +143,7 @@ export class AutopilotSystem {
             const sinBank = Math.max(-1, Math.min(1, right.y));
             const curBankDeg = -Math.asin(sinBank) * 180 / Math.PI;
             const rollErr = targetBank - curBankDeg;
-            const rollCmd = Math.max(-0.7, Math.min(0.7, rollErr * AP_HDG_ROLL_RATE_GAIN / AP_HDG_MAX_BANK_DEG));
+            const rollCmd = Math.max(-0.7, Math.min(0.7, -rollErr * AP_HDG_ROLL_RATE_GAIN / AP_HDG_MAX_BANK_DEG));
             this.scene.surfaces[0].controlInput =  rollCmd;
             this.scene.surfaces[1].controlInput = -rollCmd;
         }
