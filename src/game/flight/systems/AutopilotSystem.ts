@@ -145,13 +145,13 @@ export class AutopilotSystem {
             && (this.scene._autopilotHdgHold || this.scene._autopilotNavHold || this.scene._autopilotAprHold)
             && this.scene.surfaces.length >= 2) {
             const delta = ((this.scene._autopilotTargetHdgDeg - curHdgDeg + 540) % 360) - 180;
-            const targetBank = Math.max(
+            const targetBankDeg = Math.max(
                 -AP_HDG_MAX_BANK_DEG,
-                Math.min(AP_HDG_MAX_BANK_DEG, -delta * AP_HDG_BANK_GAIN * AP_HDG_MAX_BANK_DEG),
+                Math.min(AP_HDG_MAX_BANK_DEG, delta * AP_HDG_BANK_GAIN * AP_HDG_MAX_BANK_DEG),
             );
-            fdBankDeg = targetBank;
-            const rollErr = targetBank - curBankDeg;
-            const rollCmd = Math.max(-0.7, Math.min(0.7, rollErr * AP_HDG_ROLL_RATE_GAIN / AP_HDG_MAX_BANK_DEG));
+            fdBankDeg = targetBankDeg;
+            const targetSinBank = -Math.sin(targetBankDeg * Math.PI / 180);
+            const rollCmd = Math.max(-0.7, Math.min(0.7, (targetSinBank - sinBank) * AP_HDG_ROLL_RATE_GAIN));
             this.scene.surfaces[0].controlInput = rollCmd;
             this.scene.surfaces[1].controlInput = -rollCmd;
         }
