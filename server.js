@@ -944,29 +944,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && urlPath === '/api/user-missions') {
-        const user = authenticateRequest(req);
-        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
-        if (!dbPool) return jsonResponse(res, 200, { data: [] });
-        try {
-            let where = 'WHERE um.user_id = ?';
-            const params = [user.id];
-            if (query.status) {
-                const statuses = query.status.split(',').map(s => s.trim()).filter(Boolean);
-                if (statuses.length) {
-                    where += ` AND um.status IN (${statuses.map(() => '?').join(',')})`;
-                    params.push(...statuses);
-                }
-            }
-            const [rows] = await dbPool.execute(
-                `SELECT ${USER_MISSION_SELECT} ${USER_MISSION_JOINS}
-                 ${where} ORDER BY um.started_at DESC`, params);
-            const missionIds = rows.map(r => r.mission_id);
-            const wps = await loadWaypointsForMissionIds(missionIds);
-            return jsonResponse(res, 200, { data: rows.map(r => enrichUserMissionRow(r, wps.get(r.mission_id) || [])) });
-        } catch (err) {
-            console.error('[API] GET /api/user-missions error:', err.message);
-            return jsonResponse(res, 500, { error: 'Internal server error' });
-        }
+        const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+        return proxyToMainApi(`/api/user-missions${qs}`, req, res);
     }
 
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/complete'))) {
@@ -1229,6 +1208,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ── Airports API ─────────────────────────────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/airports/search') {
+        const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+        return proxyToMainApi(`/api/airports/search${qs}`, req, res);
+    }
+
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/airports/:id/runways'))) {
+        return proxyToMainApi(`/api/airports/${routeParams.id}/runways`, req, res);
+    }
 
     if (req.method === 'GET' && urlPath === '/api/airports/acquired') {
         const user = authenticateRequest(req);

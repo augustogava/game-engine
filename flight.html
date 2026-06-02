@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
     <title>SimFlightPro — AntiGravity 3D Engine</title>
     <meta name="description" content="Cinematic 3D flight simulator with Google Maps Photorealistic 3D Tiles, built with BabylonJS and the AntiGravity Engine.">
 
@@ -29,6 +29,11 @@
             width: 100%; height: 100%;
             touch-action: none;
             outline: none;
+            z-index: 1;
+        }
+        body.preflight-active #game-canvas {
+            pointer-events: none !important;
+            visibility: hidden;
         }
 
         /* ── Loading Screen ───────────────────────────────── */
@@ -131,6 +136,217 @@
             min-height: 16px;
             text-align: center;
             letter-spacing: 0.1em;
+        }
+
+        #preflight {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            display: none;
+            flex-direction: column;
+            background: radial-gradient(ellipse at 50% 40%, #081828 0%, #020810 75%);
+            font-family: 'Inter', system-ui, sans-serif;
+            color: #e8fff4;
+        }
+        #preflight.preflight-visible {
+            display: flex;
+            pointer-events: auto;
+            touch-action: manipulation;
+        }
+        .preflight-header {
+            padding: 14px 16px 8px;
+            text-align: center;
+            font-family: 'Orbitron', monospace;
+            font-size: 11px;
+            letter-spacing: 0.35em;
+            color: rgba(80, 200, 140, 0.55);
+            text-transform: uppercase;
+        }
+        .preflight-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 0 12px 8px;
+            overflow-x: auto;
+        }
+        .preflight-tab {
+            flex: 1;
+            min-width: 0;
+            min-height: 44px;
+            padding: 10px 6px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            border: 1px solid rgba(80, 255, 160, 0.2);
+            border-radius: 6px;
+            background: rgba(0, 20, 15, 0.5);
+            color: rgba(200, 240, 220, 0.7);
+            font-family: 'Orbitron', monospace;
+            font-size: 9px;
+            letter-spacing: 0.06em;
+            cursor: pointer;
+        }
+        .preflight-tab.active {
+            border-color: rgba(80, 255, 160, 0.65);
+            background: rgba(0, 50, 35, 0.55);
+            color: #40ffaa;
+            box-shadow: 0 0 12px rgba(0, 255, 128, 0.15);
+        }
+        .preflight-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            margin: 0 12px;
+            border: 1px solid rgba(80, 255, 160, 0.2);
+            border-radius: 10px;
+            background: rgba(0, 16, 12, 0.55);
+            backdrop-filter: blur(8px);
+        }
+        .preflight-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+        .preflight-panel.active { display: flex; }
+        .preflight-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            -webkit-overflow-scrolling: touch;
+        }
+        .preflight-detail {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .preflight-detail.visible { display: flex; flex: 1; min-height: 0; }
+        .preflight-detail-back {
+            padding: 10px 12px;
+            border: none;
+            background: transparent;
+            color: #40ffaa;
+            font-family: 'Orbitron', monospace;
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            text-align: left;
+        }
+        .preflight-detail-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 12px 12px;
+            -webkit-overflow-scrolling: touch;
+        }
+        .preflight-card {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 8px;
+            border: 1px solid rgba(80, 255, 160, 0.22);
+            border-radius: 8px;
+            background: rgba(0, 20, 15, 0.45);
+            cursor: pointer;
+        }
+        .preflight-card.selected { border-color: rgba(80, 255, 160, 0.6); background: rgba(0, 40, 28, 0.55); }
+        .preflight-card.locked { opacity: 0.55; cursor: default; }
+        .preflight-card-title { font-weight: 600; font-size: 13px; color: #fff; }
+        .preflight-card-sub { font-size: 10px; color: rgba(255, 255, 255, 0.45); margin-top: 3px; }
+        .preflight-badge-pro {
+            display: inline-block;
+            font-size: 8px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(255, 200, 0, 0.2);
+            color: #ffcc55;
+            border: 1px solid rgba(255, 200, 0, 0.4);
+            margin-left: 6px;
+        }
+        .preflight-field {
+            margin-bottom: 12px;
+        }
+        .preflight-field label {
+            display: block;
+            font-size: 9px;
+            letter-spacing: 0.12em;
+            color: rgba(100, 220, 180, 0.55);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            font-family: 'Orbitron', monospace;
+        }
+        .preflight-field input, .preflight-field select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(80, 255, 160, 0.25);
+            background: rgba(0, 0, 0, 0.45);
+            color: #fff;
+            font-size: 16px;
+            outline: none;
+            touch-action: manipulation;
+        }
+        .preflight-footer {
+            padding: 12px 16px max(20px, env(safe-area-inset-bottom, 20px));
+            padding-left: max(16px, env(safe-area-inset-left, 16px));
+            padding-right: max(16px, env(safe-area-inset-right, 16px));
+            border-top: 1px solid rgba(80, 255, 160, 0.15);
+        }
+        #preflight-fly-btn {
+            width: 100%;
+            min-height: 48px;
+            padding: 16px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #2a8f5a, #40ffaa);
+            color: #020810;
+            font-family: 'Orbitron', monospace;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.2em;
+            cursor: pointer;
+            box-shadow: 0 4px 24px rgba(64, 255, 160, 0.25);
+        }
+        #preflight-fly-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .preflight-cta-btn {
+            margin-top: 12px;
+            padding: 12px 20px;
+            width: 100%;
+            border: 1px solid rgba(80, 255, 160, 0.5);
+            border-radius: 6px;
+            background: rgba(0, 80, 40, 0.5);
+            color: #40ffaa;
+            font-family: 'Orbitron', monospace;
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            cursor: pointer;
+        }
+        .preflight-cta-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .preflight-msg { padding: 16px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 12px; }
+        .preflight-hero-img {
+            width: 100%;
+            max-height: 160px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid rgba(80, 255, 160, 0.25);
+            margin-bottom: 12px;
+            background: #0a1620;
+        }
+        @media (max-width: 768px) {
+            .preflight-header {
+                padding-top: max(14px, env(safe-area-inset-top, 14px));
+            }
+            .preflight-tabs {
+                padding-left: max(12px, env(safe-area-inset-left, 12px));
+                padding-right: max(12px, env(safe-area-inset-right, 12px));
+            }
+            .preflight-body {
+                margin-left: max(8px, env(safe-area-inset-left, 8px));
+                margin-right: max(8px, env(safe-area-inset-right, 8px));
+            }
+            .preflight-tab { font-size: 8px; letter-spacing: 0.04em; }
+            .preflight-card { padding: 12px; min-height: 56px; }
         }
 
         /* ── Debug UI ─────────────────────────────────────── */
@@ -286,6 +502,58 @@
         <div id="auth-error"></div>
     </div>
 
+    <div id="preflight" aria-label="Preflight">
+        <div class="preflight-header">SimFlightPro</div>
+        <div class="preflight-tabs" role="tablist">
+            <button type="button" class="preflight-tab active" data-tab="aircraft">Aeronave</button>
+            <button type="button" class="preflight-tab" data-tab="airport">Aeroporto</button>
+            <button type="button" class="preflight-tab" data-tab="missions">Missões</button>
+            <button type="button" class="preflight-tab" data-tab="plans">Plano de voo</button>
+        </div>
+        <div class="preflight-body">
+            <div class="preflight-panel active" id="preflight-panel-aircraft">
+                <div class="preflight-list" id="preflight-aircraft-list"></div>
+            </div>
+            <div class="preflight-panel" id="preflight-panel-airport">
+                <div class="preflight-list" id="preflight-airport-form" style="padding:12px">
+                    <div class="preflight-field">
+                        <label for="preflight-airport-search">Aeroporto</label>
+                        <input type="text" id="preflight-airport-search" placeholder="ICAO ou nome (ex. SBGR)" autocomplete="off"/>
+                    </div>
+                    <div class="preflight-field">
+                        <label for="preflight-runway-select">Pista</label>
+                        <select id="preflight-runway-select"><option value="">—</option></select>
+                    </div>
+                    <div class="preflight-field">
+                        <label for="preflight-runway-end">Extremidade</label>
+                        <select id="preflight-runway-end"><option value="le">LE</option><option value="he">HE</option></select>
+                    </div>
+                    <div class="preflight-field">
+                        <label for="preflight-datetime">Data e hora do voo</label>
+                        <input type="datetime-local" id="preflight-datetime"/>
+                    </div>
+                </div>
+            </div>
+            <div class="preflight-panel" id="preflight-panel-missions">
+                <div class="preflight-list" id="preflight-missions-list"></div>
+                <div class="preflight-detail" id="preflight-mission-detail">
+                    <button type="button" class="preflight-detail-back" data-back="missions">← Voltar</button>
+                    <div class="preflight-detail-scroll" id="preflight-mission-detail-body"></div>
+                </div>
+            </div>
+            <div class="preflight-panel" id="preflight-panel-plans">
+                <div class="preflight-list" id="preflight-plans-list"></div>
+                <div class="preflight-detail" id="preflight-plan-detail">
+                    <button type="button" class="preflight-detail-back" data-back="plans">← Voltar</button>
+                    <div class="preflight-detail-scroll" id="preflight-plan-detail-body"></div>
+                </div>
+            </div>
+        </div>
+        <div class="preflight-footer">
+            <button type="button" id="preflight-fly-btn">VOAR AGORA</button>
+        </div>
+    </div>
+
     <!-- BabylonJS renders into this canvas -->
     <canvas id="game-canvas"></canvas>
 
@@ -359,6 +627,11 @@
                     <option value="high" selected>High</option>
                     <option value="ultra">Ultra</option>
                 </select>
+
+                <div class="row" id="gfx-disable-dynamic-lights-row" style="align-items:center;gap:8px;margin-top:8px">
+                    <label style="flex:1;margin:0;font-size:10px">Freeze dynamic lights (perf)</label>
+                    <input type="checkbox" id="gfx-disable-dynamic-lights">
+                </div>
 
                 <div class="row" style="align-items:center;gap:8px;margin-top:4px">
                     <label style="flex:1;margin:0">Bloom</label>

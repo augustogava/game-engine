@@ -746,6 +746,7 @@ export class FlightSceneSimple extends Scene3D {
     private _activeFlightPlanId: number | null = null;
     private _activeFlightPlanArrivalAirportId: number | null = null;
     private _simTimeOffsetMs = 0;
+    /** @internal */ _disableDynamicLighting = false;
     private _activeFlightPlanNav: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; name: string } | null = null;
     private _navInfoEl: HTMLElement | null = null;
     private _navDestEl: HTMLElement | null = null;
@@ -1084,7 +1085,7 @@ export class FlightSceneSimple extends Scene3D {
         //     });
         // }
         
-                if (!this.isMobile) {
+                if (!this.isMobile && !this._disableDynamicLighting) {
                     this._sunUpdateTimer += dt;
                     if (this._sunUpdateTimer >= 2.0) {
                         this._sunUpdateTimer = 0;
@@ -1095,12 +1096,12 @@ export class FlightSceneSimple extends Scene3D {
         if (this._skyMaterial && this.camera) {
             this._skyMaterial.cameraOffset.y = this.camera.position.y;
         }
-        if (!this.isMobile) this._updateStarTwinkle(dt);
+        if (!this.isMobile && !this._disableDynamicLighting) this._updateStarTwinkle(dt);
         const aglForTurb = this.planeRoot
             ? Math.max(0, this.planeRoot.position.y - (this.tiles ? this.terrainY : GROUND_Y))
             : 0;
         this._updateTurbulence(dt, aglForTurb);
-        this._updateNavLights(dt);
+        if (!this._disableDynamicLighting) this._updateNavLights(dt);
         this._updateClouds(dt);
         this._updateHighClouds(dt);
         this._updatePropellerAnim();
@@ -1462,6 +1463,14 @@ export class FlightSceneSimple extends Scene3D {
 
     setMissionSpawn(mission: any, userMissionId: number | null): void {
         this._missionSystem.setMissionSpawn(mission, userMissionId);
+    }
+
+    setSimTimeOffsetFromIso(iso: string): void {
+        const scheduled = new Date(iso).getTime();
+        if (!Number.isNaN(scheduled)) {
+            this._simTimeOffsetMs = scheduled - Date.now();
+            console.debug(`[Flight] Sim time offset: ${Math.round(this._simTimeOffsetMs / 60000)} min`);
+        }
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {

@@ -1,5 +1,20 @@
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { MISSION_TOAST_VISIBLE_MS, MISSION_TOAST_FADE_MS } from '../constants/index.js';
+import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
+
+function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function flightPlanStatusToApi(status: string): number {
+    switch (status) {
+        case 'in_progress': return 1;
+        case 'completed': return 2;
+        case 'cancelled': return 3;
+        case 'planned':
+        default: return 0;
+    }
+}
 
 const WAYPOINT_REACH_NM = 0.3;
 
@@ -362,7 +377,7 @@ export class MissionSystem {
         }
 
         try {
-            const res = await fetch('/api/user-missions?status=started,in_progress', {
+            const res = await fetch('/api/user-missions', {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             if (!res.ok) {
@@ -371,12 +386,12 @@ export class MissionSystem {
                 return;
             }
             const json = await res.json();
-            const userMissions = Array.isArray(json?.data) ? json.data : [];
+            const catalog = Array.isArray(json?.data) ? json.data : [];
 
-            this.scene._missionsCache = userMissions;
+            this.scene._missionsCache = catalog;
 
-            if (!userMissions.length) {
-                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No missions acquired</div>';
+            if (!catalog.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No missions</div>';
                 this.scene._activeMission = null;
                 this.scene._activeUserMissionId = null;
                 this.scene._activeMissionId = null;
@@ -387,22 +402,28 @@ export class MissionSystem {
 
             this.renderMissionsList();
 
-            const activeFromList = userMissions.find((m: any) => m?.status === 'in_progress');
-            if (activeFromList && activeFromList.departure_lat != null && activeFromList.arrival_lat != null) {
+            const activeFromList = catalog.find((item: any) => item?.user_mission?.status === 'in_progress');
+            const ami = activeFromList?.mission || {};
+            if (activeFromList && ami) {
+                const depLat = ami.departure_lat ?? activeFromList.departure_lat;
+                const depLon = ami.departure_lon ?? activeFromList.departure_lon;
+                const arrLat = ami.arrival_lat ?? activeFromList.arrival_lat;
+                const arrLon = ami.arrival_lon ?? activeFromList.arrival_lon;
+                if (depLat != null && depLon != null) {
                 this.scene._activeMission = {
-                    departure_lat: Number(activeFromList.departure_lat),
-                    departure_lon: Number(activeFromList.departure_lon),
-                    arrival_lat: Number(activeFromList.arrival_lat),
-                    arrival_lon: Number(activeFromList.arrival_lon),
-                    departure_icao: activeFromList.departure_icao || '',
-                    arrival_icao: activeFromList.arrival_icao || '',
-                    mission_title: activeFromList.mission_title || '',
+                    departure_lat: Number(depLat),
+                    departure_lon: Number(depLon),
+                    arrival_lat: arrLat != null ? Number(arrLat) : Number(depLat),
+                    arrival_lon: arrLon != null ? Number(arrLon) : Number(depLon),
+                    departure_icao: ami.departure_icao || activeFromList.departure_icao || '',
+                    arrival_icao: ami.arrival_icao || activeFromList.arrival_icao || '',
+                    mission_title: ami.title || activeFromList.mission_title || '',
                 };
-                this.scene._activeUserMissionId = activeFromList.id ?? null;
+                this.scene._activeUserMissionId = activeFromList.user_mission?.id ?? null;
                 this.scene._activeMissionId = activeFromList.mission_id ?? null;
-                const ami = activeFromList.mission || {};
                 this.scene._missionWaypoints = Array.isArray(ami.waypoints) ? ami.waypoints : [];
                 this.scene._missionCurrentWpIndex = 0;
+                }
             } else {
                 this.scene._activeMission = null;
                 this.scene._activeUserMissionId = null;
@@ -443,8 +464,8 @@ export class MissionSystem {
                 if (sortKey === 'distance') {
                     return Number(a.mission_distance_nm ?? a.mission?.distance_nm ?? 0) - Number(b.mission_distance_nm ?? b.mission?.distance_nm ?? 0);
                 }
-                const aInProg = a?.status === 'in_progress' ? 0 : 1;
-                const bInProg = b?.status === 'in_progress' ? 0 : 1;
+                const aInProg = a?.user_mission?.status === 'in_progress' ? 0 : 1;
+                const bInProg = b?.user_mission?.status === 'in_progress' ? 0 : 1;
                 if (aInProg !== bInProg) return aInProg - bInProg;
                 return 0;
             });
@@ -455,51 +476,56 @@ export class MissionSystem {
             }
 
             let html = '';
-            for (const um of visible) {
-                const mid = Number(um?.mission_id);
+            for (const item of visible) {
+                const mid = Number(item?.mission_id);
                 if (!Number.isFinite(mid) || mid <= 0) continue;
-                const mi = um.mission || {};
-                const isInProgress = um.status === 'in_progress';
-                const borderColor = isInProgress ? 'rgba(80,255,160,.5)' : 'rgba(255,200,80,.35)';
-                const mType = um.mission_type || mi.type || '';
-                const depIcao = um.departure_icao || mi.departure_icao || '';
-                const arrIcao = um.arrival_icao || mi.arrival_icao || '';
-                const depName = um.departure_airport_name || mi.departure_airport_name || '';
-                const arrName = um.arrival_airport_name || mi.arrival_airport_name || '';
+                const mi = item.mission || {};
+                const um = item.user_mission;
+                const isInProgress = um?.status === 'in_progress';
+                const canStart = um && ['started', 'in_progress'].includes(um.status) && item.has_access;
+                const borderColor = isInProgress ? 'rgba(80,255,160,.5)' : item.has_access ? 'rgba(255,200,80,.35)' : 'rgba(255,255,255,.12)';
+                const mType = item.mission_type || mi.type || '';
+                const depIcao = item.departure_icao || mi.departure_icao || '';
+                const arrIcao = item.arrival_icao || mi.arrival_icao || '';
+                const depName = item.departure_airport_name || mi.departure_airport_name || '';
+                const arrName = item.arrival_airport_name || mi.arrival_airport_name || '';
+                const img = resolveHudImageUrl(item);
                 const isRoute = depIcao && arrIcao;
                 let routeHtml = '';
                 if (isRoute) {
-                    routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)">${depIcao} <span style="color:#40ffaa">\u2708</span> ${arrIcao}</div>
-                        <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${depName} \u2192 ${arrName}</div>`;
+                    routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)">${escapeHtml(depIcao)} <span style="color:#40ffaa">\u2708</span> ${escapeHtml(arrIcao)}</div>
+                        <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${escapeHtml(depName)} \u2192 ${escapeHtml(arrName)}</div>`;
                 } else if (mType === 'discovery') {
                     routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)"><span style="color:#40ffaa">\u2708</span> Discovery Flight</div>`;
                 } else {
-                    routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)">${mType || 'Free Flight'}</div>`;
+                    routeHtml = `<div style="font-size:10px;color:rgba(255,255,255,.5)">${escapeHtml(mType || 'Free Flight')}</div>`;
                 }
 
                 let actionHtml = '';
                 if (isInProgress) {
-                    actionHtml = `<div style="font-size:9px;color:#40ffaa;letter-spacing:.08em;margin-top:6px">IN PROGRESS</div>`;
-                } else {
+                    actionHtml = `<div style="font-size:9px;color:#40ffaa;letter-spacing:.08em;margin-top:6px">EM PROGRESSO</div>`;
+                } else if (canStart) {
                     const umId = Number(um?.id);
-                    if (!Number.isFinite(umId) || umId <= 0) {
-                        console.warn(`[FlightScene] Skipping START button for mission ${mid}: invalid user-mission id`);
-                        actionHtml = `<div style="font-size:9px;color:#ff8080;letter-spacing:.08em;margin-top:6px">INICIADA (ID INVÁLIDO)</div>`;
-                    } else {
-                        actionHtml = `<div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-                            <span style="font-size:9px;color:#ffcc55;letter-spacing:.08em">INICIADA</span>
-                            <button class="mission-start-btn" data-mission-id="${mid}" data-user-mission-id="${umId}" style="padding:4px 10px;background:rgba(0,80,40,.6);border:1px solid rgba(80,255,160,.5);border-radius:4px;color:#40ffaa;font-size:10px;font-family:'Orbitron',monospace;letter-spacing:.08em;cursor:pointer;pointer-events:auto">INICIAR JOGO</button>
-                        </div>`;
-                    }
+                    actionHtml = `<button class="mission-start-btn" data-mission-id="${mid}" data-user-mission-id="${umId}" style="margin-top:6px;padding:4px 10px;background:rgba(0,80,40,.6);border:1px solid rgba(80,255,160,.5);border-radius:4px;color:#40ffaa;font-size:10px;font-family:'Orbitron',monospace;letter-spacing:.08em;cursor:pointer">INICIAR JOGO</button>`;
+                } else if (item.has_access && !um) {
+                    actionHtml = `<button class="mission-acquire-btn" data-mission-id="${mid}" style="margin-top:6px;padding:4px 10px;background:rgba(0,80,40,.6);border:1px solid rgba(80,255,160,.5);border-radius:4px;color:#40ffaa;font-size:10px;font-family:'Orbitron',monospace;letter-spacing:.08em;cursor:pointer">INICIAR JOGO</button>`;
+                } else if (!item.has_access) {
+                    actionHtml = `<div style="font-size:9px;color:rgba(255,120,120,.8);margin-top:6px">BLOQUEADO</div>`;
                 }
 
-                html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
-                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${um.mission_title || mi.title || 'Mission'}</div>
+                html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4);display:flex;gap:8px;align-items:flex-start">
+                    <img data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="" width="56" height="40" style="width:56px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0"/>
+                    <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${escapeHtml(item.mission_title || mi.title || 'Mission')}</div>
                     ${routeHtml}
                     ${actionHtml}
+                    </div>
                 </div>`;
             }
             listEl.innerHTML = html;
+            listEl.querySelectorAll<HTMLImageElement>('img[data-hud-thumb]').forEach((imgEl) => {
+                imgEl.addEventListener('error', () => hudImgOnError(imgEl), { once: true });
+            });
 
             const startButtons = listEl.querySelectorAll<HTMLButtonElement>('.mission-start-btn');
             startButtons.forEach((btn) => {
@@ -556,6 +582,68 @@ export class MissionSystem {
                     window.location.href = `flight.html?mission_id=${encodeURIComponent(String(startMissionId))}`;
                 });
             });
+
+            const acquireButtons = listEl.querySelectorAll<HTMLButtonElement>('.mission-acquire-btn');
+            acquireButtons.forEach((btn) => {
+                btn.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    const mid = Number((ev.currentTarget as HTMLButtonElement).dataset.missionId);
+                    if (!Number.isFinite(mid) || mid <= 0) return;
+                    const target = ev.currentTarget as HTMLButtonElement;
+                    target.disabled = true;
+                    target.textContent = 'CARREGANDO...';
+                    const tk = localStorage.getItem('auth_token') || '';
+                    if (!tk) {
+                        target.disabled = false;
+                        target.textContent = 'INICIAR JOGO';
+                        return;
+                    }
+                    let userMissionId: number | null = null;
+                    try {
+                        const postRes = await fetch('/api/user-missions', {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${tk}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mission_id: mid }),
+                        });
+                        if (postRes.ok) {
+                            const data = await postRes.json();
+                            userMissionId = data?.id != null ? Number(data.id) : null;
+                        } else if (postRes.status === 409) {
+                            const recoverRes = await fetch('/api/user-missions/active', {
+                                headers: { Authorization: `Bearer ${tk}` },
+                            });
+                            if (recoverRes.ok) {
+                                const recoverJson = await recoverRes.json();
+                                const recoverList: any[] = Array.isArray(recoverJson?.data) ? recoverJson.data : [];
+                                const existing = recoverList.find((um: any) => Number(um?.mission_id) === mid);
+                                if (existing?.id != null) userMissionId = Number(existing.id);
+                            }
+                        } else {
+                            console.warn(`[FlightScene] Mission acquire failed: HTTP ${postRes.status}`);
+                            target.disabled = false;
+                            target.textContent = 'INICIAR JOGO';
+                            return;
+                        }
+                        if (userMissionId != null) {
+                            const promoteRes = await fetch(`/api/user-missions/${userMissionId}/start`, {
+                                method: 'PUT',
+                                headers: { Authorization: `Bearer ${tk}` },
+                            });
+                            if (!promoteRes.ok && promoteRes.status !== 409) {
+                                console.warn(`[FlightScene] Mission start after acquire failed: HTTP ${promoteRes.status}`);
+                                target.disabled = false;
+                                target.textContent = 'INICIAR JOGO';
+                                return;
+                            }
+                        }
+                        window.location.href = `flight.html?mission_id=${encodeURIComponent(String(mid))}`;
+                    } catch (err) {
+                        console.warn('[FlightScene] Mission acquire flow error:', err);
+                        target.disabled = false;
+                        target.textContent = 'INICIAR JOGO';
+                    }
+                });
+            });
         } catch (err) {
             console.warn('[FlightScene] Render missions list error:', err);
             listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Render error</div>';
@@ -596,7 +684,7 @@ export class MissionSystem {
         }
 
         try {
-            const res = await fetch('/api/flight-plans', {
+            const res = await fetch('/api/flight-plans?status=all&limit=100', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) {
@@ -619,21 +707,34 @@ export class MissionSystem {
                 const depRwy = p.dep_rwy_ident ? ` RWY ${p.dep_rwy_ident}` : '';
                 const arrRwy = p.arr_rwy_ident ? ` RWY ${p.arr_rwy_ident}` : '';
                 const scheduled = p.scheduled_departure_at ? new Date(p.scheduled_departure_at).toLocaleString() : '';
-                html += `<div style="border:1px solid rgba(80,255,160,.25);border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
-                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${name}</div>
+                const img = resolveHudImageUrl(p);
+                const canStart = p.has_access === true;
+                const btnStyle = canStart
+                    ? 'margin-top:6px;background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit;letter-spacing:.06em'
+                    : 'margin-top:6px;background:rgba(80,80,80,.2);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.35);padding:3px 10px;border-radius:3px;font-size:9px;font-family:inherit;letter-spacing:.06em;cursor:not-allowed';
+                html += `<div style="border:1px solid rgba(80,255,160,.25);border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4);display:flex;gap:8px">
+                    <img data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="" width="56" height="40" style="width:56px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0"/>
+                    <div style="flex:1">
+                    <div style="font-weight:600;color:#fff;margin-bottom:4px">${escapeHtml(name)}</div>
                     <div style="font-size:10px;color:rgba(255,255,255,.6)">
-                        ${depIcao}${depRwy} <span style="color:#40ffaa">\u2708</span> ${arrIcao}${arrRwy}
+                        ${escapeHtml(depIcao)}${escapeHtml(depRwy)} <span style="color:#40ffaa">\u2708</span> ${escapeHtml(arrIcao)}${escapeHtml(arrRwy)}
                     </div>
-                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${p.departure_airport_name || ''} \u2192 ${p.arrival_airport_name || ''}</div>
-                    ${scheduled ? `<div style="font-size:9px;color:rgba(255,200,0,.6);margin-top:3px">\u{1F552} ${scheduled}</div>` : ''}
-                    <button data-start-plan="${p.id}" style="margin-top:6px;background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit;letter-spacing:.06em">START</button>
+                    <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:2px">${escapeHtml(p.departure_airport_name || '')} \u2192 ${escapeHtml(p.arrival_airport_name || '')}</div>
+                    ${scheduled ? `<div style="font-size:9px;color:rgba(255,200,0,.6);margin-top:3px">\u{1F552} ${escapeHtml(scheduled)}</div>` : ''}
+                    <button data-start-plan="${p.id}" data-can-start="${canStart ? '1' : '0'}" ${canStart ? '' : 'disabled'} style="${btnStyle}">START</button>
+                    </div>
                 </div>`;
             }
             listEl.innerHTML = html;
+            listEl.querySelectorAll<HTMLImageElement>('img[data-hud-thumb]').forEach((imgEl) => {
+                imgEl.addEventListener('error', () => hudImgOnError(imgEl), { once: true });
+            });
 
             listEl.querySelectorAll('[data-start-plan]').forEach((el) => {
                 el.addEventListener('click', (e) => {
-                    const planId = (e.currentTarget as HTMLElement).getAttribute('data-start-plan');
+                    const target = e.currentTarget as HTMLElement;
+                    if (target.getAttribute('data-can-start') !== '1') return;
+                    const planId = target.getAttribute('data-start-plan');
                     if (planId) {
                         window.location.search = `?flightPlanId=${planId}`;
                     }
@@ -647,14 +748,15 @@ export class MissionSystem {
     async patchFlightPlanStatus(planId: number, status: string): Promise<void> {
         const token = localStorage.getItem('auth_token') || '';
         if (!token) return;
+        const statusCode = flightPlanStatusToApi(status);
         try {
             const res = await fetch(`/api/flight-plans/${planId}/status`, {
                 method: 'PATCH',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status }),
+                body: JSON.stringify({ status: statusCode }),
             });
-            if (!res.ok) console.warn(`[FlightPlan] PATCH status=${status} failed: ${res.status}`);
-            else console.log(`[FlightPlan] Plan ${planId} status -> ${status}`);
+            if (!res.ok) console.warn(`[FlightPlan] PATCH status=${statusCode} failed: ${res.status}`);
+            else console.log(`[FlightPlan] Plan ${planId} status -> ${statusCode}`);
         } catch (err) {
             console.error('[FlightPlan] PATCH status error:', err);
         }

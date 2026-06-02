@@ -890,6 +890,9 @@ export class HudSystem {
             s.fxaaFallback     = this.scene._premium.fxaaFallback;
             s.vegetation       = this.scene._premium.vegetation;
             s.volumetricClouds = this.scene._premium.volumetricClouds;
+            const disableDynEl = document.getElementById('gfx-disable-dynamic-lights') as HTMLInputElement | null;
+            s.disableDynamicLights = disableDynEl?.checked ?? false;
+            this.scene._disableDynamicLighting = s.disableDynamicLights;
             localStorage.setItem('gfx_settings', JSON.stringify(s));
         };
 
@@ -1116,6 +1119,18 @@ export class HudSystem {
         const MOBILE_QUALITY_AA = '1';
 
         const isMobile = this.scene.isMobile === true;
+        const dynLightsRow = document.getElementById('gfx-disable-dynamic-lights-row');
+        if (dynLightsRow) dynLightsRow.style.display = isMobile ? 'none' : '';
+        const applyDisableDynamicLights = (enabled: boolean) => {
+            this.scene._disableDynamicLighting = enabled;
+        };
+        const disableDynEl = document.getElementById('gfx-disable-dynamic-lights') as HTMLInputElement | null;
+        if (disableDynEl) {
+            disableDynEl.addEventListener('change', () => {
+                applyDisableDynamicLights(disableDynEl.checked);
+                saveSettings();
+            });
+        }
         if (isMobile && Object.keys(cfg).length === 0) {
             console.info('[GFX] Mobile detected, first visit — applying "low" preset with quality overrides (render scale, shadows, FXAA)');
             applyPreset('low');
@@ -1141,6 +1156,8 @@ export class HudSystem {
             if (cfg.fogDensity !== undefined) setVal('gfx-fog-density', Math.round(cfg.fogDensity * 100));
             setVal('gfx-aa', cfg.aa);
             setCheck('gfx-vignette', cfg.vignette); setCheck('gfx-chromatic', cfg.chromatic);
+            setCheck('gfx-disable-dynamic-lights', cfg.disableDynamicLights);
+            applyDisableDynamicLights(!!cfg.disableDynamicLights);
             if (cfg.renderScale !== undefined) setVal('gfx-render-scale', Math.round(cfg.renderScale * 100));
             setVal('gfx-fps-limit', cfg.fpsLimit);
             if (cfg.cloudDensity !== undefined) setVal('gfx-cloud-density', cfg.cloudDensity);
@@ -2093,7 +2110,9 @@ export class HudSystem {
         const pos = this.scene.planeRoot.position;
         const altitudeM = Math.round(Math.max(0, pos.y));
         const altitudeFt = Math.round(altitudeM * 3.28084);
-        const pct = Math.round(this.scene.thrust * 100);
+        const abMax = this.scene.aircraftConfig?.afterburner_thrust_mult ?? 1;
+        const thrustNorm = abMax > 0 ? this.scene.thrust / abMax : this.scene.thrust;
+        const pct = Math.round(Math.min(100, Math.max(0, thrustNorm * 100)));
 
         const altitudeMslFt = Math.round(Math.max(0, this.scene.refAlt + pos.y) * 3.28084);
         const speedDisp = this.scene._convertSpeedKts(speedKts);
@@ -2108,8 +2127,7 @@ export class HudSystem {
             const u = this.scene.hudAltVal.parentElement.querySelector('.hud-unit');
             if (u) u.textContent = altDisp.unit;
         }
-        const barPct = Math.min(100, pct);
-        this.scene.hudThrottle.style.width = `${barPct}%`;
+        this.scene.hudThrottle.style.width = `${pct}%`;
         if (this.scene.hudThrPct) this.scene.hudThrPct.textContent = `${pct}%`;
         const _engAliveArr = Array.isArray(this.scene._engineAlive) ? this.scene._engineAlive : [];
         const _eng1Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[0] === true);

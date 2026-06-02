@@ -40,12 +40,19 @@ export class GameCore3D {
     private _perfStartedAt: number = 0;
     private _perfSamples: number[] = [];
     private _perfBenchmarkDone: boolean = false;
+    private _skipPerfBenchmark: boolean = false;
 
     // Public stats
     fps: number = 0;
 
     constructor(config: GameCore3DConfig) {
         const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const isChromeMobile = isMobile && /Chrome|CriOS/i.test(navigator.userAgent || '');
+        if (isChromeMobile) {
+            this._skipPerfBenchmark = true;
+            this._perfBenchmarkDone = true;
+            console.debug('[GameCore3D] Chrome mobile: skipping FPS benchmark');
+        }
         const antialias = config.antialias ?? true;
 
         this.engine = new BABYLON.Engine(config.canvas, antialias, {
@@ -109,7 +116,7 @@ export class GameCore3D {
 
             this.fps = Math.round(this.engine.getFps());
 
-            if (!this._perfBenchmarkDone && this._perfStartedAt > 0) {
+            if (!this._skipPerfBenchmark && !this._perfBenchmarkDone && this._perfStartedAt > 0) {
                 const elapsed = now - this._perfStartedAt;
                 if (elapsed > PERF_BENCHMARK_WARMUP_MS && elapsed < PERF_BENCHMARK_DURATION_MS) {
                     this._perfSamples.push(this.fps);

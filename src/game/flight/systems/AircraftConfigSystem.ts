@@ -13,6 +13,8 @@ import {
     JET_THRUST_MACH_LAPSE_COEF,
     JET_THRUST_MACH_MIN_FACTOR,
 } from '../constants/index.js';
+import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
+import { PREFLIGHT_AIRCRAFT_KEY } from '../../../preflight/PreflightController.js';
 import {
     ENGINE_SOUND_TYPE_PISTON,
     ENGINE_SOUND_TYPE_TURBOPROP,
@@ -140,52 +142,59 @@ export class AircraftConfigSystem {
         }
 
         try {
-            const [ownedRes, allRes] = await Promise.all([
-                fetch('/api/user-aircrafts', { headers: { 'Authorization': `Bearer ${token}` } }),
-                fetch('/api/aircrafts'),
-            ]);
-
+            const ownedRes = await fetch('/api/user-aircrafts', { headers: { 'Authorization': `Bearer ${token}` } });
             const ownedData = ownedRes.ok ? await ownedRes.json() : { data: [] };
-            const allData = allRes.ok ? await allRes.json() : { data: [] };
+            const rows: any[] = Array.isArray(ownedData.data) ? ownedData.data : [];
 
-            const ownedIds = new Set((ownedData.data || []).map((ua: any) => ua.aircraft_id));
-            const selectedId = (ownedData.data || []).find((ua: any) => ua.is_selected === 1)?.aircraft_id;
-            const aircrafts: any[] = allData.data || [];
-
-            if (!aircrafts.length) {
+            if (!rows.length) {
                 listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">No aircraft available</div>';
                 return;
             }
 
             const categories = ['LIGHT', 'TURBOPROP', 'JET', 'HEAVY JET', 'MILITARY'];
             let html = '';
-            for (const ac of aircrafts) {
-                const owned = ownedIds.has(ac.id);
-                const selected = ac.id === selectedId;
-                const borderColor = selected ? 'rgba(80,255,160,.6)' : owned ? 'rgba(80,255,160,.25)' : 'rgba(255,255,255,.1)';
+            for (const row of rows) {
+                const ac = row.aircraft || {};
+                const aircraftId = row.aircraft_id ?? ac.id;
+                const name = ac.name || `Aircraft #${aircraftId}`;
+                const selected = row.is_selected === 1;
+                const hasAccess = row.has_access === true;
+                const proAccess = row.pro_access === true;
+                const img = resolveHudImageUrl(row);
+                const borderColor = selected ? 'rgba(80,255,160,.6)' : hasAccess ? 'rgba(80,255,160,.25)' : 'rgba(255,255,255,.1)';
                 const bg = selected ? 'rgba(0,40,30,.6)' : 'rgba(0,20,15,.4)';
                 const catLabel = categories[ac.category] || 'UNKNOWN';
-                const priceLabel = ac.price > 0 ? `$${ac.price}` : 'FREE';
-                const actionBtn = selected
-                    ? '<span style="color:#40ffaa;font-size:9px;letter-spacing:.1em">SELECTED</span>'
-                    : owned
-                        ? `<button data-select-aircraft="${ac.id}" style="background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit">SELECT</button>`
-                        : `<button data-acquire-aircraft="${ac.id}" style="background:rgba(255,200,0,.15);border:1px solid rgba(255,200,0,.4);color:#ffcc00;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit">${priceLabel}</button>`;
+                let actionBtn = '';
+                if (selected) {
+                    actionBtn = '<span style="color:#40ffaa;font-size:9px;letter-spacing:.1em">SELECTED</span>';
+                } else if (hasAccess && row.is_owned) {
+                    actionBtn = `<button data-select-aircraft="${aircraftId}" style="background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit">SELECT</button>`;
+                } else if (hasAccess && proAccess) {
+                    actionBtn = `<button data-select-aircraft="${aircraftId}" data-pro-only="1" style="background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit">SELECT (PRO)</button>`;
+                } else {
+                    actionBtn = `<button data-acquire-aircraft="1" style="background:rgba(255,200,0,.15);border:1px solid rgba(255,200,0,.4);color:#ffcc00;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit">LOJA</button>`;
+                }
 
-                html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:${bg};display:flex;justify-content:space-between;align-items:center">
-                    <div>
-                        <div style="font-weight:600;color:#fff;margin-bottom:2px">${ac.name}</div>
+                html += `<div style="border:1px solid ${borderColor};border-radius:6px;padding:8px;margin-bottom:6px;background:${bg};display:flex;gap:8px;align-items:center">
+                    <img data-hud-thumb src="${(img || HUD_IMAGE_PLACEHOLDER).replace(/"/g, '&quot;')}" alt="" width="56" height="40" style="width:56px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0"/>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-weight:600;color:#fff;margin-bottom:2px">${name}${proAccess ? ' <span style="color:#ffcc55;font-size:8px">PRO</span>' : ''}</div>
                         <div style="font-size:9px;color:rgba(100,240,180,.5);letter-spacing:.08em">${catLabel}</div>
                     </div>
                     <div>${actionBtn}</div>
                 </div>`;
             }
             listEl.innerHTML = html;
+            listEl.querySelectorAll<HTMLImageElement>('img[data-hud-thumb]').forEach((imgEl) => {
+                imgEl.addEventListener('error', () => hudImgOnError(imgEl), { once: true });
+            });
 
             listEl.querySelectorAll('[data-select-aircraft]').forEach((el) => {
                 el.addEventListener('click', (e) => {
-                    const aircraftId = Number((e.currentTarget as HTMLElement).getAttribute('data-select-aircraft'));
-                    this.switchAircraft(aircraftId);
+                    const target = e.currentTarget as HTMLElement;
+                    const aircraftId = Number(target.getAttribute('data-select-aircraft'));
+                    const proOnly = target.getAttribute('data-pro-only') === '1';
+                    void this.switchAircraft(aircraftId, proOnly);
                 });
             });
 
@@ -205,18 +214,22 @@ export class AircraftConfigSystem {
         }
     }
 
-    async switchAircraft(aircraftId: number): Promise<void> {
+    async switchAircraft(aircraftId: number, proOnly = false): Promise<void> {
         const token = localStorage.getItem('auth_token') || '';
         if (!token) return;
 
         try {
-            const selectResp = await fetch(`/api/user-aircrafts/${aircraftId}/select`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!selectResp.ok) {
-                console.error('[Aircraft] Select failed');
-                return;
+            if (!proOnly) {
+                const selectResp = await fetch(`/api/user-aircrafts/${aircraftId}/select`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                });
+                if (!selectResp.ok) {
+                    console.error('[Aircraft] Select failed');
+                    return;
+                }
+            } else {
+                localStorage.setItem(PREFLIGHT_AIRCRAFT_KEY, String(aircraftId));
             }
 
             const cfg = await fetchAircraftConfig(aircraftId);

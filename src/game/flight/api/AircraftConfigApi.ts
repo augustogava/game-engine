@@ -1,4 +1,5 @@
 import { AircraftConfig, DEFAULT_AIRCRAFT_CONFIG } from '../types/AircraftConfig.js';
+import { PREFLIGHT_AIRCRAFT_KEY } from '../../../preflight/PreflightController.js';
 
 const CACHED_SELECTED_AIRCRAFT_KEY = 'cached_selected_aircraft_v1';
 
@@ -74,7 +75,20 @@ export async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
         const data = await resp.json();
         console.debug('[Aircraft] fetchSelectedAircraftConfig raw response:', JSON.stringify(data));
         const list: any[] = Array.isArray(data.data) ? data.data : [];
-        const selected = list.find((ua: any) => ua.is_selected === 1) || list.find((ua: any) => ua.aircraft);
+        let selected: any = null;
+        const preflightIdRaw = localStorage.getItem(PREFLIGHT_AIRCRAFT_KEY);
+        if (preflightIdRaw) {
+            const preflightId = Number(preflightIdRaw);
+            if (Number.isFinite(preflightId) && preflightId > 0) {
+                selected = list.find((ua: any) =>
+                    Number(ua?.aircraft_id ?? ua?.aircraft?.id) === preflightId && ua?.has_access === true);
+            }
+        }
+        if (!selected) {
+            selected = list.find((ua: any) => ua.is_selected === 1 && ua?.has_access !== false)
+                || list.find((ua: any) => ua.is_selected === 1)
+                || list.find((ua: any) => ua?.has_access && ua.aircraft);
+        }
         if (selected?.aircraft) {
             const cfg = selected.aircraft as AircraftConfig;
             console.debug('[Aircraft] selected aircraft config:', JSON.stringify(cfg));

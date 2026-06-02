@@ -658,17 +658,22 @@ export class InputSystem {
         ctlExpo?.addEventListener('input', onCtlChange);
         ctlInvert?.addEventListener('change', onCtlChange);
 
+        const getAbMax = (): number => {
+            const ab = this.scene.aircraftConfig?.afterburner_thrust_mult;
+            return Number.isFinite(ab) && ab > 1 ? ab : 1;
+        };
         const updateThrVisual = () => {
-            const pct = this.scene.touchThrust * 100;
-            thrFill.style.height = `${pct}%`;
-            thrKnob.style.bottom = `${pct}%`;
+            const abMax = getAbMax();
+            const pct = (this.scene.touchThrust / abMax) * 100;
+            thrFill.style.height = `${Math.min(100, pct)}%`;
+            thrKnob.style.bottom = `${Math.min(100, pct)}%`;
         };
         updateThrVisual();
 
         const isOnWidget = (t: Touch): boolean => {
             const el = document.elementFromPoint(t.clientX, t.clientY);
             if (!el) return false;
-            return !!el.closest('#touch-throttle,#touch-flap-btns,#ap-panel,#missions-btn,#aircraft-btn,#flight-plans-btn,#missions-panel,#aircraft-panel,#flight-plans-panel,#touch-controls-btn,#touch-controls-panel,#gps-zoom-controls');
+            return !!el.closest('#preflight,#touch-throttle,#touch-flap-btns,#ap-panel,#missions-btn,#aircraft-btn,#flight-plans-btn,#missions-panel,#aircraft-panel,#flight-plans-panel,#touch-controls-btn,#touch-controls-panel,#gps-zoom-controls');
         };
 
         const canvas = this.scene.scene?.getEngine()?.getRenderingCanvas();
@@ -771,32 +776,15 @@ export class InputSystem {
                     const dy = b.clientY - a.clientY;
                     const dist = Math.hypot(dx, dy);
                     const distDelta = dist - this.scene._twoFingerLastDist;
-                    const leftSide = this.scene._twoFingerStartMidX < window.innerWidth * 0.5;
-                    if (leftSide) {
-                        this.scene.touchThrust = Math.max(0, Math.min(1, this.scene.touchThrust + distDelta * PINCH_THROTTLE_PX_TO_DELTA));
-                        updateThrVisual();
-                    } else {
-                        const cam = this.scene.camera;
-                        if (cam) {
-                            const lowerLimit = Number.isFinite(cam.lowerRadiusLimit) ? cam.lowerRadiusLimit : 1;
-                            const upperLimit = Number.isFinite(cam.upperRadiusLimit) ? cam.upperRadiusLimit : 1000;
-                            const currentRadius = Number.isFinite(cam.radius) ? cam.radius : lowerLimit;
-                            const nextRadius = currentRadius - distDelta * PINCH_ZOOM_PX_TO_RADIUS;
-                            cam.radius = Math.max(lowerLimit, Math.min(upperLimit, nextRadius));
-                        }
+                    const cam = this.scene.camera;
+                    if (cam) {
+                        const lowerLimit = Number.isFinite(cam.lowerRadiusLimit) ? cam.lowerRadiusLimit : 1;
+                        const upperLimit = Number.isFinite(cam.upperRadiusLimit) ? cam.upperRadiusLimit : 1000;
+                        const currentRadius = Number.isFinite(cam.radius) ? cam.radius : lowerLimit;
+                        const nextRadius = currentRadius - distDelta * PINCH_ZOOM_PX_TO_RADIUS;
+                        cam.radius = Math.max(lowerLimit, Math.min(upperLimit, nextRadius));
                     }
                     this.scene._twoFingerLastDist = dist;
-
-                    const midX = (a.clientX + b.clientX) * 0.5;
-                    const midY = (a.clientY + b.clientY) * 0.5;
-                    const swipeX = midX - this.scene._twoFingerStartMidX;
-                    const swipeY = midY - this.scene._twoFingerStartMidY;
-                    const swipeMag = Math.hypot(swipeX, swipeY);
-                    const distChangeRatio = Math.abs(dist - this.scene._twoFingerInitialDist) / Math.max(1, this.scene._twoFingerInitialDist);
-                    if (!this.scene._twoFingerFiredCamera && swipeMag > TWO_FINGER_SWIPE_MIN_PX && distChangeRatio < TWO_FINGER_DISTANCE_TOLERANCE_RATIO) {
-                        this.scene._twoFingerFiredCamera = true;
-                        this.scene._cycleCameraMode();
-                    }
                     e.preventDefault();
                     return;
                 }
@@ -869,8 +857,9 @@ export class InputSystem {
                 const t = e.changedTouches[i];
                 if (t.identifier !== this.scene.throttleTouchId) continue;
                 const rect = throttleEl.getBoundingClientRect();
+                const abMax = getAbMax();
                 const pct = 1 - Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height));
-                this.scene.touchThrust = pct;
+                this.scene.touchThrust = pct * abMax;
                 updateThrVisual();
             }
             e.preventDefault();

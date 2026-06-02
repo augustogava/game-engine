@@ -1,5 +1,6 @@
 import { GameCore3D } from './engine/3d/GameCore3D.js';
 import { FlightSceneSimple } from './game/FlightSceneSimple.js';
+import { PreflightController, applyPreflightToUrlAndScene } from './preflight/PreflightController.js';
 
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
 const FLIGHT_HOURS_URL = 'https://simflightpro.com/flight-time';
@@ -147,16 +148,40 @@ function renderMissionMapPreview(mission: any): void {
     }
 }
 
-const game = new GameCore3D({ canvas, antialias: true });
 const scene = new FlightSceneSimple();
+let game: GameCore3D | null = null;
 
-scene.onSpawned = () => {
-    sceneReady = true;
-    console.log('[flight-main] Scene spawned');
-    dismissLoading();
-};
+const skipPreflight = !!(flightPlanId || missionId);
 
-(async () => {
+let multiplayerStarted = false;
+
+function ensureGameCore(): GameCore3D {
+    if (game) return game;
+    game = new GameCore3D({ canvas, antialias: true });
+    scene.onSpawned = () => {
+        sceneReady = true;
+        console.log('[flight-main] Scene spawned');
+        dismissLoading();
+        if (token && !multiplayerStarted) {
+            multiplayerStarted = true;
+            scene.initMultiplayer(token, () => {
+                console.warn('[flight-main] Auth failure — redirecting to login');
+                window.location.href = WEBSITE_LOGIN_URL;
+            }, () => {
+                console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
+                window.location.href = FLIGHT_HOURS_URL;
+            });
+            setTimeout(() => { claimFreeFlightHour(token); }, FREE_HOUR_FIRST_DELAY_MS);
+            if (freeHourTimer === undefined) {
+                freeHourTimer = window.setInterval(() => claimFreeFlightHour(token), FREE_HOUR_INTERVAL_MS);
+            }
+        }
+    };
+    console.debug('[flight-main] WebGL engine initialized');
+    return game;
+}
+
+async function startFlightGame(): Promise<void> {
     if (flightPlanId && token) {
         try {
             loadingStatus.textContent = 'Loading flight plan...';
@@ -198,6 +223,7 @@ scene.onSpawned = () => {
                 if (requiredAircraftId != null && Number.isFinite(requiredAircraftId) && requiredAircraftId > 0) {
                     let owns = false;
                     let alreadySelected = false;
+                    let requiredAircraftMatch: any = null;
                     try {
                         const ownedRes = await fetch('/api/user-aircrafts', {
                             headers: { 'Authorization': `Bearer ${token}` },
@@ -205,10 +231,11 @@ scene.onSpawned = () => {
                         if (ownedRes.ok) {
                             const ownedJson = await ownedRes.json();
                             const list: any[] = Array.isArray(ownedJson?.data) ? ownedJson.data : [];
-                            const match = list.find((ua: any) => Number(ua?.aircraft?.id) === requiredAircraftId);
-                            if (match) {
+                            requiredAircraftMatch = list.find((ua: any) =>
+                                Number(ua?.aircraft_id ?? ua?.aircraft?.id) === requiredAircraftId);
+                            if (requiredAircraftMatch?.has_access) {
                                 owns = true;
-                                alreadySelected = Number(match.is_selected) === 1;
+                                alreadySelected = Number(requiredAircraftMatch.is_selected) === 1;
                             }
                         } else {
                             console.warn(`[flight-main] Owned aircrafts fetch failed: HTTP ${ownedRes.status}`);
@@ -226,14 +253,19 @@ scene.onSpawned = () => {
                     if (!alreadySelected) {
                         try {
                             loadingStatus.textContent = 'Trocando aeronave...';
-                            const selectRes = await fetch(`/api/user-aircrafts/${requiredAircraftId}/select`, {
-                                method: 'POST',
-                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                            });
-                            if (selectRes.ok) {
-                                console.log(`[flight-main] Auto-switched to required aircraft id=${requiredAircraftId} code=${mission.required_aircraft_code ?? '?'} for mission ${missionId}`);
-                            } else {
-                                console.warn(`[flight-main] Failed to auto-switch to required aircraft ${requiredAircraftId}: HTTP ${selectRes.status}`);
+                            if (requiredAircraftMatch?.is_owned) {
+                                const selectRes = await fetch(`/api/user-aircrafts/${requiredAircraftId}/select`, {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                });
+                                if (selectRes.ok) {
+                                    console.log(`[flight-main] Auto-switched to required aircraft id=${requiredAircraftId} code=${mission.required_aircraft_code ?? '?'} for mission ${missionId}`);
+                                } else {
+                                    console.warn(`[flight-main] Failed to auto-switch to required aircraft ${requiredAircraftId}: HTTP ${selectRes.status}`);
+                                }
+                            } else if (requiredAircraftMatch?.pro_access) {
+                                localStorage.setItem('preflight_aircraft_id', String(requiredAircraftId));
+                                console.log(`[flight-main] Required aircraft id=${requiredAircraftId} set via pro_access (no select)`);
                             }
                         } catch (err) {
                             console.warn('[flight-main] Required aircraft switch error:', err);
@@ -353,17 +385,19 @@ scene.onSpawned = () => {
     }
 
     if (token && !flightPlanId && !missionId) {
+        applyPreflightToUrlAndScene(scene);
         try {
             loadingStatus.textContent = 'Resetting mission state...';
-            const activeRes = await fetch('/api/user-missions?status=in_progress', {
+            const activeRes = await fetch('/api/user-missions', {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             if (activeRes.ok) {
                 const activeJson = await activeRes.json();
-                const activeList = Array.isArray(activeJson?.data) ? activeJson.data : [];
+                const catalog: any[] = Array.isArray(activeJson?.data) ? activeJson.data : [];
+                const activeList = catalog.filter((item) => item?.user_mission?.status === 'in_progress');
                 let resetCount = 0;
-                for (const um of activeList) {
-                    const umId = Number(um?.id);
+                for (const item of activeList) {
+                    const umId = Number(item?.user_mission?.id);
                     if (!Number.isFinite(umId) || umId <= 0) continue;
                     try {
                         const resetRes = await fetch(`/api/user-missions/${umId}`, {
@@ -391,24 +425,71 @@ scene.onSpawned = () => {
         }
     }
 
-    game.start(scene);
+    const g = ensureGameCore();
+    g.start(scene);
+}
 
-    if (token) {
-        scene.initMultiplayer(token, () => {
-            console.warn('[flight-main] Auth failure — redirecting to login');
-            window.location.href = WEBSITE_LOGIN_URL;
-        }, () => {
-            console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
-            window.location.href = FLIGHT_HOURS_URL;
+type TokenState = 'ok' | 'unauthorized' | 'unreachable';
+
+async function validateToken(authToken: string): Promise<TokenState> {
+    try {
+        const res = await fetch('/api/flight-stats', {
+            headers: { 'Authorization': `Bearer ${authToken}` },
         });
-
-        setTimeout(() => { claimFreeFlightHour(token); }, FREE_HOUR_FIRST_DELAY_MS);
-        freeHourTimer = window.setInterval(() => claimFreeFlightHour(token), FREE_HOUR_INTERVAL_MS);
-
-        window.addEventListener('beforeunload', () => {
-            if (freeHourTimer !== undefined) clearInterval(freeHourTimer);
-        });
+        if (res.status === 401 || res.status === 403) {
+            console.warn(`[flight-main] Token validation rejected: HTTP ${res.status}`);
+            return 'unauthorized';
+        }
+        if (!res.ok) {
+            console.warn(`[flight-main] Token validation failed (server/API not ready): HTTP ${res.status}`);
+            return 'unreachable';
+        }
+        console.debug('[flight-main] Token validated — session is fresh and server.js is reachable');
+        return 'ok';
+    } catch (err) {
+        console.warn('[flight-main] Token validation request error:', err);
+        return 'unreachable';
     }
+}
+
+(async () => {
+    window.addEventListener('beforeunload', () => {
+        if (freeHourTimer !== undefined) clearInterval(freeHourTimer);
+    });
+
+    if (!token) {
+        await startFlightGame();
+        return;
+    }
+
+    if (skipPreflight) {
+        await startFlightGame();
+        return;
+    }
+
+    loadingStatus.textContent = 'Verificando sessão...';
+    const tokenState = await validateToken(token);
+
+    if (tokenState === 'unauthorized') {
+        if (window.location.hostname.includes('simflightpro.com')) {
+            console.warn('[flight-main] Session expired/invalid — redirecting to login');
+            window.location.href = WEBSITE_LOGIN_URL;
+            return;
+        }
+        authError.textContent = 'Sessão expirada. Adicione um token válido (?token=<jwt>).';
+        await startFlightGame();
+        return;
+    }
+
+    if (tokenState === 'unreachable') {
+        console.warn('[flight-main] Skipping preflight — server/API unreachable, starting game directly');
+        await startFlightGame();
+        return;
+    }
+
+    const preflight = new PreflightController(token);
+    await preflight.run();
+    await startFlightGame();
 })();
 
 let disposed = false;
@@ -417,7 +498,8 @@ function disposeGame(reason: string): void {
     disposed = true;
     try {
         console.debug(`[flight-main] Disposing game to free WebGL/tiles memory (reason=${reason})`);
-        game.dispose();
+        game?.dispose();
+        game = null;
     } catch (err) {
         console.warn('[flight-main] Game dispose on unload failed:', err);
     }
@@ -444,7 +526,17 @@ function logMemorySnapshot(context: string): void {
 }
 setInterval(() => logMemorySnapshot('periodic'), MEMORY_DIAGNOSTIC_INTERVAL_MS);
 document.addEventListener('visibilitychange', () => logMemorySnapshot(`visibilitychange:${document.visibilityState}`));
-window.addEventListener('pagehide', () => logMemorySnapshot('pagehide'));
+window.addEventListener('pagehide', () => {
+    try {
+        const nav = (performance as Performance & { navigation?: { type?: number } }).navigation;
+        if (nav && typeof nav.type === 'number') {
+            console.debug(`[flight-main] pagehide navigation.type=${nav.type}`);
+        }
+    } catch (err) {
+        console.warn('[flight-main] pagehide navigation read failed:', err);
+    }
+    logMemorySnapshot('pagehide');
+});
 document.addEventListener('freeze', () => logMemorySnapshot('freeze'));
 document.addEventListener('resume', () => logMemorySnapshot('resume'));
 
