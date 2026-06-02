@@ -2245,8 +2245,32 @@ export class FlightSceneSimple extends Scene3D {
 
     private _missionDestForNav(): typeof this._activeFlightPlanNav | null {
         const m = this._activeMission;
-        if (!m || m.arrival_lat == null || m.arrival_lon == null) return null;
-        return { departure_lat: m.departure_lat, departure_lon: m.departure_lon, arrival_lat: m.arrival_lat, arrival_lon: m.arrival_lon, departure_icao: m.departure_icao, arrival_icao: m.arrival_icao, name: m.mission_title };
+        if (m && m.arrival_lat != null && m.arrival_lon != null) {
+            return { departure_lat: m.departure_lat, departure_lon: m.departure_lon, arrival_lat: m.arrival_lat, arrival_lon: m.arrival_lon, departure_icao: m.departure_icao, arrival_icao: m.arrival_icao, name: m.mission_title };
+        }
+
+        const wpts = this._missionWaypoints;
+        if (Array.isArray(wpts) && wpts.length > 0) {
+            const last = wpts[wpts.length - 1];
+            const arrLat = Number(last.latitude);
+            const arrLon = Number(last.longitude);
+            if (Number.isFinite(arrLat) && Number.isFinite(arrLon)) {
+                const firstLat = Number(wpts[0].latitude);
+                const firstLon = Number(wpts[0].longitude);
+                const depLat = Number.isFinite(this._pendingMissionLat as number) ? (this._pendingMissionLat as number) : firstLat;
+                const depLon = Number.isFinite(this._pendingMissionLon as number) ? (this._pendingMissionLon as number) : firstLon;
+                return {
+                    departure_lat: depLat,
+                    departure_lon: depLon,
+                    arrival_lat: arrLat,
+                    arrival_lon: arrLon,
+                    departure_icao: '',
+                    arrival_icao: last.name || 'DEST',
+                    name: m?.mission_title || '',
+                };
+            }
+        }
+        return null;
     }
 
     private _formatEteMin(eteMin: number): string {
