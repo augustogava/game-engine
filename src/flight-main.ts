@@ -15,6 +15,10 @@ const params = new URLSearchParams(window.location.search);
 const token = params.get('token') || localStorage.getItem('auth_token');
 const flightPlanId = params.get('flightPlanId');
 const missionId = params.get('missionId') ?? params.get('mission_id');
+const spawnAirportId = params.get('airportId');
+const spawnRunwayId = params.get('runwayId');
+const spawnRunwayEnd = params.get('end') === 'he' ? 'he' : 'le';
+const spawnSimTime = params.get('simTime');
 
 if (params.has('token')) {
     params.delete('token');
@@ -151,7 +155,7 @@ function renderMissionMapPreview(mission: any): void {
 const scene = new FlightSceneSimple();
 let game: GameCore3D | null = null;
 
-const skipPreflight = !!(flightPlanId || missionId);
+const skipPreflight = !!(flightPlanId || missionId || spawnAirportId);
 
 let multiplayerStarted = false;
 
@@ -179,6 +183,65 @@ function ensureGameCore(): GameCore3D {
     };
     console.debug('[flight-main] WebGL engine initialized');
     return game;
+}
+
+async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end: 'le' | 'he', simTimeIso: string | null): Promise<void> {
+    const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
+    try {
+        loadingStatus.textContent = 'Carregando aeroporto...';
+        const res = await fetch(`/api/airports/${encodeURIComponent(airportId)}/runways`, { headers });
+        if (!res.ok) {
+            console.warn(`[flight-main] Runways fetch failed for airport ${airportId}: HTTP ${res.status} — using default spawn`);
+            applyPreflightToUrlAndScene(scene);
+            return;
+        }
+        const json = await res.json();
+        const list: any[] = Array.isArray(json?.data) ? json.data : [];
+        const rwy = list.find((r) => Number(r.id) === Number(runwayId));
+        if (!rwy) {
+            console.warn(`[flight-main] Runway ${runwayId} not found at airport ${airportId} — using default spawn`);
+            applyPreflightToUrlAndScene(scene);
+            return;
+        }
+        const isHe = end === 'he';
+        const lat = Number(isHe ? rwy.he_latitude_deg : rwy.le_latitude_deg);
+        const lon = Number(isHe ? rwy.he_longitude_deg : rwy.le_longitude_deg);
+        const hdg = Number(isHe ? rwy.he_heading_deg_true : rwy.le_heading_deg_true);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            console.warn(`[flight-main] Runway ${runwayId} end ${end} has invalid coordinates — using default spawn`);
+            applyPreflightToUrlAndScene(scene);
+            return;
+        }
+        let elevFt = Number(isHe ? rwy.he_elevation_ft : rwy.le_elevation_ft);
+        if (!Number.isFinite(elevFt)) elevFt = Number(rwy.elevation_ft);
+        if (!Number.isFinite(elevFt)) {
+            try {
+                const apRes = await fetch(`/api/airports/${encodeURIComponent(airportId)}`, { headers });
+                if (apRes.ok) {
+                    const ap = await apRes.json();
+                    elevFt = Number(ap?.elevation_ft);
+                } else {
+                    console.warn(`[flight-main] Airport ${airportId} detail fetch failed: HTTP ${apRes.status}`);
+                }
+            } catch (apErr) {
+                console.warn(`[flight-main] Airport ${airportId} elevation fetch error:`, apErr);
+            }
+        }
+        const elevationFt = Number.isFinite(elevFt) ? elevFt : 0;
+        scene.setFreeFlightGroundSpawn(lat, lon, hdg, elevationFt);
+        if (simTimeIso) scene.setSimTimeOffsetFromIso(simTimeIso);
+        const cleanParams = new URLSearchParams(window.location.search);
+        cleanParams.delete('airportId');
+        cleanParams.delete('runwayId');
+        cleanParams.delete('end');
+        cleanParams.delete('simTime');
+        const cleanQs = cleanParams.toString();
+        history.replaceState(null, '', window.location.pathname + (cleanQs ? `?${cleanQs}` : ''));
+        console.log(`[flight-main] Free-flight ground spawn airport=${airportId} runway=${runwayId} end=${end} lat=${lat} lon=${lon} hdg=${hdg} elevFt=${elevationFt}`);
+    } catch (err) {
+        console.warn('[flight-main] Airport/runway spawn error — using default spawn:', err);
+        applyPreflightToUrlAndScene(scene);
+    }
 }
 
 async function startFlightGame(): Promise<void> {
@@ -385,7 +448,11 @@ async function startFlightGame(): Promise<void> {
     }
 
     if (token && !flightPlanId && !missionId) {
-        applyPreflightToUrlAndScene(scene);
+        if (spawnAirportId && spawnRunwayId) {
+            await applyAirportRunwaySpawn(spawnAirportId, spawnRunwayId, spawnRunwayEnd, spawnSimTime);
+        } else {
+            applyPreflightToUrlAndScene(scene);
+        }
         try {
             loadingStatus.textContent = 'Resetting mission state...';
             const activeRes = await fetch('/api/user-missions', {

@@ -265,6 +265,8 @@ No auth required for search/list/detail/runways.
 GET /api/airports/1842
 ```
 
+Detail includes all `airports` columns, `credit_price`, `runway_count`, embedded `runways` (same shape as `/runways`), and with JWT optional `is_owned` / `acquired_at`.
+
 ### Runways (pathways) for an airport
 
 ```http

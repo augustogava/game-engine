@@ -1,4 +1,5 @@
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../game/api/hudImageUrl.js';
+import { UiPreferences, UI_PREF_STORAGE_KEY, LANGUAGE_EN, LANGUAGE_PT } from '../game/UiPreferences.js';
 
 export const PREFLIGHT_AIRCRAFT_KEY = 'preflight_aircraft_id';
 export const PREFLIGHT_SPAWN_KEY = 'preflight_spawn';
@@ -11,6 +12,7 @@ export type PreflightSpawnConfig = {
     lat: number;
     lon: number;
     hdg: number;
+    elevationFt: number;
     simTimeIso: string;
 };
 
@@ -22,7 +24,115 @@ export const DEFAULT_SBGR_SPAWN: PreflightSpawnConfig = {
     lat: -23.4341,
     lon: -46.4825,
     hdg: 74,
+    elevationFt: 2459,
     simTimeIso: new Date().toISOString(),
+};
+
+type Lang = 'pt' | 'en';
+
+const PT_COUNTRY_CODES = new Set(['BR', 'PT', 'AO', 'MZ', 'CV', 'GW', 'ST', 'TL', 'GQ']);
+
+const I18N: Record<Lang, Record<string, string>> = {
+    pt: {
+        'tab.aircraft': 'Aeronave',
+        'tab.airport': 'Aeroporto',
+        'tab.missions': 'Missões',
+        'tab.plans': 'Plano de voo',
+        'airport.airport': 'Aeroporto',
+        'airport.runway': 'Pista',
+        'airport.end': 'Extremidade',
+        'airport.datetime': 'Data e hora do voo',
+        'airport.searchPlaceholder': 'ICAO ou nome (ex. SBGR)',
+        'cta.flyNow': 'VOAR AGORA',
+        'cta.startFly': 'INICIAR E VOAR',
+        'cta.locked': 'BLOQUEADO',
+        'cta.preparing': 'PREPARANDO...',
+        'common.back': '← Voltar',
+        'common.loading': 'Carregando...',
+        'common.connError': 'Erro de conexão',
+        'aircraft.none': 'Nenhuma aeronave',
+        'aircraft.loadFail': 'Falha ao carregar aeronaves',
+        'aircraft.unavailable': 'Indisponível',
+        'aircraft.owned': 'Sua aeronave',
+        'aircraft.pro': 'PRO disponível',
+        'missions.none': 'Nenhuma missão',
+        'missions.loadFail': 'Falha ao carregar missões',
+        'plans.none': 'Nenhum plano de voo',
+        'plans.loadFail': 'Falha ao carregar planos',
+        'badge.pro': 'PRO',
+        'badge.done': 'Concluída',
+        'badge.locked': 'Bloqueado',
+        'badge.inProgress': 'Em progresso',
+        'detail.distance': 'Distância',
+        'detail.duration': 'Duração',
+        'detail.reward': 'Recompensa',
+        'detail.departure': 'Partida',
+        'detail.arrival': 'Chegada',
+        'detail.runway': 'Pista',
+        'detail.scheduled': 'Partida programada',
+        'detail.notes': 'Notas',
+        'diff.beginner': 'Iniciante',
+        'diff.easy': 'Fácil',
+        'diff.intermediate': 'Intermediário',
+        'diff.advanced': 'Avançado',
+        'diff.expert': 'Especialista',
+        'runway.none': 'Sem pistas',
+        'runway.error': 'Erro ao carregar pistas',
+        'runway.placeholder': '—',
+        'unit.km': 'km',
+        'unit.min': 'min',
+        'unit.pts': 'pts',
+    },
+    en: {
+        'tab.aircraft': 'Aircraft',
+        'tab.airport': 'Airport',
+        'tab.missions': 'Missions',
+        'tab.plans': 'Flight plan',
+        'airport.airport': 'Airport',
+        'airport.runway': 'Runway',
+        'airport.end': 'Runway end',
+        'airport.datetime': 'Flight date & time',
+        'airport.searchPlaceholder': 'ICAO or name (e.g. SBGR)',
+        'cta.flyNow': 'FLY NOW',
+        'cta.startFly': 'START & FLY',
+        'cta.locked': 'LOCKED',
+        'cta.preparing': 'PREPARING...',
+        'common.back': '← Back',
+        'common.loading': 'Loading...',
+        'common.connError': 'Connection error',
+        'aircraft.none': 'No aircraft',
+        'aircraft.loadFail': 'Failed to load aircraft',
+        'aircraft.unavailable': 'Unavailable',
+        'aircraft.owned': 'Your aircraft',
+        'aircraft.pro': 'PRO available',
+        'missions.none': 'No missions',
+        'missions.loadFail': 'Failed to load missions',
+        'plans.none': 'No flight plans',
+        'plans.loadFail': 'Failed to load plans',
+        'badge.pro': 'PRO',
+        'badge.done': 'Completed',
+        'badge.locked': 'Locked',
+        'badge.inProgress': 'In progress',
+        'detail.distance': 'Distance',
+        'detail.duration': 'Duration',
+        'detail.reward': 'Reward',
+        'detail.departure': 'Departure',
+        'detail.arrival': 'Arrival',
+        'detail.runway': 'Runway',
+        'detail.scheduled': 'Scheduled departure',
+        'detail.notes': 'Notes',
+        'diff.beginner': 'Beginner',
+        'diff.easy': 'Easy',
+        'diff.intermediate': 'Intermediate',
+        'diff.advanced': 'Advanced',
+        'diff.expert': 'Expert',
+        'runway.none': 'No runways',
+        'runway.error': 'Failed to load runways',
+        'runway.placeholder': '—',
+        'unit.km': 'km',
+        'unit.min': 'min',
+        'unit.pts': 'pts',
+    },
 };
 
 export function setPreflightUiActive(active: boolean): void {
@@ -87,6 +197,8 @@ type FlightPlanItem = Record<string, unknown> & {
     name?: string;
 };
 
+type AirportRow = { id: number; icao_code?: string; iata_code?: string; name?: string; municipality?: string; elevation_ft?: number };
+
 function authHeaders(token: string): Record<string, string> {
     return { Authorization: `Bearer ${token}` };
 }
@@ -103,11 +215,12 @@ function attachImgFallback(root: ParentNode): void {
 
 export class PreflightController {
     private readonly token: string;
+    private lang: Lang = 'pt';
     private selectedAircraftId: number | null = null;
     private aircraftRows: AircraftRow[] = [];
     private missionItems: MissionItem[] = [];
     private planItems: FlightPlanItem[] = [];
-    private airports: Array<{ id: number; icao_code?: string; name?: string }> = [];
+    private airports: AirportRow[] = [];
     private runways: any[] = [];
     private selectedAirportId: number | null = null;
     private searchTimer: number | undefined;
@@ -122,17 +235,24 @@ export class PreflightController {
         }
     }
 
+    private t(key: string): string {
+        return I18N[this.lang][key] ?? I18N.pt[key] ?? key;
+    }
+
     async run(): Promise<void> {
         const root = document.getElementById('preflight');
         if (!root) {
             console.warn('[Preflight] #preflight element missing');
             return Promise.resolve();
         }
+        await this.detectAndApplyLanguage();
+        this.applyStaticI18n();
         this.wireTabs();
         this.wireFlyButton();
         this.wireDetailBack();
         this.wireAirportFields();
         this.setDefaultDateTime();
+        this.updateFooterVisibility('aircraft');
         setPreflightUiActive(true);
         root.classList.add('preflight-visible');
         const loading = document.getElementById('loading');
@@ -155,6 +275,66 @@ export class PreflightController {
         setPreflightUiActive(false);
     }
 
+    private async detectAndApplyLanguage(): Promise<void> {
+        try {
+            if (localStorage.getItem(UI_PREF_STORAGE_KEY)) {
+                this.lang = UiPreferences.get().language === LANGUAGE_EN ? 'en' : 'pt';
+                console.debug(`[Preflight] Using stored language preference: ${this.lang}`);
+                return;
+            }
+        } catch (err) {
+            console.warn('[Preflight] Failed to read stored language preference:', err);
+        }
+
+        let detected: Lang = 'pt';
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 1500);
+            const res = await fetch('https://ipapi.co/country/', { signal: controller.signal });
+            clearTimeout(timer);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const cc = (await res.text()).trim().toUpperCase();
+            detected = PT_COUNTRY_CODES.has(cc) ? 'pt' : 'en';
+            console.debug(`[Preflight] IP geolocation country=${cc} → language=${detected}`);
+        } catch (err) {
+            const navLang = (navigator.language || '').toLowerCase();
+            detected = navLang.startsWith('pt') ? 'pt' : 'en';
+            console.warn(`[Preflight] IP language detection failed, falling back to navigator.language=${navLang} → ${detected}:`, err);
+        }
+        this.lang = detected;
+        try {
+            UiPreferences.set({ language: detected === 'en' ? LANGUAGE_EN : LANGUAGE_PT });
+        } catch (err) {
+            console.warn('[Preflight] Failed to persist detected language:', err);
+        }
+    }
+
+    private applyStaticI18n(): void {
+        const set = (sel: string, text: string) => {
+            const el = document.querySelector(sel);
+            if (el) el.textContent = text;
+        };
+        set('.preflight-tab[data-tab="aircraft"]', this.t('tab.aircraft'));
+        set('.preflight-tab[data-tab="airport"]', this.t('tab.airport'));
+        set('.preflight-tab[data-tab="missions"]', this.t('tab.missions'));
+        set('.preflight-tab[data-tab="plans"]', this.t('tab.plans'));
+        set('label[for="preflight-airport-search"]', this.t('airport.airport'));
+        set('label[for="preflight-runway-select"]', this.t('airport.runway'));
+        set('label[for="preflight-runway-end"]', this.t('airport.end'));
+        set('label[for="preflight-datetime"]', this.t('airport.datetime'));
+        const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
+        if (search) search.placeholder = this.t('airport.searchPlaceholder');
+        const fly = document.getElementById('preflight-fly-btn');
+        if (fly) fly.textContent = this.t('cta.flyNow');
+        document.querySelectorAll('.preflight-detail-back').forEach((b) => { b.textContent = this.t('common.back'); });
+    }
+
+    private updateFooterVisibility(tab: string): void {
+        const footer = document.querySelector('.preflight-footer') as HTMLElement | null;
+        if (!footer) return;
+        footer.style.display = (tab === 'missions' || tab === 'plans') ? 'none' : '';
+    }
+
     private wireTabs(): void {
         document.querySelectorAll<HTMLButtonElement>('.preflight-tab').forEach((btn) => {
             btn.addEventListener('click', () => {
@@ -164,6 +344,7 @@ export class PreflightController {
                 btn.classList.add('active');
                 document.querySelectorAll('.preflight-panel').forEach((p) => p.classList.remove('active'));
                 document.getElementById(`preflight-panel-${tab === 'plans' ? 'plans' : tab}`)?.classList.add('active');
+                this.updateFooterVisibility(tab);
             });
         });
     }
@@ -200,8 +381,19 @@ export class PreflightController {
         const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
         search?.addEventListener('input', () => {
             if (this.searchTimer) clearTimeout(this.searchTimer);
+            const q = search!.value.trim();
             this.selectedAirportId = null;
-            this.searchTimer = window.setTimeout(() => void this.searchAirports(search!.value.trim()), 350);
+            if (!q) {
+                this.clearRunwaySelection();
+                this.hideAirportSuggestions();
+                return;
+            }
+            this.searchTimer = window.setTimeout(() => void this.searchAirports(q), 300);
+        });
+        document.addEventListener('click', (ev) => {
+            const target = ev.target as Node | null;
+            const field = search?.closest('.preflight-field');
+            if (field && target && !field.contains(target)) this.hideAirportSuggestions();
         });
         const rwy = document.getElementById('preflight-runway-select') as HTMLSelectElement | null;
         rwy?.addEventListener('change', () => this.persistSpawnFromForm());
@@ -211,19 +403,27 @@ export class PreflightController {
         dt?.addEventListener('change', () => this.persistSpawnFromForm());
     }
 
-    private async initDefaultAirport(): Promise<void> {
-        const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
-        if (search) search.value = 'SBGR';
-        await this.searchAirports('SBGR');
-        if (this.airports.length) {
-            this.selectedAirportId = this.airports[0].id;
-            await this.loadRunways(this.airports[0].id);
-        } else {
-            ensureDefaultSpawnConfig();
+    private clearRunwaySelection(): void {
+        this.runways = [];
+        const rwy = document.getElementById('preflight-runway-select') as HTMLSelectElement | null;
+        if (rwy) rwy.innerHTML = `<option value="">${this.t('runway.placeholder')}</option>`;
+        const end = document.getElementById('preflight-runway-end') as HTMLSelectElement | null;
+        if (end) end.value = 'le';
+        try {
+            localStorage.removeItem(PREFLIGHT_SPAWN_KEY);
+        } catch (err) {
+            console.warn('[Preflight] Failed to clear spawn config:', err);
         }
     }
 
-    private async searchAirports(q: string): Promise<void> {
+    private async initDefaultAirport(): Promise<void> {
+        const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
+        if (search) search.value = 'SBGR';
+        await this.searchAirports('SBGR', true);
+        if (!this.selectedAirportId) ensureDefaultSpawnConfig();
+    }
+
+    private async searchAirports(q: string, autoSelect = false): Promise<void> {
         if (!q) return;
         try {
             const res = await fetch(`/api/airports/search?q=${encodeURIComponent(q)}`);
@@ -233,34 +433,72 @@ export class PreflightController {
             }
             const json = await res.json();
             this.airports = Array.isArray(json?.data) ? json.data : [];
-            if (this.airports.length && !this.selectedAirportId) {
-                this.selectedAirportId = this.airports[0].id;
-                await this.loadRunways(this.airports[0].id);
-            } else if (this.airports.length) {
-                const match = this.airports.find((a) =>
-                    (a.icao_code || '').toUpperCase() === q.toUpperCase()) || this.airports[0];
-                this.selectedAirportId = match.id;
-                await this.loadRunways(match.id);
+            if (autoSelect) {
+                if (this.airports.length) {
+                    const match = this.airports.find((a) => (a.icao_code || '').toUpperCase() === q.toUpperCase()) || this.airports[0];
+                    await this.selectAirport(match);
+                }
+                return;
             }
+            this.renderAirportSuggestions();
         } catch (err) {
             console.warn('[Preflight] Airport search error:', err);
         }
     }
 
+    private renderAirportSuggestions(): void {
+        const box = document.getElementById('preflight-airport-suggestions');
+        if (!box) return;
+        if (!this.airports.length) {
+            box.style.display = 'none';
+            box.innerHTML = '';
+            return;
+        }
+        const top = this.airports.slice(0, 5);
+        box.innerHTML = top.map((a) => {
+            const sub = a.name || a.municipality || '';
+            return `<div class="preflight-suggestion" data-airport-id="${a.id}">
+                <span class="preflight-suggestion-icao">${escapeHtml(a.icao_code || a.iata_code || '')}</span>
+                <span class="preflight-suggestion-name">${escapeHtml(sub)}</span>
+            </div>`;
+        }).join('');
+        box.style.display = 'block';
+        box.querySelectorAll<HTMLElement>('.preflight-suggestion').forEach((el) => {
+            el.addEventListener('click', () => {
+                const id = Number(el.dataset.airportId);
+                const ap = this.airports.find((a) => a.id === id);
+                if (ap) void this.selectAirport(ap);
+            });
+        });
+    }
+
+    private hideAirportSuggestions(): void {
+        const box = document.getElementById('preflight-airport-suggestions');
+        if (box) box.style.display = 'none';
+    }
+
+    private async selectAirport(ap: AirportRow): Promise<void> {
+        this.selectedAirportId = ap.id;
+        const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
+        if (search) search.value = ap.icao_code || ap.name || '';
+        this.hideAirportSuggestions();
+        await this.loadRunways(ap.id);
+    }
+
     private async loadRunways(airportId: number): Promise<void> {
         const sel = document.getElementById('preflight-runway-select') as HTMLSelectElement | null;
         if (!sel) return;
-        sel.innerHTML = '<option value="">Carregando...</option>';
+        sel.innerHTML = `<option value="">${this.t('common.loading')}</option>`;
         try {
             const res = await fetch(`/api/airports/${airportId}/runways`);
             if (!res.ok) {
-                sel.innerHTML = '<option value="">Erro ao carregar pistas</option>';
+                sel.innerHTML = `<option value="">${this.t('runway.error')}</option>`;
                 return;
             }
             const json = await res.json();
             this.runways = Array.isArray(json?.data) ? json.data : [];
             if (!this.runways.length) {
-                sel.innerHTML = '<option value="">Sem pistas</option>';
+                sel.innerHTML = `<option value="">${this.t('runway.none')}</option>`;
                 return;
             }
             sel.innerHTML = this.runways.map((r) => {
@@ -270,7 +508,7 @@ export class PreflightController {
             this.persistSpawnFromForm();
         } catch (err) {
             console.warn('[Preflight] Runways load error:', err);
-            sel.innerHTML = '<option value="">Erro</option>';
+            sel.innerHTML = `<option value="">${this.t('runway.error')}</option>`;
         }
     }
 
@@ -289,6 +527,8 @@ export class PreflightController {
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
         const ap = this.airports.find((a) => a.id === this.selectedAirportId);
         const simTimeIso = dtSel?.value ? new Date(dtSel.value).toISOString() : new Date().toISOString();
+        const rwyElevFt = end === 'he' ? rwy.he_elevation_ft : rwy.le_elevation_ft;
+        const elevationFt = Number(rwyElevFt ?? rwy.elevation_ft ?? ap?.elevation_ft ?? 0);
         const spawn: PreflightSpawnConfig = {
             airportId: this.selectedAirportId,
             icao: ap?.icao_code || 'SBGR',
@@ -297,6 +537,7 @@ export class PreflightController {
             lat,
             lon,
             hdg: Number.isFinite(hdg) ? hdg : 0,
+            elevationFt: Number.isFinite(elevationFt) ? elevationFt : 0,
             simTimeIso,
         };
         try {
@@ -309,17 +550,17 @@ export class PreflightController {
     private async loadAircrafts(): Promise<void> {
         const list = document.getElementById('preflight-aircraft-list');
         if (!list) return;
-        list.innerHTML = '<div class="preflight-msg">Carregando...</div>';
+        list.innerHTML = `<div class="preflight-msg">${this.t('common.loading')}</div>`;
         try {
             const res = await fetch('/api/user-aircrafts', { headers: authHeaders(this.token) });
             if (!res.ok) {
-                list.innerHTML = '<div class="preflight-msg">Falha ao carregar aeronaves</div>';
+                list.innerHTML = `<div class="preflight-msg">${this.t('aircraft.loadFail')}</div>`;
                 return;
             }
             const json = await res.json();
             this.aircraftRows = Array.isArray(json?.data) ? json.data : [];
             if (!this.aircraftRows.length) {
-                list.innerHTML = '<div class="preflight-msg">Nenhuma aeronave</div>';
+                list.innerHTML = `<div class="preflight-msg">${this.t('aircraft.none')}</div>`;
                 return;
             }
             if (this.selectedAircraftId != null) {
@@ -334,7 +575,7 @@ export class PreflightController {
             this.renderAircraftList();
         } catch (err) {
             console.warn('[Preflight] Aircraft load error:', err);
-            list.innerHTML = '<div class="preflight-msg">Erro de conexão</div>';
+            list.innerHTML = `<div class="preflight-msg">${this.t('common.connError')}</div>`;
         }
     }
 
@@ -348,11 +589,12 @@ export class PreflightController {
             const selected = row.aircraft_id === this.selectedAircraftId;
             const locked = !row.has_access;
             const pro = row.pro_access;
+            const sub = locked ? this.t('aircraft.unavailable') : row.is_owned ? this.t('aircraft.owned') : this.t('aircraft.pro');
             html += `<div class="preflight-card${selected ? ' selected' : ''}${locked ? ' locked' : ''}" data-aircraft-id="${row.aircraft_id}" data-has-access="${row.has_access ? '1' : '0'}">
-                <img data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="${escapeHtml(name)}" width="72" height="48" style="width:72px;height:48px;object-fit:cover;border-radius:4px;border:1px solid rgba(80,255,160,.25);flex-shrink:0;background:#0a1620"/>
+                <img data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="${escapeHtml(name)}" width="72" height="48" loading="lazy" decoding="async" style="width:72px;height:48px;object-fit:cover;border-radius:4px;border:1px solid rgba(80,255,160,.25);flex-shrink:0;background:#0a1620"/>
                 <div style="flex:1;min-width:0">
-                    <div class="preflight-card-title">${escapeHtml(name)}${pro ? '<span class="preflight-badge-pro">PRO</span>' : ''}</div>
-                    <div class="preflight-card-sub">${locked ? 'Indisponível' : row.is_owned ? 'Sua aeronave' : 'PRO disponível'}</div>
+                    <div class="preflight-card-title">${escapeHtml(name)}${pro ? `<span class="preflight-badge preflight-badge-pro">${this.t('badge.pro')}</span>` : ''}</div>
+                    <div class="preflight-card-sub">${escapeHtml(sub)}</div>
                 </div>
             </div>`;
         }
@@ -369,14 +611,46 @@ export class PreflightController {
         });
     }
 
+    private difficultyLabel(d?: string): string {
+        if (!d) return '';
+        const key = `diff.${d.toLowerCase()}`;
+        const dict = I18N[this.lang];
+        if (dict[key]) return dict[key];
+        return d.charAt(0).toUpperCase() + d.slice(1);
+    }
+
+    private missionBadgesHtml(item: MissionItem): string {
+        const m = (item.mission || {}) as Record<string, unknown>;
+        const parts: string[] = [];
+        if (Number(m.requires_pro) === 1) parts.push(`<span class="preflight-badge preflight-badge-pro">${this.t('badge.pro')}</span>`);
+        const diff = this.difficultyLabel(m.difficulty as string | undefined);
+        if (diff) parts.push(`<span class="preflight-badge preflight-badge-level">${escapeHtml(diff)}</span>`);
+        if (item.previously_completed) parts.push(`<span class="preflight-badge preflight-badge-done">${this.t('badge.done')}</span>`);
+        const st = item.user_mission?.status;
+        if (st && ['started', 'in_progress'].includes(st)) {
+            parts.push(`<span class="preflight-badge preflight-badge-prog">${this.t('badge.inProgress')}</span>`);
+        } else if (!item.has_access) {
+            parts.push(`<span class="preflight-badge preflight-badge-locked">${this.t('badge.locked')}</span>`);
+        }
+        return parts.join('');
+    }
+
+    private missionMetaText(m: Record<string, unknown>): string {
+        const bits: string[] = [];
+        if (m.distance_nm != null) bits.push(`${Math.round(Number(m.distance_nm) * 1.852)} ${this.t('unit.km')}`);
+        if (m.estimated_duration_min != null) bits.push(`${Math.round(Number(m.estimated_duration_min))} ${this.t('unit.min')}`);
+        if (m.reward_points != null) bits.push(`${Number(m.reward_points)} ${this.t('unit.pts')}`);
+        return bits.join(' · ');
+    }
+
     private async loadMissions(): Promise<void> {
         const list = document.getElementById('preflight-missions-list');
         if (!list) return;
-        list.innerHTML = '<div class="preflight-msg">Carregando...</div>';
+        list.innerHTML = `<div class="preflight-msg">${this.t('common.loading')}</div>`;
         try {
             const res = await fetch('/api/user-missions', { headers: authHeaders(this.token) });
             if (!res.ok) {
-                list.innerHTML = '<div class="preflight-msg">Falha ao carregar missões</div>';
+                list.innerHTML = `<div class="preflight-msg">${this.t('missions.loadFail')}</div>`;
                 return;
             }
             const json = await res.json();
@@ -384,7 +658,7 @@ export class PreflightController {
             this.renderMissionList();
         } catch (err) {
             console.warn('[Preflight] Missions load error:', err);
-            list.innerHTML = '<div class="preflight-msg">Erro de conexão</div>';
+            list.innerHTML = `<div class="preflight-msg">${this.t('common.connError')}</div>`;
         }
     }
 
@@ -397,20 +671,25 @@ export class PreflightController {
             return true;
         });
         if (!enabled.length) {
-            list.innerHTML = '<div class="preflight-msg">Nenhuma missão</div>';
+            list.innerHTML = `<div class="preflight-msg">${this.t('missions.none')}</div>`;
             return;
         }
         let html = '';
         for (const item of enabled) {
-            const m = item.mission || {};
-            const title = (m as { title?: string }).title || 'Missão';
-            const dep = (m as { departure_icao?: string }).departure_icao || '';
-            const arr = (m as { arrival_icao?: string }).arrival_icao || '';
+            const m = (item.mission || {}) as Record<string, unknown>;
+            const title = (m.title as string) || 'Missão';
+            const dep = (m.departure_icao as string) || '';
+            const arr = (m.arrival_icao as string) || '';
             const img = resolveHudImageUrl(item);
+            const route = dep || arr ? `${escapeHtml(dep)} → ${escapeHtml(arr)}` : '';
+            const meta = this.missionMetaText(m);
             html += `<div class="preflight-card" data-mission-id="${item.mission_id}">
-                <img data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="" width="72" height="48" style="width:72px;height:48px;object-fit:cover;border-radius:4px;flex-shrink:0"/>
-                <div><div class="preflight-card-title">${escapeHtml(title)}</div>
-                <div class="preflight-card-sub">${escapeHtml(dep)} → ${escapeHtml(arr)}</div></div>
+                <img data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="" width="72" height="48" loading="lazy" decoding="async" style="width:72px;height:48px;object-fit:cover;border-radius:4px;flex-shrink:0"/>
+                <div style="flex:1;min-width:0">
+                    <div class="preflight-card-title">${escapeHtml(title)}${this.missionBadgesHtml(item)}</div>
+                    ${route ? `<div class="preflight-card-sub">${route}</div>` : ''}
+                    ${meta ? `<div class="preflight-meta">${escapeHtml(meta)}</div>` : ''}
+                </div>
             </div>`;
         }
         list.innerHTML = html;
@@ -425,9 +704,11 @@ export class PreflightController {
     }
 
     private showMissionDetail(item: MissionItem): void {
-        const m = item.mission || {};
-        const title = (m as { title?: string }).title || 'Missão';
-        const desc = (m as { description?: string }).description || '';
+        const m = (item.mission || {}) as Record<string, unknown>;
+        const title = (m.title as string) || 'Missão';
+        const desc = (m.description as string) || '';
+        const dep = (m.departure_icao as string) || '';
+        const arr = (m.arrival_icao as string) || '';
         const img = resolveHudImageUrl(item);
         const body = document.getElementById('preflight-mission-detail-body');
         const detail = document.getElementById('preflight-mission-detail');
@@ -437,12 +718,26 @@ export class PreflightController {
         detail.classList.add('visible');
         const canFly = item.has_access;
         const um = item.user_mission;
-        const inProgress = um && ['started', 'in_progress'].includes(um.status);
+        const inProgress = um != null && ['started', 'in_progress'].includes(um.status);
+        const ctaText = inProgress ? this.t('cta.flyNow') : canFly ? this.t('cta.startFly') : this.t('cta.locked');
+
+        const stats: string[] = [];
+        if (m.distance_nm != null) stats.push(`<div class="preflight-stat"><div class="preflight-stat-val">${Math.round(Number(m.distance_nm) * 1.852)} ${this.t('unit.km')}</div><div class="preflight-stat-lbl">${this.t('detail.distance')}</div></div>`);
+        if (m.estimated_duration_min != null) stats.push(`<div class="preflight-stat"><div class="preflight-stat-val">${Math.round(Number(m.estimated_duration_min))} ${this.t('unit.min')}</div><div class="preflight-stat-lbl">${this.t('detail.duration')}</div></div>`);
+        if (m.reward_points != null) stats.push(`<div class="preflight-stat"><div class="preflight-stat-val">${Number(m.reward_points)} ${this.t('unit.pts')}</div><div class="preflight-stat-lbl">${this.t('detail.reward')}</div></div>`);
+
+        const rows: string[] = [];
+        if (dep) rows.push(`<div class="preflight-detail-row"><span class="k">${this.t('detail.departure')}</span><span class="v">${escapeHtml((m.departure_airport_name as string) || '')} (${escapeHtml(dep)})</span></div>`);
+        if (arr) rows.push(`<div class="preflight-detail-row"><span class="k">${this.t('detail.arrival')}</span><span class="v">${escapeHtml((m.arrival_airport_name as string) || '')} (${escapeHtml(arr)})</span></div>`);
+
         body.innerHTML = `
-            <img class="preflight-hero-img" data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="${escapeHtml(title)}"/>
+            <img class="preflight-hero-img" data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="${escapeHtml(title)}" loading="lazy" decoding="async"/>
             <h2 style="font-family:Orbitron,monospace;font-size:14px;color:#40ffaa;margin-bottom:8px">${escapeHtml(title)}</h2>
-            <p style="font-size:12px;color:rgba(255,255,255,.6);line-height:1.5;margin-bottom:12px">${escapeHtml(desc)}</p>
-            <button type="button" class="preflight-cta-btn" id="preflight-mission-fly" ${canFly ? '' : 'disabled'}>${inProgress ? 'VOAR AGORA' : canFly ? 'INICIAR E VOAR' : 'BLOQUEADO'}</button>
+            <div class="preflight-detail-badges">${this.missionBadgesHtml(item)}</div>
+            ${stats.length ? `<div class="preflight-stat-row">${stats.join('')}</div>` : ''}
+            ${rows.join('')}
+            ${desc ? `<p style="font-size:12px;color:rgba(255,255,255,.6);line-height:1.5;margin:12px 0">${escapeHtml(desc)}</p>` : ''}
+            <button type="button" class="preflight-cta-btn" id="preflight-mission-fly" ${canFly ? '' : 'disabled'}>${ctaText}</button>
         `;
         attachImgFallback(body);
         const flyBtn = document.getElementById('preflight-mission-fly');
@@ -505,11 +800,11 @@ export class PreflightController {
     private async loadPlans(): Promise<void> {
         const list = document.getElementById('preflight-plans-list');
         if (!list) return;
-        list.innerHTML = '<div class="preflight-msg">Carregando...</div>';
+        list.innerHTML = `<div class="preflight-msg">${this.t('common.loading')}</div>`;
         try {
             const res = await fetch('/api/flight-plans?status=all&limit=100', { headers: authHeaders(this.token) });
             if (!res.ok) {
-                list.innerHTML = '<div class="preflight-msg">Falha ao carregar planos</div>';
+                list.innerHTML = `<div class="preflight-msg">${this.t('plans.loadFail')}</div>`;
                 return;
             }
             const json = await res.json();
@@ -517,7 +812,7 @@ export class PreflightController {
             this.renderPlanList();
         } catch (err) {
             console.warn('[Preflight] Plans load error:', err);
-            list.innerHTML = '<div class="preflight-msg">Erro de conexão</div>';
+            list.innerHTML = `<div class="preflight-msg">${this.t('common.connError')}</div>`;
         }
     }
 
@@ -525,23 +820,24 @@ export class PreflightController {
         const list = document.getElementById('preflight-plans-list');
         if (!list) return;
         if (!this.planItems.length) {
-            list.innerHTML = '<div class="preflight-msg">Nenhum plano de voo</div>';
+            list.innerHTML = `<div class="preflight-msg">${this.t('plans.none')}</div>`;
             return;
         }
         let html = '';
         for (const p of this.planItems) {
             const name = p.name || 'Plano';
-            const dep = p.departure_icao || '???';
-            const arr = p.arrival_icao || '???';
-            const img = resolveHudImageUrl(p);
+            const dep = (p.departure_icao as string) || '???';
+            const arr = (p.arrival_icao as string) || '???';
+            const scheduled = this.formatDateTime(p.scheduled_departure_at as string | undefined);
             html += `<div class="preflight-card" data-plan-id="${p.id}">
-                <img data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt="" width="72" height="48" style="width:72px;height:48px;object-fit:cover;border-radius:4px;flex-shrink:0"/>
-                <div><div class="preflight-card-title">${escapeHtml(String(name))}</div>
-                <div class="preflight-card-sub">${escapeHtml(String(dep))} → ${escapeHtml(String(arr))}</div></div>
+                <div style="flex:1;min-width:0">
+                    <div class="preflight-card-title">${escapeHtml(String(name))}</div>
+                    <div class="preflight-card-sub">${escapeHtml(String(dep))} → ${escapeHtml(String(arr))}</div>
+                    ${scheduled ? `<div class="preflight-meta">${escapeHtml(scheduled)}</div>` : ''}
+                </div>
             </div>`;
         }
         list.innerHTML = html;
-        attachImgFallback(list);
         list.querySelectorAll<HTMLElement>('[data-plan-id]').forEach((card) => {
             card.addEventListener('click', () => {
                 const id = Number(card.dataset.planId);
@@ -549,6 +845,20 @@ export class PreflightController {
                 if (plan) void this.showPlanDetail(plan);
             });
         });
+    }
+
+    private formatDateTime(iso?: string): string {
+        if (!iso) return '';
+        try {
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return '';
+            return d.toLocaleString(this.lang === 'pt' ? 'pt-BR' : 'en-US', {
+                day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+            });
+        } catch (err) {
+            console.warn('[Preflight] Date format error:', err);
+            return '';
+        }
     }
 
     private async showPlanDetail(plan: FlightPlanItem): Promise<void> {
@@ -566,15 +876,28 @@ export class PreflightController {
             console.warn('[Preflight] Plan detail fetch error:', err);
         }
         const name = full.name || 'Plano';
-        const img = resolveHudImageUrl(full);
-        const canFly = full.has_access === true;
+        const canFly = full.has_access !== false;
+        const depName = (full.departure_airport_name as string) || '';
+        const arrName = (full.arrival_airport_name as string) || '';
+        const depIcao = (full.departure_icao as string) || '';
+        const arrIcao = (full.arrival_icao as string) || '';
+        const depRwy = (full.dep_rwy_ident as string) || '';
+        const arrRwy = (full.arr_rwy_ident as string) || '';
+        const scheduled = this.formatDateTime(full.scheduled_departure_at as string | undefined);
+        const notes = (full.notes as string) || '';
+
+        const rows: string[] = [];
+        rows.push(`<div class="preflight-detail-row"><span class="k">${this.t('detail.departure')}</span><span class="v">${escapeHtml(depName)} (${escapeHtml(depIcao)})${depRwy ? ` · ${this.t('detail.runway')} ${escapeHtml(depRwy)}` : ''}</span></div>`);
+        rows.push(`<div class="preflight-detail-row"><span class="k">${this.t('detail.arrival')}</span><span class="v">${escapeHtml(arrName)} (${escapeHtml(arrIcao)})${arrRwy ? ` · ${this.t('detail.runway')} ${escapeHtml(arrRwy)}` : ''}</span></div>`);
+        if (scheduled) rows.push(`<div class="preflight-detail-row"><span class="k">${this.t('detail.scheduled')}</span><span class="v">${escapeHtml(scheduled)}</span></div>`);
+        if (notes) rows.push(`<div class="preflight-detail-row"><span class="k">${this.t('detail.notes')}</span><span class="v">${escapeHtml(notes)}</span></div>`);
+
         body.innerHTML = `
-            <img class="preflight-hero-img" data-hud-thumb src="${escapeHtml(img || HUD_IMAGE_PLACEHOLDER)}" alt=""/>
             <h2 style="font-family:Orbitron,monospace;font-size:14px;color:#40ffaa;margin-bottom:8px">${escapeHtml(String(name))}</h2>
-            <p style="font-size:12px;color:rgba(255,255,255,.55)">${escapeHtml(String(full.departure_icao || ''))} → ${escapeHtml(String(full.arrival_icao || ''))}</p>
-            <button type="button" class="preflight-cta-btn" id="preflight-plan-fly" ${canFly ? '' : 'disabled'}>VOAR AGORA</button>
+            <p style="font-size:12px;color:rgba(255,255,255,.55);margin-bottom:8px">${escapeHtml(depIcao)} → ${escapeHtml(arrIcao)}</p>
+            ${rows.join('')}
+            <button type="button" class="preflight-cta-btn" id="preflight-plan-fly" ${canFly ? '' : 'disabled'}>${this.t('cta.flyNow')}</button>
         `;
-        attachImgFallback(body);
         document.getElementById('preflight-plan-fly')?.addEventListener('click', () => {
             if (!canFly) return;
             window.location.href = `flight.html?flightPlanId=${encodeURIComponent(String(plan.id))}`;
@@ -588,11 +911,16 @@ export class PreflightController {
             return;
         }
         this.persistSpawnFromForm();
-        ensureDefaultSpawnConfig();
+        const rwySel = document.getElementById('preflight-runway-select') as HTMLSelectElement | null;
+        const endSel = document.getElementById('preflight-runway-end') as HTMLSelectElement | null;
+        const dtSel = document.getElementById('preflight-datetime') as HTMLInputElement | null;
+        const runwayId = rwySel ? Number(rwySel.value) : NaN;
+        const end = endSel?.value === 'he' ? 'he' : 'le';
+        const simTimeIso = dtSel?.value ? new Date(dtSel.value).toISOString() : new Date().toISOString();
         const btn = document.getElementById('preflight-fly-btn') as HTMLButtonElement | null;
         if (btn) {
             btn.disabled = true;
-            btn.textContent = 'PREPARANDO...';
+            btn.textContent = this.t('cta.preparing');
         }
         try {
             localStorage.setItem(PREFLIGHT_AIRCRAFT_KEY, String(row.aircraft_id));
@@ -605,42 +933,50 @@ export class PreflightController {
                     console.warn(`[Preflight] Aircraft select failed: HTTP ${selectRes.status}`);
                 }
             }
-            this.hide();
-            const loading = document.getElementById('loading');
-            if (loading) {
-                loading.style.display = 'flex';
-                loading.style.opacity = '1';
+            const params = new URLSearchParams();
+            if (this.selectedAirportId && Number.isFinite(runwayId) && runwayId > 0) {
+                params.set('airportId', String(this.selectedAirportId));
+                params.set('runwayId', String(runwayId));
+                params.set('end', end);
+            } else {
+                console.warn('[Preflight] No airport/runway selected — game will use default spawn');
             }
-            this.flyResolve?.();
-            this.flyResolve = null;
+            params.set('simTime', simTimeIso);
+            console.debug(`[Preflight] Free flight → flight.html?${params.toString()}`);
+            window.location.href = `flight.html?${params.toString()}`;
         } catch (err) {
             console.warn('[Preflight] Fly free error:', err);
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = 'VOAR AGORA';
+                btn.textContent = this.t('cta.flyNow');
             }
         }
     }
 }
 
-export function applyPreflightToUrlAndScene(scene: { setSimTimeOffsetFromIso(iso: string): void }): void {
+type GroundSpawnScene = {
+    setSimTimeOffsetFromIso(iso: string): void;
+    setFreeFlightGroundSpawn(lat: number, lon: number, hdg: number, elevationFt: number): void;
+};
+
+export function applyPreflightToUrlAndScene(scene: GroundSpawnScene): void {
     ensureDefaultSpawnConfig();
     try {
         const raw = localStorage.getItem(PREFLIGHT_SPAWN_KEY);
-        if (!raw) return;
-        const spawn = JSON.parse(raw) as PreflightSpawnConfig;
+        const spawn = raw ? (JSON.parse(raw) as PreflightSpawnConfig) : DEFAULT_SBGR_SPAWN;
+        scene.setFreeFlightGroundSpawn(spawn.lat, spawn.lon, spawn.hdg, spawn.elevationFt ?? 0);
         if (spawn.simTimeIso) scene.setSimTimeOffsetFromIso(spawn.simTimeIso);
         const params = new URLSearchParams(window.location.search);
-        params.set('lat', String(spawn.lat));
-        params.set('lng', String(spawn.lon));
-        params.set('hdg', String(spawn.hdg));
         params.delete('alt');
+        params.delete('lat');
+        params.delete('lng');
+        params.delete('hdg');
         params.delete('flightPlanId');
         params.delete('mission_id');
         params.delete('missionId');
         const qs = params.toString();
         history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
-        console.debug(`[Preflight] Free flight spawn icao=${spawn.icao} lat=${spawn.lat} lon=${spawn.lon} hdg=${spawn.hdg}`);
+        console.debug(`[Preflight] Fallback ground spawn icao=${spawn.icao} lat=${spawn.lat} lon=${spawn.lon} hdg=${spawn.hdg} elevFt=${spawn.elevationFt ?? 0}`);
     } catch (err) {
         console.warn('[Preflight] applyPreflightToUrlAndScene failed:', err);
     }

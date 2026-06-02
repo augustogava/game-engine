@@ -2,6 +2,8 @@
 
 > This document describes every API the game client (`flight.html`) needs to consume: user airports, runway data, aircraft data, and how to use them for spawning.
 
+> **Full game API index (missions, plans, aircraft, airports):** [docs/api/GAME_API_REFERENCE.md](./api/GAME_API_REFERENCE.md) · §7 Airports and runways.
+
 ---
 
 ## Table of Contents
@@ -250,9 +252,38 @@ Returns full details for a single airport (any airport, not just acquired).
   "municipality": "São Paulo",
   "is_active": 1,
   "created_at": "2025-01-01T00:00:00.000Z",
-  "updated_at": "2025-01-01T00:00:00.000Z"
+  "updated_at": "2025-01-01T00:00:00.000Z",
+  "credit_price": 500,
+  "runway_count": 2,
+  "runways": [
+    {
+      "id": 4523,
+      "airport_id": 1842,
+      "length_ft": 13123,
+      "width_ft": 148,
+      "surface": "ASP",
+      "lighted": 1,
+      "closed": 0,
+      "le_ident": "09L",
+      "le_latitude_deg": -23.44,
+      "le_longitude_deg": -46.47,
+      "le_elevation_ft": 2459,
+      "le_heading_deg_true": 92.1,
+      "le_displaced_threshold_ft": null,
+      "he_ident": "27R",
+      "he_latitude_deg": -23.45,
+      "he_longitude_deg": -46.45,
+      "he_elevation_ft": 2450,
+      "he_heading_deg_true": 272.1,
+      "he_displaced_threshold_ft": null
+    }
+  ],
+  "is_owned": false,
+  "acquired_at": null
 }
 ```
+
+`city` is set from `municipality` when `city` is null. `credit_price` matches marketplace pricing by `type`. `runways` duplicates `GET /api/airports/:id/runways` (open runways only, longest first). With `Authorization: Bearer`, `is_owned` and `acquired_at` are included when the user owns the airport.
 
 ---
 

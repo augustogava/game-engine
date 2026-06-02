@@ -1473,6 +1473,18 @@ export class FlightSceneSimple extends Scene3D {
         }
     }
 
+    setFreeFlightGroundSpawn(lat: number, lon: number, hdg: number, elevationFt: number): void {
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            console.warn('[Flight] Ignoring free-flight ground spawn: invalid coordinates');
+            return;
+        }
+        this._pendingFlightPlanLat = lat;
+        this._pendingFlightPlanLon = lon;
+        this._pendingFlightPlanHdg = Number.isFinite(hdg) ? hdg : 0;
+        this._pendingFlightPlanAltM = (Number.isFinite(elevationFt) ? elevationFt : 0) * 0.3048;
+        console.debug(`[Flight] Free-flight ground spawn lat=${lat} lon=${lon} hdg=${this._pendingFlightPlanHdg} elevFt=${elevationFt}`);
+    }
+
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
         this._multiplayerSystem.initMultiplayer(token, onAuthFailure, onNoFlightHours);
     }

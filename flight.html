@@ -260,6 +260,7 @@
         }
         .preflight-field {
             margin-bottom: 12px;
+            position: relative;
         }
         .preflight-field label {
             display: block;
@@ -333,6 +334,55 @@
             margin-bottom: 12px;
             background: #0a1620;
         }
+        .preflight-badge {
+            display: inline-block;
+            font-size: 8px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+            letter-spacing: 0.05em;
+            vertical-align: middle;
+            border: 1px solid transparent;
+        }
+        .preflight-badge-level { background: rgba(80, 160, 255, 0.18); color: #7fb8ff; border-color: rgba(80, 160, 255, 0.4); }
+        .preflight-badge-done { background: rgba(80, 255, 160, 0.18); color: #40ffaa; border-color: rgba(80, 255, 160, 0.4); }
+        .preflight-badge-locked { background: rgba(255, 90, 90, 0.15); color: #ff8a8a; border-color: rgba(255, 90, 90, 0.4); }
+        .preflight-badge-prog { background: rgba(80, 255, 160, 0.15); color: #40ffaa; border-color: rgba(80, 255, 160, 0.45); }
+        .preflight-meta { font-size: 10px; color: rgba(120, 220, 180, 0.7); margin-top: 4px; letter-spacing: 0.04em; }
+        .preflight-suggestions {
+            position: absolute;
+            left: 0; right: 0; top: 100%;
+            z-index: 20;
+            margin-top: 4px;
+            background: #0a1822;
+            border: 1px solid rgba(80, 255, 160, 0.3);
+            border-radius: 6px;
+            max-height: 240px;
+            overflow-y: auto;
+            display: none;
+            -webkit-overflow-scrolling: touch;
+        }
+        .preflight-suggestion {
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+            padding: 12px;
+            min-height: 44px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(80, 255, 160, 0.08);
+        }
+        .preflight-suggestion:last-child { border-bottom: none; }
+        .preflight-suggestion:hover { background: rgba(0, 50, 35, 0.5); }
+        .preflight-suggestion-icao { font-family: 'Orbitron', monospace; font-size: 12px; color: #40ffaa; min-width: 48px; }
+        .preflight-suggestion-name { font-size: 12px; color: rgba(255, 255, 255, 0.7); }
+        .preflight-stat-row { display: flex; gap: 8px; margin: 12px 0; }
+        .preflight-stat { flex: 1; text-align: center; padding: 10px 6px; border: 1px solid rgba(80, 255, 160, 0.2); border-radius: 8px; background: rgba(0, 20, 15, 0.4); }
+        .preflight-stat-val { font-size: 15px; font-weight: 700; color: #fff; }
+        .preflight-stat-lbl { font-size: 9px; color: rgba(120, 220, 180, 0.6); letter-spacing: 0.08em; margin-top: 3px; text-transform: uppercase; }
+        .preflight-detail-badges { margin: 4px 0 10px; }
+        .preflight-detail-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(80, 255, 160, 0.1); font-size: 12px; }
+        .preflight-detail-row .k { color: rgba(120, 220, 180, 0.65); }
+        .preflight-detail-row .v { color: #fff; text-align: right; }
         @media (max-width: 768px) {
             .preflight-header {
                 padding-top: max(14px, env(safe-area-inset-top, 14px));
@@ -519,6 +569,7 @@
                     <div class="preflight-field">
                         <label for="preflight-airport-search">Aeroporto</label>
                         <input type="text" id="preflight-airport-search" placeholder="ICAO ou nome (ex. SBGR)" autocomplete="off"/>
+                        <div class="preflight-suggestions" id="preflight-airport-suggestions"></div>
                     </div>
                     <div class="preflight-field">
                         <label for="preflight-runway-select">Pista</label>

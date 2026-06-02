@@ -1345,6 +1345,10 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/airports/:id'))) {
+        return proxyToMainApi(`/api/airports/${routeParams.id}`, req, res);
+    }
+
     // ── Aircrafts API (proxy to main API) ─────────────────────────────
 
     if (req.method === 'GET' && urlPath === '/api/aircrafts') {
