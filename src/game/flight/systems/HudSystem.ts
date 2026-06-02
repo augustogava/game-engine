@@ -1997,7 +1997,7 @@ export class HudSystem {
         const wind = this.scene._getWindAtAltitude(altMslFt);
 
         const trackDeg = this.scene.groundSpeed > MIN_GS_FOR_ETE_MS && Number.isFinite(this.scene.velocity.x) && Number.isFinite(this.scene.velocity.z)
-            ? ((Math.atan2(this.scene.velocity.x, -this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
+            ? ((Math.atan2(this.scene.velocity.x, this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
             : totalBrgDeg;
         const windAngleRad = (wind.dirDeg - trackDeg) * Math.PI / 180;
         const headComp = -wind.speedKt * Math.cos(windAngleRad);
