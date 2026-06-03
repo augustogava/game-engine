@@ -36,6 +36,7 @@ const {
     WIND_MAX_SPEED_KT,
     WIND_DEFAULT_SPEED_KT,
     WIND_DEFAULT_DIRECTION_DEG,
+    WIND_METAR_BLEND_TOP_AGL_FT,
     KT_TO_MS,
     TURB_FADE_AGL_M,
     TURB_FULL_AGL_M,
@@ -955,8 +956,19 @@ export class FlightPhysicsSystem {
     getWindAtAltitude(altFt: number): { speedKt: number; dirDeg: number } {
         const altSafe = Number.isFinite(altFt) && altFt > 0 ? altFt : 0;
         const altGain = (altSafe / 1000) * WIND_ALTITUDE_GAIN_KT_PER_1000FT;
-        const speed = Math.min(WIND_MAX_SPEED_KT, WIND_DEFAULT_SPEED_KT + altGain);
-        return { speedKt: speed, dirDeg: WIND_DEFAULT_DIRECTION_DEG };
+        const procSpeed = Math.min(WIND_MAX_SPEED_KT, WIND_DEFAULT_SPEED_KT + altGain);
+        const procDir = WIND_DEFAULT_DIRECTION_DEG;
+
+        const metar = this.scene._metarSurfaceWind;
+        if (metar && Number.isFinite(metar.speedKt) && Number.isFinite(metar.dirDeg)) {
+            const surfElev = Number.isFinite(this.scene._metarSurfaceElevFt) ? this.scene._metarSurfaceElevFt : 0;
+            const t = Math.max(0, Math.min(1, (altSafe - surfElev) / WIND_METAR_BLEND_TOP_AGL_FT));
+            const speed = metar.speedKt * (1 - t) + procSpeed * t;
+            let delta = ((procDir - metar.dirDeg + 540) % 360) - 180;
+            const dir = ((metar.dirDeg + delta * t) % 360 + 360) % 360;
+            return { speedKt: speed, dirDeg: dir };
+        }
+        return { speedKt: procSpeed, dirDeg: procDir };
     }
 
     getWindVectorWorldRef(altMslFt: number, out: BABYLON.Vector3): void {

@@ -1,7 +1,7 @@
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { MISSION_TOAST_VISIBLE_MS, MISSION_TOAST_FADE_MS } from '../constants/index.js';
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
-import { initialBearingDeg } from '../physics/NavMath.js';
+import { initialBearingDeg, haversineNm } from '../physics/NavMath.js';
 
 function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -59,6 +59,12 @@ export class MissionSystem {
                 departure_icao: plan.departure_icao || '',
                 arrival_icao: plan.arrival_icao || '',
                 name: plan.name || '',
+                dep_rwy_ident: plan.dep_rwy_ident || '',
+                arr_rwy_ident: plan.arr_rwy_ident || '',
+                dep_rwy_heading: plan.dep_rwy_heading != null ? Number(plan.dep_rwy_heading) : null,
+                arr_rwy_heading: plan.arr_rwy_heading != null ? Number(plan.arr_rwy_heading) : null,
+                dep_elevation_ft: plan.dep_rwy_elevation_ft ?? plan.dep_elevation_ft ?? null,
+                arr_elevation_ft: plan.arr_rwy_elevation_ft ?? plan.arr_elevation_ft ?? null,
             };
         }
 
@@ -794,6 +800,303 @@ export class MissionSystem {
             else console.log(`[FlightPlan] Plan ${planId} status -> ${status}`);
         } catch (err) {
             console.error('[FlightPlan] PATCH status error:', err);
+        }
+    }
+
+    setupLogbookBtn(): void {
+        if (!this.scene._logbookBtnEl || !this.scene._logbookPanelEl) return;
+        const btn = this.scene._logbookBtnEl;
+        const panel = this.scene._logbookPanelEl;
+
+        btn.addEventListener('mouseenter', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; } });
+        btn.addEventListener('mouseleave', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; } });
+
+        btn.addEventListener('click', () => {
+            const visible = panel.style.display !== 'none';
+            this.scene._closeAllPanels(visible ? null : panel);
+            if (visible) {
+                panel.style.display = 'none';
+                btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none';
+            } else {
+                panel.style.display = 'block';
+                btn.style.borderColor = 'rgba(80,255,160,.9)'; btn.style.boxShadow = '0 0 12px rgba(0,255,128,.35)';
+                this.loadLogbook(1);
+            }
+        });
+    }
+
+    async loadLogbook(page: number = 1): Promise<void> {
+        const listEl = document.getElementById('logbook-list');
+        if (!listEl) return;
+        const safePage = Math.max(1, Math.floor(page) || 1);
+        listEl.textContent = 'Carregando...';
+
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login necessário</div>';
+            return;
+        }
+
+        const limit = 20;
+        try {
+            const res = await fetch(`/api/flight-logs?page=${safePage}&limit=${limit}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Falha ao carregar logbook</div>';
+                console.warn(`[Logbook] GET /api/flight-logs failed: ${res.status}`);
+                return;
+            }
+            const json = await res.json();
+            const logs = Array.isArray(json.data) ? json.data : [];
+            const total = Number(json.total) || logs.length;
+
+            if (!logs.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">Sem voos registrados</div>';
+                return;
+            }
+
+            const statusMap: Record<string, { label: string; color: string }> = {
+                landed: { label: 'Pousou', color: '#40ffaa' },
+                cancelled: { label: 'Cancelado', color: '#ffaa55' },
+                in_flight: { label: 'Em voo', color: '#9cf' },
+                departed: { label: 'Decolou', color: '#9cf' },
+            };
+
+            let html = '';
+            for (const log of logs) {
+                const st = statusMap[log.status] || { label: String(log.status || '\u2014'), color: 'rgba(255,255,255,.6)' };
+                const depIcao = log.departure_icao || '???';
+                const arrIcao = log.arrival_icao || '???';
+                const dur = log.flight_duration_min != null ? `${Number(log.flight_duration_min).toFixed(0)} min` : '\u2014';
+                const distNm = log.distance_nm != null ? `${Number(log.distance_nm).toFixed(1)} nm` : '\u2014';
+                const maxAlt = log.max_altitude_ft != null ? `${Number(log.max_altitude_ft).toFixed(0)} ft` : '\u2014';
+                const avgSpd = log.avg_speed_knots != null ? `${Number(log.avg_speed_knots).toFixed(0)} kt` : '\u2014';
+                const lr = log.landing_rate_fpm != null ? `${Number(log.landing_rate_fpm).toFixed(0)} fpm` : '\u2014';
+                const when = log.departure_time ? new Date(log.departure_time).toLocaleString() : '';
+                html += `<div style="border:1px solid rgba(80,255,160,.25);border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                        <span style="font-weight:600;color:#fff">${escapeHtml(depIcao)} <span style="color:#40ffaa">\u2708</span> ${escapeHtml(arrIcao)}</span>
+                        <span style="font-size:9px;color:${st.color};border:1px solid ${st.color};border-radius:3px;padding:1px 6px">${escapeHtml(st.label)}</span>
+                    </div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:4px">${escapeHtml((log.departure_name || '') + (log.arrival_name ? ' \u2192 ' + log.arrival_name : ''))}</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:10px;color:rgba(255,255,255,.7)">
+                        <span>\u23F1 ${escapeHtml(dur)}</span>
+                        <span>\u2194 ${escapeHtml(distNm)}</span>
+                        <span>\u2191 ${escapeHtml(maxAlt)}</span>
+                        <span>GS ${escapeHtml(avgSpd)}</span>
+                        ${log.status === 'landed' ? `<span>\u{1F6EC} ${escapeHtml(lr)}</span>` : ''}
+                    </div>
+                    ${when ? `<div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:3px">${escapeHtml(when)}</div>` : ''}
+                </div>`;
+            }
+
+            const totalPages = Math.max(1, Math.ceil(total / limit));
+            if (totalPages > 1) {
+                const prevDisabled = safePage <= 1;
+                const nextDisabled = safePage >= totalPages;
+                const pagerBtn = (enabled: boolean) => enabled
+                    ? 'background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit'
+                    : 'background:rgba(80,80,80,.2);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.35);padding:3px 10px;border-radius:3px;font-size:9px;font-family:inherit;cursor:not-allowed';
+                html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+                    <button data-logbook-prev ${prevDisabled ? 'disabled' : ''} style="${pagerBtn(!prevDisabled)}">Anterior</button>
+                    <span style="font-size:9px;color:rgba(255,255,255,.5)">${safePage} / ${totalPages}</span>
+                    <button data-logbook-next ${nextDisabled ? 'disabled' : ''} style="${pagerBtn(!nextDisabled)}">Próximo</button>
+                </div>`;
+            }
+
+            listEl.innerHTML = html;
+            const prevBtn = listEl.querySelector('[data-logbook-prev]');
+            if (prevBtn) prevBtn.addEventListener('click', () => { if (safePage > 1) this.loadLogbook(safePage - 1); });
+            const nextBtn = listEl.querySelector('[data-logbook-next]');
+            if (nextBtn) nextBtn.addEventListener('click', () => { if (safePage < totalPages) this.loadLogbook(safePage + 1); });
+            console.log(`[Logbook] Loaded page ${safePage}/${totalPages} (${logs.length} of ${total})`);
+        } catch (err) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Erro de conexão</div>';
+            console.error('[Logbook] load error:', err);
+        }
+    }
+
+    setupEfbBtn(): void {
+        if (!this.scene._efbBtnEl || !this.scene._efbPanelEl) return;
+        const btn = this.scene._efbBtnEl;
+        const panel = this.scene._efbPanelEl;
+
+        btn.addEventListener('mouseenter', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; } });
+        btn.addEventListener('mouseleave', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; } });
+
+        btn.addEventListener('click', () => {
+            const visible = panel.style.display !== 'none';
+            this.scene._closeAllPanels(visible ? null : panel);
+            if (visible) {
+                panel.style.display = 'none';
+                btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none';
+            } else {
+                panel.style.display = 'block';
+                btn.style.borderColor = 'rgba(80,255,160,.9)'; btn.style.boxShadow = '0 0 12px rgba(0,255,128,.35)';
+                this.renderEfb();
+            }
+        });
+    }
+
+    renderEfb(): void {
+        const el = document.getElementById('efb-content');
+        if (!el) return;
+        try {
+            const nav = this.scene._activeFlightPlanNav || this.scene._activeMission || null;
+            const wps = Array.isArray(this.scene._missionWaypoints) ? this.scene._missionWaypoints : [];
+
+            if (!nav && wps.length === 0) {
+                el.innerHTML = '<div style="color:rgba(255,255,255,.4)">Sem rota ativa</div>';
+                return;
+            }
+
+            const points: { label: string; lat: number; lon: number; alt: number | null }[] = [];
+            if (nav && Number.isFinite(nav.departure_lat) && Number.isFinite(nav.departure_lon)) {
+                const depRwy = nav.dep_rwy_ident ? ` RWY ${nav.dep_rwy_ident}` : '';
+                points.push({ label: `${nav.departure_icao || 'DEP'}${depRwy}`, lat: Number(nav.departure_lat), lon: Number(nav.departure_lon), alt: nav.dep_elevation_ft ?? null });
+            }
+            for (const wp of wps) {
+                if (Number.isFinite(wp.latitude) && Number.isFinite(wp.longitude)) {
+                    points.push({ label: wp.name || `WP${wp.order_index}`, lat: Number(wp.latitude), lon: Number(wp.longitude), alt: wp.altitude_ft ?? null });
+                }
+            }
+            if (nav && Number.isFinite(nav.arrival_lat) && Number.isFinite(nav.arrival_lon)) {
+                const arrRwy = nav.arr_rwy_ident ? ` RWY ${nav.arr_rwy_ident}` : '';
+                const arrIcao = nav.arrival_icao || nav.arr_icao || 'ARR';
+                points.push({ label: `${arrIcao}${arrRwy}`, lat: Number(nav.arrival_lat), lon: Number(nav.arrival_lon), alt: nav.arr_elevation_ft ?? null });
+            }
+
+            let totalNm = 0;
+            let legsHtml = '';
+            for (let i = 0; i < points.length; i++) {
+                const p = points[i];
+                const altTxt = p.alt != null ? ` <span style="color:rgba(255,255,255,.4)">${Number(p.alt).toFixed(0)} ft</span>` : '';
+                let legTxt = '';
+                if (i > 0) {
+                    const prev = points[i - 1];
+                    const dist = haversineNm(prev.lat, prev.lon, p.lat, p.lon);
+                    const brg = initialBearingDeg(prev.lat, prev.lon, p.lat, p.lon);
+                    totalNm += dist;
+                    legTxt = `<span style="color:#40ffaa;font-size:9px"> ${dist.toFixed(1)} nm / ${brg.toFixed(0)}°</span>`;
+                }
+                legsHtml += `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid rgba(80,255,160,.08)"><span>${escapeHtml(p.label)}${altTxt}</span>${legTxt}</div>`;
+            }
+
+            const routeName = nav?.name || nav?.mission_title || '';
+            const cfg = this.scene.aircraftConfig || {};
+            const cruiseKt = Number.isFinite(cfg.vne_kts) && cfg.vne_kts > 0
+                ? cfg.vne_kts * 0.8
+                : (Number.isFinite(cfg.stall_speed_kts) && cfg.stall_speed_kts > 0 ? cfg.stall_speed_kts * 4 : 250);
+            const estTimeHr = cruiseKt > 0 ? totalNm / cruiseKt : 0;
+            const estTimeMin = estTimeHr * 60;
+            const burnMax = Number(cfg.fuel_burn_rate_kg_per_s_max) || 0;
+            const burnIdle = Number(cfg.fuel_burn_rate_kg_per_s_idle) || 0;
+            const cruiseBurnKgPerS = burnMax > 0 ? (burnMax + burnIdle) / 2 : 0;
+            const tripFuelKg = cruiseBurnKgPerS * estTimeHr * 3600;
+            const reserveFuelKg = cruiseBurnKgPerS * 0.75 * 3600;
+            const totalFuelKg = tripFuelKg + reserveFuelKg;
+            const capKg = Number(cfg.fuel_capacity_kg) || 0;
+            const fuelPct = capKg > 0 ? Math.min(100, (totalFuelKg / capKg) * 100) : 0;
+            const fuelColor = capKg > 0 && totalFuelKg > capKg ? '#ff6666' : '#40ffaa';
+
+            const baseMassKg = Number(cfg.mass_kg) || 0;
+            const takeoffMassKg = baseMassKg + totalFuelKg;
+
+            const elevForWx = (nav && nav.dep_elevation_ft != null) ? Number(nav.dep_elevation_ft) : 0;
+            let wxHtml = '';
+            try {
+                const wx = this.scene._weatherService?.getSnapshot(elevForWx);
+                if (wx) {
+                    wxHtml = `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Vento</span><span>${wx.windDirDeg.toFixed(0)}° / ${wx.windSpeedKt.toFixed(0)} kt</span></div>
+                    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Nuvens</span><span>${(wx.cloudCoverage * 100).toFixed(0)}%</span></div>
+                    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Precip.</span><span>${(wx.precipitationIntensity * 100).toFixed(0)}%</span></div>
+                    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">ISA Δ</span><span>${wx.isaDeltaTempK >= 0 ? '+' : ''}${wx.isaDeltaTempK.toFixed(1)} K</span></div>`;
+                }
+            } catch (wErr) {
+                console.warn('[EFB] weather briefing failed:', wErr);
+            }
+
+            const section = (title: string, body: string) => `<div style="margin-bottom:10px"><div style="font-family:'Orbitron',monospace;font-size:9px;color:#40ffaa;letter-spacing:.12em;margin-bottom:4px">${title}</div>${body}</div>`;
+
+            let approachHtml = '';
+            if (nav) {
+                const arrIdent = nav.arr_rwy_ident || '\u2014';
+                const fac = (nav.arr_rwy_heading != null && Number.isFinite(Number(nav.arr_rwy_heading)))
+                    ? `${Number(nav.arr_rwy_heading).toFixed(0)}°`
+                    : 'N/D';
+                const thrElev = nav.arr_elevation_ft != null ? `${Number(nav.arr_elevation_ft).toFixed(0)} ft` : 'N/D';
+                approachHtml = `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Pista cheg.</span><span>${escapeHtml(String(arrIdent))}</span></div>
+                    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Curso final</span><span style="color:#40ffaa">${fac}</span></div>
+                    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Rampa</span><span>3.0°</span></div>
+                    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Elev. threshold</span><span>${thrElev}</span></div>
+                    <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">NAVAID/ILS</span><span style="color:rgba(255,255,255,.35)">N/D</span></div>`;
+            }
+
+            el.innerHTML =
+                (routeName ? `<div style="font-weight:600;color:#fff;margin-bottom:8px">${escapeHtml(routeName)}</div>` : '') +
+                section('ROTA', legsHtml + `<div style="display:flex;justify-content:space-between;margin-top:4px;font-weight:600"><span>Total</span><span style="color:#40ffaa">${totalNm.toFixed(1)} nm</span></div>`) +
+                (approachHtml ? section('APPROACH (IFR geométrico)', approachHtml) : '') +
+                section('COMBUSTÍVEL (estimativa)',
+                    `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Cruzeiro</span><span>${cruiseKt.toFixed(0)} kt</span></div>
+                     <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Tempo est.</span><span>${estTimeMin.toFixed(0)} min</span></div>
+                     <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Trip</span><span>${tripFuelKg.toFixed(0)} kg</span></div>
+                     <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Reserva (45min)</span><span>${reserveFuelKg.toFixed(0)} kg</span></div>
+                     <div style="display:flex;justify-content:space-between;font-weight:600"><span>Total</span><span style="color:${fuelColor}">${totalFuelKg.toFixed(0)} kg ${capKg > 0 ? `(${fuelPct.toFixed(0)}% cap.)` : ''}</span></div>
+                     ${capKg > 0 && totalFuelKg > capKg ? '<div style="color:#ff6666;font-size:9px;margin-top:2px">Acima da capacidade do tanque</div>' : ''}`) +
+                section('PESO (estimativa)',
+                    `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Vazio/base</span><span>${baseMassKg.toFixed(0)} kg</span></div>
+                     <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Combustível</span><span>${totalFuelKg.toFixed(0)} kg</span></div>
+                     <div style="display:flex;justify-content:space-between;font-weight:600"><span>Decolagem est.</span><span style="color:#40ffaa">${takeoffMassKg.toFixed(0)} kg</span></div>`) +
+                (wxHtml ? section('BRIEFING METEO (procedural)', wxHtml) : '') +
+                section('METAR REAL', '<div id="efb-metar" style="font-size:10px;color:rgba(255,255,255,.7)">\u2014</div>');
+            console.log(`[EFB] Rendered route: ${points.length} pts, ${totalNm.toFixed(1)} nm`);
+
+            const depIcao = nav?.departure_icao || nav?.dep_icao || '';
+            if (depIcao) this.loadMetarBriefing(depIcao, elevForWx);
+        } catch (err) {
+            el.innerHTML = '<div style="color:rgba(255,100,100,.8)">Erro ao montar EFB</div>';
+            console.error('[EFB] render error:', err);
+        }
+    }
+
+    async loadMetarBriefing(icao: string, elevFt: number): Promise<void> {
+        const el = document.getElementById('efb-metar');
+        if (!el) return;
+        const code = String(icao || '').trim().toUpperCase();
+        if (!/^[A-Z0-9]{3,4}$/.test(code)) {
+            el.innerHTML = '<div style="color:rgba(255,255,255,.4)">METAR indisponível (ICAO inválido)</div>';
+            return;
+        }
+        el.textContent = 'Carregando METAR...';
+        try {
+            const res = await fetch(`/api/weather/metar?icao=${encodeURIComponent(code)}`);
+            if (!res.ok) {
+                el.innerHTML = '<div style="color:rgba(255,255,255,.4)">METAR indisponível</div>';
+                console.warn(`[METAR] briefing HTTP ${res.status} for ${code}`);
+                return;
+            }
+            const json = await res.json();
+            const m = json.data;
+            if (!m) {
+                el.innerHTML = '<div style="color:rgba(255,255,255,.4)">METAR indisponível</div>';
+                return;
+            }
+            if (Number.isFinite(m.windDirDeg) && Number.isFinite(m.windSpeedKt)) {
+                this.scene._metarSurfaceWind = { speedKt: Number(m.windSpeedKt), dirDeg: Number(m.windDirDeg) };
+                this.scene._metarSurfaceElevFt = Number.isFinite(elevFt) ? Number(elevFt) : 0;
+                console.log(`[METAR] Surface wind override ${code}: ${m.windDirDeg}°/${m.windSpeedKt}kt`);
+            }
+            const windTxt = `${m.windVariable ? 'VRB' : (m.windDirDeg != null ? m.windDirDeg + '°' : '\u2014')} / ${m.windSpeedKt != null ? m.windSpeedKt + ' kt' : '\u2014'}${m.windGustKt != null ? ' G' + m.windGustKt : ''}`;
+            el.innerHTML = `<div style="font-family:monospace;font-size:9px;color:#9cf;word-break:break-word;margin-bottom:4px">${escapeHtml(m.raw || '')}</div>
+                <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Vento</span><span>${escapeHtml(windTxt)}</span></div>
+                ${m.tempC != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Temp/Orvalho</span><span>${m.tempC}° / ${m.dewpointC ?? '\u2014'}°</span></div>` : ''}
+                ${m.altimeterHpa != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">QNH</span><span>${Number(m.altimeterHpa).toFixed(0)} hPa</span></div>` : ''}
+                ${m.visibility != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Visib.</span><span>${escapeHtml(String(m.visibility))}</span></div>` : ''}
+                ${json.stale ? '<div style="color:#ffaa55;font-size:9px;margin-top:2px">Dados em cache (fonte indisponível)</div>' : ''}`;
+        } catch (err) {
+            el.innerHTML = '<div style="color:rgba(255,255,255,.4)">METAR indisponível</div>';
+            console.warn('[METAR] briefing fetch failed:', err);
         }
     }
 }

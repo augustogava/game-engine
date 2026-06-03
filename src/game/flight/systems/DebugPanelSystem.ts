@@ -39,8 +39,8 @@ export class DebugPanelSystem {
     }
 
     closeAllPanels(except?: HTMLElement | null): void {
-        const panels = [this.scene._missionPanelEl, this.scene._aircraftPanelEl, this.scene._flightPlansPanelEl];
-        const btns = [this.scene._missionBtnEl, this.scene._aircraftBtnEl, this.scene._flightPlansBtnEl];
+        const panels = [this.scene._missionPanelEl, this.scene._aircraftPanelEl, this.scene._flightPlansPanelEl, this.scene._logbookPanelEl, this.scene._efbPanelEl];
+        const btns = [this.scene._missionBtnEl, this.scene._aircraftBtnEl, this.scene._flightPlansBtnEl, this.scene._logbookBtnEl, this.scene._efbBtnEl];
         for (let i = 0; i < panels.length; i++) {
             const p = panels[i];
             if (!p || p === except) continue;
@@ -52,7 +52,7 @@ export class DebugPanelSystem {
 
     persistPanelState(): void {
         try {
-            const ids = ['missions-panel', 'aircraft-panel', 'flight-plans-panel'];
+            const ids = ['missions-panel', 'aircraft-panel', 'flight-plans-panel', 'logbook-panel', 'efb-panel'];
             const state: Record<string, { x?: number; y?: number; w?: number; h?: number; minimized: boolean; pinned: boolean }> = {};
             for (const id of ids) {
                 const el = document.getElementById(id);
@@ -115,7 +115,7 @@ export class DebugPanelSystem {
     }
 
     setupPanelControls(): void {
-        const panels = ['missions-panel', 'aircraft-panel', 'flight-plans-panel'];
+        const panels = ['missions-panel', 'aircraft-panel', 'flight-plans-panel', 'logbook-panel', 'efb-panel'];
         for (const id of panels) {
             const panel = document.getElementById(id);
             if (!panel) continue;

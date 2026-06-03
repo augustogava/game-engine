@@ -20,6 +20,7 @@ import {
     AP_NAV_XTE_DEG_PER_NM,
     AP_APR_GLIDESLOPE_DEG,
     AP_APR_MIN_ALT_FT,
+    AP_APR_CENTERLINE_FAF_NM,
     AP_INPUT_DISENGAGE_THRESHOLD,
     AUTOTRIM_DEADBAND,
     AUTOTRIM_RATE_PER_S,
@@ -59,7 +60,26 @@ export class AutopilotSystem {
         return null;
     }
 
+    aprCenterlinePrev(): { lat: number; lon: number } | null {
+        if (!this.scene._autopilotAprHold) return null;
+        const nav = this.scene._activeFlightPlanNav;
+        if (!nav) return null;
+        const hdg = Number(nav.arr_rwy_heading);
+        if (!Number.isFinite(hdg)) return null;
+        const wpts = this.scene._missionWaypoints;
+        const wpIdx = this.scene._missionCurrentWpIndex;
+        const hasRemainingWp = wpts && wpts.length > 0 && wpIdx >= 0 && wpIdx < wpts.length;
+        if (hasRemainingWp) return null;
+        const thrLat = Number(nav.arrival_lat);
+        const thrLon = Number(nav.arrival_lon);
+        if (!Number.isFinite(thrLat) || !Number.isFinite(thrLon)) return null;
+        const recip = (hdg + 180) % 360;
+        return NavMath.destinationPoint(thrLat, thrLon, recip, AP_APR_CENTERLINE_FAF_NM);
+    }
+
     apPrevNavLatLon(): { lat: number; lon: number } | null {
+        const centerline = this.aprCenterlinePrev();
+        if (centerline) return centerline;
         const wpts = this.scene._missionWaypoints;
         const wpIdx = this.scene._missionCurrentWpIndex;
         if (wpts && wpts.length > 0 && wpIdx > 0 && wpIdx < wpts.length) {

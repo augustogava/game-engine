@@ -692,7 +692,7 @@ export class InputSystem {
         const isOnWidget = (t: Touch): boolean => {
             const el = document.elementFromPoint(t.clientX, t.clientY);
             if (!el) return false;
-            return !!el.closest('#preflight,#touch-throttle,#touch-flap-btns,#ap-panel,#missions-btn,#aircraft-btn,#flight-plans-btn,#missions-panel,#aircraft-panel,#flight-plans-panel,#touch-controls-btn,#touch-controls-panel,#gps-zoom-controls');
+            return !!el.closest('#preflight,#touch-throttle,#touch-flap-btns,#ap-panel,#missions-btn,#aircraft-btn,#flight-plans-btn,#logbook-btn,#efb-btn,#missions-panel,#aircraft-panel,#flight-plans-panel,#logbook-panel,#efb-panel,#touch-controls-btn,#touch-controls-panel,#gps-zoom-controls');
         };
 
         const canvas = this.scene.scene?.getEngine()?.getRenderingCanvas();

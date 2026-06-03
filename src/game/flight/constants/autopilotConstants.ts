@@ -16,6 +16,7 @@ export const AP_NAV_XTE_DEG_PER_NM = 6;
 export const AP_NAV_MAX_INTERCEPT_DEG = 45;
 export const AP_APR_GLIDESLOPE_DEG = 3;
 export const AP_APR_MIN_ALT_FT = 0;
+export const AP_APR_CENTERLINE_FAF_NM = 12;
 export const AP_INPUT_DISENGAGE_THRESHOLD = 0.25;
 export const AUTOTRIM_RATE_PER_S = 0.04;
 export const AUTOTRIM_MAX = 0.15;

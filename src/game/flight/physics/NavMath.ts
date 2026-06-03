@@ -16,6 +16,22 @@ export function initialBearingDeg(lat1: number, lon1: number, lat2: number, lon2
     return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
 }
 
+export function destinationPoint(lat: number, lon: number, bearingDeg: number, distNm: number): { lat: number; lon: number } {
+    const R_NM = 3440.065;
+    const toRad = Math.PI / 180;
+    const toDeg = 180 / Math.PI;
+    const dr = distNm / R_NM;
+    const brg = bearingDeg * toRad;
+    const phi1 = lat * toRad;
+    const lambda1 = lon * toRad;
+    const sinPhi2 = Math.sin(phi1) * Math.cos(dr) + Math.cos(phi1) * Math.sin(dr) * Math.cos(brg);
+    const phi2 = Math.asin(Math.max(-1, Math.min(1, sinPhi2)));
+    const y = Math.sin(brg) * Math.sin(dr) * Math.cos(phi1);
+    const x = Math.cos(dr) - Math.sin(phi1) * sinPhi2;
+    const lambda2 = lambda1 + Math.atan2(y, x);
+    return { lat: phi2 * toDeg, lon: ((lambda2 * toDeg + 540) % 360) - 180 };
+}
+
 export function computeXteNm(prevLat: number, prevLon: number, nextLat: number, nextLon: number, curLat: number, curLon: number): number {
     const R_NM = 3440.065;
     const toRad = Math.PI / 180;

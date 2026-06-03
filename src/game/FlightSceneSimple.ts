@@ -386,6 +386,7 @@ import { LiveTrafficSystem } from './flight/systems/LiveTrafficSystem.js';
 import { DebugPanelSystem } from './flight/systems/DebugPanelSystem.js';
 import { InputSystem } from './flight/systems/InputSystem.js';
 import { HudSystem } from './flight/systems/HudSystem.js';
+import { AtcSystem } from './flight/systems/AtcSystem.js';
 import { WeatherService } from './flight/systems/WeatherService.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
@@ -418,6 +419,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _inputSystem = new InputSystem(this);
     /** @internal */ private readonly _hudSystem = new HudSystem(this);
     /** @internal */ private readonly _weatherService = new WeatherService(this);
+    /** @internal */ private readonly _atcSystem = new AtcSystem(this);
     private planeRoot!: BABYLON.TransformNode;
     private velocity        = BABYLON.Vector3.Zero();
     private angularVelocity = BABYLON.Vector3.Zero();
@@ -707,6 +709,8 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ public _precipitationType: number = 0;
     /** @internal */ public _precipitationIntensity: number = 0;
     /** @internal */ public _currentCloudCoverage: number = 0;
+    /** @internal */ public _metarSurfaceWind: { speedKt: number; dirDeg: number } | null = null;
+    /** @internal */ public _metarSurfaceElevFt: number = 0;
     private _autopilotTargetAltFt: number = 0;
     private _autopilotTargetVsFpm:  number = 0;
     private _autopilotLastPitchRad: number = Number.NaN;
@@ -739,6 +743,10 @@ export class FlightSceneSimple extends Scene3D {
     private _aircraftBtnEl: HTMLElement | null = null;
     private _flightPlansPanelEl: HTMLElement | null = null;
     private _flightPlansBtnEl: HTMLElement | null = null;
+    /** @internal */ _logbookPanelEl: HTMLElement | null = null;
+    /** @internal */ _logbookBtnEl: HTMLElement | null = null;
+    /** @internal */ _efbPanelEl: HTMLElement | null = null;
+    /** @internal */ _efbBtnEl: HTMLElement | null = null;
     private _pendingFlightPlanLat: number | null = null;
     private _pendingFlightPlanLon: number | null = null;
     private _pendingFlightPlanHdg: number | null = null;
@@ -1123,6 +1131,7 @@ export class FlightSceneSimple extends Scene3D {
         } catch (err) {
             console.warn('[LiveTraffic] update failed:', err);
         }
+        this._atcSystem.update(dt);
     }
 
     private _updatePropellerAnim(): void {
@@ -2198,6 +2207,22 @@ export class FlightSceneSimple extends Scene3D {
 
     private _patchFlightPlanStatus(planId: number, status: string): Promise<void> {
         return this._missionSystem.patchFlightPlanStatus(planId, status);
+    }
+
+    // ── Logbook Button ─────────────────────────────────────────────────────────
+
+    /** @internal */ _setupLogbookBtn(): void {
+        this._missionSystem.setupLogbookBtn();
+    }
+
+    private _loadLogbook(page: number = 1): Promise<void> {
+        return this._missionSystem.loadLogbook(page);
+    }
+
+    // ── EFB Button ─────────────────────────────────────────────────────────────
+
+    /** @internal */ _setupEfbBtn(): void {
+        this._missionSystem.setupEfbBtn();
     }
 
     // ── Aircraft Button ──────────────────────────────────────────────────────────

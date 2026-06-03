@@ -1468,9 +1468,13 @@ export class HudSystem {
 #missions-btn{top:22px!important;right:10px!important}
 #aircraft-btn{top:60px!important;right:10px!important}
 #flight-plans-btn{top:98px!important;right:10px!important}
+#logbook-btn{top:136px!important;right:10px!important}
+#efb-btn{top:174px!important;right:10px!important}
 #missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
+#logbook-panel{top:130px!important;right:50px!important;width:280px!important;max-height:50vh!important}
+#efb-panel{top:168px!important;right:50px!important;width:280px!important;max-height:50vh!important}
 #nav-info{top:185px!important;left:auto!important;right:2px!important;width:140px!important;font-size:9px!important}
 #ap-panel{top:auto!important;bottom:60px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
 #ap-panel .ap-btn{padding:2px 5px!important;font-size:9px!important}
@@ -1500,6 +1504,10 @@ export class HudSystem {
 #aircraft-panel{top:38px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
 #flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
 #flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+#logbook-btn{top:108px!important;right:6px!important;width:28px!important;height:28px!important}
+#logbook-panel{top:106px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#efb-btn{top:142px!important;right:6px!important;width:28px!important;height:28px!important}
+#efb-panel{top:140px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
 #nav-info{top:150px!important;left:auto!important;right:2px!important;width:110px!important;font-size:8px!important}
 #ap-panel{top:auto!important;bottom:58px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
 #ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
@@ -1807,6 +1815,44 @@ export class HudSystem {
   <div class="panel-resize" data-panel="flight-plans-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
+<div id="logbook-btn" style="position:absolute;top:188px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Logbook">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a2 2 0 0 1 2 2v14H6a2 2 0 0 1-2-2z"/><path d="M8 4v16"/><line x1="11" y1="9" x2="16" y2="9"/><line x1="11" y1="13" x2="16" y2="13"/></svg>
+</div>
+
+<div id="logbook-panel" class="game-panel" style="display:none;position:absolute;top:178px;right:54px;width:340px;height:400px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="logbook-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">LOGBOOK</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="logbook-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="logbook-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="logbook-panel" data-btn="logbook-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 36px)">
+    <div id="logbook-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+  </div>
+  <div class="panel-resize" data-panel="logbook-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
+</div>
+
+<div id="efb-btn" style="position:absolute;top:226px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="EFB">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>
+</div>
+
+<div id="efb-panel" class="game-panel" style="display:none;position:absolute;top:216px;right:54px;width:340px;height:420px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="efb-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">EFB</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="efb-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="efb-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="efb-panel" data-btn="efb-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 36px)">
+    <div id="efb-content" style="font-size:11px;color:rgba(255,255,255,.7)">Sem rota ativa</div>
+  </div>
+  <div class="panel-resize" data-panel="efb-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
+</div>
+
 <div id="instrument-dock" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:6px;background:rgba(2,10,20,.85);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;box-shadow:0 0 12px rgba(0,255,128,.1);z-index:250">
   <div id="pfd-btn" style="width:32px;height:32px;background:rgba(2,10,20,.6);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="PFD (Shift+I)">
     <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><path d="M3.6 12a8.4 8.4 0 0 1 16.8 0z" fill="#2e6db4"/><path d="M3.6 12a8.4 8.4 0 0 0 16.8 0z" fill="#6b4a2a"/><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><line x1="7" y1="12" x2="17" y2="12" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="12" r="1.2" fill="#fff"/></svg>
@@ -1935,6 +1981,14 @@ export class HudSystem {
         this.scene._flightPlansBtnEl = document.getElementById('flight-plans-btn');
         this.scene._flightPlansPanelEl = document.getElementById('flight-plans-panel');
         this.scene._setupFlightPlansBtn();
+
+        this.scene._logbookBtnEl = document.getElementById('logbook-btn');
+        this.scene._logbookPanelEl = document.getElementById('logbook-panel');
+        this.scene._setupLogbookBtn();
+
+        this.scene._efbBtnEl = document.getElementById('efb-btn');
+        this.scene._efbPanelEl = document.getElementById('efb-panel');
+        this.scene._setupEfbBtn();
 
         this.scene._setupPanelControls();
         this.setupPfdPanel();

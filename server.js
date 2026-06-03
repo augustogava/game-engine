@@ -426,6 +426,55 @@ async function callExternalFlightPlanStatus(flightPlanId, status, authToken) {
     }
 }
 
+// ── METAR (real weather) source + cache ──────────────────────────────────────
+const METAR_CACHE = new Map();
+const METAR_CACHE_TTL_MS = 10 * 60 * 1000;
+const METAR_SOURCE_URL = process.env.METAR_SOURCE_URL || 'https://aviationweather.gov/api/data/metar';
+
+async function fetchMetar(icao) {
+    const code = String(icao || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{3,4}$/.test(code)) return { error: 'invalid_icao' };
+    const cached = METAR_CACHE.get(code);
+    if (cached && (Date.now() - cached.ts) < METAR_CACHE_TTL_MS) {
+        return { data: cached.data, cached: true };
+    }
+    try {
+        const url = `${METAR_SOURCE_URL}?ids=${encodeURIComponent(code)}&format=json`;
+        const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        if (!resp.ok) {
+            console.warn(`[METAR] source HTTP ${resp.status} for ${code}`);
+            if (cached) return { data: cached.data, cached: true, stale: true };
+            return { error: 'source_error' };
+        }
+        const arr = await resp.json();
+        const raw = Array.isArray(arr) && arr.length ? arr[0] : null;
+        if (!raw) {
+            if (cached) return { data: cached.data, cached: true, stale: true };
+            return { error: 'not_found' };
+        }
+        const data = {
+            icao: raw.icaoId || code,
+            raw: raw.rawOb || '',
+            observed: raw.reportTime || raw.obsTime || null,
+            tempC: raw.temp != null ? Number(raw.temp) : null,
+            dewpointC: raw.dewp != null ? Number(raw.dewp) : null,
+            windDirDeg: (raw.wdir != null && raw.wdir !== 'VRB') ? Number(raw.wdir) : null,
+            windVariable: raw.wdir === 'VRB',
+            windSpeedKt: raw.wspd != null ? Number(raw.wspd) : null,
+            windGustKt: raw.wgst != null ? Number(raw.wgst) : null,
+            visibility: raw.visib != null ? raw.visib : null,
+            altimeterHpa: raw.altim != null ? Number(raw.altim) : null,
+        };
+        METAR_CACHE.set(code, { ts: Date.now(), data });
+        console.log(`[METAR] Fetched ${code} from source`);
+        return { data, cached: false };
+    } catch (err) {
+        console.error(`[METAR] fetch error for ${code}:`, err.message);
+        if (cached) return { data: cached.data, cached: true, stale: true };
+        return { error: 'fetch_failed' };
+    }
+}
+
 function matchRoute(method, urlPath, pattern) {
     const parts = urlPath.split('/');
     const patParts = pattern.split('/');
@@ -1095,6 +1144,19 @@ const server = http.createServer(async (req, res) => {
             console.error('[API] GET /api/flight-logs error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
         }
+    }
+
+    // ── Weather (METAR) API ──────────────────────────────────────────────
+
+    if (req.method === 'GET' && urlPath === '/api/weather/metar') {
+        const icao = query.icao;
+        if (!icao) return jsonResponse(res, 400, { error: 'icao required' });
+        const result = await fetchMetar(icao);
+        if (result.error) {
+            const statusMap = { invalid_icao: 400, not_found: 404 };
+            return jsonResponse(res, statusMap[result.error] || 502, { error: result.error });
+        }
+        return jsonResponse(res, 200, { data: result.data, cached: !!result.cached, stale: !!result.stale });
     }
 
     // ── Flight Stats API ─────────────────────────────────────────────────
