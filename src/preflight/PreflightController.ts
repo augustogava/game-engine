@@ -178,7 +178,7 @@ type AircraftRow = {
     pro_access: boolean;
     is_selected: number;
     image_url?: string | null;
-    aircraft?: { id: number; name: string; code?: string };
+    aircraft?: { id: number; name: string; code?: string; thumbnail_url?: string };
 };
 
 type MissionItem = {

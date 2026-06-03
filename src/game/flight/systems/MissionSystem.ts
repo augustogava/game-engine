@@ -945,11 +945,7 @@ export class MissionSystem {
         try {
             const nav = this.scene._activeFlightPlanNav || this.scene._activeMission || null;
             const wps = Array.isArray(this.scene._missionWaypoints) ? this.scene._missionWaypoints : [];
-
-            if (!nav && wps.length === 0) {
-                el.innerHTML = '<div style="color:rgba(255,255,255,.4)">Sem rota ativa</div>';
-                return;
-            }
+            const hasRoute = !!nav || wps.length > 0;
 
             const points: { label: string; lat: number; lon: number; alt: number | null }[] = [];
             if (nav && Number.isFinite(nav.departure_lat) && Number.isFinite(nav.departure_lon)) {
@@ -984,6 +980,7 @@ export class MissionSystem {
             }
 
             const routeName = nav?.name || nav?.mission_title || '';
+            const depIcao = nav?.departure_icao || nav?.dep_icao || '';
             const cfg = this.scene.aircraftConfig || {};
             const cruiseKt = Number.isFinite(cfg.vne_kts) && cfg.vne_kts > 0
                 ? cfg.vne_kts * 0.8
@@ -1033,9 +1030,13 @@ export class MissionSystem {
                     <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">NAVAID/ILS</span><span style="color:rgba(255,255,255,.35)">N/D</span></div>`;
             }
 
+            const routeBody = hasRoute
+                ? legsHtml + `<div style="display:flex;justify-content:space-between;margin-top:4px;font-weight:600"><span>Total</span><span style="color:#40ffaa">${totalNm.toFixed(1)} nm</span></div>`
+                : '<div style="color:rgba(255,255,255,.4)">Sem rota ativa</div>';
+
             el.innerHTML =
                 (routeName ? `<div style="font-weight:600;color:#fff;margin-bottom:8px">${escapeHtml(routeName)}</div>` : '') +
-                section('ROTA', legsHtml + `<div style="display:flex;justify-content:space-between;margin-top:4px;font-weight:600"><span>Total</span><span style="color:#40ffaa">${totalNm.toFixed(1)} nm</span></div>`) +
+                section('ROTA', routeBody) +
                 (approachHtml ? section('APPROACH (IFR geométrico)', approachHtml) : '') +
                 section('COMBUSTÍVEL (estimativa)',
                     `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Cruzeiro</span><span>${cruiseKt.toFixed(0)} kt</span></div>
@@ -1049,10 +1050,9 @@ export class MissionSystem {
                      <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Combustível</span><span>${totalFuelKg.toFixed(0)} kg</span></div>
                      <div style="display:flex;justify-content:space-between;font-weight:600"><span>Decolagem est.</span><span style="color:#40ffaa">${takeoffMassKg.toFixed(0)} kg</span></div>`) +
                 (wxHtml ? section('BRIEFING METEO (procedural)', wxHtml) : '') +
-                section('METAR REAL', '<div id="efb-metar" style="font-size:10px;color:rgba(255,255,255,.7)">\u2014</div>');
-            console.log(`[EFB] Rendered route: ${points.length} pts, ${totalNm.toFixed(1)} nm`);
+                (depIcao ? section('METAR REAL', '<div id="efb-metar" style="font-size:10px;color:rgba(255,255,255,.7)">\u2014</div>') : '');
+            console.log(`[EFB] Rendered: ${points.length} pts, ${totalNm.toFixed(1)} nm, route=${hasRoute}`);
 
-            const depIcao = nav?.departure_icao || nav?.dep_icao || '';
             if (depIcao) this.loadMetarBriefing(depIcao, elevForWx);
         } catch (err) {
             el.innerHTML = '<div style="color:rgba(255,100,100,.8)">Erro ao montar EFB</div>';
