@@ -709,8 +709,10 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ public _precipitationType: number = 0;
     /** @internal */ public _precipitationIntensity: number = 0;
     /** @internal */ public _currentCloudCoverage: number = 0;
-    /** @internal */ public _metarSurfaceWind: { speedKt: number; dirDeg: number } | null = null;
+    /** @internal */ public _metarSurfaceWind: { speedKt: number; dirDeg: number; gustKt?: number } | null = null;
     /** @internal */ public _metarSurfaceElevFt: number = 0;
+    /** @internal */ public _metarCloudBaseFt: number = 0;
+    /** @internal */ public _metarApplied: boolean = false;
     private _autopilotTargetAltFt: number = 0;
     private _autopilotTargetVsFpm:  number = 0;
     private _autopilotLastPitchRad: number = Number.NaN;
@@ -1657,6 +1659,7 @@ export class FlightSceneSimple extends Scene3D {
         try {
             if (this.scene) {
                 this._setOvercast(this.scene, this._currentCloudCoverage >= 0.6);
+                this._applyPrecipitationVisibility(this.scene);
             }
             this._setRain(this._precipitationIntensity, this._precipitationType);
             const ptEl = document.getElementById('gfx-precip-type') as HTMLSelectElement | null;
@@ -1668,6 +1671,25 @@ export class FlightSceneSimple extends Scene3D {
         } catch (err) {
             console.warn('[Weather] Failed to apply METAR visuals:', err);
         }
+    }
+
+    /** Reduces visibility (denser fog) and slightly greys the scene under precipitation. Reversible when precip is 0. */
+    private _applyPrecipitationVisibility(scene: BABYLON.Scene): void {
+        if (scene.fogMode === BABYLON.Scene.FOGMODE_NONE) return;
+        const p = Math.max(0, Math.min(1, Number(this._precipitationIntensity) || 0));
+        if (p <= 0.01) {
+            scene.fogDensity = this._fogDensityBase;
+            scene.fogColor.copyFrom(this._fogColorBase);
+            return;
+        }
+        scene.fogDensity = this._fogDensityBase * (1 + 4 * p);
+        const greyR = 0.62, greyG = 0.64, greyB = 0.68;
+        const k = 0.4 * p;
+        scene.fogColor.set(
+            this._fogColorBase.r * (1 - k) + greyR * k,
+            this._fogColorBase.g * (1 - k) + greyG * k,
+            this._fogColorBase.b * (1 - k) + greyB * k,
+        );
     }
 
     private _buildRainTexture(scene: BABYLON.Scene, snow: boolean): BABYLON.DynamicTexture {

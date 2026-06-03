@@ -33,6 +33,10 @@ export class AtcSystem {
                     this._phase = phase;
                     this._pendingPhase = null;
                     this._emitPhaseMessage(phase);
+                    if ((phase === 'takeoff' || phase === 'approach' || phase === 'landing')
+                        && this.scene._missionSystem && typeof this.scene._missionSystem.refreshWeatherAtPosition === 'function') {
+                        this.scene._missionSystem.refreshWeatherAtPosition(phase);
+                    }
                 }
             } else if (phase === this._phase) {
                 this._pendingPhase = null;

@@ -157,6 +157,9 @@ export class SpawnSystem {
             } catch (err) {
                 console.warn('[Cinematic] onSpawned callback failed:', err);
             }
+            if (this.scene._missionSystem && typeof this.scene._missionSystem.refreshWeatherAtPosition === 'function') {
+                this.scene._missionSystem.refreshWeatherAtPosition('spawn');
+            }
             this.scene._safeSetTimeout(() => {
                 this.scene._cinematicActive = false;
                 this.scene._setCameraMode(CAMERA_MODE_CHASE);

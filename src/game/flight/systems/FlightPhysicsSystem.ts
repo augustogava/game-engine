@@ -37,6 +37,7 @@ const {
     WIND_DEFAULT_SPEED_KT,
     WIND_DEFAULT_DIRECTION_DEG,
     WIND_METAR_BLEND_TOP_AGL_FT,
+    WIND_ALOFT_VEER_MAX_DEG,
     KT_TO_MS,
     TURB_FADE_AGL_M,
     TURB_FULL_AGL_M,
@@ -971,19 +972,23 @@ export class FlightPhysicsSystem {
     getWindAtAltitude(altFt: number): { speedKt: number; dirDeg: number } {
         const altSafe = Number.isFinite(altFt) && altFt > 0 ? altFt : 0;
         const altGain = (altSafe / 1000) * WIND_ALTITUDE_GAIN_KT_PER_1000FT;
-        const procSpeed = Math.min(WIND_MAX_SPEED_KT, WIND_DEFAULT_SPEED_KT + altGain);
-        const procDir = WIND_DEFAULT_DIRECTION_DEG;
 
         const metar = this.scene._metarSurfaceWind;
         if (metar && Number.isFinite(metar.speedKt) && Number.isFinite(metar.dirDeg)) {
+            // Winds-aloft model: surface METAR blended toward an aloft layer that
+            // strengthens with altitude (gain) and veers with height (standard
+            // Ekman/geostrophic veer: clockwise in the N hemisphere, backing in S).
             const surfElev = Number.isFinite(this.scene._metarSurfaceElevFt) ? this.scene._metarSurfaceElevFt : 0;
             const t = Math.max(0, Math.min(1, (altSafe - surfElev) / WIND_METAR_BLEND_TOP_AGL_FT));
-            const speed = metar.speedKt * (1 - t) + procSpeed * t;
-            let delta = ((procDir - metar.dirDeg + 540) % 360) - 180;
-            const dir = ((metar.dirDeg + delta * t) % 360 + 360) % 360;
+            const aloftSpeed = Math.min(WIND_MAX_SPEED_KT, metar.speedKt + altGain);
+            const speed = metar.speedKt * (1 - t) + aloftSpeed * t;
+            const hemiSign = (Number(this.scene.originLat) >= 0) ? 1 : -1;
+            const veerDeg = hemiSign * WIND_ALOFT_VEER_MAX_DEG * t;
+            const dir = ((metar.dirDeg + veerDeg) % 360 + 360) % 360;
             return { speedKt: speed, dirDeg: dir };
         }
-        return { speedKt: procSpeed, dirDeg: procDir };
+        const procSpeed = Math.min(WIND_MAX_SPEED_KT, WIND_DEFAULT_SPEED_KT + altGain);
+        return { speedKt: procSpeed, dirDeg: WIND_DEFAULT_DIRECTION_DEG };
     }
 
     getWindVectorWorldRef(altMslFt: number, out: BABYLON.Vector3): void {
@@ -1010,7 +1015,13 @@ export class FlightPhysicsSystem {
         } else {
             intensity = 1.0 - (safeAgl - TURB_FULL_AGL_M) / (TURB_FADE_AGL_M - TURB_FULL_AGL_M);
         }
-        const targetMag = TURB_MAX_GUST_MS * intensity;
+        const metar = this.scene._metarSurfaceWind;
+        let gustFactor = 1.0;
+        if (metar && Number.isFinite(metar.gustKt) && Number.isFinite(metar.speedKt)) {
+            const spread = Math.max(0, Number(metar.gustKt) - Number(metar.speedKt));
+            gustFactor = 1.0 + Math.min(1.5, spread / 15);
+        }
+        const targetMag = TURB_MAX_GUST_MS * intensity * gustFactor;
         const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(0.2, dt) : 0.016;
         const alpha = Math.max(0, Math.min(1, stepDt / TURB_TAU_S));
         const r1 = (Math.random() + Math.random() + Math.random() - 1.5) * 0.67;

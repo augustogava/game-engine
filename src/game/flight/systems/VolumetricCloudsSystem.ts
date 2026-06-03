@@ -97,7 +97,11 @@ export class VolumetricCloudsSystem {
                         effect.setFloat('time', performance.now() * 0.001);
                         effect.setFloat('cloudBaseAlt', 800);
                         effect.setFloat('cloudTopAlt', 5500);
-                        effect.setFloat('cloudCoverage', 0.45);
+                        const metarCov = Number(this.scene._currentCloudCoverage);
+                        const coverage = Number.isFinite(metarCov) && metarCov > 0
+                            ? Math.max(0.1, Math.min(1, metarCov))
+                            : 0.45;
+                        effect.setFloat('cloudCoverage', coverage);
                         effect.setFloat('cloudDensity', 1.2);
                         effect.setFloat('farClipZ', camera.maxZ);
                         effect.setFloat2('windOffset', this.scene._cloudWindOffset.x, this.scene._cloudWindOffset.z);

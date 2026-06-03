@@ -313,6 +313,17 @@ export class CloudsSystem {
         const fadeFar  = CLOUD_NEAR_FADE_FAR_M;
         const wrapStep = dt / CLOUD_WRAP_FADE_S;
 
+        const metarApplied = this.scene._metarApplied === true;
+        const covFactor = metarApplied
+            ? Math.max(0.05, Math.min(1, 0.05 + 0.95 * (Number(this.scene._currentCloudCoverage) || 0)))
+            : 1;
+        let yOffset = 0;
+        if (metarApplied && Number(this.scene._metarCloudBaseFt) > 0) {
+            const ceilM = Number(this.scene._metarCloudBaseFt) * 0.3048;
+            yOffset = Math.max(-400, Math.min(3000, ceilM - 700));
+        }
+        const doScale = (Number(this.scene._frameTick) & 1) === 0;
+
         for (const c of this.scene.cloudInstances) {
             c.mesh.position.x += baseVx * c.windMult * dtClamp;
             c.mesh.position.z += baseVz * c.windMult * dtClamp;
@@ -335,35 +346,33 @@ export class CloudsSystem {
             if (wrapped) c.wrapFade = 0;
             else if (c.wrapFade < 1) c.wrapFade = Math.min(1, c.wrapFade + wrapStep);
 
-            if (c.wrapFade < 1) {
-                const t = c.wrapFade;
-                const eased = t * t * t * (t * (t * 6 - 15) + 10);
-                c.mesh.scaling.x = c.baseScaleX * eased;
-                c.mesh.scaling.y = c.baseScaleY * eased;
-            } else if (c.mesh.scaling.x !== c.baseScaleX || c.mesh.scaling.y !== c.baseScaleY) {
-                c.mesh.scaling.x = c.baseScaleX;
-                c.mesh.scaling.y = c.baseScaleY;
-            }
+            if (!doScale) continue;
 
+            c.mesh.position.y = c.yBase + yOffset;
+
+            const wrapEased = c.wrapFade < 1
+                ? c.wrapFade * c.wrapFade * c.wrapFade * (c.wrapFade * (c.wrapFade * 6 - 15) + 10)
+                : 1;
+
+            let fade: number;
             if (cameraFadeOn) {
                 const ddx = c.mesh.position.x - camX;
                 const ddy = c.mesh.position.y - camY;
                 const ddz = c.mesh.position.z - camZ;
                 const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
                 const nearFade = Math.max(0, Math.min(1, (dist - fadeNear) / (fadeFar - fadeNear)));
-                const effectiveFade = Math.min(nearFade, c.wrapFade);
-                if (c.mesh instanceof BABYLON.InstancedMesh) {
-                    c.mesh.scaling.x = c.baseScaleX * effectiveFade;
-                    c.mesh.scaling.y = c.baseScaleY * effectiveFade;
-                    const shouldEnable = effectiveFade > 0.01;
-                    if (c.mesh.isEnabled() !== shouldEnable) c.mesh.setEnabled(shouldEnable);
-                } else {
-                    c.mesh.visibility = effectiveFade;
-                }
-            } else if (c.mesh instanceof BABYLON.InstancedMesh) {
-                if (c.mesh.isEnabled() !== true) c.mesh.setEnabled(true);
-            } else if (c.mesh.visibility !== 1) {
-                c.mesh.visibility = 1;
+                fade = Math.min(nearFade, wrapEased) * covFactor;
+            } else {
+                fade = wrapEased * covFactor;
+            }
+
+            if (c.mesh instanceof BABYLON.InstancedMesh) {
+                c.mesh.scaling.x = c.baseScaleX * fade;
+                c.mesh.scaling.y = c.baseScaleY * fade;
+                const shouldEnable = fade > 0.01;
+                if (c.mesh.isEnabled() !== shouldEnable) c.mesh.setEnabled(shouldEnable);
+            } else {
+                c.mesh.visibility = fade;
             }
         }
     }

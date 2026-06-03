@@ -11,6 +11,9 @@ const WAYPOINT_REACH_NM = 0.3;
 
 export class MissionSystem {
     private readonly scene: any;
+    private _lastWxRefreshMs = 0;
+    private _lastWxLat = Number.NaN;
+    private _lastWxLon = Number.NaN;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -1050,10 +1053,11 @@ export class MissionSystem {
                      <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Combustível</span><span>${totalFuelKg.toFixed(0)} kg</span></div>
                      <div style="display:flex;justify-content:space-between;font-weight:600"><span>Decolagem est.</span><span style="color:#40ffaa">${takeoffMassKg.toFixed(0)} kg</span></div>`) +
                 (wxHtml ? section('BRIEFING METEO (procedural)', wxHtml) : '') +
-                (depIcao ? section('METAR REAL', '<div id="efb-metar" style="font-size:10px;color:rgba(255,255,255,.7)">\u2014</div>') : '');
+                section('METAR REAL', '<div id="efb-metar" style="font-size:10px;color:rgba(255,255,255,.7)">\u2014</div>');
             console.log(`[EFB] Rendered: ${points.length} pts, ${totalNm.toFixed(1)} nm, route=${hasRoute}`);
 
             if (depIcao) this.loadMetarBriefing(depIcao, elevForWx);
+            else this.refreshWeatherAtPosition('efb', true);
         } catch (err) {
             el.innerHTML = '<div style="color:rgba(255,100,100,.8)">Erro ao montar EFB</div>';
             console.error('[EFB] render error:', err);
@@ -1082,33 +1086,102 @@ export class MissionSystem {
                 el.innerHTML = '<div style="color:rgba(255,255,255,.4)">METAR indisponível</div>';
                 return;
             }
-            if (Number.isFinite(m.windDirDeg) && Number.isFinite(m.windSpeedKt)) {
-                this.scene._metarSurfaceWind = { speedKt: Number(m.windSpeedKt), dirDeg: Number(m.windDirDeg) };
-                this.scene._metarSurfaceElevFt = Number.isFinite(elevFt) ? Number(elevFt) : 0;
-                console.log(`[METAR] Surface wind override ${code}: ${m.windDirDeg}°/${m.windSpeedKt}kt`);
-            }
-
-            const weather = this._deriveMetarWeather(m);
-            this.scene._currentCloudCoverage = weather.cloudCoverage;
-            this.scene._precipitationIntensity = weather.precipIntensity;
-            this.scene._precipitationType = weather.precipType;
-            if (typeof this.scene._applyMetarWeatherVisuals === 'function') {
-                this.scene._applyMetarWeatherVisuals();
-            }
+            const weather = this.applyMetarToScene(m, elevFt);
             console.log(`[METAR] Weather ${code}: cloud=${(weather.cloudCoverage * 100).toFixed(0)}% precip=${(weather.precipIntensity * 100).toFixed(0)}% type=${weather.precipType} (${weather.label})`);
-
-            const windTxt = `${m.windVariable ? 'VRB' : (m.windDirDeg != null ? m.windDirDeg + '°' : '\u2014')} / ${m.windSpeedKt != null ? m.windSpeedKt + ' kt' : '\u2014'}${m.windGustKt != null ? ' G' + m.windGustKt : ''}`;
-            el.innerHTML = `<div style="font-family:monospace;font-size:9px;color:#9cf;word-break:break-word;margin-bottom:4px">${escapeHtml(m.raw || '')}</div>
-                <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Condição</span><span>${escapeHtml(weather.label)}</span></div>
-                <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Vento</span><span>${escapeHtml(windTxt)}</span></div>
-                ${m.tempC != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Temp/Orvalho</span><span>${m.tempC}° / ${m.dewpointC ?? '\u2014'}°</span></div>` : ''}
-                ${m.altimeterHpa != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">QNH</span><span>${Number(m.altimeterHpa).toFixed(0)} hPa</span></div>` : ''}
-                ${m.visibility != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Visib.</span><span>${escapeHtml(String(m.visibility))}</span></div>` : ''}
-                ${json.stale ? '<div style="color:#ffaa55;font-size:9px;margin-top:2px">Dados em cache (fonte indisponível)</div>' : ''}`;
+            this._renderMetarEl(el, m, weather, !!json.stale);
         } catch (err) {
             el.innerHTML = '<div style="color:rgba(255,255,255,.4)">METAR indisponível</div>';
             console.warn('[METAR] briefing fetch failed:', err);
         }
+    }
+
+    /** Fetches the METAR of the nearest airport to the aircraft and applies it (on-demand). */
+    async refreshWeatherAtPosition(reason: string, force: boolean = false): Promise<void> {
+        try {
+            const ll = typeof this.scene._getCurrentLatLon === 'function' ? this.scene._getCurrentLatLon() : null;
+            if (!ll || !Number.isFinite(ll.lat) || !Number.isFinite(ll.lon)) {
+                console.debug(`[METAR] refreshWeatherAtPosition skipped (${reason}): no position`);
+                return;
+            }
+            const now = Date.now();
+            if (!force && this._lastWxRefreshMs > 0 && Number.isFinite(this._lastWxLat) && Number.isFinite(this._lastWxLon)) {
+                const dtMs = now - this._lastWxRefreshMs;
+                const movedNm = haversineNm(this._lastWxLat, this._lastWxLon, ll.lat, ll.lon);
+                if (dtMs < 60000 && movedNm < 10) {
+                    console.debug(`[METAR] refreshWeatherAtPosition throttled (${reason}): ${(dtMs / 1000).toFixed(0)}s, ${movedNm.toFixed(1)}nm`);
+                    return;
+                }
+            }
+            const res = await fetch(`/api/weather/metar/nearest?lat=${ll.lat.toFixed(4)}&lon=${ll.lon.toFixed(4)}`);
+            if (!res.ok) {
+                console.warn(`[METAR] nearest HTTP ${res.status} (${reason})`);
+                return;
+            }
+            const json = await res.json();
+            const m = json.data;
+            if (!m) {
+                console.warn(`[METAR] nearest no data (${reason})`);
+                return;
+            }
+            const elevFt = json.airport && Number.isFinite(json.airport.elevation_ft) ? Number(json.airport.elevation_ft) : 0;
+            const weather = this.applyMetarToScene(m, elevFt);
+            this._lastWxRefreshMs = now;
+            this._lastWxLat = ll.lat;
+            this._lastWxLon = ll.lon;
+            console.log(`[METAR] Position weather (${reason}) ${json.airport?.icao || '?'}: cloud=${(weather.cloudCoverage * 100).toFixed(0)}% precip=${(weather.precipIntensity * 100).toFixed(0)}% (${weather.label})`);
+            const el = document.getElementById('efb-metar');
+            if (el) this._renderMetarEl(el, m, weather, !!json.stale);
+        } catch (err) {
+            console.warn(`[METAR] refreshWeatherAtPosition failed (${reason}):`, err);
+        }
+    }
+
+    /** Applies parsed METAR data to the scene: surface wind/gust, density altitude, clouds, precipitation, ceiling. */
+    applyMetarToScene(m: any, elevFt: number): { cloudCoverage: number; precipIntensity: number; precipType: number; label: string } {
+        const weather = this._deriveMetarWeather(m);
+        const elev = Number.isFinite(elevFt) ? Number(elevFt) : 0;
+        if (Number.isFinite(m.windDirDeg) && Number.isFinite(m.windSpeedKt)) {
+            const gustKt = Number.isFinite(m.windGustKt) ? Number(m.windGustKt) : 0;
+            this.scene._metarSurfaceWind = { speedKt: Number(m.windSpeedKt), dirDeg: Number(m.windDirDeg), gustKt };
+            this.scene._metarSurfaceElevFt = elev;
+        }
+        if (Number.isFinite(m.tempC)) {
+            const isaTemp = 15 - 1.98 * (elev / 1000);
+            this.scene._isaDeltaTempK = Math.max(-40, Math.min(40, Number(m.tempC) - isaTemp));
+        }
+        this.scene._metarCloudBaseFt = this._lowestCeilingFt(m);
+        this.scene._metarApplied = true;
+        this.scene._currentCloudCoverage = weather.cloudCoverage;
+        this.scene._precipitationIntensity = weather.precipIntensity;
+        this.scene._precipitationType = weather.precipType;
+        if (typeof this.scene._applyMetarWeatherVisuals === 'function') {
+            this.scene._applyMetarWeatherVisuals();
+        }
+        return weather;
+    }
+
+    private _lowestCeilingFt(m: any): number {
+        const clouds = Array.isArray(m && m.clouds) ? m.clouds : [];
+        let base = 0;
+        for (const c of clouds) {
+            const cov = String(c && c.cover || '').toUpperCase();
+            if ((cov === 'BKN' || cov === 'OVC' || cov === 'VV') && Number.isFinite(c.baseFt)) {
+                const b = Number(c.baseFt);
+                if (base === 0 || b < base) base = b;
+            }
+        }
+        return base;
+    }
+
+    private _renderMetarEl(el: HTMLElement, m: any, weather: { label: string }, stale: boolean): void {
+        const windTxt = `${m.windVariable ? 'VRB' : (m.windDirDeg != null ? m.windDirDeg + '°' : '\u2014')} / ${m.windSpeedKt != null ? m.windSpeedKt + ' kt' : '\u2014'}${m.windGustKt != null ? ' G' + m.windGustKt : ''}`;
+        el.innerHTML = `<div style="font-family:monospace;font-size:9px;color:#9cf;word-break:break-word;margin-bottom:4px">${escapeHtml(m.raw || '')}</div>
+            <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Condição</span><span>${escapeHtml(weather.label)}</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Vento</span><span>${escapeHtml(windTxt)}</span></div>
+            ${m.tempC != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Temp/Orvalho</span><span>${m.tempC}° / ${m.dewpointC ?? '\u2014'}°</span></div>` : ''}
+            ${m.altimeterHpa != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">QNH</span><span>${Number(m.altimeterHpa).toFixed(0)} hPa</span></div>` : ''}
+            ${m.visibility != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Visib.</span><span>${escapeHtml(String(m.visibility))}</span></div>` : ''}
+            ${stale ? '<div style="color:#ffaa55;font-size:9px;margin-top:2px">Dados em cache (fonte indisponível)</div>' : ''}`;
     }
 
     private _deriveMetarWeather(m: any): { cloudCoverage: number; precipIntensity: number; precipType: number; label: string } {

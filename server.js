@@ -511,7 +511,7 @@ async function findNearestAirport(lat, lon, radiusNm) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radiusNm) || radiusNm <= 0) return null;
     try {
         const [rows] = await dbPool.execute(
-            `SELECT id, icao_code, name, latitude, longitude,
+            `SELECT id, icao_code, name, latitude, longitude, elevation_ft,
                     (3440.065 * ACOS(
                         LEAST(1, GREATEST(-1,
                             COS(RADIANS(?)) * COS(RADIANS(latitude)) *
@@ -1164,6 +1164,34 @@ const server = http.createServer(async (req, res) => {
             return jsonResponse(res, statusMap[result.error] || 502, { error: result.error });
         }
         return jsonResponse(res, 200, { data: result.data, cached: !!result.cached, stale: !!result.stale });
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/weather/metar/nearest') {
+        const lat = Number(query.lat);
+        const lon = Number(query.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            return jsonResponse(res, 400, { error: 'lat and lon required' });
+        }
+        const airport = await findNearestAirportWithFallback(lat, lon);
+        if (!airport || !airport.icao_code) {
+            return jsonResponse(res, 404, { error: 'no_nearby_airport' });
+        }
+        const result = await fetchMetar(airport.icao_code);
+        if (result.error) {
+            const statusMap = { invalid_icao: 400, not_found: 404 };
+            return jsonResponse(res, statusMap[result.error] || 502, { error: result.error });
+        }
+        return jsonResponse(res, 200, {
+            data: result.data,
+            airport: {
+                icao: airport.icao_code,
+                name: airport.name,
+                elevation_ft: airport.elevation_ft != null ? Number(airport.elevation_ft) : null,
+                distance_nm: airport.dist_nm != null ? Number(airport.dist_nm) : null,
+            },
+            cached: !!result.cached,
+            stale: !!result.stale,
+        });
     }
 
     // ── Flight Stats API ─────────────────────────────────────────────────
