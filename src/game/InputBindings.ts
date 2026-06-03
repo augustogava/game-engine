@@ -64,7 +64,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
     screenshot: 'F12',
     towerCamera: 'KeyT',
     replayToggle: 'KeyV',
-    autothrottleToggle: 'KeyH',
+    autothrottleToggle: 'KeyO',
 };
 
 export const ACTION_LABELS: Record<ActionId, string> = {

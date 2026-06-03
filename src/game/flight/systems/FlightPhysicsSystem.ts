@@ -118,6 +118,10 @@ export class FlightPhysicsSystem {
             if (!this.scene.planeRoot) return;
             if (this.scene._crashOverlayEl) this.scene._crashOverlayEl.style.display = 'none';
             this.scene._crashed = false;
+            this.scene._worldReady = false;
+            this.scene._worldReadyStartMs = 0;
+            this.scene._spawnSnapFramesLeft = 0;
+            console.debug('[Crash] Respawning at session origin');
             this.scene._spawnPlane();
         }, RESPAWN_DELAY_MS);
     }

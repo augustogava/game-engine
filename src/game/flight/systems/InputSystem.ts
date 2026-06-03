@@ -460,6 +460,12 @@ export class InputSystem {
             return current + (target - current) * t;
         };
 
+        if (this.scene._cinematicActive) {
+            targetPitch = 0;
+            targetRoll = 0;
+            targetYaw = 0;
+        }
+
         if (this.scene.isOnGround) {
             targetRoll = 0;
         }
@@ -596,6 +602,7 @@ export class InputSystem {
   <label>Zona morta<input id="ctl-deadzone" type="range" min="0" max="${JOYSTICK_MAX_DEADZONE_NORM}" step="0.01"><span id="ctl-deadzone-v">\u2014</span></label>
   <label>Curva (expo)<input id="ctl-expo" type="range" min="${JOYSTICK_MIN_EXPO}" max="${JOYSTICK_MAX_EXPO}" step="0.1"><span id="ctl-expo-v">\u2014</span></label>
   <label>Inverter pitch<input id="ctl-invert" type="checkbox"></label>
+  <button id="ctl-open-settings" style="margin-top:8px;width:100%;background:rgba(64,255,170,.16);border:1px solid rgba(80,255,160,.4);color:#7df9c8;padding:8px;border-radius:6px;font-family:'Orbitron',monospace;font-size:10px;letter-spacing:.08em;cursor:pointer;touch-action:manipulation">CONFIGURA\u00C7\u00D5ES \u2699</button>
 </div>`;
         document.body.appendChild(overlay);
 
@@ -642,6 +649,18 @@ export class InputSystem {
         if (ctlBtn && ctlPanel) {
             ctlBtn.addEventListener('click', () => {
                 ctlPanel.style.display = ctlPanel.style.display === 'none' || !ctlPanel.style.display ? 'block' : 'none';
+            });
+        }
+        const ctlOpenSettings = document.getElementById('ctl-open-settings');
+        if (ctlOpenSettings) {
+            ctlOpenSettings.addEventListener('click', () => {
+                const dbgUi = document.getElementById('debug-ui');
+                if (!dbgUi) {
+                    console.warn('[InputSystem] Settings panel not found');
+                    return;
+                }
+                dbgUi.classList.remove('minimized');
+                if (ctlPanel) ctlPanel.style.display = 'none';
             });
         }
         const onCtlChange = () => {

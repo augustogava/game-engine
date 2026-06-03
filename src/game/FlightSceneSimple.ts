@@ -1376,6 +1376,7 @@ export class FlightSceneSimple extends Scene3D {
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         try { this._liveTrafficSystem.dispose(); } catch (err) { console.warn('[FlightSimple] LiveTrafficSystem dispose failed:', err); }
         this.mpClient?.dispose();
+        this.mpClient = null;
         this._removeUserGestureListener();
         this._engineSound.dispose();
         this._flightAudio.dispose();
@@ -1446,11 +1447,7 @@ export class FlightSceneSimple extends Scene3D {
         if (this._volumetricBlueNoiseTexture) { try { this._volumetricBlueNoiseTexture.dispose(); } catch (_) { /* ignore */ } this._volumetricBlueNoiseTexture = null; }
         if (this._colorLutTexture) { try { this._colorLutTexture.dispose(); } catch (_) { /* ignore */ } this._colorLutTexture = null; }
         for (const [id, remote] of this.remotePlayers) {
-            try { remote.labelTexture?.dispose(); } catch (_) { /* ignore */ }
-            try { remote.labelPlane?.dispose(); } catch (_) { /* ignore */ }
-            try { remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose()); } catch (_) { /* ignore */ }
-            try { remote.root.dispose(); } catch (_) { /* ignore */ }
-            try { remote.engineSound?.dispose(); } catch (_) { /* ignore */ }
+            try { this._multiplayerSystem.disposeRemotePlayer(remote); } catch (_) { /* ignore */ }
             this.remotePlayers.delete(id);
         }
         if (this._shadowGen) { this._shadowGen.dispose(); this._shadowGen = null; }

@@ -380,9 +380,9 @@ for (const plan of data) {
 | Action | Method | Endpoint |
 |--------|--------|----------|
 | Load flight | GET | `/api/flight-plans/:id` |
-| Update status | PATCH | `/api/flight-plans/:id/status` body `{ "status": 0 }` — use numeric enum in requests |
+| Update status | PATCH | `/api/flight-plans/:id/status` body `{ "status": "planned" }` — use the string enum in requests |
 
-**Status enum (requests):** `0` = planned, `1` = in_progress, `2` = completed, `3` = cancelled.
+**Status enum (requests):** `"planned"`, `"in_progress"`, `"completed"`, `"cancelled"` (matches the `flight_plans.status` column enum).
 
 ---
 

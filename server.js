@@ -391,6 +391,41 @@ async function callExternalMissionComplete(userMissionId, authToken) {
     }
 }
 
+async function callExternalFlightPlanStatus(flightPlanId, status, authToken) {
+    if (!MAIN_API_URL) {
+        console.warn(`[FlightPlan] External status update skipped: MAIN_API_URL not configured (flightPlan=${flightPlanId})`);
+        return false;
+    }
+    if (!Number.isFinite(Number(flightPlanId)) || Number(flightPlanId) <= 0) {
+        console.warn(`[FlightPlan] External status update skipped: invalid flightPlanId=${flightPlanId}`);
+        return false;
+    }
+    if (!authToken) {
+        console.warn(`[FlightPlan] External status update skipped: missing auth token (flightPlan=${flightPlanId})`);
+        return false;
+    }
+    try {
+        const url = `${MAIN_API_URL}/api/flight-plans/${flightPlanId}/status`;
+        const resp = await fetch(url, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ status }),
+        });
+        if (!resp.ok) {
+            console.warn(`[FlightPlan] External status update failed: HTTP ${resp.status} (flightPlan=${flightPlanId}, status=${status})`);
+            return false;
+        }
+        console.log(`[FlightPlan] External status update OK (flightPlan=${flightPlanId} -> ${status})`);
+        return true;
+    } catch (err) {
+        console.error(`[FlightPlan] External status update error (flightPlan=${flightPlanId}):`, err.message);
+        return false;
+    }
+}
+
 function matchRoute(method, urlPath, pattern) {
     const parts = urlPath.split('/');
     const patParts = pattern.split('/');
@@ -528,6 +563,7 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
                     arrivalAirportId,
                 }));
             } catch (_) {}
+            entry.flightPlanFinalized = true;
         }
     } catch (err) {
         console.error(`[DB] Flight log finalize error (log ${flightLogId}, user ${userId}):`, err.message);
@@ -892,6 +928,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && urlPath === '/api/user-missions') {
+        if (MAIN_API_URL) {
+            return proxyToMainApi('/api/user-missions', req, res, await parseBody(req));
+        }
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Not authenticated' });
         if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
@@ -926,6 +965,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && urlPath === '/api/user-missions/active') {
+        if (MAIN_API_URL) {
+            return proxyToMainApi('/api/user-missions/active', req, res);
+        }
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
         if (!dbPool) return jsonResponse(res, 200, { data: [] });
@@ -957,6 +999,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id'))) {
+        if (MAIN_API_URL) {
+            return proxyToMainApi(`/api/user-missions/${routeParams.id}`, req, res, await parseBody(req));
+        }
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
         if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
@@ -1635,6 +1680,8 @@ wss.on('connection', (ws) => {
                     missionNextWpIndex: reuseFlight ? existing.missionNextWpIndex : 0,
                     missionAllWpReached: reuseFlight ? existing.missionAllWpReached : false,
                     missionExternalCompleteSent: reuseFlight ? existing.missionExternalCompleteSent : false,
+                    flightPlanId: reuseFlight ? existing.flightPlanId : null,
+                    flightPlanFinalized: reuseFlight ? existing.flightPlanFinalized : false,
                     authToken: msg.token,
                     aircraftRegistration: reuseFlight ? existing.aircraftRegistration : null,
                     aircraftType: reuseFlight ? existing.aircraftType : null,
@@ -1678,6 +1725,10 @@ wss.on('connection', (ws) => {
 
                 const entry = players.get(playerId);
                 if (entry) {
+                    if (!entry.flightPlanFinalized && msg.flightPlanId !== undefined) {
+                        const fpId = Number(msg.flightPlanId);
+                        entry.flightPlanId = Number.isFinite(fpId) && fpId > 0 ? fpId : null;
+                    }
                     entry.state = {
                         userId: playerId,
                         lat,
@@ -1976,6 +2027,12 @@ wss.on('connection', (ws) => {
                     [durationMin, entry.sessionDbId]
                 ).catch(err => console.error('[DB] Session update error:', err.message));
             }
+        }
+
+        if (entry.flightPlanId && !entry.flightPlanFinalized) {
+            entry.flightPlanFinalized = true;
+            console.log(`[FlightPlan] Connection lost with active flight plan ${entry.flightPlanId} for user ${playerId}; cancelling via external API`);
+            await callExternalFlightPlanStatus(entry.flightPlanId, 'cancelled', entry.authToken);
         }
 
         players.delete(playerId);

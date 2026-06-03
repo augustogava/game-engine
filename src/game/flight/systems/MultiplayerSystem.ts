@@ -26,6 +26,7 @@ export class MultiplayerSystem {
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
+        this.scene.mpClient?.dispose();
         this.scene.mpClient = new MultiplayerClient(token);
 
         this.scene.mpClient.onPlayersUpdate((players: PlayerState[]) => {
@@ -65,12 +66,7 @@ export class MultiplayerSystem {
 
             for (const [id, remote] of this.scene.remotePlayers) {
                 if (!activeIds.has(id)) {
-                    this.disposeRemoteContrails(remote);
-                    remote.labelTexture?.dispose();
-                    remote.labelPlane?.dispose();
-                    remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose());
-                    remote.root.dispose();
-                    try { remote.engineSound?.dispose(); } catch (_) { /* ignore */ }
+                    this.disposeRemotePlayer(remote);
                     this.scene.remotePlayers.delete(id);
                 }
             }
@@ -92,12 +88,7 @@ export class MultiplayerSystem {
             if (!connected) {
                 try {
                     for (const [id, remote] of this.scene.remotePlayers) {
-                        try { this.disposeRemoteContrails(remote); } catch (_) { /* ignore */ }
-                        try { remote.labelTexture?.dispose(); } catch (_) { /* ignore */ }
-                        try { remote.labelPlane?.dispose(); } catch (_) { /* ignore */ }
-                        try { remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose()); } catch (_) { /* ignore */ }
-                        try { remote.root.dispose(); } catch (_) { /* ignore */ }
-                        try { remote.engineSound?.dispose(); } catch (_) { /* ignore */ }
+                        try { this.disposeRemotePlayer(remote); } catch (_) { /* ignore */ }
                         this.scene.remotePlayers.delete(id);
                     }
                     console.debug('[MP] Cleared remote players on disconnect');
@@ -324,6 +315,21 @@ export class MultiplayerSystem {
         remote.contrailRibbonRight = null;
         remote.contrailEmitterLeft = null;
         remote.contrailEmitterRight = null;
+    }
+
+    disposeRemotePlayer(remote: RemotePlayer): void {
+        this.disposeRemoteContrails(remote);
+        try { remote.labelTexture?.dispose(); } catch (_) { /* ignore */ }
+        try { remote.labelPlane?.material?.dispose(); } catch (_) { /* ignore */ }
+        try { remote.labelPlane?.dispose(); } catch (_) { /* ignore */ }
+        try {
+            remote.meshes.forEach((m: BABYLON.AbstractMesh) => {
+                try { m.material?.dispose(); } catch (_) { /* ignore */ }
+                m.dispose();
+            });
+        } catch (_) { /* ignore */ }
+        try { remote.root.dispose(); } catch (_) { /* ignore */ }
+        try { remote.engineSound?.dispose(); } catch (_) { /* ignore */ }
     }
 
     buildRemoteFallback(id: string, root: BABYLON.TransformNode, remote: RemotePlayer): void {

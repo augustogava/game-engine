@@ -7,16 +7,6 @@ function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function flightPlanStatusToApi(status: string): number {
-    switch (status) {
-        case 'in_progress': return 1;
-        case 'completed': return 2;
-        case 'cancelled': return 3;
-        case 'planned':
-        default: return 0;
-    }
-}
-
 const WAYPOINT_REACH_NM = 0.3;
 
 export class MissionSystem {
@@ -195,7 +185,10 @@ export class MissionSystem {
     }
 
     checkWaypointProgress(lat: number, lon: number): void {
-        if (!this.scene._missionWaypoints.length) return;
+        if (!this.scene._missionWaypoints.length) {
+            this.checkDirectMissionArrival(lat, lon);
+            return;
+        }
         if (this.scene._missionCurrentWpIndex >= this.scene._missionWaypoints.length) return;
         const total = this.scene._missionWaypoints.length;
         const idx = this.scene._missionCurrentWpIndex;
@@ -244,6 +237,19 @@ export class MissionSystem {
                 }
             }
         }
+    }
+
+    private checkDirectMissionArrival(lat: number, lon: number): void {
+        if (!this.scene._activeUserMissionId || this.scene._missionCompletionInFlight) return;
+        const mission = this.scene._activeMission;
+        if (!mission || mission.arrival_lat == null || mission.arrival_lon == null) return;
+        const arrLat = Number(mission.arrival_lat);
+        const arrLon = Number(mission.arrival_lon);
+        if (!Number.isFinite(arrLat) || !Number.isFinite(arrLon)) return;
+        const dist = this.scene._haversineNm(lat, lon, arrLat, arrLon);
+        if (dist > WAYPOINT_REACH_NM) return;
+        console.log(`[Mission] Destination reached without waypoints: dist=${dist.toFixed(3)}nm, completing userMissionId=${this.scene._activeUserMissionId}`);
+        this.completeActiveMission();
     }
 
     async completeActiveMission(): Promise<void> {
@@ -778,15 +784,14 @@ export class MissionSystem {
     async patchFlightPlanStatus(planId: number, status: string): Promise<void> {
         const token = localStorage.getItem('auth_token') || '';
         if (!token) return;
-        const statusCode = flightPlanStatusToApi(status);
         try {
             const res = await fetch(`/api/flight-plans/${planId}/status`, {
                 method: 'PATCH',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: statusCode }),
+                body: JSON.stringify({ status }),
             });
-            if (!res.ok) console.warn(`[FlightPlan] PATCH status=${statusCode} failed: ${res.status}`);
-            else console.log(`[FlightPlan] Plan ${planId} status -> ${statusCode}`);
+            if (!res.ok) console.warn(`[FlightPlan] PATCH status=${status} failed: ${res.status}`);
+            else console.log(`[FlightPlan] Plan ${planId} status -> ${status}`);
         } catch (err) {
             console.error('[FlightPlan] PATCH status error:', err);
         }

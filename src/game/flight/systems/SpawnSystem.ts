@@ -74,6 +74,8 @@ export class SpawnSystem {
         }
 
         if (elapsed >= WORLD_READY_TIMEOUT_MS) {
+            this.scene.terrainY = TERRAIN_UNKNOWN_Y;
+            this.scene._lastKnownSpawnTerrainY = TERRAIN_UNKNOWN_Y;
             this.scene._worldReady = true;
             console.warn(`[WorldReady] Timeout after ${elapsed.toFixed(0)}ms; activating physics without terrain`);
             this.onWorldReady();
@@ -174,6 +176,8 @@ export class SpawnSystem {
         const yawRad = (180 - spawnHdg) * Math.PI / 180;
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.scene.planeRoot.rotationQuaternion!);
         this.scene.angularVelocity.set(0, 0, 0);
+        this.scene._worldReady = false;
+        this.scene._worldReadyStartMs = 0;
         this.scene.terrainY = GROUND_Y;
         this.scene._lastKnownSpawnTerrainY = TERRAIN_UNKNOWN_Y;
         this.scene.fuelRemaining = cfg.fuel_capacity_kg;

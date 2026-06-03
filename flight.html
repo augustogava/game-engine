@@ -472,7 +472,8 @@
 
         @media(max-width:768px){
             #debug-toggle{display:none!important}
-            #debug-ui{display:none!important}
+            #debug-ui{width:min(320px,calc(100vw - 20px))!important;max-height:calc(100vh - 60px)!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important}
+            #debug-ui.minimized{transform:translateX(calc(100% + 20px))!important}
         }
 
         /* ── Keys Helper Overlay ─────────────────────────── */
@@ -647,6 +648,7 @@
     <div id="debug-ui" class="minimized">
         <header>
             <h3>LOCATION</h3>
+            <button id="dbg-close" title="Fechar" style="background:rgba(255,85,85,.12);border:1px solid rgba(255,85,85,.4);color:#ff8888;width:26px;height:26px;border-radius:4px;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;touch-action:manipulation">&times;</button>
         </header>
         <div class="debug-form">
             <label>Search address or airport</label>
@@ -1112,6 +1114,12 @@
         if (dbgToggleBtn && dbgUi) {
             dbgToggleBtn.addEventListener('click', () => {
                 dbgUi.classList.toggle('minimized');
+            });
+        }
+        const dbgCloseBtn = document.getElementById('dbg-close');
+        if (dbgCloseBtn && dbgUi) {
+            dbgCloseBtn.addEventListener('click', () => {
+                dbgUi.classList.add('minimized');
             });
         }
         // Shift+D handler removed to avoid conflict with telemetry panel (DebugPanelSystem).

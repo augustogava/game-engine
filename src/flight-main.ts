@@ -15,6 +15,10 @@ const params = new URLSearchParams(window.location.search);
 const token = params.get('token') || localStorage.getItem('auth_token');
 const flightPlanId = params.get('flightPlanId');
 const missionId = params.get('missionId') ?? params.get('mission_id');
+const userMissionIdParam = params.get('userMissionId');
+const userMissionIdFromUrl = userMissionIdParam != null && Number.isFinite(Number(userMissionIdParam)) && Number(userMissionIdParam) > 0
+    ? Number(userMissionIdParam)
+    : null;
 const spawnAirportId = params.get('airportId');
 const spawnRunwayId = params.get('runwayId');
 const spawnRunwayEnd = params.get('end') === 'he' ? 'he' : 'le';
@@ -50,6 +54,23 @@ let freeHourTimer: number | undefined;
 let sceneReady = false;
 let dismissed = false;
 let statusInterval: number | undefined;
+let freeHourFirstTimer: number | undefined;
+let memoryDiagnosticTimer: number | undefined;
+let spawnedPollTimer: number | undefined;
+let loadingTimeoutTimer: number | undefined;
+
+function showLoadingError(message: string): void {
+    sceneReady = false;
+    loadingStatus.textContent = message;
+    authError.textContent = message;
+    console.warn(`[flight-main] ${message}`);
+}
+
+function showLoadingWarning(message: string): void {
+    loadingStatus.textContent = message;
+    authError.textContent = message;
+    console.warn(`[flight-main] ${message}`);
+}
 
 function dismissLoading() {
     if (dismissed) return;
@@ -175,7 +196,7 @@ function ensureGameCore(): GameCore3D {
                 console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
                 window.location.href = FLIGHT_HOURS_URL;
             });
-            setTimeout(() => { claimFreeFlightHour(token); }, FREE_HOUR_FIRST_DELAY_MS);
+            freeHourFirstTimer = window.setTimeout(() => { claimFreeFlightHour(token); }, FREE_HOUR_FIRST_DELAY_MS);
             if (freeHourTimer === undefined) {
                 freeHourTimer = window.setInterval(() => claimFreeFlightHour(token), FREE_HOUR_INTERVAL_MS);
             }
@@ -192,6 +213,7 @@ async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end:
         const res = await fetch(`/api/airports/${encodeURIComponent(airportId)}/runways`, { headers });
         if (!res.ok) {
             console.warn(`[flight-main] Runways fetch failed for airport ${airportId}: HTTP ${res.status} — using default spawn`);
+            authError.textContent = 'Não foi possível carregar a pista selecionada. Usando ponto de partida padrão.';
             applyPreflightToUrlAndScene(scene);
             return;
         }
@@ -200,6 +222,7 @@ async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end:
         const rwy = list.find((r) => Number(r.id) === Number(runwayId));
         if (!rwy) {
             console.warn(`[flight-main] Runway ${runwayId} not found at airport ${airportId} — using default spawn`);
+            authError.textContent = 'Pista não encontrada para este aeroporto. Usando ponto de partida padrão.';
             applyPreflightToUrlAndScene(scene);
             return;
         }
@@ -209,6 +232,7 @@ async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end:
         const hdg = Number(isHe ? rwy.he_heading_deg_true : rwy.le_heading_deg_true);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
             console.warn(`[flight-main] Runway ${runwayId} end ${end} has invalid coordinates — using default spawn`);
+            authError.textContent = 'Coordenadas da pista inválidas. Usando ponto de partida padrão.';
             applyPreflightToUrlAndScene(scene);
             return;
         }
@@ -240,8 +264,37 @@ async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end:
         console.log(`[flight-main] Free-flight ground spawn airport=${airportId} runway=${runwayId} end=${end} lat=${lat} lon=${lon} hdg=${hdg} elevFt=${elevationFt}`);
     } catch (err) {
         console.warn('[flight-main] Airport/runway spawn error — using default spawn:', err);
+        authError.textContent = 'Erro ao posicionar na pista. Usando ponto de partida padrão.';
         applyPreflightToUrlAndScene(scene);
     }
+}
+
+async function findUserMissionForMission(missionIdNum: number): Promise<{ id: number; status: string } | null> {
+    const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
+    const endpoints = ['/api/user-missions', '/api/user-missions/active'];
+    for (const endpoint of endpoints) {
+        try {
+            const res = await fetch(endpoint, { headers });
+            if (!res.ok) {
+                console.warn(`[flight-main] User mission lookup failed at ${endpoint}: HTTP ${res.status}`);
+                continue;
+            }
+            const json = await res.json();
+            const list: any[] = Array.isArray(json?.data) ? json.data : [];
+            for (const item of list) {
+                const userMission = item?.user_mission ?? item;
+                const itemMissionId = Number(userMission?.mission_id ?? item?.mission_id ?? item?.id);
+                const userMissionId = Number(userMission?.id ?? item?.user_mission_id);
+                const status = String(userMission?.status ?? item?.status ?? '');
+                if (itemMissionId === missionIdNum && Number.isFinite(userMissionId) && userMissionId > 0) {
+                    return { id: userMissionId, status };
+                }
+            }
+        } catch (err) {
+            console.warn(`[flight-main] User mission lookup error at ${endpoint}:`, err);
+        }
+    }
+    return null;
 }
 
 async function startFlightGame(): Promise<void> {
@@ -258,9 +311,13 @@ async function startFlightGame(): Promise<void> {
                 console.log(`[flight-main] Flight plan ${flightPlanId} loaded for spawn`);
             } else {
                 console.warn(`[flight-main] Flight plan ${flightPlanId} fetch failed: ${res.status}`);
+                showLoadingError(`Plano de voo ${flightPlanId} indisponível.`);
+                return;
             }
         } catch (err) {
             console.error('[flight-main] Flight plan fetch error:', err);
+            showLoadingError('Erro ao carregar plano de voo.');
+            return;
         }
     }
 
@@ -274,6 +331,8 @@ async function startFlightGame(): Promise<void> {
             });
             if (!detailRes.ok) {
                 console.warn(`[flight-main] Mission ${missionId} fetch failed: ${detailRes.status}`);
+                showLoadingError(`Missão ${missionId} indisponível.`);
+                return;
             } else {
                 const mission = await detailRes.json();
                 console.log(`[flight-main] Mission ${missionId} loaded:`, { type: mission.type, departure_icao: mission.departure_icao, arrival_icao: mission.arrival_icao });
@@ -338,30 +397,38 @@ async function startFlightGame(): Promise<void> {
                     }
                 }
 
-                let userMissionId: number | null = null;
+                let userMissionId: number | null = userMissionIdFromUrl;
                 let alreadyActive = false;
                 let needsPromotion = false;
+                let userMissionStatusFromUrl: string | null = null;
 
-                try {
-                    const activeRes = await fetch('/api/user-missions/active', {
-                        headers: { 'Authorization': `Bearer ${token}` },
-                    });
-                    if (activeRes.ok) {
-                        const activeJson = await activeRes.json();
-                        const activeList = Array.isArray(activeJson?.data) ? activeJson.data : [];
-                        const existing = activeList.find((um: any) => Number(um?.mission_id) === missionIdNum);
-                        if (existing && existing.id != null) {
-                            userMissionId = Number(existing.id);
+                if (userMissionId == null) {
+                    try {
+                        const existing = await findUserMissionForMission(missionIdNum);
+                        if (existing) {
+                            userMissionId = existing.id;
                             alreadyActive = true;
                             if (existing.status === 'started') {
                                 needsPromotion = true;
                             }
                         }
-                    } else {
-                        console.warn(`[flight-main] Active user-missions check failed: ${activeRes.status}`);
+                    } catch (err) {
+                        console.warn('[flight-main] User mission lookup error:', err);
                     }
-                } catch (err) {
-                    console.warn('[flight-main] Active user-missions check error:', err);
+                } else {
+                    const existing = await findUserMissionForMission(missionIdNum);
+                    if (existing && existing.id !== userMissionId) {
+                        showLoadingError('Missão ativa não corresponde ao link informado.');
+                        return;
+                    }
+                    if (!existing) {
+                        showLoadingError('Não foi possível validar a missão ativa do link.');
+                        return;
+                    }
+                    userMissionStatusFromUrl = existing?.status ?? null;
+                    alreadyActive = true;
+                    needsPromotion = userMissionStatusFromUrl !== 'in_progress';
+                    console.log(`[flight-main] Using userMissionId=${userMissionId} from URL for mission ${missionId}`);
                 }
 
                 if (alreadyActive) {
@@ -377,9 +444,13 @@ async function startFlightGame(): Promise<void> {
                                 console.log(`[flight-main] user-mission ${userMissionId} already in_progress (409 idempotent)`);
                             } else {
                                 console.warn(`[flight-main] Failed to start user-mission ${userMissionId}: HTTP ${promoteRes.status}`);
+                                showLoadingError('Não foi possível iniciar a missão.');
+                                return;
                             }
                         } catch (err) {
                             console.warn(`[flight-main] Start user-mission ${userMissionId} error:`, err);
+                            showLoadingError('Erro ao iniciar missão.');
+                            return;
                         }
                     }
                     console.log(`[flight-main] Mission ${missionId} already active, userMissionId=${userMissionId}`);
@@ -406,9 +477,13 @@ async function startFlightGame(): Promise<void> {
                                     console.log(`[flight-main] user-mission ${userMissionId} already in_progress (409 idempotent)`);
                                 } else {
                                     console.warn(`[flight-main] Failed to start user-mission ${userMissionId}: HTTP ${promoteRes.status}`);
+                                    showLoadingError('Não foi possível iniciar a missão.');
+                                    return;
                                 }
                             } catch (err) {
                                 console.warn(`[flight-main] Start user-mission ${userMissionId} error:`, err);
+                                showLoadingError('Erro ao iniciar missão.');
+                                return;
                             }
                         }
                         scene.setMissionSpawn(mission, userMissionId);
@@ -416,34 +491,32 @@ async function startFlightGame(): Promise<void> {
                         console.log(`[flight-main] Mission ${missionId} already active (race), fetching active userMissionId`);
                         let recoveredUserMissionId: number | null = null;
                         try {
-                            const recoverRes = await fetch('/api/user-missions/active', {
-                                headers: { 'Authorization': `Bearer ${token}` },
-                            });
-                            if (recoverRes.ok) {
-                                const recoverJson = await recoverRes.json();
-                                const recoverList: any[] = Array.isArray(recoverJson?.data) ? recoverJson.data : [];
-                                const existing = recoverList.find((um: any) => Number(um?.mission_id) === missionIdNum);
-                                if (existing && existing.id != null) {
-                                    recoveredUserMissionId = Number(existing.id);
-                                    console.log(`[flight-main] Recovered userMissionId=${recoveredUserMissionId} after 409`);
-                                } else {
-                                    console.warn(`[flight-main] No active user-mission for mission ${missionId} after 409`);
-                                }
+                            const existing = await findUserMissionForMission(missionIdNum);
+                            if (existing) {
+                                recoveredUserMissionId = existing.id;
+                                console.log(`[flight-main] Recovered userMissionId=${recoveredUserMissionId} after 409`);
                             } else {
-                                console.warn(`[flight-main] Recover after 409 failed: HTTP ${recoverRes.status}`);
+                                console.warn(`[flight-main] No user-mission for mission ${missionId} after 409`);
                             }
                         } catch (recoverErr) {
                             console.warn('[flight-main] Recover after 409 error:', recoverErr);
                         }
+                        if (recoveredUserMissionId == null) {
+                            showLoadingError('Não foi possível recuperar a missão ativa.');
+                            return;
+                        }
                         scene.setMissionSpawn(mission, recoveredUserMissionId);
                     } else {
                         console.warn(`[flight-main] Mission ${missionId} acquire failed: ${startRes.status}`);
-                        scene.setMissionSpawn(mission, null);
+                        showLoadingError('Não foi possível adquirir a missão.');
+                        return;
                     }
                 }
             }
         } catch (err) {
             console.error('[flight-main] Mission fetch error:', err);
+            showLoadingError('Erro ao carregar missão.');
+            return;
         }
     }
 
@@ -522,14 +595,10 @@ async function validateToken(authToken: string): Promise<TokenState> {
 (async () => {
     window.addEventListener('beforeunload', () => {
         if (freeHourTimer !== undefined) clearInterval(freeHourTimer);
+        if (freeHourFirstTimer !== undefined) clearTimeout(freeHourFirstTimer);
     });
 
     if (!token) {
-        await startFlightGame();
-        return;
-    }
-
-    if (skipPreflight) {
         await startFlightGame();
         return;
     }
@@ -544,12 +613,16 @@ async function validateToken(authToken: string): Promise<TokenState> {
             return;
         }
         authError.textContent = 'Sessão expirada. Adicione um token válido (?token=<jwt>).';
-        await startFlightGame();
         return;
     }
 
     if (tokenState === 'unreachable') {
         console.warn('[flight-main] Skipping preflight — server/API unreachable, starting game directly');
+        await startFlightGame();
+        return;
+    }
+
+    if (skipPreflight) {
         await startFlightGame();
         return;
     }
@@ -560,11 +633,58 @@ async function validateToken(authToken: string): Promise<TokenState> {
 })();
 
 let disposed = false;
+function clearRuntimeTimers(): void {
+    if (freeHourFirstTimer !== undefined) {
+        clearTimeout(freeHourFirstTimer);
+        freeHourFirstTimer = undefined;
+    }
+    if (freeHourTimer !== undefined) {
+        clearInterval(freeHourTimer);
+        freeHourTimer = undefined;
+    }
+    if (memoryDiagnosticTimer !== undefined) {
+        clearInterval(memoryDiagnosticTimer);
+        memoryDiagnosticTimer = undefined;
+    }
+    if (spawnedPollTimer !== undefined) {
+        clearInterval(spawnedPollTimer);
+        spawnedPollTimer = undefined;
+    }
+    if (loadingTimeoutTimer !== undefined) {
+        clearTimeout(loadingTimeoutTimer);
+        loadingTimeoutTimer = undefined;
+    }
+    if (statusInterval !== undefined) {
+        clearInterval(statusInterval);
+        statusInterval = undefined;
+    }
+}
+
+function cancelActiveFlightPlanOnUnload(reason: string): void {
+    const planId = (scene as any)._activeFlightPlanId;
+    if (!token || !Number.isFinite(Number(planId)) || Number(planId) <= 0) return;
+    try {
+        void fetch(`/api/flight-plans/${Number(planId)}/status`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'cancelled' }),
+            keepalive: true,
+        });
+        (scene as any)._activeFlightPlanId = null;
+        (scene as any)._activeFlightPlanArrivalAirportId = null;
+        console.debug(`[flight-main] Flight plan ${planId} marked cancelled on ${reason}`);
+    } catch (err) {
+        console.warn('[flight-main] Flight plan unload cancellation failed:', err);
+    }
+}
+
 function disposeGame(reason: string): void {
     if (disposed) return;
     disposed = true;
     try {
         console.debug(`[flight-main] Disposing game to free WebGL/tiles memory (reason=${reason})`);
+        cancelActiveFlightPlanOnUnload(reason);
+        clearRuntimeTimers();
         game?.dispose();
         game = null;
     } catch (err) {
@@ -591,7 +711,7 @@ function logMemorySnapshot(context: string): void {
         console.warn('[Memory] Snapshot failed:', err);
     }
 }
-setInterval(() => logMemorySnapshot('periodic'), MEMORY_DIAGNOSTIC_INTERVAL_MS);
+memoryDiagnosticTimer = window.setInterval(() => logMemorySnapshot('periodic'), MEMORY_DIAGNOSTIC_INTERVAL_MS);
 document.addEventListener('visibilitychange', () => logMemorySnapshot(`visibilitychange:${document.visibilityState}`));
 window.addEventListener('pagehide', () => {
     try {
@@ -607,20 +727,40 @@ window.addEventListener('pagehide', () => {
 document.addEventListener('freeze', () => logMemorySnapshot('freeze'));
 document.addEventListener('resume', () => logMemorySnapshot('resume'));
 
-setInterval(() => {
-    if (!sceneReady && (scene as any).spawned) {
-        sceneReady = true;
-        console.log('[flight-main] Scene spawned (poll fallback)');
+let loadingRotationCleared = false;
+function clearLoadingRotation(): void {
+    if (loadingRotationCleared) return;
+    const rotation = (window as any).__loadingStatusInterval;
+    if (rotation) clearInterval(rotation);
+    loadingRotationCleared = true;
+}
+
+spawnedPollTimer = window.setInterval(() => {
+    if (dismissed) return;
+    const sc = scene as any;
+    const isSpawned = !!sc.spawned;
+    const isWorldReady = !!sc._worldReady;
+    if (isSpawned && isWorldReady) {
+        if (!sceneReady) {
+            sceneReady = true;
+            console.log('[flight-main] Scene spawned and world ready (poll)');
+        }
         dismissLoading();
+        return;
     }
+    clearLoadingRotation();
+    loadingStatus.textContent = isSpawned ? 'Preparando aeronave…' : 'Construindo terreno…';
 }, 500);
 
-setTimeout(() => {
-    if (!dismissed) {
-        sceneReady = true;
-        console.warn('[flight-main] Forcing loading dismiss (timeout)');
-        dismissLoading();
+loadingTimeoutTimer = window.setTimeout(() => {
+    if (dismissed) return;
+    const sc = scene as any;
+    if (!(sc.spawned && sc._worldReady)) {
+        showLoadingWarning('A preparação do voo está demorando mais que o esperado. Iniciando mesmo assim…');
     }
+    sceneReady = true;
+    console.warn('[flight-main] Forcing loading dismiss (timeout)');
+    dismissLoading();
 }, 20000);
 
 statusInterval = (window as any).__loadingStatusInterval;

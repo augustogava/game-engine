@@ -236,6 +236,19 @@ DELETE /api/flight-plans/:id
 
 Sets `is_active = 0`. The plan is no longer returned by default list queries.
 
+### 3.6 Update flight plan status
+
+```
+PATCH /api/flight-plans/:id/status
+Content-Type: application/json
+
+{ "status": "in_progress" }
+```
+
+The game calls this endpoint during a flight (e.g. `in_progress` on takeoff, `completed` on arrival, `cancelled` on unload/disconnect).
+
+**Status enum:** `"planned"`, `"in_progress"`, `"completed"`, `"cancelled"` — strings matching the `flight_plans.status` column enum.
+
 ---
 
 ## 4. URL Parameters Passed to the Game

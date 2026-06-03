@@ -124,6 +124,8 @@ const DICTIONARIES: Record<Language, Dict> = {
         'gamepad.connected': 'Gamepad conectado',
         'gamepad.disconnected': 'Gamepad desconectado',
         'screenshot.taken': 'Screenshot salvo',
+        'ap.nav.noWaypoint': 'NAV indisponivel: sem waypoint ou destino na rota',
+        'ap.apr.noDestination': 'APR indisponivel: sem destino de aproximacao',
     },
     [LANGUAGE_EN]: {
         'menu.aircraft': 'AIRCRAFT',
@@ -246,6 +248,8 @@ const DICTIONARIES: Record<Language, Dict> = {
         'gamepad.connected': 'Gamepad connected',
         'gamepad.disconnected': 'Gamepad disconnected',
         'screenshot.taken': 'Screenshot saved',
+        'ap.nav.noWaypoint': 'NAV unavailable: no waypoint or destination on route',
+        'ap.apr.noDestination': 'APR unavailable: no approach destination',
     },
 };
 

@@ -14,6 +14,7 @@ export class RealtimeClient {
     private disposed = false;
     private lastSendTime = 0;
     private reconnectDelay = 1000;
+    private reconnectTimer: number | null = null;
 
     private readonly path: string;
     private readonly sendRateMs: number;
@@ -53,6 +54,10 @@ export class RealtimeClient {
 
         this.ws.onopen = () => {
             this._connected = true;
+            if (this.reconnectTimer !== null) {
+                clearTimeout(this.reconnectTimer);
+                this.reconnectTimer = null;
+            }
             this.reconnectDelay = 1000;
             this.notifyConnection(true);
         };
@@ -133,6 +138,10 @@ export class RealtimeClient {
 
     dispose(): void {
         this.disposed = true;
+        if (this.reconnectTimer !== null) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
         this.ws?.close();
         this.ws = null;
         this.messageListeners = [];
@@ -146,7 +155,11 @@ export class RealtimeClient {
 
     private scheduleReconnect(): void {
         if (this.disposed || !this.shouldReconnect) return;
-        setTimeout(() => this.connect(), this.reconnectDelay);
+        if (this.reconnectTimer !== null) return;
+        this.reconnectTimer = window.setTimeout(() => {
+            this.reconnectTimer = null;
+            this.connect();
+        }, this.reconnectDelay);
         this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, this.maxReconnectDelay);
     }
 }

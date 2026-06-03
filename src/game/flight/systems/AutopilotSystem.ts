@@ -1,5 +1,6 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
+import { I18n } from '../../I18n.js';
 import * as NavMath from '../physics/NavMath.js';
 import {
     MIN_GS_FOR_ETE_MS,
@@ -316,6 +317,7 @@ export class AutopilotSystem {
         const newState = forceOn ? true : !this.scene._autopilotNavHold;
         if (newState && !this.apCurrentNavTarget()) {
             console.warn('[AP] NAV armed but no waypoint/destination available');
+            this.scene._showToast(I18n.t('ap.nav.noWaypoint'));
             return;
         }
         this.scene._autopilotNavHold = newState;
@@ -329,6 +331,7 @@ export class AutopilotSystem {
         const newState = forceOn ? true : !this.scene._autopilotAprHold;
         if (newState && !this.apCurrentNavTarget()) {
             console.warn('[AP] APR armed but no destination available');
+            this.scene._showToast(I18n.t('ap.apr.noDestination'));
             return;
         }
         this.scene._autopilotAprHold = newState;

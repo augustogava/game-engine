@@ -26,6 +26,7 @@ Os voos são gravados automaticamente — distância, tempo, altitude máxima, t
 
 - **Spawn no solo**: aeronave começa parada no aeroporto, motor ao ralenti, flaps na posição de descolagem, gear baixo. Avance throttle (`W`) para descolar.
 - **Spawn em voo (missões)**: a aeronave aparece em altitude com velocidade de cruzeiro, gear recolhido (se retrátil), flaps neutros, throttle a ~55%.
+- Durante a cinematica de spawn os comandos de stick (pitch/roll/yaw) ficam bloqueados; throttle e teclas de sistema continuam ativos. O controlo total é libertado quando a cinematica termina.
 
 ---
 
@@ -232,7 +233,7 @@ Todas as teclas podem ser reconfiguradas em **Settings → Controls** (atalho `S
 | `K` | VS Hold — mantém velocidade vertical atual |
 | `U` | NAV Hold — segue waypoint |
 | `I` | APR Hold — modo approach |
-| `H` | Autothrottle — mantém velocidade IAS |
+| `O` | Autothrottle — mantém velocidade IAS |
 
 > O autopilot **desengata automaticamente** se o piloto mover muito stick (pitch/roll/yaw) — segurança. Para reengatar, prima `Z` novamente.
 
@@ -260,7 +261,7 @@ Todas as teclas podem ser reconfiguradas em **Settings → Controls** (atalho `S
 |-------|------|
 | `P` | Pausa / despausa |
 | `[` | Time scale − (reduz aceleração) |
-| `]` | Time scale + (aumenta até 32x) |
+| `]` | Time scale + (aumenta até 8x) |
 | `M` | Easy Mode — ativa estabilização e auto-throttle |
 | `R` | Respawn (reaparece no aeroporto de partida) |
 | `F12` | Screenshot (gera PNG da viewport) |
@@ -323,9 +324,11 @@ Os painéis são **arrastáveis** (drag pela barra superior), **redimensionávei
 1. Prima `Z` ou clique no botão **AP** — o master liga.
 2. Prima um modo lateral: `F` (HDG), `U` (NAV) ou `I` (APR).
 3. Prima um modo vertical: `J` (ALT) ou `K` (VS).
-4. Opcional: prima `H` para autothrottle (velocidade automática).
+4. Opcional: prima `O` para autothrottle (velocidade automática).
 
 > Ao engatar **HDG**, o AP captura o heading atual do avião como alvo. Para mudar, role o knob HDG no painel ou clique no display para escrever o valor.
+
+> **NAV** e **APR** só engatam com rota ativa (waypoint/destino). Sem rota, o jogo mostra um aviso e o modo não liga.
 
 ### 7.2 Modos
 
@@ -337,7 +340,7 @@ Os painéis são **arrastáveis** (drag pela barra superior), **redimensionávei
 | **APR** | Approach — segue ILS final (localizer + glideslope) | `I` |
 | **ALT** | Mantém altitude (0–50,000 ft) | `J` |
 | **VS** | Mantém razão de subida/descida (−3000 a +3000 fpm) | `K` |
-| **AT** | Autothrottle — mantém IAS alvo (Mach em altitude) | `H` |
+| **AT** | Autothrottle — mantém IAS alvo (Mach em altitude) | `O` |
 
 ### 7.3 Ajustar valores alvo
 
@@ -461,7 +464,7 @@ Simula falha individual de motor. Útil para treino de emergências em multi-mot
 
 - **Pause (`P`)** — congela física, mantém HUD visível.
 - **Time scale** (`[` / `]`) — acelera/desacelera tempo de simulação. Útil em cruzeiros longos.
-  - Valores: 0.25x, 0.5x, 1x, 2x, 4x, 8x, 16x, 32x
+  - Valores: 0.25x, 0.5x, 1x, 2x, 4x, 8x
   - Aparece no topo do HUD quando ≠ 1.0x
   - A física continua estável até 8x; acima disso pode haver imprecisões em manobras agressivas
 
@@ -635,7 +638,7 @@ Aceda em `Shift+D` ou pelo botão ⚙ no canto superior direito.
 | **Autopilot** | `Z` | AP master |
 | | `F` `J` `K` | HDG/ALT/VS |
 | | `U` `I` | NAV/APR |
-| | `H` | Autothrottle |
+| | `O` | Autothrottle |
 | **Câmara** | `C` | Cicla |
 | | `T` | Torre |
 | | `Y` | Mouse yoke |
