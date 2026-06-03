@@ -76,6 +76,7 @@ const {
     CRASH_VS_THRESHOLD_MS,
     CRASH_GROUND_SPEED_MS,
     CRASH_GROUND_ATTITUDE_DEG,
+    GROUND_LATERAL_GRIP_PER_S,
     CINEMATIC_DURATION_MS,
     CAMERA_RADIUS_MIN_M,
     CAMERA_RADIUS_MAX_M,
@@ -756,6 +757,20 @@ export class FlightPhysicsSystem {
             const bodyRight = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
             const worldUp = new BABYLON.Vector3(0, 1, 0);
             const rollAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(bodyRight, worldUp))));
+
+            const lateralAxisX = bodyRight.x;
+            const lateralAxisZ = bodyRight.z;
+            const lateralAxisLenSq = lateralAxisX * lateralAxisX + lateralAxisZ * lateralAxisZ;
+            if (lateralAxisLenSq > 1e-6) {
+                const invLen = 1 / Math.sqrt(lateralAxisLenSq);
+                const axX = lateralAxisX * invLen;
+                const axZ = lateralAxisZ * invLen;
+                const lateralVel = this.scene.velocity.x * axX + this.scene.velocity.z * axZ;
+                const removeFactor = Math.max(0, Math.min(1, GROUND_LATERAL_GRIP_PER_S * dt));
+                const dvLat = lateralVel * removeFactor;
+                this.scene.velocity.x -= dvLat * axX;
+                this.scene.velocity.z -= dvLat * axZ;
+            }
             const horizSpeed = Math.sqrt(this.scene.velocity.x * this.scene.velocity.x + this.scene.velocity.z * this.scene.velocity.z);
             if (horizSpeed > CRASH_GROUND_SPEED_MS) {
                 const bodyFwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();

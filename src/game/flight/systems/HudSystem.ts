@@ -871,6 +871,8 @@ export class HudSystem {
             s.fpsLimit = parseInt((document.getElementById('gfx-fps-limit') as HTMLSelectElement)?.value || '0');
             s.cloudDensity = (document.getElementById('gfx-cloud-density') as HTMLSelectElement)?.value || 'medium';
             s.overcast = (document.getElementById('gfx-overcast') as HTMLInputElement)?.checked ?? false;
+            s.precipType = parseInt((document.getElementById('gfx-precip-type') as HTMLSelectElement)?.value || '0') || 0;
+            s.precipIntensity = parseInt((document.getElementById('gfx-precip-intensity') as HTMLInputElement)?.value || '0') / 100;
             s.milkyway = (document.getElementById('gfx-milkyway') as HTMLInputElement)?.checked ?? false;
             s.highClouds = (document.getElementById('gfx-highclouds') as HTMLInputElement)?.checked ?? true;
             s.highCloudsCover = parseInt((document.getElementById('gfx-highclouds-cover') as HTMLInputElement)?.value || '55') / 100;
@@ -997,6 +999,17 @@ export class HudSystem {
                     const overcastEl = document.getElementById('gfx-overcast') as HTMLInputElement | null;
                     if (overcastEl) {
                         this.scene._setOvercast(scene, overcastEl.checked);
+                    }
+                    const precipTypeEl = document.getElementById('gfx-precip-type') as HTMLSelectElement | null;
+                    const precipIntEl = document.getElementById('gfx-precip-intensity') as HTMLInputElement | null;
+                    const precipIntLbl = document.getElementById('gfx-precip-intensity-val');
+                    if (precipTypeEl && precipIntEl) {
+                        const type = parseInt(precipTypeEl.value) || 0;
+                        const intensity = (parseInt(precipIntEl.value) || 0) / 100;
+                        this.scene._precipitationType = type;
+                        this.scene._precipitationIntensity = intensity;
+                        this.scene._setRain(intensity, type);
+                        if (precipIntLbl) precipIntLbl.textContent = Math.round(intensity * 100) + '%';
                     }
                     const milkywayEl = document.getElementById('gfx-milkyway') as HTMLInputElement | null;
                     if (milkywayEl) {
@@ -1162,6 +1175,8 @@ export class HudSystem {
             setVal('gfx-fps-limit', cfg.fpsLimit);
             if (cfg.cloudDensity !== undefined) setVal('gfx-cloud-density', cfg.cloudDensity);
             setCheck('gfx-overcast', cfg.overcast);
+            if (cfg.precipType !== undefined) setVal('gfx-precip-type', cfg.precipType);
+            if (cfg.precipIntensity !== undefined) setVal('gfx-precip-intensity', Math.round(cfg.precipIntensity * 100));
             setCheck('gfx-milkyway', cfg.milkyway);
             setCheck('gfx-highclouds', cfg.highClouds);
             if (cfg.highCloudsCover !== undefined) setVal('gfx-highclouds-cover', Math.round(cfg.highCloudsCover * 100));
@@ -1217,7 +1232,7 @@ export class HudSystem {
             }, 100);
         }
 
-        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-milkyway', 'gfx-highclouds', 'gfx-highclouds-cover', 'gfx-highclouds-speed', 'gfx-highclouds-scale', 'gfx-highclouds-alpha', 'gfx-highclouds-reflect', 'gfx-hdr-env'];
+        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-precip-type', 'gfx-precip-intensity', 'gfx-milkyway', 'gfx-highclouds', 'gfx-highclouds-cover', 'gfx-highclouds-speed', 'gfx-highclouds-scale', 'gfx-highclouds-alpha', 'gfx-highclouds-reflect', 'gfx-hdr-env'];
         for (const id of ids) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => applySettings());

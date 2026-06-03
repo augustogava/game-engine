@@ -774,6 +774,20 @@
                 </div>
 
                 <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0">Precipitation</label>
+                    <select id="gfx-precip-type" style="background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.1);color:#fff;padding:4px 6px;border-radius:4px;font-family:monospace;font-size:10px;outline:none">
+                        <option value="0" selected>Nenhuma</option>
+                        <option value="1">Chuva</option>
+                        <option value="2">Neve</option>
+                    </select>
+                </div>
+                <div class="row" style="align-items:center;gap:8px">
+                    <label style="flex:1;margin:0;font-size:9px;color:rgba(255,255,255,.4)">Intensity</label>
+                    <input type="range" id="gfx-precip-intensity" min="0" max="100" value="0" style="width:100px">
+                    <span id="gfx-precip-intensity-val" style="font-size:10px;color:#40ffaa;min-width:30px">0%</span>
+                </div>
+
+                <div class="row" style="align-items:center;gap:8px">
                     <label style="flex:1;margin:0">Milky Way</label>
                     <input type="checkbox" id="gfx-milkyway">
                 </div>

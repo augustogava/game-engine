@@ -1087,8 +1087,19 @@ export class MissionSystem {
                 this.scene._metarSurfaceElevFt = Number.isFinite(elevFt) ? Number(elevFt) : 0;
                 console.log(`[METAR] Surface wind override ${code}: ${m.windDirDeg}°/${m.windSpeedKt}kt`);
             }
+
+            const weather = this._deriveMetarWeather(m);
+            this.scene._currentCloudCoverage = weather.cloudCoverage;
+            this.scene._precipitationIntensity = weather.precipIntensity;
+            this.scene._precipitationType = weather.precipType;
+            if (typeof this.scene._applyMetarWeatherVisuals === 'function') {
+                this.scene._applyMetarWeatherVisuals();
+            }
+            console.log(`[METAR] Weather ${code}: cloud=${(weather.cloudCoverage * 100).toFixed(0)}% precip=${(weather.precipIntensity * 100).toFixed(0)}% type=${weather.precipType} (${weather.label})`);
+
             const windTxt = `${m.windVariable ? 'VRB' : (m.windDirDeg != null ? m.windDirDeg + '°' : '\u2014')} / ${m.windSpeedKt != null ? m.windSpeedKt + ' kt' : '\u2014'}${m.windGustKt != null ? ' G' + m.windGustKt : ''}`;
             el.innerHTML = `<div style="font-family:monospace;font-size:9px;color:#9cf;word-break:break-word;margin-bottom:4px">${escapeHtml(m.raw || '')}</div>
+                <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Condição</span><span>${escapeHtml(weather.label)}</span></div>
                 <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Vento</span><span>${escapeHtml(windTxt)}</span></div>
                 ${m.tempC != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">Temp/Orvalho</span><span>${m.tempC}° / ${m.dewpointC ?? '\u2014'}°</span></div>` : ''}
                 ${m.altimeterHpa != null ? `<div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">QNH</span><span>${Number(m.altimeterHpa).toFixed(0)} hPa</span></div>` : ''}
@@ -1098,5 +1109,41 @@ export class MissionSystem {
             el.innerHTML = '<div style="color:rgba(255,255,255,.4)">METAR indisponível</div>';
             console.warn('[METAR] briefing fetch failed:', err);
         }
+    }
+
+    private _deriveMetarWeather(m: any): { cloudCoverage: number; precipIntensity: number; precipType: number; label: string } {
+        const coverMap: Record<string, number> = { SKC: 0, CLR: 0, NSC: 0, CAVOK: 0, NCD: 0, FEW: 0.25, SCT: 0.45, BKN: 0.75, OVC: 1.0, VV: 1.0 };
+        let cloudCoverage = 0;
+        const clouds = Array.isArray(m && m.clouds) ? m.clouds : [];
+        for (const c of clouds) {
+            const cov = coverMap[String(c && c.cover || '').toUpperCase()];
+            if (Number.isFinite(cov) && cov > cloudCoverage) cloudCoverage = cov;
+        }
+
+        const wx = String(m && m.wxString || '').toUpperCase();
+        let precipIntensity = 0;
+        let precipType = 0;
+        if (wx && wx !== 'NSW') {
+            const hasRain = /RA|DZ|SH/.test(wx);
+            const hasSnow = /SN|SG|PL|GS|GR/.test(wx);
+            if (hasSnow) precipType = 2;
+            else if (hasRain) precipType = 1;
+            else if (/TS/.test(wx)) precipType = 1;
+            if (precipType > 0) {
+                if (/(^|\s)\+/.test(wx) || /\+RA|\+SN|\+SH|TS/.test(wx)) precipIntensity = 1.0;
+                else if (/(^|\s)-/.test(wx) || /-RA|-SN|-DZ/.test(wx)) precipIntensity = 0.35;
+                else precipIntensity = 0.65;
+            }
+        }
+
+        let label: string;
+        if (precipType === 2) label = precipIntensity >= 0.8 ? 'Neve forte' : (precipIntensity <= 0.4 ? 'Neve fraca' : 'Neve');
+        else if (precipType === 1) label = precipIntensity >= 0.8 ? 'Chuva forte' : (precipIntensity <= 0.4 ? 'Chuva fraca' : 'Chuva');
+        else if (cloudCoverage >= 0.75) label = 'Encoberto';
+        else if (cloudCoverage >= 0.4) label = 'Nublado';
+        else if (cloudCoverage > 0) label = 'Poucas nuvens';
+        else label = 'Céu limpo';
+
+        return { cloudCoverage, precipIntensity, precipType, label };
     }
 }

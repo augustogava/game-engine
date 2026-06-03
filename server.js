@@ -452,6 +452,11 @@ async function fetchMetar(icao) {
             if (cached) return { data: cached.data, cached: true, stale: true };
             return { error: 'not_found' };
         }
+        const clouds = Array.isArray(raw.clouds)
+            ? raw.clouds
+                .filter((c) => c && c.cover)
+                .map((c) => ({ cover: String(c.cover).toUpperCase(), baseFt: c.base != null ? Number(c.base) : null }))
+            : [];
         const data = {
             icao: raw.icaoId || code,
             raw: raw.rawOb || '',
@@ -464,6 +469,8 @@ async function fetchMetar(icao) {
             windGustKt: raw.wgst != null ? Number(raw.wgst) : null,
             visibility: raw.visib != null ? raw.visib : null,
             altimeterHpa: raw.altim != null ? Number(raw.altim) : null,
+            clouds,
+            wxString: raw.wxString != null ? String(raw.wxString) : null,
         };
         METAR_CACHE.set(code, { ts: Date.now(), data });
         console.log(`[METAR] Fetched ${code} from source`);

@@ -836,6 +836,9 @@ export class FlightSceneSimple extends Scene3D {
     private _moonHaloMat: BABYLON.StandardMaterial | null = null;
     private _overcastMesh: BABYLON.Mesh | null = null;
     private _overcastMat: BABYLON.StandardMaterial | null = null;
+    private _rainPS: BABYLON.ParticleSystem | null = null;
+    private _rainEmitter: BABYLON.TransformNode | null = null;
+    private _rainTexture: BABYLON.DynamicTexture | null = null;
     private _milkyWayRoot: BABYLON.TransformNode | null = null;
     private _cloudDensityMult = CLOUD_DENSITY_MULT_MEDIUM;
     private _cloudVolumetric = false;
@@ -1111,6 +1114,7 @@ export class FlightSceneSimple extends Scene3D {
         this._updateTurbulence(dt, aglForTurb);
         if (!this._disableDynamicLighting) this._updateNavLights(dt);
         this._updateClouds(dt);
+        this._updatePrecipitation(dt);
         this._updateHighClouds(dt);
         this._updatePropellerAnim();
         this._updateControlSurfaceAnim();
@@ -1646,6 +1650,109 @@ export class FlightSceneSimple extends Scene3D {
 
     private _setOvercast(scene: BABYLON.Scene, enabled: boolean): void {
         this._cloudsSystem.setOvercast(scene, enabled);
+    }
+
+    /** Applies the fetched METAR conditions (cloud cover + precipitation) to the graphics. */
+    /** @internal */ public _applyMetarWeatherVisuals(): void {
+        try {
+            if (this.scene) {
+                this._setOvercast(this.scene, this._currentCloudCoverage >= 0.6);
+            }
+            this._setRain(this._precipitationIntensity, this._precipitationType);
+            const ptEl = document.getElementById('gfx-precip-type') as HTMLSelectElement | null;
+            const piEl = document.getElementById('gfx-precip-intensity') as HTMLInputElement | null;
+            const piLbl = document.getElementById('gfx-precip-intensity-val');
+            if (ptEl) ptEl.value = String(this._precipitationType);
+            if (piEl) piEl.value = String(Math.round(this._precipitationIntensity * 100));
+            if (piLbl) piLbl.textContent = Math.round(this._precipitationIntensity * 100) + '%';
+        } catch (err) {
+            console.warn('[Weather] Failed to apply METAR visuals:', err);
+        }
+    }
+
+    private _buildRainTexture(scene: BABYLON.Scene, snow: boolean): BABYLON.DynamicTexture {
+        const w = 16;
+        const h = snow ? 16 : 64;
+        const tex = new BABYLON.DynamicTexture('precipTex', { width: w, height: h }, scene, false);
+        const ctx = tex.getContext() as CanvasRenderingContext2D;
+        ctx.clearRect(0, 0, w, h);
+        if (snow) {
+            const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+            grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+            grad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, w, h);
+        } else {
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, 'rgba(200,220,255,0)');
+            grad.addColorStop(0.5, 'rgba(210,225,255,0.85)');
+            grad.addColorStop(1, 'rgba(200,220,255,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(w * 0.38, 0, w * 0.24, h);
+        }
+        tex.hasAlpha = true;
+        tex.update(false);
+        return tex;
+    }
+
+    private _setRain(intensity: number, type: number): void {
+        const i = Math.max(0, Math.min(1, Number.isFinite(intensity) ? intensity : 0));
+        if (i <= 0.01) {
+            if (this._rainPS) this._rainPS.emitRate = 0;
+            return;
+        }
+        if (!this.scene || !this.camera) return;
+        const snow = type === 2;
+        if (!this._rainEmitter) {
+            this._rainEmitter = new BABYLON.TransformNode('precipEmitter', this.scene);
+        }
+        if (!this._rainPS) {
+            const capacity = this.isMobile ? 600 : 1800;
+            const ps = new BABYLON.ParticleSystem('precip', capacity, this.scene);
+            this._rainTexture = this._buildRainTexture(this.scene, snow);
+            ps.particleTexture = this._rainTexture;
+            ps.emitter = this._rainEmitter as unknown as BABYLON.AbstractMesh;
+            ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+            ps.isLocal = false;
+            this._rainPS = ps;
+            ps.start();
+        }
+        const ps = this._rainPS;
+        const box = 28;
+        ps.minEmitBox = new BABYLON.Vector3(-box, snow ? 6 : 14, -box);
+        ps.maxEmitBox = new BABYLON.Vector3(box, snow ? 12 : 20, box);
+        if (snow) {
+            ps.color1 = new BABYLON.Color4(1, 1, 1, 0.9);
+            ps.color2 = new BABYLON.Color4(0.95, 0.97, 1, 0.8);
+            ps.colorDead = new BABYLON.Color4(1, 1, 1, 0);
+            ps.minSize = 0.12; ps.maxSize = 0.28;
+            ps.minLifeTime = 1.4; ps.maxLifeTime = 2.2;
+            ps.gravity = new BABYLON.Vector3(0, -2.2, 0);
+            ps.direction1 = new BABYLON.Vector3(-1.2, -1, -1.2);
+            ps.direction2 = new BABYLON.Vector3(1.2, -1, 1.2);
+            ps.minEmitPower = 0.4; ps.maxEmitPower = 1.0;
+            ps.emitRate = Math.round(i * (this.isMobile ? 250 : 700));
+        } else {
+            ps.color1 = new BABYLON.Color4(0.78, 0.85, 1, 0.55);
+            ps.color2 = new BABYLON.Color4(0.7, 0.8, 1, 0.45);
+            ps.colorDead = new BABYLON.Color4(0.7, 0.8, 1, 0);
+            ps.minSize = 0.06; ps.maxSize = 0.12;
+            ps.minScaleY = 6; ps.maxScaleY = 10;
+            ps.minLifeTime = 0.5; ps.maxLifeTime = 0.8;
+            ps.gravity = new BABYLON.Vector3(0, -55, 0);
+            ps.direction1 = new BABYLON.Vector3(-1.5, -1, -1.5);
+            ps.direction2 = new BABYLON.Vector3(1.5, -1, 1.5);
+            ps.minEmitPower = 14; ps.maxEmitPower = 22;
+            ps.emitRate = Math.round(i * (this.isMobile ? 500 : 1400));
+        }
+    }
+
+    private _updatePrecipitation(dt: number): void {
+        if (!this._rainPS || !this._rainEmitter || this._rainPS.emitRate <= 0) return;
+        const cam = this.camera;
+        if (!cam) return;
+        const cp = cam.globalPosition;
+        this._rainEmitter.position.set(cp.x, cp.y, cp.z);
     }
 
     private _setMilkyWay(scene: BABYLON.Scene, enabled: boolean): void {
