@@ -466,7 +466,7 @@ export class MissionSystem {
                 };
                 this.scene._activeUserMissionId = activeFromList.user_mission?.id ?? null;
                 this.scene._activeMissionId = activeFromList.mission_id ?? null;
-                this.scene._missionWaypoints = Array.isArray(ami.waypoints) ? ami.waypoints : [];
+                this.scene._missionWaypoints = this.normalizeMissionWaypoints(ami.waypoints);
                 this.scene._missionCurrentWpIndex = 0;
                 }
             } else {

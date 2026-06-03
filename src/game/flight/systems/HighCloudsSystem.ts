@@ -100,6 +100,10 @@ export class HighCloudsSystem {
         const ok = await this.registerShaders();
         if (!ok) return;
         if (this._mesh) return;
+        if (this.scene._disposed) {
+            console.debug('[HighClouds] Build aborted: scene disposed during shader load');
+            return;
+        }
 
         const plane = BABYLON.MeshBuilder.CreateGround('highCloudsLayer', {
             width: HIGH_CLOUDS_PLANE_SIZE_M,
@@ -292,6 +296,17 @@ export class HighCloudsSystem {
     getAlpha(): number { return this._alpha; }
     getReflect(): number { return this._reflect; }
     getColorHex(): string { return rgbToHex(this._color.r, this._color.g, this._color.b); }
+
+    dispose(): void {
+        try {
+            if (this._mesh) { this._mesh.dispose(); this._mesh = null; }
+            if (this._material) { this._material.dispose(true, true); this._material = null; }
+            this._sceneRef = null;
+            console.debug('[HighClouds] Disposed');
+        } catch (err) {
+            console.warn('[HighClouds] Dispose failed:', err);
+        }
+    }
 }
 
 function clamp01(v: number): number {

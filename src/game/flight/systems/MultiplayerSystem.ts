@@ -41,6 +41,10 @@ export class MultiplayerSystem {
                     remote = this.createRemotePlayer(p.userId, remoteModelFile || undefined);
                     this.scene.remotePlayers.set(p.userId, remote);
                 } else if (remoteModelFile && remote.aircraftCode !== remoteModelFile) {
+                    remote.animationGroups.forEach((g: BABYLON.AnimationGroup) => { try { g.dispose(); } catch (_) { /* ignore */ } });
+                    remote.animationGroups = [];
+                    remote.skeletons.forEach((s: BABYLON.Skeleton) => { try { s.dispose(); } catch (_) { /* ignore */ } });
+                    remote.skeletons = [];
                     remote.meshes.forEach((m: BABYLON.AbstractMesh) => m.dispose());
                     remote.meshes = [];
                     const pivot = remote.root.getChildTransformNodes(true).find((n: BABYLON.TransformNode) => n.name.startsWith('remotePivot_'));
@@ -125,7 +129,7 @@ export class MultiplayerSystem {
 
         const aircraftCode = modelFile || null;
         const remote: RemotePlayer = {
-            root, meshes: [], prevState: null, nextState: null, lastUpdateTime: 0,
+            root, meshes: [], animationGroups: [], skeletons: [], prevState: null, nextState: null, lastUpdateTime: 0,
             aircraftCode, labelPlane: null, labelTexture: null,
             currentUsername: null, currentAvatarUrl: null,
             engineSound: null, engineTypeResolved: false,
@@ -184,14 +188,20 @@ export class MultiplayerSystem {
 
         BABYLON.SceneLoader.ImportMesh(
             '', folder, file, scene,
-            (meshes: BABYLON.AbstractMesh[]) => {
+            (meshes: BABYLON.AbstractMesh[], _particleSystems: BABYLON.IParticleSystem[], skeletons: BABYLON.Skeleton[], animationGroups: BABYLON.AnimationGroup[]) => {
                 if (!meshes.length) return;
                 const stillActive = this.scene.remotePlayers.get(id) === remote && !root.isDisposed();
                 if (!stillActive) {
                     console.debug(`[Remote] Discarding GLB for ${id}: entity no longer active`);
                     try { meshes.forEach((m) => m.dispose()); } catch (_) { /* ignore */ }
+                    try { animationGroups.forEach((g) => g.dispose()); } catch (_) { /* ignore */ }
+                    try { skeletons.forEach((s) => s.dispose()); } catch (_) { /* ignore */ }
                     return;
                 }
+                try {
+                    animationGroups.forEach((g) => remote.animationGroups.push(g));
+                    skeletons.forEach((s) => remote.skeletons.push(s));
+                } catch (_) { /* ignore */ }
                 const glbRoot = meshes[0];
                 const bb = glbRoot.getHierarchyBoundingVectors(true);
                 const center = bb.min.add(bb.max).scale(0.5);
@@ -322,6 +332,14 @@ export class MultiplayerSystem {
         try { remote.labelTexture?.dispose(); } catch (_) { /* ignore */ }
         try { remote.labelPlane?.material?.dispose(); } catch (_) { /* ignore */ }
         try { remote.labelPlane?.dispose(); } catch (_) { /* ignore */ }
+        try {
+            remote.animationGroups.forEach((g: BABYLON.AnimationGroup) => { try { g.dispose(); } catch (_) { /* ignore */ } });
+            remote.animationGroups = [];
+        } catch (_) { /* ignore */ }
+        try {
+            remote.skeletons.forEach((s: BABYLON.Skeleton) => { try { s.dispose(); } catch (_) { /* ignore */ } });
+            remote.skeletons = [];
+        } catch (_) { /* ignore */ }
         try {
             remote.meshes.forEach((m: BABYLON.AbstractMesh) => {
                 try { m.material?.dispose(); } catch (_) { /* ignore */ }

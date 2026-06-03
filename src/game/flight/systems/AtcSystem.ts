@@ -1,4 +1,6 @@
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
+import * as NavMath from '../physics/NavMath.js';
+import { TERRAIN_UNKNOWN_Y } from '../constants/index.js';
 
 type AtcPhase = 'parked' | 'taxi' | 'takeoff' | 'climb' | 'cruise' | 'descent' | 'approach' | 'landing' | 'taxi_in';
 
@@ -7,6 +9,7 @@ const ATC_MSG_DURATION_MS = 5000;
 const ATC_TRAFFIC_HORIZONTAL_M = 5556;
 const ATC_TRAFFIC_VERTICAL_M = 304.8;
 const ATC_TRAFFIC_COOLDOWN_MS = 25000;
+const ATC_NEAR_ARRIVAL_NM = 15;
 
 export class AtcSystem {
     private readonly scene: any;
@@ -73,7 +76,9 @@ export class AtcSystem {
     private _aglFt(): number {
         const py = Number(this.scene.planeRoot?.position?.y);
         if (!Number.isFinite(py)) return 0;
-        const groundY = Number.isFinite(this.scene.terrainY) ? this.scene.terrainY : 0;
+        const groundY = (Number.isFinite(this.scene.terrainY) && this.scene.terrainY !== TERRAIN_UNKNOWN_Y)
+            ? this.scene.terrainY
+            : 0;
         return Math.max(0, (py - groundY) * 3.28084);
     }
 
@@ -82,14 +87,14 @@ export class AtcSystem {
         if (!nav || !Number.isFinite(nav.arrival_lat) || !Number.isFinite(nav.arrival_lon)) return false;
         const here = this.scene._autopilotSystem?.apCurrentLatLon?.();
         if (!here) return false;
-        const dx = nav.arrival_lat - here.lat;
-        const dy = nav.arrival_lon - here.lon;
-        return (dx * dx + dy * dy) < (0.25 * 0.25);
+        const distNm = NavMath.haversineNm(here.lat, here.lon, Number(nav.arrival_lat), Number(nav.arrival_lon));
+        return Number.isFinite(distNm) && distNm <= ATC_NEAR_ARRIVAL_NM;
     }
 
-    private _windText(): string {
+    private _windText(elevFt: number = 0): string {
         try {
-            const wind = this.scene._getWindAtAltitude(0);
+            const elev = Number.isFinite(elevFt) ? elevFt : 0;
+            const wind = this.scene._getWindAtAltitude(elev);
             if (wind && Number.isFinite(wind.dirDeg) && Number.isFinite(wind.speedKt)) {
                 return `${wind.dirDeg.toFixed(0)}°/${wind.speedKt.toFixed(0)}kt`;
             }
@@ -102,13 +107,15 @@ export class AtcSystem {
         const depRwy = nav?.dep_rwy_ident || '';
         const arrRwy = nav?.arr_rwy_ident || '';
         const arrIcao = nav?.arrival_icao || nav?.arr_icao || '';
+        const depElevFt = Number(nav?.dep_elevation_ft);
+        const arrElevFt = Number(nav?.arr_elevation_ft);
         let msg = '';
         switch (phase) {
             case 'taxi':
                 msg = depRwy ? `ATC: Taxi to runway ${depRwy}.` : 'ATC: Taxi to the active runway.';
                 break;
             case 'takeoff':
-                msg = depRwy ? `ATC: Runway ${depRwy}, cleared for takeoff. Wind ${this._windText()}.` : `ATC: Cleared for takeoff. Wind ${this._windText()}.`;
+                msg = depRwy ? `ATC: Runway ${depRwy}, cleared for takeoff. Wind ${this._windText(depElevFt)}.` : `ATC: Cleared for takeoff. Wind ${this._windText(depElevFt)}.`;
                 break;
             case 'climb':
                 msg = 'ATC: Climb approved. Contact Control.';
@@ -125,7 +132,7 @@ export class AtcSystem {
                     : 'ATC: On approach.';
                 break;
             case 'landing':
-                msg = arrRwy ? `ATC: Runway ${arrRwy}, cleared to land. Wind ${this._windText()}.` : `ATC: Cleared to land. Wind ${this._windText()}.`;
+                msg = arrRwy ? `ATC: Runway ${arrRwy}, cleared to land. Wind ${this._windText(arrElevFt)}.` : `ATC: Cleared to land. Wind ${this._windText(arrElevFt)}.`;
                 break;
             case 'taxi_in':
                 msg = arrIcao ? `ATC: Landing confirmed. Taxi to the ramp. Welcome to ${arrIcao}.` : 'ATC: Landing confirmed. Taxi to the ramp.';

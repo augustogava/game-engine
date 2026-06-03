@@ -327,6 +327,14 @@ export class AircraftModelSystem {
             },
             null,
             (_scene: BABYLON.Scene, _msg: string, ex?: any) => {
+                if (this.scene._disposed || !this.scene.planeRoot) {
+                    console.log(`[FlightSimple] Discarding fallback build (${cfg.code}) — scene disposed.`);
+                    return;
+                }
+                if (myVersion !== this.scene._modelLoadVersion) {
+                    console.log(`[FlightSimple] Discarding stale fallback build (${cfg.code}) — newer load in progress.`);
+                    return;
+                }
                 console.warn('[FlightSimple] GLB load failed, building fallback', ex);
                 this.buildFallbackMesh(scene);
             },
@@ -356,6 +364,7 @@ export class AircraftModelSystem {
             m.material = mat;
             m.parent = this.scene.planeRoot;
         });
+        this.scene._loadedModelMeshes = fallbackMeshes;
         this.scene._lightingSystem.registerAircraftMeshes(fallbackMeshes);
         this.scene._buildNavLights(scene, this.scene.planeRoot, {
             halfSpan: 8,

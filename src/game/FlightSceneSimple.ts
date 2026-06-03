@@ -1390,6 +1390,18 @@ export class FlightSceneSimple extends Scene3D {
         try { this._airportOverlaysSystem.dispose(); } catch (err) { console.warn('[FlightSimple] AirportOverlays dispose failed:', err); }
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         try { this._liveTrafficSystem.dispose(); } catch (err) { console.warn('[FlightSimple] LiveTrafficSystem dispose failed:', err); }
+        try { this._highCloudsSystem.dispose(); } catch (err) { console.warn('[FlightSimple] HighCloudsSystem dispose failed:', err); }
+        try { this._terrainTilesSystem.disposeGround(); } catch (err) { console.warn('[FlightSimple] Ground dispose failed:', err); }
+        try {
+            this._loadedAnimGroups.forEach((g) => { try { g.dispose(); } catch (_) { /* ignore */ } });
+            this._loadedAnimGroups = [];
+            if (this._propellerAnimGroup) { try { this._propellerAnimGroup.dispose(); } catch (_) { /* ignore */ } this._propellerAnimGroup = null; }
+            this._loadedModelMeshes.forEach((m) => {
+                try { m.material?.dispose(); } catch (_) { /* ignore */ }
+                try { m.dispose(); } catch (_) { /* ignore */ }
+            });
+            this._loadedModelMeshes = [];
+        } catch (err) { console.warn('[FlightSimple] Aircraft model dispose failed:', err); }
         this.mpClient?.dispose();
         this.mpClient = null;
         this._removeUserGestureListener();

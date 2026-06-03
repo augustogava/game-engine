@@ -214,8 +214,8 @@ export class VfxSystem {
     }
 
     disposeContrails(): void {
-        if (this.scene._contrailPSLeft)  { try { this.scene._contrailPSLeft.dispose();  } catch (_) { /* ignore */ } }
-        if (this.scene._contrailPSRight) { try { this.scene._contrailPSRight.dispose(); } catch (_) { /* ignore */ } }
+        if (this.scene._contrailPSLeft)  { try { this.scene._contrailPSLeft.dispose(true);  } catch (_) { /* ignore */ } }
+        if (this.scene._contrailPSRight) { try { this.scene._contrailPSRight.dispose(true); } catch (_) { /* ignore */ } }
         if (this._ribbonSystem) {
             try { this._ribbonSystem.disposePair(this.scene._contrailRibbonLeft);  } catch (_) { /* ignore */ }
             try { this._ribbonSystem.disposePair(this.scene._contrailRibbonRight); } catch (_) { /* ignore */ }
@@ -267,7 +267,7 @@ export class VfxSystem {
     }
 
     disposeVaporCone(): void {
-        if (this.scene._vaporConePS)     { try { this.scene._vaporConePS.dispose();     } catch (_) { /* ignore */ } this.scene._vaporConePS = null; }
+        if (this.scene._vaporConePS)     { try { this.scene._vaporConePS.dispose(true);     } catch (_) { /* ignore */ } this.scene._vaporConePS = null; }
         if (this.scene._vaporConeEmitter){ try { this.scene._vaporConeEmitter.dispose();} catch (_) { /* ignore */ } this.scene._vaporConeEmitter = null; }
     }
 
@@ -323,7 +323,7 @@ export class VfxSystem {
     }
 
     disposeHeatHaze(): void {
-        if (this.scene._heatHazePS)     { try { this.scene._heatHazePS.dispose();     } catch (_) { /* ignore */ } this.scene._heatHazePS = null; }
+        if (this.scene._heatHazePS)     { try { this.scene._heatHazePS.dispose(true);     } catch (_) { /* ignore */ } this.scene._heatHazePS = null; }
         if (this.scene._heatHazeEmitter){ try { this.scene._heatHazeEmitter.dispose();} catch (_) { /* ignore */ } this.scene._heatHazeEmitter = null; }
     }
 

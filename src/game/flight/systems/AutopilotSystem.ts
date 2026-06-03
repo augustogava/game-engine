@@ -45,6 +45,8 @@ export class AutopilotSystem {
     }
 
     apCurrentNavTarget(): { lat: number; lon: number } | null {
+        const finalSeg = this._aprFinalSegment();
+        if (finalSeg) return { lat: finalSeg.thrLat, lon: finalSeg.thrLon };
         const wpts = this.scene._missionWaypoints;
         const wpIdx = this.scene._missionCurrentWpIndex;
         if (wpts && wpts.length > 0 && wpIdx >= 0 && wpIdx < wpts.length) {
@@ -60,21 +62,35 @@ export class AutopilotSystem {
         return null;
     }
 
-    aprCenterlinePrev(): { lat: number; lon: number } | null {
+    /**
+     * When APR is engaged and the aircraft is on the final segment (no remaining waypoint,
+     * or within the FAF capture distance of the threshold), returns the threshold position
+     * plus the reciprocal runway course so NAV/APR can track the runway centerline.
+     */
+    private _aprFinalSegment(): { thrLat: number; thrLon: number; recip: number } | null {
         if (!this.scene._autopilotAprHold) return null;
         const nav = this.scene._activeFlightPlanNav;
         if (!nav) return null;
         const hdg = Number(nav.arr_rwy_heading);
-        if (!Number.isFinite(hdg)) return null;
+        const thrLat = Number(nav.arrival_lat);
+        const thrLon = Number(nav.arrival_lon);
+        if (!Number.isFinite(hdg) || !Number.isFinite(thrLat) || !Number.isFinite(thrLon)) return null;
         const wpts = this.scene._missionWaypoints;
         const wpIdx = this.scene._missionCurrentWpIndex;
         const hasRemainingWp = wpts && wpts.length > 0 && wpIdx >= 0 && wpIdx < wpts.length;
-        if (hasRemainingWp) return null;
-        const thrLat = Number(nav.arrival_lat);
-        const thrLon = Number(nav.arrival_lon);
-        if (!Number.isFinite(thrLat) || !Number.isFinite(thrLon)) return null;
-        const recip = (hdg + 180) % 360;
-        return NavMath.destinationPoint(thrLat, thrLon, recip, AP_APR_CENTERLINE_FAF_NM);
+        if (hasRemainingWp) {
+            const here = this.apCurrentLatLon();
+            if (!here) return null;
+            const distNm = NavMath.haversineNm(here.lat, here.lon, thrLat, thrLon);
+            if (!Number.isFinite(distNm) || distNm > AP_APR_CENTERLINE_FAF_NM) return null;
+        }
+        return { thrLat, thrLon, recip: (hdg + 180) % 360 };
+    }
+
+    aprCenterlinePrev(): { lat: number; lon: number } | null {
+        const finalSeg = this._aprFinalSegment();
+        if (!finalSeg) return null;
+        return NavMath.destinationPoint(finalSeg.thrLat, finalSeg.thrLon, finalSeg.recip, AP_APR_CENTERLINE_FAF_NM);
     }
 
     apPrevNavLatLon(): { lat: number; lon: number } | null {
@@ -82,8 +98,9 @@ export class AutopilotSystem {
         if (centerline) return centerline;
         const wpts = this.scene._missionWaypoints;
         const wpIdx = this.scene._missionCurrentWpIndex;
-        if (wpts && wpts.length > 0 && wpIdx > 0 && wpIdx < wpts.length) {
-            const wp = wpts[wpIdx - 1];
+        if (wpts && wpts.length > 0 && wpIdx > 0) {
+            const prevIdx = Math.min(wpIdx, wpts.length) - 1;
+            const wp = wpts[prevIdx];
             const lat = Number(wp?.latitude);
             const lon = Number(wp?.longitude);
             if (Number.isFinite(lat) && Number.isFinite(lon)) {

@@ -94,6 +94,7 @@ const {
     ALT_BAND_GREEN_FT, ALT_BAND_AMBER_FT,
     GEAR_STATE_DOWN, GEAR_STATE_UP, GEAR_STATE_RETRACTING, GEAR_STATE_EXTENDING,
     GROUND_Y,
+    TERRAIN_UNKNOWN_Y,
     ON_GROUND_AGL_M,
     STALL_AOA_WARNING_FRACTION, STALL_WARNING_MIN_AGL_M,
     ISA_TROPOPAUSE_M, ISA_TROPOPAUSE_TEMP_K, ISA_SEA_LEVEL_TEMP_K, ISA_LAPSE_RATE_K_PER_M,
@@ -2296,9 +2297,10 @@ export class HudSystem {
         const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this.scene._tmpFwd, this.scene._tmpUp))));
         const pitchDeg = Math.round(pitchAngle * 180 / Math.PI);
 
+        const terrainKnown = !this.scene.tiles || this.scene.terrainY !== TERRAIN_UNKNOWN_Y;
         const groundY = this.scene.tiles ? this.scene.terrainY : GROUND_Y;
         const aglM = Math.max(0, pos.y - groundY);
-        const isOnGround = aglM < ON_GROUND_AGL_M;
+        const isOnGround = terrainKnown && aglM < ON_GROUND_AGL_M;
 
         this.scene.hudAttitude.textContent =
             isOnGround         ? 'GROUND'   :
@@ -2323,6 +2325,7 @@ export class HudSystem {
             && aoaAbs > STALL_AOA_WARNING_FRACTION * stallAlpha;
         const stallByIas = speedKtsIas < this.scene.aircraftConfig.stall_speed_kts;
         const stallActive = this.scene._spawnSnapFramesLeft <= 0
+            && terrainKnown
             && aglM > STALL_WARNING_MIN_AGL_M
             && (stallByIas || stallByAoa);
 
@@ -2340,9 +2343,11 @@ export class HudSystem {
         }
 
         this.scene._updateOverspeed(speedKtsIas, currentMach);
-        const aglFtForGpws = aglM * 3.28084;
-        const vsFpmForGpws = Math.round(this.scene.velocity.y * 196.85);
-        this.scene._updateGPWS(aglFtForGpws, vsFpmForGpws);
+        if (terrainKnown) {
+            const aglFtForGpws = aglM * 3.28084;
+            const vsFpmForGpws = Math.round(this.scene.velocity.y * 196.85);
+            this.scene._updateGPWS(aglFtForGpws, vsFpmForGpws);
+        }
         const anyWarn = stallActive || this.scene._overspeedActive;
         this.scene.hudWarning.style.display = anyWarn ? 'block' : 'none';
         if (anyWarn && this.scene.hudWarning) {
@@ -2365,10 +2370,12 @@ export class HudSystem {
         }
 
         try {
-            const vsFpm = this.scene.velocity.y * 196.85;
-            const gearDown = this.scene.gearState === GEAR_STATE_DOWN || this.scene.gearState === GEAR_STATE_EXTENDING;
-            const aglFt = aglM * 3.28084;
-            this.scene._flightAudio.updateGpws(aglFt, vsFpm, isOnGround, gearDown);
+            if (terrainKnown) {
+                const vsFpm = this.scene.velocity.y * 196.85;
+                const gearDown = this.scene.gearState === GEAR_STATE_DOWN || this.scene.gearState === GEAR_STATE_EXTENDING;
+                const aglFt = aglM * 3.28084;
+                this.scene._flightAudio.updateGpws(aglFt, vsFpm, isOnGround, gearDown);
+            }
         } catch (_) { /* ignore */ }
         const overGActive = this.scene._gForce > OVER_G_THRESHOLD;
         if (overGActive && !this.scene._lastOverGState) {
@@ -3334,8 +3341,9 @@ export class HudSystem {
         const oatC = tempK - 273.15;
         const wind = this.scene._getWindAtAltitude(altitude);
         const mach = Number.isFinite(this.scene._lastMach) ? this.scene._lastMach : 0;
+        const terrainKnown = !this.scene.tiles || this.scene.terrainY !== TERRAIN_UNKNOWN_Y;
         const groundY = this.scene.tiles ? this.scene.terrainY : GROUND_Y;
-        const aglFt = Math.max(0, pPos.y - groundY) * 3.28084;
+        const aglFt = terrainKnown ? Math.max(0, pPos.y - groundY) * 3.28084 : Number.NaN;
         const navInfo = this._getPfdNavInfo();
 
         const vel = this.scene.velocity;

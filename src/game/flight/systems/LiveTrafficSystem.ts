@@ -73,6 +73,7 @@ export class LiveTrafficSystem {
     private _fetchInFlight = false;
     private _initStartMs = 0;
     private _disposed = false;
+    private readonly _abortController = new AbortController();
     private _trafficAssetContainer: BABYLON.AssetContainer | null = null;
     private _trafficModelLoading = false;
     private _trafficModelFailed = false;
@@ -130,6 +131,7 @@ export class LiveTrafficSystem {
 
     dispose(): void {
         this._disposed = true;
+        try { this._abortController.abort(); } catch (_) { /* ignore */ }
         for (const [, entity] of this.entities) {
             this._disposeEntity(entity);
         }
@@ -165,6 +167,7 @@ export class LiveTrafficSystem {
         fetchLiveTrafficPositions(bounds, {
             categories: LIVE_TRAFFIC_CATEGORIES,
             limit: LIVE_TRAFFIC_LIMIT,
+            signal: this._abortController.signal,
         }).then((flights) => {
             if (this._disposed) return;
             this._onFetchResult(flights);

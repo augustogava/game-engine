@@ -7,6 +7,8 @@ import type { ContrailRibbonHandle } from '../systems/ContrailRibbonSystem.js';
 export interface RemotePlayer {
     root: BABYLON.TransformNode;
     meshes: BABYLON.Mesh[];
+    animationGroups: BABYLON.AnimationGroup[];
+    skeletons: BABYLON.Skeleton[];
     prevState: PlayerState | null;
     nextState: PlayerState | null;
     lastUpdateTime: number;

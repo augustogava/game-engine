@@ -324,4 +324,17 @@ export class TerrainTilesSystem {
         this.scene.ground.receiveShadows = true;
         this.scene.ground.freezeWorldMatrix();
     }
+
+    disposeGround(): void {
+        try {
+            if (this.scene.ground) {
+                try { this.scene.ground.material?.dispose(); } catch (_) { /* ignore */ }
+                this.scene.ground.dispose();
+                this.scene.ground = null;
+                console.debug('[Terrain] Ground disposed');
+            }
+        } catch (err) {
+            console.warn('[Terrain] disposeGround failed:', err);
+        }
+    }
 }

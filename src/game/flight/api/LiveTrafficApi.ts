@@ -10,6 +10,7 @@ export interface LiveTrafficBounds {
 export interface LiveTrafficFetchOptions {
     categories?: string;
     limit?: number;
+    signal?: AbortSignal;
 }
 
 function isValidBounds(b: LiveTrafficBounds): boolean {
@@ -43,7 +44,7 @@ export async function fetchLiveTrafficPositions(
         if (Number.isFinite(opts.limit) && (opts.limit as number) > 0) params.set('limit', String(Math.floor(opts.limit as number)));
 
         const headers: Record<string, string> = { 'Authorization': `Bearer ${token}` };
-        const resp = await fetch(`/api/live-traffic/positions?${params.toString()}`, { headers });
+        const resp = await fetch(`/api/live-traffic/positions?${params.toString()}`, { headers, signal: opts.signal });
         if (!resp.ok) {
             console.warn(`[LiveTraffic] HTTP ${resp.status} fetching positions`);
             return [];
@@ -72,6 +73,10 @@ export async function fetchLiveTrafficPositions(
         console.debug(`[LiveTraffic] Fetched ${flights.length} flights (bounds=${boundsStr})`);
         return flights;
     } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+            console.debug('[LiveTraffic] fetchLiveTrafficPositions aborted');
+            return [];
+        }
         console.warn('[LiveTraffic] fetchLiveTrafficPositions failed:', err);
         return [];
     }

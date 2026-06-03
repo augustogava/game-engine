@@ -49,6 +49,7 @@ export interface ContrailRibbonHandle {
     prevPerpY: number;
     prevPerpZ: number;
     prevPerpValid: boolean;
+    canceled: boolean;
 }
 
 export class ContrailRibbonSystem {
@@ -203,6 +204,7 @@ export class ContrailRibbonSystem {
             prevPerpY: 0,
             prevPerpZ: 1,
             prevPerpValid: false,
+            canceled: false,
         };
     }
 
@@ -210,6 +212,10 @@ export class ContrailRibbonSystem {
         try {
             const ok = await this.registerShaders();
             if (!ok) return;
+            if (handle.canceled) {
+                console.debug(`[ContrailRibbon] Init aborted: handle canceled (${handle.idTag})`);
+                return;
+            }
             if (handle.mesh) return;
             if (!handle.parentRoot || (handle.parentRoot as any).isDisposed && (handle.parentRoot as any).isDisposed()) return;
             const mat = this._buildMaterial(scene, handle.idTag);
@@ -227,6 +233,9 @@ export class ContrailRibbonSystem {
 
     disposePair(handle: ContrailRibbonHandle | null): void {
         if (!handle) return;
+        handle.canceled = true;
+        const idx = this._pendingHandles.indexOf(handle);
+        if (idx >= 0) this._pendingHandles.splice(idx, 1);
         try { handle.material?.dispose(); } catch (_) { /* ignore */ }
         try { handle.mesh?.dispose(); } catch (_) { /* ignore */ }
         handle.material = null;

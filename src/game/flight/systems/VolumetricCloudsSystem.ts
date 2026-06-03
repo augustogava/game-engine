@@ -8,6 +8,7 @@ import {
 
 export class VolumetricCloudsSystem {
     private readonly scene: any;
+    private _toggleToken = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -30,6 +31,7 @@ export class VolumetricCloudsSystem {
     }
 
     setVolumetricClouds(scene: BABYLON.Scene, enabled: boolean): void {
+        const myToken = ++this._toggleToken;
         if (enabled === !!this.scene._volumetricCloudsPost) return;
         const cam = scene.activeCamera;
         if (enabled) {
@@ -39,6 +41,10 @@ export class VolumetricCloudsSystem {
             }
             this.registerVolumetricShader().then((ok) => {
                 if (!ok || this.scene._volumetricCloudsPost) return;
+                if (this.scene._disposed || myToken !== this._toggleToken) {
+                    console.debug('[VolumetricClouds] Enable aborted: feature toggled off or scene disposed during shader load');
+                    return;
+                }
                 try {
                     for (const c of this.scene.cloudInstances) c.mesh.isVisible = false;
                     if (this.scene._overcastMesh) this.scene._overcastMesh.isVisible = false;
