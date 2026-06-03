@@ -390,6 +390,8 @@ import { AtcSystem } from './flight/systems/AtcSystem.js';
 import { WeatherService } from './flight/systems/WeatherService.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
+const PAUSED_UI_UPDATE_INTERVAL_FRAMES = 6;
+
 export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _waterSystem = new WaterSystem(this);
     /** @internal */ private readonly _vegetationSystem = new VegetationSystem(this);
@@ -1073,7 +1075,7 @@ export class FlightSceneSimple extends Scene3D {
         const scaledDt = dt * effectiveTimeScale;
         if (physicsActive) {
             this.physicsAccumulator += scaledDt;
-            const maxSteps = 8;
+            const maxSteps = Math.max(8, Math.ceil(8 * effectiveTimeScale));
             let steps = 0;
             while (this.physicsAccumulator >= this.FIXED_DT && steps < maxSteps) {
                 this._applyPhysics(this.FIXED_DT);
@@ -1126,8 +1128,11 @@ export class FlightSceneSimple extends Scene3D {
         this._updateHeatHaze();
         this._updateLensFlareOcclusion(dt * 1000);
         this._updateMotionBlurAndDof();
-        this._updateHUD();
-        this._updateGEffectsOverlay(dt);
+        const updatePlayerUi = !this._paused || (this._frameTick % PAUSED_UI_UPDATE_INTERVAL_FRAMES === 0);
+        if (updatePlayerUi) {
+            this._updateHUD();
+            this._updateGEffectsOverlay(dt);
+        }
         if (!this._paused) {
             this._sendOwnState();
         }

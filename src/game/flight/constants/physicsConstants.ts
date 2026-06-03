@@ -6,6 +6,7 @@ export const CRASH_VS_THRESHOLD_MS = -12;
 export const CRASH_GROUND_SPEED_MS = 25.7;
 export const CRASH_GROUND_ATTITUDE_DEG = 45;
 export const GROUND_LATERAL_GRIP_PER_S = 6;
+export const GROUND_WIND_AERO_FADE_MS = 25;
 export const CRASH_METERS_TO_FEET = 3.28084;
 export const CRASH_MPS_TO_FPM = 196.85;
 

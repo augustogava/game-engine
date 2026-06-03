@@ -78,6 +78,7 @@ export class LiveTrafficSystem {
     private _trafficModelLoading = false;
     private _trafficModelFailed = false;
     private _trafficModelScale = 1;
+    private readonly _minimapEntries: LiveTrafficMinimapEntry[] = [];
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -115,17 +116,23 @@ export class LiveTrafficSystem {
     }
 
     getTrafficEntries(): LiveTrafficMinimapEntry[] {
-        const list: LiveTrafficMinimapEntry[] = [];
+        const list = this._minimapEntries;
+        let i = 0;
         for (const [, entity] of this.entities) {
-            list.push({
-                fr24Id: entity.fr24Id,
-                callsign: entity.callsign,
-                lat: entity.currentLat,
-                lon: entity.currentLon,
-                trackDeg: entity.trackDeg,
-                altFt: entity.currentAltFt,
-            });
+            let entry = list[i];
+            if (!entry) {
+                entry = { fr24Id: '', callsign: '', lat: 0, lon: 0, trackDeg: 0, altFt: 0 };
+                list[i] = entry;
+            }
+            entry.fr24Id = entity.fr24Id;
+            entry.callsign = entity.callsign;
+            entry.lat = entity.currentLat;
+            entry.lon = entity.currentLon;
+            entry.trackDeg = entity.trackDeg;
+            entry.altFt = entity.currentAltFt;
+            i++;
         }
+        if (list.length > i) list.length = i;
         return list;
     }
 

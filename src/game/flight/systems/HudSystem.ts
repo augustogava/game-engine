@@ -114,6 +114,26 @@ export class HudSystem {
 
     private _lastChecklistHtml: string = '';
 
+    private _hudSpeedUnitEl: Element | null = null;
+    private _hudAltUnitEl: Element | null = null;
+
+    private _setText(el: { textContent: string | null } | null | undefined, value: string): void {
+        if (!el) return;
+        if ((el as any).__hudText !== value) {
+            el.textContent = value;
+            (el as any).__hudText = value;
+        }
+    }
+
+    private _setStyle(el: HTMLElement | null | undefined, prop: string, value: string): void {
+        if (!el) return;
+        const cache = ((el as any).__hudStyle ||= {});
+        if (cache[prop] !== value) {
+            (el.style as any)[prop] = value;
+            cache[prop] = value;
+        }
+    }
+
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
         this._resizeHandler = () => {
@@ -2168,7 +2188,7 @@ export class HudSystem {
         const localDate = new Date(localMs);
         const lhh = String(localDate.getUTCHours()).padStart(2, '0');
         const lmm = String(localDate.getUTCMinutes()).padStart(2, '0');
-        this.scene.hudUtc.textContent = `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC \u00B7 ${lhh}:${lmm} LCL`;
+        this._setText(this.scene.hudUtc, `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC \u00B7 ${lhh}:${lmm} LCL`);
 
         const tasMs = Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length();
         const iasMs = Number.isFinite(this.scene._lastIasMs) ? this.scene._lastIasMs : tasMs;
@@ -2187,27 +2207,27 @@ export class HudSystem {
         const altitudeMslFt = Math.round(Math.max(0, this.scene.refAlt + pos.y) * 3.28084);
         const speedDisp = this.scene._convertSpeedKts(speedKts);
         const altDisp = this.scene._convertAltitudeFt(altitudeMslFt);
-        this.scene.hudSpeedVal.textContent = String(speedDisp.value);
-        this.scene.hudAltVal.textContent   = String(altDisp.value);
-        if (this.scene.hudSpeedVal.parentElement) {
-            const u = this.scene.hudSpeedVal.parentElement.querySelector('.hud-unit');
-            if (u) u.textContent = speedDisp.unit;
+        this._setText(this.scene.hudSpeedVal, String(speedDisp.value));
+        this._setText(this.scene.hudAltVal, String(altDisp.value));
+        if (this._hudSpeedUnitEl === null && this.scene.hudSpeedVal.parentElement) {
+            this._hudSpeedUnitEl = this.scene.hudSpeedVal.parentElement.querySelector('.hud-unit');
         }
-        if (this.scene.hudAltVal.parentElement) {
-            const u = this.scene.hudAltVal.parentElement.querySelector('.hud-unit');
-            if (u) u.textContent = altDisp.unit;
+        if (this._hudAltUnitEl === null && this.scene.hudAltVal.parentElement) {
+            this._hudAltUnitEl = this.scene.hudAltVal.parentElement.querySelector('.hud-unit');
         }
-        this.scene.hudThrottle.style.width = `${pct}%`;
-        if (this.scene.hudThrPct) this.scene.hudThrPct.textContent = `${pct}%`;
+        this._setText(this._hudSpeedUnitEl, speedDisp.unit);
+        this._setText(this._hudAltUnitEl, altDisp.unit);
+        this._setStyle(this.scene.hudThrottle, 'width', `${pct}%`);
+        if (this.scene.hudThrPct) this._setText(this.scene.hudThrPct, `${pct}%`);
         const _engAliveArr = Array.isArray(this.scene._engineAlive) ? this.scene._engineAlive : [];
         const _eng1Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[0] === true);
         const _eng2Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[1] === true);
         const _eng3Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[2] === true);
         const _eng4Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[3] === true);
-        if (this.scene.hudEng1Pct) this.scene.hudEng1Pct.textContent = `${_eng1Alive ? pct : 0}%`;
-        if (this.scene.hudEng2Pct) this.scene.hudEng2Pct.textContent = `${_eng2Alive ? pct : 0}%`;
-        if (this.scene.hudEng3Pct) this.scene.hudEng3Pct.textContent = `${_eng3Alive ? pct : 0}%`;
-        if (this.scene.hudEng4Pct) this.scene.hudEng4Pct.textContent = `${_eng4Alive ? pct : 0}%`;
+        if (this.scene.hudEng1Pct) this._setText(this.scene.hudEng1Pct, `${_eng1Alive ? pct : 0}%`);
+        if (this.scene.hudEng2Pct) this._setText(this.scene.hudEng2Pct, `${_eng2Alive ? pct : 0}%`);
+        if (this.scene.hudEng3Pct) this._setText(this.scene.hudEng3Pct, `${_eng3Alive ? pct : 0}%`);
+        if (this.scene.hudEng4Pct) this._setText(this.scene.hudEng4Pct, `${_eng4Alive ? pct : 0}%`);
         if (this.scene.hudAbTag) {
             this.scene.hudAbTag.style.display = this.scene.thrust > 1.0 ? '' : 'none';
         }
@@ -2255,12 +2275,12 @@ export class HudSystem {
         }
 
         const flapDeg = this.scene.FLAP_STEPS[this.scene.flapIndex];
-        this.scene.hudFlapVal.textContent = flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF';
-        this.scene.hudBrakeVal.textContent = this.scene.brakesOn ? 'ON' : 'OFF';
-        this.scene.hudBrakeVal.style.color = this.scene.brakesOn ? '#ff4040' : '';
+        this._setText(this.scene.hudFlapVal, flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF');
+        this._setText(this.scene.hudBrakeVal, this.scene.brakesOn ? 'ON' : 'OFF');
+        this._setStyle(this.scene.hudBrakeVal, 'color', this.scene.brakesOn ? '#ff4040' : '');
 
         if (this.scene.hudGearRow) {
-            this.scene.hudGearRow.style.display = '';
+            this._setStyle(this.scene.hudGearRow, 'display', '');
             const gs = this.scene.gearState;
             const label = gs === GEAR_STATE_DOWN ? 'DOWN'
                 : gs === GEAR_STATE_UP ? 'UP'
@@ -2269,8 +2289,8 @@ export class HudSystem {
             const color = gs === GEAR_STATE_DOWN ? '#50ff80'
                 : gs === GEAR_STATE_UP ? '#888'
                 : '#ffcc00';
-            this.scene.hudGearState.textContent = label;
-            this.scene.hudGearState.style.color = color;
+            this._setText(this.scene.hudGearState, label);
+            this._setStyle(this.scene.hudGearState, 'color', color);
             if (this.scene.isMobile) {
                 const gearBtn = document.getElementById('touch-gear');
                 if (gearBtn) {
@@ -2302,10 +2322,10 @@ export class HudSystem {
         const aglM = Math.max(0, pos.y - groundY);
         const isOnGround = terrainKnown && aglM < ON_GROUND_AGL_M;
 
-        this.scene.hudAttitude.textContent =
+        this._setText(this.scene.hudAttitude,
             isOnGround         ? 'GROUND'   :
             pitchAngle > 0.08  ? 'CLIMB' :
-            pitchAngle < -0.08 ? 'DESC'   : 'LEVEL';
+            pitchAngle < -0.08 ? 'DESC'   : 'LEVEL');
         try {
             this.scene._engineSound.setThrottle(this.scene.thrust);
             this.scene._engineSound.setRpm(this.scene.engineRpm);
@@ -2384,12 +2404,12 @@ export class HudSystem {
         }
         this.scene._lastOverGState = overGActive;
 
-        this.scene.hudFps.textContent =
-            `${this.scene.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`;
+        this._setText(this.scene.hudFps,
+            `${this.scene.scene?.getEngine?.()?.getFps?.()?.toFixed(0) ?? '--'} FPS`);
 
-        if (this.scene.hudTasVal) this.scene.hudTasVal.textContent = String(speedKtsTas);
-        if (this.scene.hudGsVal)  this.scene.hudGsVal.textContent  = String(speedKtsGs);
-        if (this.scene.hudIasVal) this.scene.hudIasVal.textContent = String(speedKtsIas);
+        if (this.scene.hudTasVal) this._setText(this.scene.hudTasVal, String(speedKtsTas));
+        if (this.scene.hudGsVal)  this._setText(this.scene.hudGsVal, String(speedKtsGs));
+        if (this.scene.hudIasVal) this._setText(this.scene.hudIasVal, String(speedKtsIas));
 
         if (this.scene.hudApState) {
             if (this.scene._autopilotMaster) {
@@ -2399,11 +2419,11 @@ export class HudSystem {
                 if (this.scene._autopilotAprHold) parts.push('APR');
                 else if (this.scene._autopilotVsHold) parts.push(`VS ${this.scene._autopilotTargetVsFpm >= 0 ? '+' : ''}${Math.round(this.scene._autopilotTargetVsFpm)}`);
                 else if (this.scene._autopilotAltHold) parts.push(`ALT ${Math.round(this.scene._autopilotTargetAltFt)}`);
-                this.scene.hudApState.textContent = parts.length ? parts.join(' / ') : 'ON';
-                this.scene.hudApState.style.color = '#40ff80';
+                this._setText(this.scene.hudApState, parts.length ? parts.join(' / ') : 'ON');
+                this._setStyle(this.scene.hudApState, 'color', '#40ff80');
             } else {
-                this.scene.hudApState.textContent = 'OFF';
-                this.scene.hudApState.style.color = '#888';
+                this._setText(this.scene.hudApState, 'OFF');
+                this._setStyle(this.scene.hudApState, 'color', '#888');
             }
         }
         this.scene._updateAutopilotPanel();
@@ -2411,14 +2431,14 @@ export class HudSystem {
         if (this.scene.hudSpoilerState) {
             const pct = Math.round(this.scene._spoilerDeflection * 100);
             if (this.scene._spoilerArmed && pct === 0) {
-                this.scene.hudSpoilerState.textContent = 'ARM';
-                this.scene.hudSpoilerState.style.color = '#ffcc55';
+                this._setText(this.scene.hudSpoilerState, 'ARM');
+                this._setStyle(this.scene.hudSpoilerState, 'color', '#ffcc55');
             } else if (pct > 0) {
-                this.scene.hudSpoilerState.textContent = `${pct}%`;
-                this.scene.hudSpoilerState.style.color = '#40ff80';
+                this._setText(this.scene.hudSpoilerState, `${pct}%`);
+                this._setStyle(this.scene.hudSpoilerState, 'color', '#40ff80');
             } else {
-                this.scene.hudSpoilerState.textContent = '--';
-                this.scene.hudSpoilerState.style.color = '#888';
+                this._setText(this.scene.hudSpoilerState, '--');
+                this._setStyle(this.scene.hudSpoilerState, 'color', '#888');
             }
             if (this.scene.isMobile) {
                 const splBtn = document.getElementById('touch-spl');
@@ -2432,14 +2452,14 @@ export class HudSystem {
             const total = Math.max(1, this.scene.aircraftConfig.engine_count ?? 1);
             const alive = Array.isArray(this.scene._engineAlive) ? this.scene._engineAlive.filter(Boolean).length : total;
             if (alive === total) {
-                this.scene.hudEngsState.textContent = 'OK';
-                this.scene.hudEngsState.style.color = '#40ff80';
+                this._setText(this.scene.hudEngsState, 'OK');
+                this._setStyle(this.scene.hudEngsState, 'color', '#40ff80');
             } else if (alive === 0) {
-                this.scene.hudEngsState.textContent = 'OUT';
-                this.scene.hudEngsState.style.color = '#ff4040';
+                this._setText(this.scene.hudEngsState, 'OUT');
+                this._setStyle(this.scene.hudEngsState, 'color', '#ff4040');
             } else {
-                this.scene.hudEngsState.textContent = `${alive}/${total}`;
-                this.scene.hudEngsState.style.color = '#ffcc55';
+                this._setText(this.scene.hudEngsState, `${alive}/${total}`);
+                this._setStyle(this.scene.hudEngsState, 'color', '#ffcc55');
             }
         }
 
@@ -2453,55 +2473,55 @@ export class HudSystem {
         const _engineRpmAngle = -120 + _engineClamped * 240;
         const _engineDeadAngle = -120;
         const _engRpmRounded = Math.round(this.scene.engineRpm);
-        if (this.scene.hudRpmVal) this.scene.hudRpmVal.textContent = String(_eng1Alive ? _engRpmRounded : 0);
+        if (this.scene.hudRpmVal) this._setText(this.scene.hudRpmVal, String(_eng1Alive ? _engRpmRounded : 0));
         if (this.scene.hudRpmNeedle) {
-            this.scene.hudRpmNeedle.style.transform = `rotate(${_eng1Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
+            this._setStyle(this.scene.hudRpmNeedle, 'transform', `rotate(${_eng1Alive ? _engineRpmAngle : _engineDeadAngle}deg)`);
         }
         const _engineCountCfg = this.scene.aircraftConfig?.engine_count ?? 1;
         if (this.scene.hudEngine2Col && _engineCountCfg >= 2) {
-            if (this.scene.hudRpmVal2) this.scene.hudRpmVal2.textContent = String(_eng2Alive ? _engRpmRounded : 0);
-            if (this.scene.hudRpmNeedle2) this.scene.hudRpmNeedle2.style.transform = `rotate(${_eng2Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
+            if (this.scene.hudRpmVal2) this._setText(this.scene.hudRpmVal2, String(_eng2Alive ? _engRpmRounded : 0));
+            if (this.scene.hudRpmNeedle2) this._setStyle(this.scene.hudRpmNeedle2, 'transform', `rotate(${_eng2Alive ? _engineRpmAngle : _engineDeadAngle}deg)`);
         }
         if (this.scene.hudEngine3Col && _engineCountCfg >= 3) {
-            if (this.scene.hudRpmVal3) this.scene.hudRpmVal3.textContent = String(_eng3Alive ? _engRpmRounded : 0);
-            if (this.scene.hudRpmNeedle3) this.scene.hudRpmNeedle3.style.transform = `rotate(${_eng3Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
+            if (this.scene.hudRpmVal3) this._setText(this.scene.hudRpmVal3, String(_eng3Alive ? _engRpmRounded : 0));
+            if (this.scene.hudRpmNeedle3) this._setStyle(this.scene.hudRpmNeedle3, 'transform', `rotate(${_eng3Alive ? _engineRpmAngle : _engineDeadAngle}deg)`);
         }
         if (this.scene.hudEngine4Col && _engineCountCfg >= 4) {
-            if (this.scene.hudRpmVal4) this.scene.hudRpmVal4.textContent = String(_eng4Alive ? _engRpmRounded : 0);
-            if (this.scene.hudRpmNeedle4) this.scene.hudRpmNeedle4.style.transform = `rotate(${_eng4Alive ? _engineRpmAngle : _engineDeadAngle}deg)`;
+            if (this.scene.hudRpmVal4) this._setText(this.scene.hudRpmVal4, String(_eng4Alive ? _engRpmRounded : 0));
+            if (this.scene.hudRpmNeedle4) this._setStyle(this.scene.hudRpmNeedle4, 'transform', `rotate(${_eng4Alive ? _engineRpmAngle : _engineDeadAngle}deg)`);
         }
 
         const fuelPct = this.scene.aircraftConfig.fuel_capacity_kg > 0
             ? Math.round((this.scene.fuelRemaining / this.scene.aircraftConfig.fuel_capacity_kg) * 100)
             : 100;
-        if (this.scene.hudFuelVal) this.scene.hudFuelVal.textContent = `${fuelPct}%`;
+        if (this.scene.hudFuelVal) this._setText(this.scene.hudFuelVal, `${fuelPct}%`);
 
         const aoaSource = Number.isFinite(this.scene._lastAoaRad) ? this.scene._lastAoaRad : 0;
         const aoaDeg = Math.round(aoaSource * 180 / Math.PI);
-        if (this.scene.hudAoaVal) this.scene.hudAoaVal.textContent = `${aoaDeg}\u00B0`;
+        if (this.scene.hudAoaVal) this._setText(this.scene.hudAoaVal, `${aoaDeg}\u00B0`);
 
         const vsFpm = Math.round(this.scene.velocity.y * 196.85);
-        if (this.scene.hudVsVal) this.scene.hudVsVal.textContent = String(vsFpm);
+        if (this.scene.hudVsVal) this._setText(this.scene.hudVsVal, String(vsFpm));
 
         if (this.scene.hudVsPointer) {
             const vsForPointer = Number.isFinite(vsFpm) ? vsFpm : 0;
             const vsRangeFpm = 6000;
             const vsClamped = Math.max(-vsRangeFpm, Math.min(vsRangeFpm, vsForPointer));
             const vsTopPct = 50 - (vsClamped / vsRangeFpm) * 50;
-            this.scene.hudVsPointer.style.top = `${vsTopPct}%`;
+            this._setStyle(this.scene.hudVsPointer, 'top', `${vsTopPct}%`);
         }
         if (this.scene.hudVsBar) {
             const vsClamp = Math.max(-1000, Math.min(1000, vsFpm));
             const vsHeight = Math.abs(vsClamp) / 1000 * 50;
-            this.scene.hudVsBar.style.height = `${vsHeight}%`;
-            this.scene.hudVsBar.style.bottom = vsFpm >= 0 ? '50%' : `${50 - vsHeight}%`;
-            this.scene.hudVsBar.style.background = vsFpm >= 0 
+            this._setStyle(this.scene.hudVsBar, 'height', `${vsHeight}%`);
+            this._setStyle(this.scene.hudVsBar, 'bottom', vsFpm >= 0 ? '50%' : `${50 - vsHeight}%`);
+            this._setStyle(this.scene.hudVsBar, 'background', vsFpm >= 0 
                 ? 'linear-gradient(to top,rgba(50,200,100,.8),rgba(100,255,150,.6))'
-                : 'linear-gradient(to bottom,rgba(200,100,50,.8),rgba(255,150,100,.6))';
+                : 'linear-gradient(to bottom,rgba(200,100,50,.8),rgba(255,150,100,.6))');
         }
 
-        if (this.scene.hudTrimVal) this.scene.hudTrimVal.textContent = String(Math.round(this.scene.trimPitch * 1000));
-        if (this.scene.hudBaroVal) this.scene.hudBaroVal.textContent = '29.92';
+        if (this.scene.hudTrimVal) this._setText(this.scene.hudTrimVal, String(Math.round(this.scene.trimPitch * 1000)));
+        if (this.scene.hudBaroVal) this._setText(this.scene.hudBaroVal, '29.92');
 
         if (this.scene.hudHdgVal) {
             const fwdFlat = this.scene._tmpFwd.subtract(this.scene._tmpUp.scale(BABYLON.Vector3.Dot(this.scene._tmpFwd, this.scene._tmpUp)));
@@ -2514,7 +2534,7 @@ export class HudSystem {
             const here = this.scene._apCurrentLatLon();
             const magVar = here ? this.scene._magneticVariationDeg(here.lat, here.lon) : 0;
             const hdgMagDeg = Math.round(((hdgTrueDeg - magVar) + 360) % 360);
-            this.scene.hudHdgVal.textContent = `${hdgMagDeg}\u00B0M`;
+            this._setText(this.scene.hudHdgVal, `${hdgMagDeg}\u00B0M`);
         }
 
         this.scene._updateTapeMarks(speedKts, altitudeFt);

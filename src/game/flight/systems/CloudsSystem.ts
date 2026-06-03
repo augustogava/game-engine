@@ -57,10 +57,17 @@ export class CloudsSystem {
             { count: 80,  yMin: 4000, yRange: 2500, spread: 52000, sizeBase: 1500, aspectY: 0.25, windMult: 3.0 },
         ];
 
+        let baseCloudTex: BABYLON.Texture | null = null;
         for (const layer of layers) {
             const variantTemplates: BABYLON.Mesh[] = [];
             for (let v = 0; v < CLOUD_VARIANT_COUNT; v++) {
-                const tex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
+                let tex: BABYLON.Texture;
+                if (baseCloudTex === null) {
+                    baseCloudTex = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
+                    tex = baseCloudTex;
+                } else {
+                    tex = baseCloudTex.clone();
+                }
                 tex.hasAlpha = true;
                 tex.wAng = (v / CLOUD_VARIANT_COUNT) * Math.PI * 2;
 

@@ -78,6 +78,7 @@ const {
     CRASH_GROUND_SPEED_MS,
     CRASH_GROUND_ATTITUDE_DEG,
     GROUND_LATERAL_GRIP_PER_S,
+    GROUND_WIND_AERO_FADE_MS,
     CINEMATIC_DURATION_MS,
     CAMERA_RADIUS_MIN_M,
     CAMERA_RADIUS_MAX_M,
@@ -95,6 +96,9 @@ import { UiPreferences } from '../../UiPreferences.js';
 
 export class FlightPhysicsSystem {
     private readonly scene: any;
+
+    private readonly _tmpPointVelCross = new BABYLON.Vector3();
+    private readonly _tmpPointVel = new BABYLON.Vector3();
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -509,6 +513,13 @@ export class FlightPhysicsSystem {
         this.scene._getWindVectorWorldRef(altMslFtForWind, this.scene._tmpWindWorld);
         const windWorld = this.scene._tmpWindWorld;
 
+        const groundAeroWindScale = anyGearOnGround
+            ? Math.max(0, Math.min(1, this.scene.groundSpeed / GROUND_WIND_AERO_FADE_MS))
+            : 1;
+        const aeroWindWorld = groundAeroWindScale < 1
+            ? windWorld.scale(groundAeroWindScale)
+            : windWorld;
+
         const computeForces = (vel: BABYLON.Vector3, angVel: BABYLON.Vector3) => {
             const totalForce  = BABYLON.Vector3.Zero();
             const totalTorque = BABYLON.Vector3.Zero();
@@ -517,12 +528,14 @@ export class FlightPhysicsSystem {
 
             totalForce.addInPlace(toWorld(thrustVec));
 
-            const airVelWorld = vel.subtract(windWorld);
+            const airVelWorld = vel.subtract(aeroWindWorld);
             const bodyVel = toBody(airVelWorld);
             let primaryAlpha = 0;
             for (let si = 0; si < this.scene.surfaces.length; si++) {
                 const surface = this.scene.surfaces[si];
-                const pointVel = bodyVel.add(BABYLON.Vector3.Cross(angVel, surface.position));
+                BABYLON.Vector3.CrossToRef(angVel, surface.position, this._tmpPointVelCross);
+                bodyVel.addToRef(this._tmpPointVelCross, this._tmpPointVel);
+                const pointVel = this._tmpPointVel;
                 const isTailSurface = si >= 2;
                 const pwBoost = isTailSurface ? propwashBoost : 0;
                 const { force, torque, liftVec } = computeSurfaceForces(

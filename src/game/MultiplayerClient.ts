@@ -48,7 +48,10 @@ export class MultiplayerClient {
                 this.onCountChangeCb?.(this._onlineCount);
             }
             if (msg.type === 'state' && Array.isArray(msg.players)) {
-                const players = msg.players.map((p: any) => ({ ...p, userId: String(p.userId) }));
+                const players = msg.players as PlayerState[];
+                for (let i = 0; i < players.length; i++) {
+                    players[i].userId = String(players[i].userId);
+                }
                 this.onPlayersUpdateCb?.(players);
             }
             if (msg.type === 'playerJoined' || msg.type === 'playerLeft') {

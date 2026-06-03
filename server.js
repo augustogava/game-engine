@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
@@ -146,6 +147,10 @@ const MIME_TYPES = {
     '.glb': 'model/gltf-binary',
     '.hdr': 'application/octet-stream',
 };
+
+const STATIC_IMMUTABLE_EXTS = ['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.woff', '.woff2', '.glb', '.gltf', '.bin', '.ktx2'];
+const COMPRESSIBLE_EXTS = new Set(['.js', '.css', '.json', '.map', '.svg', '.html']);
+const COMPRESSION_MIN_BYTES = 1024;
 
 // ── Haversine (nautical miles) ────────────────────────────────────────────────
 function haversineNm(lat1, lon1, lat2, lon2) {
@@ -549,8 +554,8 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
 
     const elapsed = entry.flightStartTime ? (Date.now() - entry.flightStartTime) : 0;
     const distKm = entry.flightDistanceNm * 1.852;
-    const avgSpeed = entry.speedSamples.length
-        ? entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length
+    const avgSpeed = entry.speedSampleCount
+        ? entry.speedSampleSum / entry.speedSampleCount
         : null;
 
     let arrivalAirportId = null;
@@ -664,7 +669,8 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     entry.departureAlt = 0;
     entry.isAirborne = false;
     entry.maxAltitudeFt = 0;
-    entry.speedSamples = [];
+    entry.speedSampleSum = 0;
+    entry.speedSampleCount = 0;
     entry.routePoints = [];
     entry.flightDistanceNm = 0;
     entry.flightStartTime = null;
@@ -1589,8 +1595,27 @@ const server = http.createServer(async (req, res) => {
 
         if (ext === '.html') {
             headers['Cache-Control'] = 'no-cache';
-        } else if (['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.woff', '.woff2'].includes(ext)) {
+        } else if (STATIC_IMMUTABLE_EXTS.includes(ext)) {
             headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+        }
+
+        const acceptEncoding = String(req.headers['accept-encoding'] || '');
+        if (COMPRESSIBLE_EXTS.has(ext) && data.length >= COMPRESSION_MIN_BYTES && /\b(?:br|gzip)\b/.test(acceptEncoding)) {
+            headers['Vary'] = 'Accept-Encoding';
+            const useBrotli = /\bbr\b/.test(acceptEncoding);
+            const encode = useBrotli ? zlib.brotliCompress : zlib.gzip;
+            encode(data, (encErr, encoded) => {
+                if (encErr || !encoded) {
+                    console.warn(`[Static] Compression failed for ${staticPath}: ${encErr ? encErr.message : 'empty output'} - sending uncompressed`);
+                    res.writeHead(200, headers);
+                    res.end(data);
+                    return;
+                }
+                headers['Content-Encoding'] = useBrotli ? 'br' : 'gzip';
+                res.writeHead(200, headers);
+                res.end(encoded);
+            });
+            return;
         }
 
         res.writeHead(200, headers);
@@ -1762,7 +1787,8 @@ wss.on('connection', (ws) => {
                     departureAlt: reuseFlight ? existing.departureAlt : 0,
                     isAirborne: reuseFlight ? existing.isAirborne : false,
                     maxAltitudeFt: reuseFlight ? existing.maxAltitudeFt : 0,
-                    speedSamples: reuseFlight ? existing.speedSamples : [],
+                    speedSampleSum: reuseFlight ? (existing.speedSampleSum || 0) : 0,
+                    speedSampleCount: reuseFlight ? (existing.speedSampleCount || 0) : 0,
                     routePoints: reuseFlight ? existing.routePoints : [],
                     lastRouteSample: reuseFlight ? existing.lastRouteSample : 0,
                     flightStartTime: reuseFlight ? existing.flightStartTime : null,
@@ -1989,7 +2015,8 @@ wss.on('connection', (ws) => {
                             entry.flightLogId = insertId;
                             entry.flightStartTime = Date.now();
                             entry.maxAltitudeFt = alt || 0;
-                            entry.speedSamples = [];
+                            entry.speedSampleSum = 0;
+                            entry.speedSampleCount = 0;
                             entry.routePoints = [[
                                 Math.round(lat * 10000) / 10000,
                                 Math.round(lon * 10000) / 10000,
@@ -2022,7 +2049,7 @@ wss.on('connection', (ws) => {
 
                     if (entry.flightLogId) {
                         if (alt > entry.maxAltitudeFt) entry.maxAltitudeFt = alt;
-                        if (airspeed > 0) entry.speedSamples.push(airspeed);
+                        if (airspeed > 0) { entry.speedSampleSum += airspeed; entry.speedSampleCount++; }
                         entry.flightDistanceNm += stepNm;
 
                         const now = Date.now();
@@ -2234,8 +2261,8 @@ setInterval(async () => {
             const fDistKm = Math.round(entry.flightDistanceNm * 1.852 * 100) / 100;
             const fDistNm = Math.round(entry.flightDistanceNm * 100) / 100;
             const maxAltFt = Math.round(entry.maxAltitudeFt * METERS_TO_FEET);
-            const avgSpd = entry.speedSamples.length
-                ? Math.round((entry.speedSamples.reduce((a, b) => a + b, 0) / entry.speedSamples.length) * KMH_TO_KNOTS * 100) / 100
+            const avgSpd = entry.speedSampleCount
+                ? Math.round((entry.speedSampleSum / entry.speedSampleCount) * KMH_TO_KNOTS * 100) / 100
                 : null;
             try {
                 const [updRes] = await dbPool.execute(
