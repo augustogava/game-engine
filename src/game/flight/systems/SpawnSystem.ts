@@ -230,5 +230,7 @@ export class SpawnSystem {
             this.scene.flapIndex = cfg.default_flap_index_ground;
             this.scene.currentFlapDeg = this.scene.FLAP_STEPS[this.scene.flapIndex] || 15;
         }
+
+        this.scene._inputSystem.applyMissionStartThrottle();
     }
 }

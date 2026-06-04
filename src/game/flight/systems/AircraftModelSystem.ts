@@ -19,6 +19,7 @@ import {
 } from '../constants/index.js';
 
 const AIRCRAFT_TEXTURE_ANISOTROPY = 8;
+const GLB_LOAD_TIMEOUT_MS = 12000;
 
 export class AircraftModelSystem {
     private readonly scene: any;
@@ -75,6 +76,8 @@ export class AircraftModelSystem {
             console.debug(`[FlightSimple] Initial ground spawn: snap window armed for ${SPAWN_SNAP_FRAMES} frames, gearHeight=${gearHeight.toFixed(3)}`);
         }
 
+        this.scene._inputSystem.applyMissionStartThrottle();
+
         this.loadAircraftModel(scene);
     }
 
@@ -93,7 +96,12 @@ export class AircraftModelSystem {
         BABYLON.SceneLoader.ImportMesh(
             '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[], _ps: BABYLON.IParticleSystem[], _sk: BABYLON.Skeleton[], animationGroups: BABYLON.AnimationGroup[]) => {
-                if (!meshes.length) return;
+                if (!meshes.length) {
+                    if (this.scene._disposed || !this.scene.planeRoot || myVersion !== this.scene._modelLoadVersion) return;
+                    console.warn(`[FlightSimple] GLB returned no meshes (${cfg.code}) — building fallback mesh.`);
+                    this.buildFallbackMesh(scene);
+                    return;
+                }
                 if (this.scene._disposed || !this.scene.scene || !this.scene.planeRoot) {
                     console.log(`[FlightSimple] Discarding model load (${cfg.code}) — scene disposed.`);
                     meshes.forEach((m) => { try { m.dispose(); } catch (_) { /* ignore */ } });
@@ -339,6 +347,15 @@ export class AircraftModelSystem {
                 this.buildFallbackMesh(scene);
             },
         );
+
+        this.scene._safeSetTimeout(() => {
+            if (this.scene._disposed || !this.scene.planeRoot) return;
+            if (myVersion !== this.scene._modelLoadVersion) return;
+            if (this.scene.spawned) return;
+            console.warn(`[FlightSimple] GLB load watchdog fired after ${GLB_LOAD_TIMEOUT_MS}ms (${cfg.code}) — ImportMesh did not complete; building fallback mesh.`);
+            this.scene._modelLoadVersion++;
+            this.buildFallbackMesh(scene);
+        }, GLB_LOAD_TIMEOUT_MS);
     }
 
     buildFallbackMesh(scene: BABYLON.Scene): void {

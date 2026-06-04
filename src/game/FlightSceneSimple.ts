@@ -1011,8 +1011,15 @@ export class FlightSceneSimple extends Scene3D {
             }
             console.log(`[Aircraft] Loaded: ${cfg.name} (${cfg.code})`);
         }).catch((err) => {
+            const wasDeferred = this._skipInitialModelLoad;
             this._skipInitialModelLoad = false;
             console.warn('[Aircraft] fetchSelectedAircraftConfig failed:', err);
+            if (this._disposed || !this.scene) return;
+            if (wasDeferred && this.planeRoot) {
+                console.warn('[Aircraft] Config fetch failed — loading fallback model so aircraft still spawns.');
+                this._loadAircraftModel(scene);
+                this._spawnPlane();
+            }
         });
 
         this._initSurfaces();

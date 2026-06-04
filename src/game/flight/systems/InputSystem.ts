@@ -73,6 +73,32 @@ export class InputSystem {
         this.scene._cockpitClick();
     }
 
+    applyMissionStartThrottle(): void {
+        if (this.scene._activeMissionId == null) return;
+        const ab = this.scene.aircraftConfig?.afterburner_thrust_mult;
+        const abMax = Number.isFinite(ab) && ab > 1 ? ab : 1;
+        const missionThrust = 0.9 * abMax;
+        this.scene.thrust = missionThrust;
+        this.scene.touchThrust = missionThrust;
+        this.refreshTouchThrottleVisual();
+        console.debug(`[Mission] Spawn throttle set to 90% (thrust=${missionThrust.toFixed(2)}, abMax=${abMax})`);
+    }
+
+    refreshTouchThrottleVisual(): void {
+        if (!this.scene.isMobile) return;
+        try {
+            const fill = document.getElementById('touch-thr-fill');
+            const knob = document.getElementById('touch-thr-knob');
+            const ab = this.scene.aircraftConfig?.afterburner_thrust_mult;
+            const abMax = Number.isFinite(ab) && ab > 1 ? ab : 1;
+            const pct = Math.min(100, (this.scene.touchThrust / abMax) * 100);
+            if (fill) fill.style.height = `${pct}%`;
+            if (knob) knob.style.bottom = `${pct}%`;
+        } catch (err) {
+            console.warn('[InputSystem] refreshTouchThrottleVisual failed:', err);
+        }
+    }
+
     adjustTimeScale(direction: number): void {
         const steps = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
         let idx = steps.findIndex((s) => Math.abs(s - this.scene._timeScale) < 1e-3);
@@ -583,13 +609,13 @@ export class InputSystem {
 #touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
 #touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
 #touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
-#touch-controls-btn{position:absolute;top:136px;right:10px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
-#touch-controls-panel{display:none;position:absolute;top:172px;right:6px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#touch-controls-btn{position:absolute;top:264px;right:14px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+#touch-controls-panel{display:none;position:absolute;top:300px;right:14px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
 #touch-controls-panel label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 #touch-controls-panel input[type=range]{width:120px}
 @media(max-width:480px){
-#touch-controls-btn{top:108px!important;right:6px!important;width:28px!important;height:28px!important}
-#touch-controls-panel{top:142px!important;right:6px!important;width:200px!important}
+#touch-controls-btn{top:176px!important;right:6px!important;width:28px!important;height:28px!important}
+#touch-controls-panel{top:210px!important;right:6px!important;width:200px!important}
 }
 </style>
 <div id="touch-joy"><div id="touch-joy-deadzone"></div><div id="touch-joy-knob"></div></div>
