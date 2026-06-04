@@ -21,8 +21,24 @@ const TILES_LRU_MAX_SIZE_DESKTOP = 2000;
 const TILES_LRU_MIN_SIZE_DESKTOP = 800;
 const TILE_TEXTURE_ANISOTROPY = 8;
 
+const ADAPT_EVAL_INTERVAL_MS = 3000;
+const ADAPT_WARMUP_MS = 8000;
+const ADAPT_FPS_LOW = 18;
+const ADAPT_FPS_HIGH = 25;
+const ADAPT_MAX_STEPS = 3;
+const ADAPT_ERROR_TARGET_MULT_PER_STEP = 2.0;
+const ADAPT_LRU_MULT_PER_STEP = 0.75;
+const ADAPT_SCALE_DOWN_PER_STEP = 0.15;
+const ADAPT_SCALE_MIN = 0.5;
+
 export class TerrainTilesSystem {
     private readonly scene: any;
+    private _adaptErrorTargetBase = TILES_ERROR_TARGET_DESKTOP;
+    private _adaptLruMaxBase = TILES_LRU_MAX_SIZE_DESKTOP;
+    private _adaptLruMinBase = TILES_LRU_MIN_SIZE_DESKTOP;
+    private _adaptStep = 0;
+    private _adaptStartMs = 0;
+    private _adaptLastEvalMs = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -72,6 +88,12 @@ export class TerrainTilesSystem {
         (this.scene.tiles as any).errorThreshold = 60;
         this.scene.tiles.lruCache.maxSize = isMobile ? TILES_LRU_MAX_SIZE_MOBILE : TILES_LRU_MAX_SIZE_DESKTOP;
         this.scene.tiles.lruCache.minSize = isMobile ? TILES_LRU_MIN_SIZE_MOBILE : TILES_LRU_MIN_SIZE_DESKTOP;
+        this._adaptErrorTargetBase = this.scene.tiles.errorTarget;
+        this._adaptLruMaxBase = this.scene.tiles.lruCache.maxSize;
+        this._adaptLruMinBase = this.scene.tiles.lruCache.minSize;
+        this._adaptStep = 0;
+        this._adaptStartMs = 0;
+        this._adaptLastEvalMs = 0;
         console.info(`[3DTiles] errorTarget=${this.scene.tiles.errorTarget} lruMax=${this.scene.tiles.lruCache.maxSize} (mobile=${isMobile})`);
         try {
             this.scene.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
@@ -231,6 +253,62 @@ export class TerrainTilesSystem {
             console.debug('[3DTiles] Visual handlers attached (shadow receivers + PBR polish + fade hook)');
         } catch (err) {
             console.warn('[3DTiles] Failed to attach visual handlers:', err);
+        }
+    }
+
+    updateAdaptiveQuality(): void {
+        const tiles = this.scene.tiles;
+        if (!tiles) return;
+        const engine = this.scene.scene?.getEngine?.();
+        if (!engine) return;
+
+        const now = performance.now();
+        if (this._adaptStartMs === 0) {
+            this._adaptStartMs = now;
+            this._adaptLastEvalMs = now;
+            return;
+        }
+        if (now - this._adaptStartMs < ADAPT_WARMUP_MS) return;
+        if (now - this._adaptLastEvalMs < ADAPT_EVAL_INTERVAL_MS) return;
+        this._adaptLastEvalMs = now;
+
+        let fps = 0;
+        try { fps = engine.getFps(); } catch (_) { fps = 0; }
+        if (!Number.isFinite(fps) || fps <= 0) return;
+
+        const prevStep = this._adaptStep;
+        if (fps < ADAPT_FPS_LOW && this._adaptStep < ADAPT_MAX_STEPS) {
+            this._adaptStep++;
+        } else if (fps > ADAPT_FPS_HIGH && this._adaptStep > 0) {
+            this._adaptStep--;
+        }
+        if (this._adaptStep === prevStep) return;
+
+        this._applyAdaptiveStep(engine);
+        console.log(`[3DTiles] Adaptive quality step ${prevStep}->${this._adaptStep} (fps=${fps.toFixed(0)} errorTarget=${tiles.errorTarget})`);
+    }
+
+    private _applyAdaptiveStep(engine: any): void {
+        const tiles = this.scene.tiles;
+        if (!tiles) return;
+        const step = this._adaptStep;
+        try {
+            tiles.errorTarget = this._adaptErrorTargetBase * (1 + step * ADAPT_ERROR_TARGET_MULT_PER_STEP);
+            const lruMult = Math.max(0.3, 1 - step * (1 - ADAPT_LRU_MULT_PER_STEP));
+            if (tiles.lruCache) {
+                tiles.lruCache.maxSize = Math.max(this._adaptLruMinBase, Math.round(this._adaptLruMaxBase * lruMult));
+            }
+        } catch (err) {
+            console.warn('[3DTiles] Adaptive tile detail apply failed:', err);
+        }
+
+        try {
+            const scaleEl = document.getElementById('gfx-render-scale') as HTMLInputElement | null;
+            const baseScale = scaleEl ? Math.max(0.5, Math.min(2, (parseInt(scaleEl.value, 10) || 100) / 100)) : 1;
+            const effective = Math.max(ADAPT_SCALE_MIN, baseScale * (1 - step * ADAPT_SCALE_DOWN_PER_STEP));
+            engine.setHardwareScalingLevel(1 / effective);
+        } catch (err) {
+            console.warn('[3DTiles] Adaptive render scale apply failed:', err);
         }
     }
 

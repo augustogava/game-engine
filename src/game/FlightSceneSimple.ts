@@ -1050,6 +1050,7 @@ export class FlightSceneSimple extends Scene3D {
         if (!this.spawned) return;
         this._frameTick++;
         if (this._premium.tileFade) this._updateTileFade(dt);
+        this._terrainTilesSystem.updateAdaptiveQuality();
         this._airportOverlaysSystem.update(dt);
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
         if (this._premium.vegetation) this._updateVegetation();

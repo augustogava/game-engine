@@ -26,7 +26,7 @@ function isValidBounds(b: LiveTrafficBounds): boolean {
 export async function fetchLiveTrafficPositions(
     bounds: LiveTrafficBounds,
     opts: LiveTrafficFetchOptions = {},
-): Promise<LiveTrafficFlight[]> {
+): Promise<LiveTrafficFlight[] | null> {
     if (!isValidBounds(bounds)) {
         console.warn('[LiveTraffic] fetchLiveTrafficPositions: invalid bounds', bounds);
         return [];
@@ -47,7 +47,7 @@ export async function fetchLiveTrafficPositions(
         const resp = await fetch(`/api/live-traffic/positions?${params.toString()}`, { headers, signal: opts.signal });
         if (!resp.ok) {
             console.warn(`[LiveTraffic] HTTP ${resp.status} fetching positions`);
-            return [];
+            return null;
         }
         const json = await resp.json();
         const data = Array.isArray(json?.data) ? json.data : [];
@@ -78,6 +78,6 @@ export async function fetchLiveTrafficPositions(
             return [];
         }
         console.warn('[LiveTraffic] fetchLiveTrafficPositions failed:', err);
-        return [];
+        return null;
     }
 }

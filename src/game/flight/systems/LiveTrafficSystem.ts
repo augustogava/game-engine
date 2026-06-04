@@ -5,6 +5,8 @@ import { fetchLiveTrafficPositions, LiveTrafficBounds } from '../api/LiveTraffic
 import {
     LIVE_TRAFFIC_INITIAL_DELAY_MS,
     LIVE_TRAFFIC_POLL_INTERVAL_MS,
+    LIVE_TRAFFIC_BACKOFF_MAX_MS,
+    LIVE_TRAFFIC_BACKOFF_MAX_STEPS,
     LIVE_TRAFFIC_RANGE_DEG,
     LIVE_TRAFFIC_LIMIT,
     LIVE_TRAFFIC_CATEGORIES,
@@ -71,6 +73,7 @@ export class LiveTrafficSystem {
     private _lastFetchMs = 0;
     private _firstFetchDone = false;
     private _fetchInFlight = false;
+    private _consecutiveFailures = 0;
     private _initStartMs = 0;
     private _disposed = false;
     private readonly _abortController = new AbortController();
@@ -98,7 +101,7 @@ export class LiveTrafficSystem {
                 if (now - this._initStartMs >= LIVE_TRAFFIC_INITIAL_DELAY_MS) {
                     this._triggerFetch(now);
                 }
-            } else if (now - this._lastFetchMs >= LIVE_TRAFFIC_POLL_INTERVAL_MS) {
+            } else if (now - this._lastFetchMs >= this._currentPollIntervalMs()) {
                 this._triggerFetch(now);
             }
         }
@@ -177,13 +180,34 @@ export class LiveTrafficSystem {
             signal: this._abortController.signal,
         }).then((flights) => {
             if (this._disposed) return;
+            if (flights === null) {
+                this._registerFetchFailure();
+                return;
+            }
+            if (this._consecutiveFailures > 0) {
+                console.debug('[LiveTraffic] Fetch recovered; resuming normal poll interval');
+            }
+            this._consecutiveFailures = 0;
             this._onFetchResult(flights);
         }).catch((err) => {
             console.warn('[LiveTraffic] fetch error:', err);
+            this._registerFetchFailure();
         }).finally(() => {
             this._fetchInFlight = false;
             this._firstFetchDone = true;
         });
+    }
+
+    private _currentPollIntervalMs(): number {
+        if (this._consecutiveFailures <= 0) return LIVE_TRAFFIC_POLL_INTERVAL_MS;
+        const factor = 2 ** Math.min(this._consecutiveFailures, LIVE_TRAFFIC_BACKOFF_MAX_STEPS);
+        return Math.min(LIVE_TRAFFIC_BACKOFF_MAX_MS, LIVE_TRAFFIC_POLL_INTERVAL_MS * factor);
+    }
+
+    private _registerFetchFailure(): void {
+        this._consecutiveFailures = Math.min(this._consecutiveFailures + 1, LIVE_TRAFFIC_BACKOFF_MAX_STEPS);
+        const nextMs = this._currentPollIntervalMs();
+        console.warn(`[LiveTraffic] Fetch failed (consecutive=${this._consecutiveFailures}); next poll in ${(nextMs / 1000).toFixed(0)}s`);
     }
 
     private _onFetchResult(flights: LiveTrafficFlight[]): void {
