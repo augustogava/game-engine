@@ -24,7 +24,7 @@ const TILE_TEXTURE_ANISOTROPY = 8;
 const ADAPT_EVAL_INTERVAL_MS = 3000;
 const ADAPT_WARMUP_MS = 8000;
 const ADAPT_FPS_LOW = 18;
-const ADAPT_FPS_HIGH = 30;
+const ADAPT_FPS_HIGH = 28;
 const ADAPT_MAX_STEPS = 2;
 const ADAPT_ERROR_TARGET_MULT_PER_STEP = 2.0;
 const ADAPT_LRU_MULT_PER_STEP = 0.75;
@@ -306,7 +306,7 @@ export class TerrainTilesSystem {
             const scaleEl = document.getElementById('gfx-render-scale') as HTMLInputElement | null;
             const baseScale = scaleEl ? Math.max(0.5, Math.min(2, (parseInt(scaleEl.value, 10) || 100) / 100)) : 1;
             const effective = Math.max(ADAPT_SCALE_MIN, baseScale * (1 - step * ADAPT_SCALE_DOWN_PER_STEP));
-            engine.setHardwareScalingLevel(1 / effective);
+            engine.setHardwareScalingLevel(this.scene._computeHardwareScalingLevel(effective));
         } catch (err) {
             console.warn('[3DTiles] Adaptive render scale apply failed:', err);
         }

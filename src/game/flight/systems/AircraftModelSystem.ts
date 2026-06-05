@@ -118,6 +118,10 @@ export class AircraftModelSystem {
                     }
                     return;
                 }
+                if (this.scene._loadedModelMeshes && this.scene._loadedModelMeshes.length) {
+                    console.log(`[FlightSimple] Replacing placeholder/fallback mesh with loaded model (${cfg.code}).`);
+                    this.disposeCurrentModelMeshes();
+                }
                 this.scene._loadedModelMeshes = meshes;
                 try {
                     const seenMats = new Set<BABYLON.Material>();
@@ -325,6 +329,13 @@ export class AircraftModelSystem {
                     if (this.scene.camera.radius < aircraftMinRadius) {
                         this.scene.camera.radius = aircraftMinRadius;
                     }
+                    if (this.scene._cinematicActive) {
+                        this.scene._cinematicTargetRadius = Math.max(
+                            CAMERA_RADIUS_MIN_M,
+                            Math.min(CAMERA_RADIUS_MAX_M, this.scene.camera.radius),
+                        );
+                        console.debug(`[Camera] Cinematic in progress — retargeting fly-in radius to ${this.scene._cinematicTargetRadius.toFixed(1)}m for ${cfg.code} (model loaded after placeholder).`);
+                    }
                     console.debug(`[Camera] Initial radius set to ${initialRadius.toFixed(1)}m, lowerRadiusLimit=${aircraftMinRadius.toFixed(1)}m for ${cfg.code} (W=${safeW.toFixed(1)}m, H=${safeH.toFixed(1)}m, L=${safeD.toFixed(1)}m)`);
                 }
 
@@ -343,6 +354,10 @@ export class AircraftModelSystem {
                     console.log(`[FlightSimple] Discarding stale fallback build (${cfg.code}) — newer load in progress.`);
                     return;
                 }
+                if (this.scene.spawned && this.scene._loadedModelMeshes && this.scene._loadedModelMeshes.length) {
+                    console.warn(`[FlightSimple] GLB load failed after placeholder already shown (${cfg.code}); keeping current mesh.`, ex);
+                    return;
+                }
                 console.warn('[FlightSimple] GLB load failed, building fallback', ex);
                 this.buildFallbackMesh(scene);
             },
@@ -352,13 +367,31 @@ export class AircraftModelSystem {
             if (this.scene._disposed || !this.scene.planeRoot) return;
             if (myVersion !== this.scene._modelLoadVersion) return;
             if (this.scene.spawned) return;
-            console.warn(`[FlightSimple] GLB load watchdog fired after ${GLB_LOAD_TIMEOUT_MS}ms (${cfg.code}) — ImportMesh did not complete; building fallback mesh.`);
-            this.scene._modelLoadVersion++;
+            console.warn(`[FlightSimple] GLB load watchdog fired after ${GLB_LOAD_TIMEOUT_MS}ms (${cfg.code}) — ImportMesh did not complete; showing placeholder mesh while load continues.`);
             this.buildFallbackMesh(scene);
         }, GLB_LOAD_TIMEOUT_MS);
     }
 
+    private disposeCurrentModelMeshes(): void {
+        if (this.scene._loadedModelMeshes && this.scene._loadedModelMeshes.length) {
+            this.scene._loadedModelMeshes.forEach((m: BABYLON.AbstractMesh) => { try { m.dispose(); } catch (_) { /* ignore */ } });
+        }
+        this.scene._loadedModelMeshes = [];
+        if (this.scene._loadedAnimGroups && this.scene._loadedAnimGroups.length) {
+            this.scene._loadedAnimGroups.forEach((g: BABYLON.AnimationGroup) => { try { g.dispose(); } catch (_) { /* ignore */ } });
+        }
+        this.scene._loadedAnimGroups = [];
+        this.scene._propellerAnimGroup = null;
+        this.scene._gearUpAnimGroups = [];
+        this.scene._gearDownAnimGroups = [];
+        try {
+            const pivot = this.scene.planeRoot?.getChildTransformNodes(true).find((n: BABYLON.TransformNode) => n.name === 'modelPivot');
+            if (pivot) pivot.dispose();
+        } catch (_) { /* ignore */ }
+    }
+
     buildFallbackMesh(scene: BABYLON.Scene): void {
+        this.disposeCurrentModelMeshes();
         const mat = new BABYLON.PBRMaterial('planePBR', scene);
         mat.albedoColor = new BABYLON.Color3(0.85, 0.88, 0.92);
         mat.metallic = 0.7;

@@ -998,7 +998,7 @@ export class HudSystem {
                     if (chrEl) p.chromaticAberrationEnabled = chrEl.checked;
                     if (scaleEl) {
                         const scale = parseInt(scaleEl.value) / 100;
-                        engine.setHardwareScalingLevel(1 / scale);
+                        engine.setHardwareScalingLevel(this.scene._computeHardwareScalingLevel(scale));
                         if (scaleLbl) scaleLbl.textContent = scale.toFixed(1) + 'x';
                     }
                     if (fpsEl) {

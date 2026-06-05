@@ -391,6 +391,7 @@ import { WeatherService } from './flight/systems/WeatherService.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 const PAUSED_UI_UPDATE_INTERVAL_FRAMES = 6;
+const MOBILE_RENDER_DPR_CAP = 2;
 
 export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _waterSystem = new WaterSystem(this);
@@ -1903,6 +1904,15 @@ export class FlightSceneSimple extends Scene3D {
 
     private _updateControlSurfaceAnim(): void {
         this._aircraftModelSystem.updateControlSurfaceAnim();
+    }
+
+    public _computeHardwareScalingLevel(renderScaleFraction: number): number {
+        const safeScale = Number.isFinite(renderScaleFraction) && renderScaleFraction > 0 ? renderScaleFraction : 1;
+        const dpr = (typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0)
+            ? window.devicePixelRatio
+            : 1;
+        const dprFactor = this.isMobile === true ? Math.min(dpr, MOBILE_RENDER_DPR_CAP) : 1;
+        return 1 / (safeScale * dprFactor);
     }
 
     private _buildContrails(scene: BABYLON.Scene, halfSpan: number): void {
