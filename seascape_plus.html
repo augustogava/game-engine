@@ -31,7 +31,7 @@ canvas { display: block; width: 100vw; height: 100vh; }
     <div class="row"><span>Escala N</span><input id="cloudScale" type="range" min="0.2" max="4" step="0.01" value="3.02"><span id="cloudScaleValue">1.60</span></div>
     <div class="row"><span>Cor Nuvens</span><input id="cloudColor" type="color" value="#f0cb7a"><span id="cloudColorValue">#ffffff</span></div>
     <div class="row"><span>Praia</span><input id="shorePos" type="range" min="0" max="40" step="0.5" value="12"><span id="shorePosValue">12.0</span></div>
-    <div class="row"><span>Inclinacao</span><input id="beachSlope" type="range" min="0.02" max="0.5" step="0.01" value="0.2"><span id="beachSlopeValue">0.20</span></div>
+    <div class="row"><span>Inclinacao</span><input id="beachSlope" type="range" min="0.02" max="0.5" step="0.01" value="0.14"><span id="beachSlopeValue">0.14</span></div>
     <div class="row"><span>Crescimento</span><input id="shoalGain" type="range" min="0" max="4" step="0.05" value="0.8"><span id="shoalGainValue">0.80</span></div>
     <div class="row"><span>Swash Vel</span><input id="swashSpeed" type="range" min="0" max="3" step="0.05" value="0.7"><span id="swashSpeedValue">0.70</span></div>
     <div class="row"><span>Swash Dist</span><input id="swashRun" type="range" min="0" max="2" step="0.05" value="0.4"><span id="swashRunValue">0.40</span></div>
@@ -106,7 +106,7 @@ const params = {
     cloudScale: 3.02,
     cloudColor: [0.9411764705882353, 0.796078431372549, 0.47843137254901963],
     shorePos: 12.0,
-    beachSlope: 0.2,
+    beachSlope: 0.14,
     shoalGain: 0.8,
     swashSpeed: 0.7,
     swashRun: 0.4,
@@ -349,7 +349,7 @@ float map_detailed(vec3 p) {
     return p.y - top;
 }
 
-vec3 getSeaColor(vec3 p, vec3 n, vec3 l, vec3 eye, vec3 dist) {
+vec3 getSeaColor(vec3 p, vec3 n, vec3 l, vec3 eye, vec3 dist, float depth) {
     float fresnel = clamp(1.0 - dot(n, -eye), 0.0, 1.0);
     fresnel = min(fresnel * fresnel * fresnel, 0.5);
 
@@ -359,10 +359,17 @@ vec3 getSeaColor(vec3 p, vec3 n, vec3 l, vec3 eye, vec3 dist) {
     vec3 reflected = getSkyColor(reflect(eye, n));
     vec3 refracted = uSeaBase + diffuse(n, l, 80.0) * uSeaWaterColor * 0.12 * lightAtten;
 
+    float shallow = smoothstep(5.0, 0.2, depth);
+    vec3 shallowTint = vec3(0.12, 0.50, 0.52) * lightAtten;
+    refracted = mix(refracted, shallowTint, shallow * 0.8);
+
     vec3 color = mix(refracted, reflected, fresnel);
 
     float atten = max(1.0 - dot(dist, dist) * 0.001, 0.0);
     color += uSeaWaterColor * (p.y - uSeaHeight) * 0.18 * atten;
+
+    float seeThrough = smoothstep(0.8, 0.0, depth) * (1.0 - fresnel);
+    color = mix(color, uSandColor * 0.6, seeThrough * 0.55);
 
     color += specular(n, l, eye, 600.0 * inversesqrt(dot(dist,dist))) * lightAtten;
 
@@ -371,29 +378,46 @@ vec3 getSeaColor(vec3 p, vec3 n, vec3 l, vec3 eye, vec3 dist) {
 
 vec3 getSandColor(vec3 p, vec3 n, vec3 l, vec3 eye, float bed, float swash) {
     vec3 dry = uSandColor;
-    vec3 wet = uSandColor * 0.45;
-    float wetness = smoothstep(0.35, 0.0, bed);
-    wetness = max(wetness, smoothstep(0.05, -0.2, bed - swash));
+    vec3 wet = uSandColor * 0.4;
+
+    float wetness = smoothstep(0.6, 0.0, bed);
+    wetness = max(wetness, smoothstep(0.1, -0.25, bed - swash));
     wetness = clamp(wetness, 0.0, 1.0);
 
     float ripple = noise(p.xz * vec2(0.6, 2.5)) * 0.5 + 0.5;
+    float grain = noise(p.xz * 12.0) * 0.5 + 0.5;
     vec3 col = mix(dry, wet, wetness);
-    col *= 0.85 + 0.3 * ripple;
+    col *= 0.82 + 0.22 * ripple + 0.06 * grain;
 
     float diff = clamp(dot(n, l) * 0.5 + 0.5, 0.0, 1.0);
     col *= 0.6 + 0.4 * diff;
-    col += specular(n, l, eye, 60.0) * wetness * 0.3;
+
+    vec3 sky = getSkyColor(reflect(eye, n));
+    col = mix(col, col * 0.5 + sky * 0.5, wetness * 0.45);
+    col += specular(n, l, eye, 200.0) * wetness * 0.5;
     return col;
 }
 
-vec3 applyFoam(vec3 col, vec3 p, float bed, float waterTop) {
+vec3 applyFoam(vec3 col, vec3 p, float bed, float waterTop, float swash) {
     float depth = max(0.0, -bed);
-    float surfZone = smoothstep(0.8, 0.0, depth);
-    float crest = smoothstep(0.9, 1.7, waterTop);
+
+    float n1 = noise(p.xz * 3.0 + vec2(iTime * 0.6, -iTime * 0.4));
+    float n2 = noise(p.xz * 7.0 - vec2(iTime * 0.9, iTime * 0.5));
+    float turb = (n1 * 0.6 + n2 * 0.4) * 0.5 + 0.5;
+
+    float surfZone = smoothstep(1.2, 0.0, depth);
+    float crest = smoothstep(0.7, 1.6, waterTop);
     float breaking = crest * surfZone;
-    float band = smoothstep(0.35, 0.0, abs(bed));
-    float fn = noise(p.xz * 3.0 + vec2(iTime * 0.6, -iTime * 0.4)) * 0.5 + 0.5;
-    float foam = clamp((breaking + band) * (0.45 + 0.55 * fn) * uFoamAmount, 0.0, 1.0);
+
+    float edge = smoothstep(0.18, 0.0, abs(bed - swash));
+    float band = smoothstep(0.4, 0.0, abs(bed));
+
+    float foam = (breaking + band * 0.8 + edge) * turb;
+    foam = clamp(foam * uFoamAmount, 0.0, 1.0);
+
+    float residue = smoothstep(0.5, 0.05, bed) * smoothstep(0.55, 0.85, turb) * 0.4 * uFoamAmount;
+    foam = clamp(foam + residue, 0.0, 1.0);
+
     return mix(col, vec3(0.95), foam);
 }
 
@@ -451,16 +475,17 @@ vec3 getPixel(in vec2 coord, float time) {
     vec3 light = normalize(vec3(0.0,1.0,0.8));
 
     float bed = beachBed(p.xz);
-    float swash = sin(iTime * uSwashSpeed) * uSwashRun * exp(-max(0.0, -bed) * 0.8);
+    float depth = max(0.0, -bed);
+    float swash = sin(iTime * uSwashSpeed) * uSwashRun * exp(-depth * 0.8);
     float waterTop = waterSurface(p.xz, bed, uIterFragment);
 
     vec3 surf;
     if (bed > waterTop) {
         surf = getSandColor(p, n, light, dir, bed, swash);
     } else {
-        surf = getSeaColor(p, n, light, dir, dist);
+        surf = getSeaColor(p, n, light, dir, dist, depth);
     }
-    surf = applyFoam(surf, p, bed, waterTop);
+    surf = applyFoam(surf, p, bed, waterTop, swash);
 
     return mix(
         getSkyColor(dir),

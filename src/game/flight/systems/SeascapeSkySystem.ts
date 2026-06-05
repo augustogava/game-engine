@@ -91,6 +91,7 @@ export class SeascapeSkySystem {
 
         const box = BABYLON.MeshBuilder.CreateBox('seascapeSkyDome', { size: SEASCAPE_SKY_BOX_SIZE }, scene);
         box.infiniteDistance = true;
+        box.ignoreCameraMaxZ = true;
         box.isPickable = false;
         box.applyFog = false;
         box.renderingGroupId = 0;
