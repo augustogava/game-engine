@@ -108,6 +108,10 @@ export class LightingSystem {
         return Number.isFinite(this._lastSunIntensity) ? this._lastSunIntensity : 3.0;
     }
 
+    getUserHdrChoice(): string {
+        return this._userHdrChoice;
+    }
+
     registerAircraftMeshes(meshes: BABYLON.AbstractMesh[]): void {
         if (!this._aircraftAmbientLight) return;
         this._aircraftAmbientLight.includedOnlyMeshes = meshes.slice();

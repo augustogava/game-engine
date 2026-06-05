@@ -366,6 +366,7 @@ import { NavLightsSystem } from './flight/systems/NavLightsSystem.js';
 import { RunwayCollidersSystem } from './flight/systems/RunwayCollidersSystem.js';
 import { VolumetricCloudsSystem } from './flight/systems/VolumetricCloudsSystem.js';
 import { HighCloudsSystem } from './flight/systems/HighCloudsSystem.js';
+import { SeascapeSkySystem } from './flight/systems/SeascapeSkySystem.js';
 import { CameraSystem } from './flight/systems/CameraSystem.js';
 import { PostProcessingSystem } from './flight/systems/PostProcessingSystem.js';
 import { LightingSystem } from './flight/systems/LightingSystem.js';
@@ -400,6 +401,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _runwayCollidersSystem = new RunwayCollidersSystem(this);
     /** @internal */ private readonly _volumetricCloudsSystem = new VolumetricCloudsSystem(this);
     /** @internal */ private readonly _highCloudsSystem = new HighCloudsSystem(this);
+    /** @internal */ private readonly _seascapeSkySystem = new SeascapeSkySystem(this);
     /** @internal */ private readonly _cameraSystem = new CameraSystem(this);
     /** @internal */ private readonly _postProcessingSystem = new PostProcessingSystem(this);
     /** @internal */ private readonly _lightingSystem = new LightingSystem(this);
@@ -1035,6 +1037,7 @@ export class FlightSceneSimple extends Scene3D {
         this._buildSkybox(scene);
         this._buildClouds(scene);
         this._buildHighClouds(scene);
+        this._buildSeascapeSky(scene);
         this._buildGround(scene);
         this._buildPlane(scene);
         this._buildCamera(scene);
@@ -1134,6 +1137,7 @@ export class FlightSceneSimple extends Scene3D {
         this._updateClouds(dt);
         this._updatePrecipitation(dt);
         this._updateHighClouds(dt);
+        this._updateSeascapeSky(dt);
         this._updatePropellerAnim();
         this._updateControlSurfaceAnim();
         this._updateGearState();
@@ -1416,6 +1420,7 @@ export class FlightSceneSimple extends Scene3D {
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         try { this._liveTrafficSystem.dispose(); } catch (err) { console.warn('[FlightSimple] LiveTrafficSystem dispose failed:', err); }
         try { this._highCloudsSystem.dispose(); } catch (err) { console.warn('[FlightSimple] HighCloudsSystem dispose failed:', err); }
+        try { this._seascapeSkySystem.dispose(); } catch (err) { console.warn('[FlightSimple] SeascapeSkySystem dispose failed:', err); }
         try { this._terrainTilesSystem.disposeGround(); } catch (err) { console.warn('[FlightSimple] Ground dispose failed:', err); }
         try {
             this._loadedAnimGroups.forEach((g) => { try { g.dispose(); } catch (_) { /* ignore */ } });
@@ -1837,6 +1842,18 @@ export class FlightSceneSimple extends Scene3D {
 
     /** @internal */ getHighCloudsSystem(): HighCloudsSystem {
         return this._highCloudsSystem;
+    }
+
+    private _buildSeascapeSky(scene: BABYLON.Scene): void {
+        void this._seascapeSkySystem.build(scene);
+    }
+
+    private _updateSeascapeSky(dt: number): void {
+        this._seascapeSkySystem.update(dt);
+    }
+
+    /** @internal */ getSeascapeSkySystem(): SeascapeSkySystem {
+        return this._seascapeSkySystem;
     }
 
     // ── Ground ────────────────────────────────────────────────────────────────

@@ -30,6 +30,13 @@ canvas { display: block; width: 100vw; height: 100vh; }
     <div class="row"><span>Velocidade N</span><input id="cloudSpeed" type="range" min="0" max="1.5" step="0.01" value="0.06"><span id="cloudSpeedValue">0.15</span></div>
     <div class="row"><span>Escala N</span><input id="cloudScale" type="range" min="0.2" max="4" step="0.01" value="3.02"><span id="cloudScaleValue">1.60</span></div>
     <div class="row"><span>Cor Nuvens</span><input id="cloudColor" type="color" value="#f0cb7a"><span id="cloudColorValue">#ffffff</span></div>
+    <div class="row"><span>Praia</span><input id="shorePos" type="range" min="0" max="40" step="0.5" value="12"><span id="shorePosValue">12.0</span></div>
+    <div class="row"><span>Inclinacao</span><input id="beachSlope" type="range" min="0.02" max="0.5" step="0.01" value="0.2"><span id="beachSlopeValue">0.20</span></div>
+    <div class="row"><span>Crescimento</span><input id="shoalGain" type="range" min="0" max="4" step="0.05" value="0.8"><span id="shoalGainValue">0.80</span></div>
+    <div class="row"><span>Swash Vel</span><input id="swashSpeed" type="range" min="0" max="3" step="0.05" value="0.7"><span id="swashSpeedValue">0.70</span></div>
+    <div class="row"><span>Swash Dist</span><input id="swashRun" type="range" min="0" max="2" step="0.05" value="0.4"><span id="swashRunValue">0.40</span></div>
+    <div class="row"><span>Espuma</span><input id="foamAmount" type="range" min="0" max="2" step="0.05" value="1"><span id="foamAmountValue">1.00</span></div>
+    <div class="row"><span>Cor areia</span><input id="sandColor" type="color" value="#c2a878"><span id="sandColorValue">#c2a878</span></div>
     <div class="hint">Ctrl + Roda: Zoom | Ctrl + Mover: Deslocar</div>
 </div>
 <script>
@@ -65,7 +72,21 @@ const ui = {
     cloudScale: document.getElementById("cloudScale"),
     cloudScaleValue: document.getElementById("cloudScaleValue"),
     cloudColor: document.getElementById("cloudColor"),
-    cloudColorValue: document.getElementById("cloudColorValue")
+    cloudColorValue: document.getElementById("cloudColorValue"),
+    shorePos: document.getElementById("shorePos"),
+    shorePosValue: document.getElementById("shorePosValue"),
+    beachSlope: document.getElementById("beachSlope"),
+    beachSlopeValue: document.getElementById("beachSlopeValue"),
+    shoalGain: document.getElementById("shoalGain"),
+    shoalGainValue: document.getElementById("shoalGainValue"),
+    swashSpeed: document.getElementById("swashSpeed"),
+    swashSpeedValue: document.getElementById("swashSpeedValue"),
+    swashRun: document.getElementById("swashRun"),
+    swashRunValue: document.getElementById("swashRunValue"),
+    foamAmount: document.getElementById("foamAmount"),
+    foamAmountValue: document.getElementById("foamAmountValue"),
+    sandColor: document.getElementById("sandColor"),
+    sandColorValue: document.getElementById("sandColorValue")
 };
 
 const params = {
@@ -83,7 +104,14 @@ const params = {
     cloudIntensity: 1.0,
     cloudSpeed: 0.06,
     cloudScale: 3.02,
-    cloudColor: [0.9411764705882353, 0.796078431372549, 0.47843137254901963]
+    cloudColor: [0.9411764705882353, 0.796078431372549, 0.47843137254901963],
+    shorePos: 12.0,
+    beachSlope: 0.2,
+    shoalGain: 0.8,
+    swashSpeed: 0.7,
+    swashRun: 0.4,
+    foamAmount: 1.0,
+    sandColor: [0.7607843137254902, 0.6588235294117647, 0.47058823529411764]
 };
 
 const MAX_ITER_GEOMETRY = 8;
@@ -165,6 +193,13 @@ uniform float uCloudIntensity;
 uniform float uCloudSpeed;
 uniform float uCloudScale;
 uniform vec3 uCloudColor;
+uniform float uShorePos;
+uniform float uBeachSlope;
+uniform float uShoalGain;
+uniform float uSwashSpeed;
+uniform float uSwashRun;
+uniform float uFoamAmount;
+uniform vec3 uSandColor;
 
 const int MAX_NUM_STEPS = 64;
 const int MAX_ITER_GEOMETRY = 8;
@@ -269,40 +304,49 @@ float sea_octave(vec2 uv, float choppy) {
     return pow(1.0-pow(wv.x * wv.y,0.65),choppy);
 }
 
-float map(vec3 p) {
-    float freq = uSeaFreq;
-    float amp = uSeaHeight;
-    float choppy = uSeaChoppy;
-    vec2 uv = p.xz; uv.x *= 0.75;
-
-    float d, h = 0.0;
-    for(int i = 0; i < MAX_ITER_GEOMETRY; i++) {
-        if (i >= uIterGeometry) break;
-        d = sea_octave((uv+SEA_TIME)*freq,choppy);
-        d += sea_octave((uv-SEA_TIME)*freq,choppy);
-        h += d * amp;
-        uv *= octave_m; freq *= 1.9; amp *= 0.22;
-        choppy = mix(choppy,1.0,0.2);
-    }
-    return p.y - h;
+float beachBed(vec2 xz) {
+    float off = (-xz.y) - uShorePos;
+    float bed = -off * uBeachSlope;
+    bed += noise(xz * 0.05) * 0.25;
+    return bed;
 }
 
-float map_detailed(vec3 p) {
+float seaWaveHeight(vec2 pos, int iters) {
     float freq = uSeaFreq;
     float amp = uSeaHeight;
     float choppy = uSeaChoppy;
-    vec2 uv = p.xz; uv.x *= 0.75;
+    vec2 uv = pos; uv.x *= 0.75;
 
     float d, h = 0.0;
     for(int i = 0; i < MAX_ITER_FRAGMENT; i++) {
-        if (i >= uIterFragment) break;
+        if (i >= iters) break;
         d = sea_octave((uv+SEA_TIME)*freq,choppy);
         d += sea_octave((uv-SEA_TIME)*freq,choppy);
         h += d * amp;
         uv *= octave_m; freq *= 1.9; amp *= 0.22;
         choppy = mix(choppy,1.0,0.2);
     }
-    return p.y - h;
+    return h;
+}
+
+float waterSurface(vec2 xz, float bed, int iters) {
+    float depth = max(0.0, -bed);
+    float shoal = 1.0 + uShoalGain * exp(-depth * 0.6);
+    float dev = seaWaveHeight(xz, iters) - uSeaHeight * 1.1;
+    float swash = sin(iTime * uSwashSpeed) * uSwashRun * exp(-depth * 0.8);
+    return dev * shoal + swash;
+}
+
+float map(vec3 p) {
+    float bed = beachBed(p.xz);
+    float top = max(bed, waterSurface(p.xz, bed, uIterGeometry));
+    return p.y - top;
+}
+
+float map_detailed(vec3 p) {
+    float bed = beachBed(p.xz);
+    float top = max(bed, waterSurface(p.xz, bed, uIterFragment));
+    return p.y - top;
 }
 
 vec3 getSeaColor(vec3 p, vec3 n, vec3 l, vec3 eye, vec3 dist) {
@@ -323,6 +367,34 @@ vec3 getSeaColor(vec3 p, vec3 n, vec3 l, vec3 eye, vec3 dist) {
     color += specular(n, l, eye, 600.0 * inversesqrt(dot(dist,dist))) * lightAtten;
 
     return color;
+}
+
+vec3 getSandColor(vec3 p, vec3 n, vec3 l, vec3 eye, float bed, float swash) {
+    vec3 dry = uSandColor;
+    vec3 wet = uSandColor * 0.45;
+    float wetness = smoothstep(0.35, 0.0, bed);
+    wetness = max(wetness, smoothstep(0.05, -0.2, bed - swash));
+    wetness = clamp(wetness, 0.0, 1.0);
+
+    float ripple = noise(p.xz * vec2(0.6, 2.5)) * 0.5 + 0.5;
+    vec3 col = mix(dry, wet, wetness);
+    col *= 0.85 + 0.3 * ripple;
+
+    float diff = clamp(dot(n, l) * 0.5 + 0.5, 0.0, 1.0);
+    col *= 0.6 + 0.4 * diff;
+    col += specular(n, l, eye, 60.0) * wetness * 0.3;
+    return col;
+}
+
+vec3 applyFoam(vec3 col, vec3 p, float bed, float waterTop) {
+    float depth = max(0.0, -bed);
+    float surfZone = smoothstep(0.8, 0.0, depth);
+    float crest = smoothstep(0.9, 1.7, waterTop);
+    float breaking = crest * surfZone;
+    float band = smoothstep(0.35, 0.0, abs(bed));
+    float fn = noise(p.xz * 3.0 + vec2(iTime * 0.6, -iTime * 0.4)) * 0.5 + 0.5;
+    float foam = clamp((breaking + band) * (0.45 + 0.55 * fn) * uFoamAmount, 0.0, 1.0);
+    return mix(col, vec3(0.95), foam);
 }
 
 vec3 getNormal(vec3 p, float eps) {
@@ -378,9 +450,21 @@ vec3 getPixel(in vec2 coord, float time) {
     vec3 n = getNormal(p, dot(dist,dist) * EPSILON_NRM);
     vec3 light = normalize(vec3(0.0,1.0,0.8));
 
+    float bed = beachBed(p.xz);
+    float swash = sin(iTime * uSwashSpeed) * uSwashRun * exp(-max(0.0, -bed) * 0.8);
+    float waterTop = waterSurface(p.xz, bed, uIterFragment);
+
+    vec3 surf;
+    if (bed > waterTop) {
+        surf = getSandColor(p, n, light, dir, bed, swash);
+    } else {
+        surf = getSeaColor(p, n, light, dir, dist);
+    }
+    surf = applyFoam(surf, p, bed, waterTop);
+
     return mix(
         getSkyColor(dir),
-        getSeaColor(p,n,light,dir,dist),
+        surf,
         pow(smoothstep(0.0,-0.02,dir.y),0.2));
 }
 
@@ -428,6 +512,13 @@ void main() {
         bindColor(ui.cloudColor, ui.cloudColorValue, "cloudColor");
         bindColor(ui.seaBase, ui.seaBaseValue, "seaBase");
         bindColor(ui.seaWaterColor, ui.seaWaterColorValue, "seaWaterColor");
+        bindRange(ui.shorePos, ui.shorePosValue, "shorePos", 1);
+        bindRange(ui.beachSlope, ui.beachSlopeValue, "beachSlope", 2);
+        bindRange(ui.shoalGain, ui.shoalGainValue, "shoalGain", 2);
+        bindRange(ui.swashSpeed, ui.swashSpeedValue, "swashSpeed", 2);
+        bindRange(ui.swashRun, ui.swashRunValue, "swashRun", 2);
+        bindRange(ui.foamAmount, ui.foamAmountValue, "foamAmount", 2);
+        bindColor(ui.sandColor, ui.sandColorValue, "sandColor");
 
         const program = gl.createProgram();
         gl.attachShader(program, vertexShader);
@@ -472,6 +563,13 @@ void main() {
             const cloudSpeedLocation = gl.getUniformLocation(program, "uCloudSpeed");
             const cloudScaleLocation = gl.getUniformLocation(program, "uCloudScale");
             const cloudColorLocation = gl.getUniformLocation(program, "uCloudColor");
+            const shorePosLocation = gl.getUniformLocation(program, "uShorePos");
+            const beachSlopeLocation = gl.getUniformLocation(program, "uBeachSlope");
+            const shoalGainLocation = gl.getUniformLocation(program, "uShoalGain");
+            const swashSpeedLocation = gl.getUniformLocation(program, "uSwashSpeed");
+            const swashRunLocation = gl.getUniformLocation(program, "uSwashRun");
+            const foamAmountLocation = gl.getUniformLocation(program, "uFoamAmount");
+            const sandColorLocation = gl.getUniformLocation(program, "uSandColor");
 
             let mouseX = 0;
             let mouseY = 0;
@@ -543,7 +641,9 @@ void main() {
                     !seaHeightLocation || !seaChoppyLocation || !seaSpeedLocation || !seaFreqLocation ||
                     !seaBaseLocation || !seaWaterColorLocation || !gammaLocation ||
                     !iterGeometryLocation || !iterFragmentLocation || !numStepsLocation ||
-                    !cloudCoverLocation || !cloudIntensityLocation || !cloudSpeedLocation || !cloudScaleLocation || !cloudColorLocation) {
+                    !cloudCoverLocation || !cloudIntensityLocation || !cloudSpeedLocation || !cloudScaleLocation || !cloudColorLocation ||
+                    !shorePosLocation || !beachSlopeLocation || !shoalGainLocation || !swashSpeedLocation || !swashRunLocation ||
+                    !foamAmountLocation || !sandColorLocation) {
                     console.error("Uniform location missing");
                     return;
                 }
@@ -569,6 +669,13 @@ void main() {
                 gl.uniform1f(cloudSpeedLocation, params.cloudSpeed);
                 gl.uniform1f(cloudScaleLocation, params.cloudScale);
                 gl.uniform3f(cloudColorLocation, params.cloudColor[0], params.cloudColor[1], params.cloudColor[2]);
+                gl.uniform1f(shorePosLocation, params.shorePos);
+                gl.uniform1f(beachSlopeLocation, params.beachSlope);
+                gl.uniform1f(shoalGainLocation, params.shoalGain);
+                gl.uniform1f(swashSpeedLocation, params.swashSpeed);
+                gl.uniform1f(swashRunLocation, params.swashRun);
+                gl.uniform1f(foamAmountLocation, params.foamAmount);
+                gl.uniform3f(sandColorLocation, params.sandColor[0], params.sandColor[1], params.sandColor[2]);
                 gl.drawArrays(gl.TRIANGLES, 0, 6);
                 requestAnimationFrame(render);
             }

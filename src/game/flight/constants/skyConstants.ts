@@ -39,6 +39,24 @@ export const HDR_ENV_DEFAULT = 'kloofendal_48d_partly_cloudy_puresky_4k.hdr';
 export const HDR_SKYBOX_SIZE = 600_000;
 export const HDR_SKYBOX_LEVEL = 0.8;
 
+export const SEASCAPE_SKY_SHADER_VERTEX_URL = 'src/game/shaders/seascapeSky.vertex.fx';
+export const SEASCAPE_SKY_SHADER_FRAGMENT_URL = 'src/game/shaders/seascapeSky.fragment.fx';
+export const SEASCAPE_SKY_BOX_SIZE = 600_000;
+export const SEASCAPE_SKY_DEFAULT_ENABLED = false;
+export const SEASCAPE_SKY_DEFAULT_COVER = 0.35;
+export const SEASCAPE_SKY_DEFAULT_INTENSITY = 1.0;
+export const SEASCAPE_SKY_DEFAULT_SPEED = 0.06;
+export const SEASCAPE_SKY_DEFAULT_SCALE = 3.02;
+export const SEASCAPE_SKY_DEFAULT_COLOR_R = 0.94;
+export const SEASCAPE_SKY_DEFAULT_COLOR_G = 0.80;
+export const SEASCAPE_SKY_DEFAULT_COLOR_B = 0.48;
+export const SEASCAPE_SKY_DEFAULT_COLOR_HEX = '#f0cb7a';
+export const SEASCAPE_SKY_NIGHT_ZENITH_R = 0.02;
+export const SEASCAPE_SKY_NIGHT_ZENITH_G = 0.03;
+export const SEASCAPE_SKY_NIGHT_ZENITH_B = 0.08;
+export const SEASCAPE_SKY_DAYFACTOR_OFFSET_DEG = 6;
+export const SEASCAPE_SKY_DAYFACTOR_RANGE_DEG = 30;
+
 export const HDR_AUTO_DAY_FILE   = 'drakensberg_solitary_mountain_puresky_4k.hdr';
 export const HDR_AUTO_NIGHT_FILE = 'qwantani_moon_noon_puresky_4k.hdr';
 export const HDR_AUTO_NIGHT_ELEVATION_DEG = -3;

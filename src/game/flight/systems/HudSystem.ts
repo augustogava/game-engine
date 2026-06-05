@@ -901,6 +901,12 @@ export class HudSystem {
             s.highCloudsScale = parseInt((document.getElementById('gfx-highclouds-scale') as HTMLInputElement)?.value || '170') / 100;
             s.highCloudsAlpha = parseInt((document.getElementById('gfx-highclouds-alpha') as HTMLInputElement)?.value || '85') / 100;
             s.highCloudsReflect = parseInt((document.getElementById('gfx-highclouds-reflect') as HTMLInputElement)?.value || '24') / 100;
+            s.seascapeSky = (document.getElementById('gfx-seascapesky') as HTMLInputElement)?.checked ?? false;
+            s.seascapeSkyCover = parseInt((document.getElementById('gfx-seascapesky-cover') as HTMLInputElement)?.value || '35') / 100;
+            s.seascapeSkyIntensity = parseInt((document.getElementById('gfx-seascapesky-intensity') as HTMLInputElement)?.value || '100') / 100;
+            s.seascapeSkySpeed = parseInt((document.getElementById('gfx-seascapesky-speed') as HTMLInputElement)?.value || '6') / 100;
+            s.seascapeSkyScale = parseInt((document.getElementById('gfx-seascapesky-scale') as HTMLInputElement)?.value || '302') / 100;
+            s.seascapeSkyColor = (document.getElementById('gfx-seascapesky-color') as HTMLInputElement)?.value || '#f0cb7a';
             s.hdrEnv = (document.getElementById('gfx-hdr-env') as HTMLSelectElement)?.value || 'auto';
             s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
             s.tileShadows      = this.scene._premium.tileShadows;
@@ -1078,8 +1084,45 @@ export class HudSystem {
                         }
                         highCloudsSys.setAutoTint(true);
                     }
+                    let seascapeOn = false;
+                    const seascapeSys = this.scene.getSeascapeSkySystem?.();
+                    if (seascapeSys) {
+                        const ssEnableEl = document.getElementById('gfx-seascapesky') as HTMLInputElement | null;
+                        const ssCoverEl = document.getElementById('gfx-seascapesky-cover') as HTMLInputElement | null;
+                        const ssCoverLbl = document.getElementById('gfx-seascapesky-cover-val');
+                        const ssIntensityEl = document.getElementById('gfx-seascapesky-intensity') as HTMLInputElement | null;
+                        const ssIntensityLbl = document.getElementById('gfx-seascapesky-intensity-val');
+                        const ssSpeedEl = document.getElementById('gfx-seascapesky-speed') as HTMLInputElement | null;
+                        const ssSpeedLbl = document.getElementById('gfx-seascapesky-speed-val');
+                        const ssScaleEl = document.getElementById('gfx-seascapesky-scale') as HTMLInputElement | null;
+                        const ssScaleLbl = document.getElementById('gfx-seascapesky-scale-val');
+                        const ssColorEl = document.getElementById('gfx-seascapesky-color') as HTMLInputElement | null;
+                        if (ssCoverEl) {
+                            const v = parseInt(ssCoverEl.value) / 100;
+                            seascapeSys.setCover(v);
+                            if (ssCoverLbl) ssCoverLbl.textContent = v.toFixed(2);
+                        }
+                        if (ssIntensityEl) {
+                            const v = parseInt(ssIntensityEl.value) / 100;
+                            seascapeSys.setIntensity(v);
+                            if (ssIntensityLbl) ssIntensityLbl.textContent = v.toFixed(2);
+                        }
+                        if (ssSpeedEl) {
+                            const v = parseInt(ssSpeedEl.value) / 100;
+                            seascapeSys.setSpeed(v);
+                            if (ssSpeedLbl) ssSpeedLbl.textContent = v.toFixed(2);
+                        }
+                        if (ssScaleEl) {
+                            const v = parseInt(ssScaleEl.value) / 100;
+                            seascapeSys.setScale(v);
+                            if (ssScaleLbl) ssScaleLbl.textContent = v.toFixed(2);
+                        }
+                        if (ssColorEl) seascapeSys.setColorHex(ssColorEl.value);
+                        seascapeOn = ssEnableEl?.checked ?? false;
+                        seascapeSys.setEnabled(seascapeOn);
+                    }
                     const hdrEnvEl = document.getElementById('gfx-hdr-env') as HTMLSelectElement | null;
-                    if (hdrEnvEl) {
+                    if (hdrEnvEl && !seascapeOn) {
                         try {
                             this.scene._applyHdrEnvironment(scene, hdrEnvEl.value || 'none');
                         } catch (err) {
@@ -1205,6 +1248,12 @@ export class HudSystem {
             if (cfg.highCloudsScale !== undefined) setVal('gfx-highclouds-scale', Math.round(cfg.highCloudsScale * 100));
             if (cfg.highCloudsAlpha !== undefined) setVal('gfx-highclouds-alpha', Math.round(cfg.highCloudsAlpha * 100));
             if (cfg.highCloudsReflect !== undefined) setVal('gfx-highclouds-reflect', Math.round(cfg.highCloudsReflect * 100));
+            setCheck('gfx-seascapesky', cfg.seascapeSky);
+            if (cfg.seascapeSkyCover !== undefined) setVal('gfx-seascapesky-cover', Math.round(cfg.seascapeSkyCover * 100));
+            if (cfg.seascapeSkyIntensity !== undefined) setVal('gfx-seascapesky-intensity', Math.round(cfg.seascapeSkyIntensity * 100));
+            if (cfg.seascapeSkySpeed !== undefined) setVal('gfx-seascapesky-speed', Math.round(cfg.seascapeSkySpeed * 100));
+            if (cfg.seascapeSkyScale !== undefined) setVal('gfx-seascapesky-scale', Math.round(cfg.seascapeSkyScale * 100));
+            if (cfg.seascapeSkyColor !== undefined) setVal('gfx-seascapesky-color', cfg.seascapeSkyColor);
             if (cfg.hdrEnv !== undefined) setVal('gfx-hdr-env', cfg.hdrEnv);
             if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
 
@@ -1253,7 +1302,7 @@ export class HudSystem {
             }, 100);
         }
 
-        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-precip-type', 'gfx-precip-intensity', 'gfx-milkyway', 'gfx-highclouds', 'gfx-highclouds-cover', 'gfx-highclouds-speed', 'gfx-highclouds-scale', 'gfx-highclouds-alpha', 'gfx-highclouds-reflect', 'gfx-hdr-env'];
+        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-precip-type', 'gfx-precip-intensity', 'gfx-milkyway', 'gfx-highclouds', 'gfx-highclouds-cover', 'gfx-highclouds-speed', 'gfx-highclouds-scale', 'gfx-highclouds-alpha', 'gfx-highclouds-reflect', 'gfx-seascapesky', 'gfx-seascapesky-cover', 'gfx-seascapesky-intensity', 'gfx-seascapesky-speed', 'gfx-seascapesky-scale', 'gfx-seascapesky-color', 'gfx-hdr-env'];
         for (const id of ids) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => applySettings());
