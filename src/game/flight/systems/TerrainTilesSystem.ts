@@ -24,8 +24,10 @@ const TILE_TEXTURE_ANISOTROPY = 8;
 const ADAPT_EVAL_INTERVAL_MS = 3000;
 const ADAPT_WARMUP_MS = 8000;
 const ADAPT_FPS_LOW = 18;
-const ADAPT_FPS_HIGH = 28;
+const ADAPT_FPS_HIGH = 40;
 const ADAPT_MAX_STEPS = 2;
+const ADAPT_STEP_COOLDOWN_MS = 7000;
+const ADAPT_UPGRADE_STREAK = 2;
 const ADAPT_ERROR_TARGET_MULT_PER_STEP = 2.0;
 const ADAPT_LRU_MULT_PER_STEP = 0.75;
 const ADAPT_SCALE_DOWN_PER_STEP = 0.15;
@@ -39,6 +41,8 @@ export class TerrainTilesSystem {
     private _adaptStep = 0;
     private _adaptStartMs = 0;
     private _adaptLastEvalMs = 0;
+    private _adaptLastStepMs = 0;
+    private _highFpsStreak = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -94,6 +98,8 @@ export class TerrainTilesSystem {
         this._adaptStep = 0;
         this._adaptStartMs = 0;
         this._adaptLastEvalMs = 0;
+        this._adaptLastStepMs = 0;
+        this._highFpsStreak = 0;
         console.info(`[3DTiles] errorTarget=${this.scene.tiles.errorTarget} lruMax=${this.scene.tiles.lruCache.maxSize} (mobile=${isMobile})`);
         try {
             this.scene.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
@@ -259,6 +265,7 @@ export class TerrainTilesSystem {
     updateAdaptiveQuality(): void {
         const tiles = this.scene.tiles;
         if (!tiles) return;
+        if (this.scene._crashed) return;
         const engine = this.scene.scene?.getEngine?.();
         if (!engine) return;
 
@@ -279,11 +286,20 @@ export class TerrainTilesSystem {
         const prevStep = this._adaptStep;
         if (fps < ADAPT_FPS_LOW && this._adaptStep < ADAPT_MAX_STEPS) {
             this._adaptStep++;
+            this._highFpsStreak = 0;
         } else if (fps > ADAPT_FPS_HIGH && this._adaptStep > 0) {
-            this._adaptStep--;
+            this._highFpsStreak++;
+            const cooldownElapsed = now - this._adaptLastStepMs >= ADAPT_STEP_COOLDOWN_MS;
+            if (this._highFpsStreak >= ADAPT_UPGRADE_STREAK && cooldownElapsed) {
+                this._adaptStep--;
+                this._highFpsStreak = 0;
+            }
+        } else {
+            this._highFpsStreak = 0;
         }
         if (this._adaptStep === prevStep) return;
 
+        this._adaptLastStepMs = now;
         this._applyAdaptiveStep(engine);
         console.log(`[3DTiles] Adaptive quality step ${prevStep}->${this._adaptStep} (fps=${fps.toFixed(0)} errorTarget=${tiles.errorTarget})`);
     }

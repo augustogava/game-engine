@@ -178,7 +178,7 @@ export class InputSystem {
                 if (!this.scene._screenshotKeyLock) {
                     this.scene._screenshotKeyLock = true;
                     this.scene._takeScreenshot();
-                    setTimeout(() => { this.scene._screenshotKeyLock = false; }, 500);
+                    this.safeSetTimeout(() => { this.scene._screenshotKeyLock = false; }, 500);
                 }
             }
         };

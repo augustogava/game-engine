@@ -579,7 +579,7 @@ export class HudSystem {
             }
             toast.textContent = message;
             toast.style.opacity = '1';
-            setTimeout(() => { if (toast) toast.style.opacity = '0'; }, durationMs);
+            this.scene._safeSetTimeout(() => { if (toast) toast.style.opacity = '0'; }, durationMs);
         } catch (err) {
             console.warn('[Toast] failed:', err);
         }

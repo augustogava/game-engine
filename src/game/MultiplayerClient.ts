@@ -35,6 +35,7 @@ export class MultiplayerClient {
     private onNoFlightHoursCb: (() => void) | null = null;
     private _onFlightLogEndedCb: ((msg: any) => void) | null = null;
     private _onlineCount = 0;
+    private _pendingCrash: { reason: string; altitudeFt: number; verticalSpeedFpm: number } | null = null;
 
     constructor(token: string) {
         this.token = token;
@@ -91,9 +92,24 @@ export class MultiplayerClient {
         this.rt.onConnectionChange((connected) => {
             if (connected) {
                 this.rt.send({ type: 'join', token: this.token });
+                this._flushPendingCrash();
             }
         });
         this.rt.connect();
+    }
+
+    private _flushPendingCrash(): void {
+        if (!this._pendingCrash) return;
+        if (!this.rt.connected) return;
+        const pending = this._pendingCrash;
+        this._pendingCrash = null;
+        console.log(`[Crash] Flushing queued crash after (re)connect reason=${pending.reason} altFt=${pending.altitudeFt} vsFpm=${pending.verticalSpeedFpm}`);
+        this.rt.send({
+            type: 'crash',
+            reason: pending.reason,
+            altitudeFt: pending.altitudeFt,
+            verticalSpeedFpm: pending.verticalSpeedFpm,
+        });
     }
 
     sendUpdate(state: Omit<PlayerState, 'userId'>): void {
@@ -104,13 +120,14 @@ export class MultiplayerClient {
     }
 
     sendCrash(reason: string, altitudeFt: number, verticalSpeedFpm: number): void {
-        if (!this.rt.connected) {
-            console.warn(`[Crash] sendCrash skipped: WebSocket not connected (reason=${reason})`);
-            return;
-        }
         const safeReason = (typeof reason === 'string' && reason.length > 0) ? reason.slice(0, 64) : 'unknown';
         const safeAlt = Number.isFinite(altitudeFt) ? Math.round(altitudeFt) : 0;
         const safeVs = Number.isFinite(verticalSpeedFpm) ? Math.round(verticalSpeedFpm) : 0;
+        if (!this.rt.connected) {
+            this._pendingCrash = { reason: safeReason, altitudeFt: safeAlt, verticalSpeedFpm: safeVs };
+            console.warn(`[Crash] sendCrash queued: WebSocket not connected (reason=${safeReason}); will flush on reconnect`);
+            return;
+        }
         console.log(`[Crash] sendCrash reason=${safeReason} altFt=${safeAlt} vsFpm=${safeVs}`);
         this.rt.send({
             type: 'crash',

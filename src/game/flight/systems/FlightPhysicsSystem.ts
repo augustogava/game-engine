@@ -20,6 +20,8 @@ const {
     TERRAIN_RAY_LENGTH_M,
     TERRAIN_UNKNOWN_Y,
     TERRAIN_HIT_ABOVE_LIMIT_M,
+    TERRAIN_GRACE_SUBSTEPS,
+    TERRAIN_TUNNEL_STREAK_REQUIRED,
     GROUND_TERRAIN_SMOOTH_SNAP_DELTA_M,
     GROUND_TERRAIN_SMOOTH_TAU_S,
     GEAR_STATE_DOWN,
@@ -94,6 +96,8 @@ const {
 } = CONST as any;
 import { UiPreferences } from '../../UiPreferences.js';
 
+const INERTIA_MIN_KGM2 = 1e-3;
+
 export class FlightPhysicsSystem {
     private readonly scene: any;
 
@@ -105,6 +109,10 @@ export class FlightPhysicsSystem {
     }
 
     triggerCrash(reason: string = 'unknown'): void {
+        if (this.scene._crashed) {
+            console.debug(`[Crash] Ignoring duplicate crash trigger reason=${reason} (already crashed)`);
+            return;
+        }
         const altFtBefore = this.scene.planeRoot
             ? Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y) * CRASH_METERS_TO_FEET)
             : 0;
@@ -261,6 +269,7 @@ export class FlightPhysicsSystem {
             }
             const wasUnknown = this.scene.terrainY === TERRAIN_UNKNOWN_Y;
             let resolvedTerrainY: number = TERRAIN_UNKNOWN_Y;
+            let suspectHighHit = false;
             if (hit?.hit && hit.pickedPoint) {
                 const accept = inSpawnWindow || hit.pickedPoint.y <= pos.y + TERRAIN_HIT_ABOVE_LIMIT_M;
                 if (accept) {
@@ -268,11 +277,23 @@ export class FlightPhysicsSystem {
                     resolvedTerrainY = (inSpawnWindow && !isRunwayHit)
                         ? hit.pickedPoint.y + RUNWAY_COLLIDER_Y_BIAS_M
                         : hit.pickedPoint.y;
+                    this.scene._tunnelHitStreak = 0;
                 } else if (!inSpawnWindow) {
-                    const buryDepth = hit.pickedPoint.y - pos.y;
-                    console.warn(`[Crash] Terrain tunneling detected: pos.y=${pos.y.toFixed(1)}m terrainHit=${hit.pickedPoint.y.toFixed(1)}m bury=${buryDepth.toFixed(1)}m speed=${(this.scene.velocity.length() * 1.94384).toFixed(0)}kt`);
-                    this.scene._triggerCrash('terrain_tunneling');
-                    return;
+                    suspectHighHit = true;
+                    const settling = wasUnknown || this.scene._terrainGraceFramesLeft > 0;
+                    if (settling) {
+                        this.scene._tunnelHitStreak = 0;
+                        console.debug(`[Terrain] Rejected suspect high hit during tile settle (no crash): pos.y=${pos.y.toFixed(1)}m terrainHit=${hit.pickedPoint.y.toFixed(1)}m grace=${this.scene._terrainGraceFramesLeft}`);
+                    } else {
+                        this.scene._tunnelHitStreak++;
+                        if (this.scene._tunnelHitStreak >= TERRAIN_TUNNEL_STREAK_REQUIRED) {
+                            const buryDepth = hit.pickedPoint.y - pos.y;
+                            console.warn(`[Crash] Terrain tunneling detected (streak=${this.scene._tunnelHitStreak}): pos.y=${pos.y.toFixed(1)}m terrainHit=${hit.pickedPoint.y.toFixed(1)}m bury=${buryDepth.toFixed(1)}m speed=${(this.scene.velocity.length() * 1.94384).toFixed(0)}kt`);
+                            this.scene._triggerCrash('terrain_tunneling');
+                            return;
+                        }
+                        console.warn(`[Terrain] Suspect high hit (streak=${this.scene._tunnelHitStreak}/${TERRAIN_TUNNEL_STREAK_REQUIRED}), deferring crash: pos.y=${pos.y.toFixed(1)}m terrainHit=${hit.pickedPoint.y.toFixed(1)}m`);
+                    }
                 }
             }
             if (resolvedTerrainY !== TERRAIN_UNKNOWN_Y) {
@@ -285,8 +306,15 @@ export class FlightPhysicsSystem {
                     this.scene.terrainY = resolvedTerrainY;
                 }
                 this.scene._lastKnownSpawnTerrainY = resolvedTerrainY;
+                this.scene._lastValidTerrainY = this.scene.terrainY;
+                this.scene._terrainGraceFramesLeft = TERRAIN_GRACE_SUBSTEPS;
             } else if (inSpawnWindow && this.scene._lastKnownSpawnTerrainY !== TERRAIN_UNKNOWN_Y) {
                 this.scene.terrainY = this.scene._lastKnownSpawnTerrainY;
+            } else if (!inSpawnWindow && this.scene._terrainGraceFramesLeft > 0 && this.scene._lastValidTerrainY !== TERRAIN_UNKNOWN_Y) {
+                this.scene._terrainGraceFramesLeft--;
+                this.scene.terrainY = this.scene._lastValidTerrainY;
+            } else if (suspectHighHit && this.scene._lastValidTerrainY !== TERRAIN_UNKNOWN_Y) {
+                this.scene.terrainY = this.scene._lastValidTerrainY;
             } else {
                 this.scene.terrainY = TERRAIN_UNKNOWN_Y;
             }
@@ -426,9 +454,17 @@ export class FlightPhysicsSystem {
         const MASS = cfg.fuel_capacity_kg > 0
             ? cfg.mass_kg + this.scene.fuelRemaining
             : cfg.mass_kg;
-        const cIxx = cfg.inertia_xx;
-        const cIyy = cfg.inertia_yy;
-        const cIzz = cfg.inertia_zz;
+        const rawIxx = cfg.inertia_xx;
+        const rawIyy = cfg.inertia_yy;
+        const rawIzz = cfg.inertia_zz;
+        const cIxx = Math.max(INERTIA_MIN_KGM2, Number.isFinite(rawIxx) ? rawIxx : 0);
+        const cIyy = Math.max(INERTIA_MIN_KGM2, Number.isFinite(rawIyy) ? rawIyy : 0);
+        const cIzz = Math.max(INERTIA_MIN_KGM2, Number.isFinite(rawIzz) ? rawIzz : 0);
+        if (!this.scene._inertiaClampWarned
+            && (cIxx !== rawIxx || cIyy !== rawIyy || cIzz !== rawIzz)) {
+            this.scene._inertiaClampWarned = true;
+            console.warn(`[Physics] Inertia clamped to min ${INERTIA_MIN_KGM2} (raw xx=${rawIxx} yy=${rawIyy} zz=${rawIzz}); check aircraft config to avoid NaN angular dynamics.`);
+        }
 
         const engineCountTotal = Math.max(1, cfg.engine_count ?? 1);
         if (!Array.isArray(this.scene._engineAlive) || this.scene._engineAlive.length !== engineCountTotal) {

@@ -8,6 +8,9 @@ import { EngineSound, ENGINE_SOUND_TYPE_TURBOFAN } from '../../EngineSound.js';
 import { AudioCore } from '../../AudioCore.js';
 import { CONTRAIL_EMIT_LERP_RATE, CONTRAIL_EMIT_RATE_MAX } from '../constants/index.js';
 
+const REMOTE_MODEL_LOAD_TIMEOUT_MS = 12000;
+const failedRemoteModelUrls = new Set<string>();
+
 const LABEL_TEX_W = 256;
 const LABEL_TEX_H = 80;
 const LABEL_AVATAR_SIZE = 48;
@@ -89,6 +92,7 @@ export class MultiplayerSystem {
                 this.scene.dbgMpStatus.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
                 this.scene.dbgMpStatus.style.color = connected ? '#40ffaa' : '#ff5555';
             }
+            this._setConnectionIndicator(connected);
             if (!connected) {
                 try {
                     for (const [id, remote] of this.scene.remotePlayers) {
@@ -122,6 +126,26 @@ export class MultiplayerSystem {
         this.scene.mpClient.connect();
     }
 
+    private _setConnectionIndicator(connected: boolean): void {
+        try {
+            let el = document.getElementById('mp-conn-indicator');
+            if (connected) {
+                if (el) el.style.display = 'none';
+                return;
+            }
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'mp-conn-indicator';
+                el.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9998;background:rgba(40,20,0,.8);border:1px solid rgba(255,180,60,.5);color:#ffcc66;padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;font-size:11px;pointer-events:none;backdrop-filter:blur(6px)';
+                el.textContent = 'Reconectando…';
+                document.body.appendChild(el);
+            }
+            el.style.display = 'block';
+        } catch (err) {
+            console.warn('[MP] Connection indicator update failed:', err);
+        }
+    }
+
     createRemotePlayer(id: string, modelFile?: string): RemotePlayer {
         const scene = this.scene.scene;
         const root = new BABYLON.TransformNode(`remote_${id}`, scene);
@@ -139,6 +163,7 @@ export class MultiplayerSystem {
             contrailHalfSpan: REMOTE_CONTRAIL_FALLBACK_HALF_SPAN,
             modelPivot: null, modelOriginalSize: 0, modelOriginalHalfWidth: 0,
             aircraftConfigCached: null, pendingConfigApply: false,
+            modelLoadToken: 0,
         };
 
         this.loadRemoteModel(id, root, remote, modelFile || DEFAULT_AIRCRAFT_CONFIG.model_file);
@@ -186,18 +211,51 @@ export class MultiplayerSystem {
         const folder = lastSlash >= 0 ? modelFile.substring(0, lastSlash + 1) : '';
         const file = lastSlash >= 0 ? modelFile.substring(lastSlash + 1) : modelFile;
 
+        const myToken = ++remote.modelLoadToken;
+        const tokenValid = () => remote.modelLoadToken === myToken
+            && this.scene.remotePlayers.get(id) === remote
+            && !root.isDisposed();
+
+        if (failedRemoteModelUrls.has(modelFile)) {
+            console.debug(`[Remote] Skipping known-broken model ${modelFile} for ${id}; using fallback`);
+            this.buildRemoteFallback(id, root, remote);
+            this.buildRemoteContrails(remote, REMOTE_CONTRAIL_FALLBACK_HALF_SPAN, id);
+            return;
+        }
+
+        let settled = false;
+        const watchdog = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            if (!tokenValid()) return;
+            if (remote.modelPivot && !remote.modelPivot.isDisposed()) return;
+            console.warn(`[Remote] Model load watchdog fired for ${id} (${modelFile}); using fallback`);
+            this.buildRemoteFallback(id, root, remote);
+            this.buildRemoteContrails(remote, REMOTE_CONTRAIL_FALLBACK_HALF_SPAN, id);
+        }, REMOTE_MODEL_LOAD_TIMEOUT_MS);
+
         BABYLON.SceneLoader.ImportMesh(
             '', folder, file, scene,
             (meshes: BABYLON.AbstractMesh[], _particleSystems: BABYLON.IParticleSystem[], skeletons: BABYLON.Skeleton[], animationGroups: BABYLON.AnimationGroup[]) => {
+                const watchdogAlreadyFired = settled;
+                settled = true;
+                try { window.clearTimeout(watchdog); } catch (_) { /* ignore */ }
                 if (!meshes.length) return;
-                const stillActive = this.scene.remotePlayers.get(id) === remote && !root.isDisposed();
+                const stillActive = tokenValid();
                 if (!stillActive) {
-                    console.debug(`[Remote] Discarding GLB for ${id}: entity no longer active`);
+                    console.debug(`[Remote] Discarding GLB for ${id}: entity no longer active or superseded`);
                     try { meshes.forEach((m) => m.dispose()); } catch (_) { /* ignore */ }
                     try { animationGroups.forEach((g) => g.dispose()); } catch (_) { /* ignore */ }
                     try { skeletons.forEach((s) => s.dispose()); } catch (_) { /* ignore */ }
                     return;
                 }
+                if (watchdogAlreadyFired && remote.meshes.length) {
+                    console.debug(`[Remote] GLB arrived after watchdog fallback for ${id}; replacing fallback meshes`);
+                }
+                try {
+                    remote.meshes.forEach((m) => { try { m.material?.dispose(); } catch (_) { /* ignore */ } try { m.dispose(); } catch (_) { /* ignore */ } });
+                    remote.meshes = [];
+                } catch (_) { /* ignore */ }
                 try {
                     animationGroups.forEach((g) => remote.animationGroups.push(g));
                     skeletons.forEach((s) => remote.skeletons.push(s));
@@ -245,12 +303,17 @@ export class MultiplayerSystem {
                 }
             },
             null,
-            () => {
-                const stillActive = this.scene.remotePlayers.get(id) === remote && !root.isDisposed();
+            (_scene: BABYLON.Scene, _message?: string, _exception?: any) => {
+                if (settled) return;
+                settled = true;
+                try { window.clearTimeout(watchdog); } catch (_) { /* ignore */ }
+                failedRemoteModelUrls.add(modelFile);
+                const stillActive = tokenValid();
                 if (!stillActive) {
-                    console.debug(`[Remote] Skipping fallback for ${id}: entity no longer active`);
+                    console.debug(`[Remote] Skipping fallback for ${id}: entity no longer active or superseded`);
                     return;
                 }
+                console.warn(`[Remote] Model load failed for ${id} (${modelFile}); using fallback:`, _message || _exception);
                 this.buildRemoteFallback(id, root, remote);
                 this.buildRemoteContrails(remote, REMOTE_CONTRAIL_FALLBACK_HALF_SPAN, id);
             },

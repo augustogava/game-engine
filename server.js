@@ -113,16 +113,18 @@ async function initDatabase() {
 }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
-function jsonResponse(res, status, data) {
+function jsonResponse(res, status, data, extraHeaders) {
     const payload = JSON.stringify(data);
     const reqOrigin = res.req && res.req.headers ? res.req.headers.origin : undefined;
-    res.writeHead(status, {
+    const headers = {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': resolveCorsOrigin(reqOrigin),
         'Vary': 'Origin',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    });
+    };
+    if (extraHeaders) Object.assign(headers, extraHeaders);
+    res.writeHead(status, headers);
     res.end(payload);
 }
 
@@ -341,7 +343,32 @@ async function loadWaypointsForMissionIds(missionIds) {
 }
 
 // ── Proxy to main API ────────────────────────────────────────────────────────
-async function proxyToMainApi(apiPath, req, res, body) {
+const PROXY_FETCH_TIMEOUT_MS = 15000;
+const LIVE_TRAFFIC_STALE_MS = 120000;
+const LIVE_TRAFFIC_CACHE_MAX_KEYS = 50;
+const liveTrafficCache = new Map();
+
+function setLiveTrafficCache(key, status, data) {
+    if (liveTrafficCache.has(key)) liveTrafficCache.delete(key);
+    liveTrafficCache.set(key, { status, data, ts: Date.now() });
+    while (liveTrafficCache.size > LIVE_TRAFFIC_CACHE_MAX_KEYS) {
+        const oldestKey = liveTrafficCache.keys().next().value;
+        liveTrafficCache.delete(oldestKey);
+    }
+}
+
+function serveLiveTrafficStale(res, apiPath, cacheOpts, contextLabel) {
+    if (!cacheOpts || !cacheOpts.key) return false;
+    const cached = liveTrafficCache.get(cacheOpts.key);
+    if (!cached) return false;
+    const ageMs = Date.now() - cached.ts;
+    if (ageMs > LIVE_TRAFFIC_STALE_MS) return false;
+    console.warn(`[Proxy] Serving stale live-traffic for ${apiPath} (${contextLabel}, age=${ageMs}ms)`);
+    jsonResponse(res, 200, cached.data, { 'X-LiveTraffic-Stale': 'true' });
+    return true;
+}
+
+async function proxyToMainApi(apiPath, req, res, body, cacheOpts) {
     if (!MAIN_API_URL) {
         return jsonResponse(res, 503, { error: 'Main API not configured' });
     }
@@ -350,15 +377,34 @@ async function proxyToMainApi(apiPath, req, res, body) {
     const auth = req.headers['authorization'];
     if (auth) headers['Authorization'] = auth;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { try { controller.abort(); } catch (_) { /* ignore */ } }, PROXY_FETCH_TIMEOUT_MS);
     try {
-        const options = { method: req.method, headers };
+        const options = { method: req.method, headers, signal: controller.signal };
         if (body) options.body = JSON.stringify(body);
         const resp = await fetch(targetUrl, options);
-        const data = await resp.json();
+        const rawText = await resp.text();
+        let data;
+        let parsed = true;
+        try {
+            data = rawText.length ? JSON.parse(rawText) : {};
+        } catch (_) {
+            parsed = false;
+            data = { error: 'Upstream error', status: resp.status };
+        }
+        if (resp.ok && parsed) {
+            if (cacheOpts && cacheOpts.key) setLiveTrafficCache(cacheOpts.key, resp.status, data);
+            return jsonResponse(res, resp.status, data);
+        }
+        console.warn(`[Proxy] ${req.method} ${apiPath} upstream status=${resp.status} parsed=${parsed} body="${rawText.slice(0, 120)}"`);
+        if (serveLiveTrafficStale(res, apiPath, cacheOpts, `upstream status=${resp.status}`)) return;
         return jsonResponse(res, resp.status, data);
     } catch (err) {
-        console.error(`[Proxy] ${req.method} ${apiPath} error:`, err.message);
+        console.error(`[Proxy] ${req.method} ${apiPath} network error host=${MAIN_API_URL} name=${err && err.name} code=${err && err.code} msg=${err && err.message}`);
+        if (serveLiveTrafficStale(res, apiPath, cacheOpts, 'network error')) return;
         return jsonResponse(res, 502, { error: 'Main API unreachable' });
+    } finally {
+        clearTimeout(timeout);
     }
 }
 
@@ -1537,11 +1583,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && urlPath === '/api/live-traffic/positions') {
         const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-        return proxyToMainApi(`/api/live-traffic/positions${qs}`, req, res);
+        return proxyToMainApi(`/api/live-traffic/positions${qs}`, req, res, undefined, { key: `positions:${qs}` });
     }
 
     if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/live-traffic/airport/:code'))) {
-        return proxyToMainApi(`/api/live-traffic/airport/${encodeURIComponent(routeParams.code)}`, req, res);
+        return proxyToMainApi(`/api/live-traffic/airport/${encodeURIComponent(routeParams.code)}`, req, res, undefined, { key: `airport:${routeParams.code}` });
     }
 
     // ── Avatar proxy (same-origin for canvas CORS) ────────────────────────

@@ -6,6 +6,7 @@ const PANEL_STATE_STORAGE_KEY = 'flight_panels_v1';
 
 export class DebugPanelSystem {
     private readonly scene: any;
+    private readonly _windowDragHandlers: { move: (e: MouseEvent) => void; up: () => void }[] = [];
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -24,7 +25,7 @@ export class DebugPanelSystem {
             elY = rect.top;
             e.preventDefault();
         });
-        window.addEventListener('mousemove', (e: MouseEvent) => {
+        const moveHandler = (e: MouseEvent): void => {
             if (!dragging) return;
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
@@ -34,8 +35,19 @@ export class DebugPanelSystem {
             el.style.right = 'auto';
             el.style.bottom = 'auto';
             el.style.transform = 'none';
-        });
-        window.addEventListener('mouseup', () => { dragging = false; });
+        };
+        const upHandler = (): void => { dragging = false; };
+        window.addEventListener('mousemove', moveHandler);
+        window.addEventListener('mouseup', upHandler);
+        this._windowDragHandlers.push({ move: moveHandler, up: upHandler });
+    }
+
+    dispose(): void {
+        for (const h of this._windowDragHandlers) {
+            try { window.removeEventListener('mousemove', h.move); } catch (_) { /* ignore */ }
+            try { window.removeEventListener('mouseup', h.up); } catch (_) { /* ignore */ }
+        }
+        this._windowDragHandlers.length = 0;
     }
 
     closeAllPanels(except?: HTMLElement | null): void {

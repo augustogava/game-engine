@@ -28,6 +28,8 @@ import {
     METERS_PER_DEG_LAT,
 } from '../constants/index.js';
 
+const LIVE_TRAFFIC_MODEL_LOAD_TIMEOUT_MS = 15000;
+
 interface LiveTrafficEntity {
     fr24Id: string;
     callsign: string;
@@ -81,6 +83,7 @@ export class LiveTrafficSystem {
     private _trafficModelLoading = false;
     private _trafficModelFailed = false;
     private _trafficModelScale = 1;
+    private _trafficModelWatchdog: ReturnType<typeof setTimeout> | null = null;
     private readonly _minimapEntries: LiveTrafficMinimapEntry[] = [];
 
     constructor(scene: FlightSceneSimple) {
@@ -142,6 +145,7 @@ export class LiveTrafficSystem {
     dispose(): void {
         this._disposed = true;
         try { this._abortController.abort(); } catch (_) { /* ignore */ }
+        if (this._trafficModelWatchdog) { try { clearTimeout(this._trafficModelWatchdog); } catch (_) { /* ignore */ } this._trafficModelWatchdog = null; }
         for (const [, entity] of this.entities) {
             this._disposeEntity(entity);
         }
@@ -363,7 +367,20 @@ export class LiveTrafficSystem {
         const folder = lastSlash >= 0 ? path.substring(0, lastSlash + 1) : '';
         const file = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
         console.log(`[LiveTraffic] Loading model template: ${path}`);
+        if (this._trafficModelWatchdog) { try { clearTimeout(this._trafficModelWatchdog); } catch (_) { /* ignore */ } }
+        this._trafficModelWatchdog = setTimeout(() => {
+            if (this._disposed || !this._trafficModelLoading) return;
+            this._trafficModelLoading = false;
+            this._trafficModelFailed = true;
+            this._trafficModelWatchdog = null;
+            console.warn(`[LiveTraffic] Model template load watchdog fired for ${path}; using fallback meshes only`);
+        }, LIVE_TRAFFIC_MODEL_LOAD_TIMEOUT_MS);
         BABYLON.SceneLoader.LoadAssetContainerAsync(folder, file, sceneRef).then((container) => {
+            if (this._trafficModelWatchdog) { try { clearTimeout(this._trafficModelWatchdog); } catch (_) { /* ignore */ } this._trafficModelWatchdog = null; }
+            if (this._trafficModelFailed) {
+                try { container.dispose(); } catch (_) { /* ignore */ }
+                return;
+            }
             this._trafficModelLoading = false;
             if (this._disposed) {
                 try { container.dispose(); } catch (_) { /* ignore */ }
@@ -394,6 +411,7 @@ export class LiveTrafficSystem {
             this._trafficAssetContainer = container;
             this._swapFallbackEntitiesToModel();
         }).catch((err) => {
+            if (this._trafficModelWatchdog) { try { clearTimeout(this._trafficModelWatchdog); } catch (_) { /* ignore */ } this._trafficModelWatchdog = null; }
             this._trafficModelLoading = false;
             this._trafficModelFailed = true;
             console.warn(`[LiveTraffic] Failed to load model template ${path}; using fallback meshes only:`, err);

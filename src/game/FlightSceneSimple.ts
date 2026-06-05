@@ -448,6 +448,7 @@ export class FlightSceneSimple extends Scene3D {
     private _disposed = false;
     private _pendingTimeouts = new Set<number>();
     private _dbgKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
+    private _pfdPanelKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
     private _mapImgLoadHandler: (() => void) | null = null;
     private _mapImgErrorHandler: ((ev: Event) => void) | null = null;
     private _lastCameraCycleMs = 0;
@@ -544,6 +545,10 @@ export class FlightSceneSimple extends Scene3D {
     private _gearTransitionStartMs = 0;
     private _spawnSnapFramesLeft = 0;
     private _lastKnownSpawnTerrainY: number = TERRAIN_UNKNOWN_Y;
+    private _lastValidTerrainY: number = TERRAIN_UNKNOWN_Y;
+    private _terrainGraceFramesLeft = 0;
+    private _tunnelHitStreak = 0;
+    private _inertiaClampWarned = false;
     private _worldReady = false;
     private _worldReadyStartMs = 0;
     private _worldReadyProbeRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), WORLD_READY_PROBE_LENGTH_M);
@@ -1392,16 +1397,22 @@ export class FlightSceneSimple extends Scene3D {
             try { window.removeEventListener('keydown', this._dbgKeydownHandler); } catch (_) { /* ignore */ }
             this._dbgKeydownHandler = null;
         }
+        if (this._pfdPanelKeydownHandler) {
+            try { window.removeEventListener('keydown', this._pfdPanelKeydownHandler); } catch (_) { /* ignore */ }
+            this._pfdPanelKeydownHandler = null;
+        }
         this._removeMapImgListeners();
         document.getElementById('flight-hud')?.remove();
         document.getElementById('dbg-panel')?.remove();
         
         document.getElementById('touch-overlay')?.remove();
+        document.getElementById('mp-conn-indicator')?.remove();
         try { this._inputSystem.dispose(); } catch (err) { console.warn('[FlightSimple] InputSystem dispose failed:', err); }
         try { this._hudSystem.disposeResizeListener(); } catch (err) { console.warn('[FlightSimple] HudSystem resize listener dispose failed:', err); }
         document.getElementById('aircraft-btn')?.remove();
         document.getElementById('aircraft-panel')?.remove();
         try { this._airportOverlaysSystem.dispose(); } catch (err) { console.warn('[FlightSimple] AirportOverlays dispose failed:', err); }
+        try { this._debugPanelSystem.dispose(); } catch (err) { console.warn('[FlightSimple] DebugPanelSystem dispose failed:', err); }
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         try { this._liveTrafficSystem.dispose(); } catch (err) { console.warn('[FlightSimple] LiveTrafficSystem dispose failed:', err); }
         try { this._highCloudsSystem.dispose(); } catch (err) { console.warn('[FlightSimple] HighCloudsSystem dispose failed:', err); }

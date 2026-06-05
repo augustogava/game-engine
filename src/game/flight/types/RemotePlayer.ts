@@ -31,4 +31,5 @@ export interface RemotePlayer {
     modelOriginalHalfWidth: number;
     aircraftConfigCached: AircraftConfig | null;
     pendingConfigApply: boolean;
+    modelLoadToken: number;
 }
