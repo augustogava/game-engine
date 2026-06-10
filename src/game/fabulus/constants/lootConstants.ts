@@ -1,0 +1,17 @@
+export const COIN_MODEL_FILE = 'coins.glb';
+export const PICKUP_RADIUS = 1.2;
+export const DROP_DESPAWN_MS = 60000;
+export const DROP_FADE_WARN_MS = 5000;
+export const MAX_INVENTORY = 40;
+export const DROP_SCATTER_RADIUS = 1.5;
+export const DROP_GRAVITY = 18;
+export const DROP_EJECT_SPEED_MIN = 3.5;
+export const DROP_EJECT_SPEED_MAX = 5.5;
+export const COIN_BOUNCE_DAMPING = 0.45;
+export const COIN_MAX_BOUNCES = 2;
+export const COIN_SPIN_SPEED = 2.5;
+export const COIN_REST_BOB_AMPL = 0.06;
+export const COIN_REST_BOB_SPEED = 2.0;
+export const COIN_SCALE = 0.5;
+export const ITEM_BEAM_HEIGHT = 2.2;
+export const ITEM_BEAM_RADIUS = 0.22;

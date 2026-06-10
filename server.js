@@ -5,6 +5,7 @@ const zlib = require('zlib');
 const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
+const { handleFabulusRoutes } = require('./server/fabulus-routes');
 
 const PORT = process.env.PORT || 3000;
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -1125,6 +1126,9 @@ const server = http.createServer(async (req, res) => {
         res.end();
         return;
     }
+
+    // Fabulus RPG API
+    if (await handleFabulusRoutes(req, res)) return;
 
     // API: online player count
     if (req.method === 'GET' && req.url.split('?')[0] === '/api/online-count') {

@@ -5,6 +5,7 @@ const AUDIO_BUS_DEFAULT_ALERTS = 1.0;
 const AUDIO_BUS_DEFAULT_ATC = 0.9;
 const AUDIO_BUS_DEFAULT_MUSIC = 0.5;
 const AUDIO_BUS_DEFAULT_CLICK = 0.6;
+const AUDIO_BUS_DEFAULT_SFX = 0.7;
 
 export const AUDIO_VOLUME_STORAGE_KEY = 'flight_audio_volumes_v1';
 
@@ -16,6 +17,7 @@ export interface AudioVolumes {
     atc: number;
     music: number;
     click: number;
+    sfx: number;
 }
 
 const DEFAULT_VOLUMES: AudioVolumes = {
@@ -26,6 +28,7 @@ const DEFAULT_VOLUMES: AudioVolumes = {
     atc: AUDIO_BUS_DEFAULT_ATC,
     music: AUDIO_BUS_DEFAULT_MUSIC,
     click: AUDIO_BUS_DEFAULT_CLICK,
+    sfx: AUDIO_BUS_DEFAULT_SFX,
 };
 
 function clamp01(v: number): number {
@@ -46,6 +49,7 @@ function loadVolumes(): AudioVolumes {
             atc: clamp01(obj.atc ?? DEFAULT_VOLUMES.atc),
             music: clamp01(obj.music ?? DEFAULT_VOLUMES.music),
             click: clamp01(obj.click ?? DEFAULT_VOLUMES.click),
+            sfx: clamp01(obj.sfx ?? DEFAULT_VOLUMES.sfx),
         };
     } catch (err) {
         console.warn('[AudioCore] loadVolumes failed:', err);
@@ -70,6 +74,7 @@ export class AudioCore {
     private static _atc: GainNode | null = null;
     private static _music: GainNode | null = null;
     private static _click: GainNode | null = null;
+    private static _sfx: GainNode | null = null;
     private static _resumeBound = false;
     private static _volumes: AudioVolumes = loadVolumes();
 
@@ -96,6 +101,7 @@ export class AudioCore {
             this._atc    = this._makeBus(ctx, master, this._volumes.atc);
             this._music  = this._makeBus(ctx, master, this._volumes.music);
             this._click  = this._makeBus(ctx, master, this._volumes.click);
+            this._sfx    = this._makeBus(ctx, master, this._volumes.sfx);
 
             if (ctx.state === 'suspended') {
                 ctx.resume().catch(err => console.warn('[AudioCore] Resume failed:', err));
@@ -123,6 +129,7 @@ export class AudioCore {
     public static getAtcBus(): GainNode | null { this.getCtx(); return this._atc; }
     public static getMusicBus(): GainNode | null { this.getCtx(); return this._music; }
     public static getClickBus(): GainNode | null { this.getCtx(); return this._click; }
+    public static getSfxBus(): GainNode | null { this.getCtx(); return this._sfx; }
 
     public static getVolumes(): AudioVolumes {
         return { ...this._volumes };
@@ -137,6 +144,7 @@ export class AudioCore {
             atc: partial.atc !== undefined ? clamp01(partial.atc) : this._volumes.atc,
             music: partial.music !== undefined ? clamp01(partial.music) : this._volumes.music,
             click: partial.click !== undefined ? clamp01(partial.click) : this._volumes.click,
+            sfx: partial.sfx !== undefined ? clamp01(partial.sfx) : this._volumes.sfx,
         };
         this._volumes = merged;
         saveVolumes(merged);
@@ -148,6 +156,7 @@ export class AudioCore {
             if (this._atc)    this._atc.gain.value    = merged.atc;
             if (this._music)  this._music.gain.value  = merged.music;
             if (this._click)  this._click.gain.value  = merged.click;
+            if (this._sfx)    this._sfx.gain.value    = merged.sfx;
         } catch (err) {
             console.warn('[AudioCore] setVolumes apply failed:', err);
         }

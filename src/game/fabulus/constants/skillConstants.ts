@@ -1,0 +1,9 @@
+export const MAX_BAR_SLOTS = 4;
+export const GLOBAL_COOLDOWN_MS = 300;
+export const PROJECTILE_DEFAULT_SPEED = 14;
+export const PROJECTILE_MAX_RANGE = 20;
+export const PROJECTILE_RADIUS = 0.25;
+export const AOE_RING_LIFETIME_MS = 600;
+export const RANK_EFFECT_SCALING = 0.15;
+export const FROST_SLOW_PCT = 50;
+export const FROST_SLOW_MS = 2500;

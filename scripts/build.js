@@ -67,7 +67,7 @@ async function build() {
 
     console.log('\nBuilding flight 3D bundle...');
     await esbuild.build({
-        entryPoints: ['src/flight-main.ts'],
+        entryPoints: ['src/flight-main.ts', 'src/fabulus-main.ts'],
         bundle: true,
         outdir: DIST_DIR,
         sourcemap: true,
@@ -88,7 +88,7 @@ async function build() {
         return content.replace(/src="dist\//g, 'src="');
     };
     
-    const htmlFiles = ['index.html', 'rpg.html', 'shooter.html', 'galaxy.html', 'ocean.html', 'gta.html', 'flight.html'];
+    const htmlFiles = ['index.html', 'rpg.html', 'shooter.html', 'galaxy.html', 'ocean.html', 'gta.html', 'flight.html', 'fabulus.html'];
     for (const file of htmlFiles) {
         if (fs.existsSync(file)) {
             copyFile(file, DIST_DIR, transformHtml);

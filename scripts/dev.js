@@ -103,7 +103,7 @@ const ctx2D = esbuild.context({
 
 // ── 3D Flight Game build options ─────────────────────────────────────────────
 const flight3dOpts = {
-    entryPoints: ['src/flight-main.ts'],
+    entryPoints: ['src/flight-main.ts', 'src/fabulus-main.ts'],
     bundle: true,
     outdir: 'dist',
     sourcemap: true,

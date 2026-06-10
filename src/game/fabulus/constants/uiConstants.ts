@@ -1,0 +1,6 @@
+export const FLOAT_TEXT_DURATION_MS = 1100;
+export const TOAST_DURATION_MS = 3500;
+export const RARITY_FALLBACK_COLOR = '#d8cdb4';
+export const HUD_REFRESH_DECIMALS = 0;
+export const LEVELUP_MODAL_AUTOCLOSE_MS = 12000;
+export const DEATH_OVERLAY_FADE_MS = 400;
