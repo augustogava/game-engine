@@ -420,12 +420,51 @@ export class MissionSystem {
         this.scene._missionsSearchWired = true;
     }
 
+    async loadDailyMissionBanner(): Promise<void> {
+        try {
+            const listEl = document.getElementById('missions-list');
+            if (!listEl || !listEl.parentElement) return;
+            const token = localStorage.getItem('auth_token') || '';
+            if (!token) return;
+            const resp = await fetch('/api/missions/daily', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!resp.ok) return;
+            const json = await resp.json();
+            const daily = json?.data;
+            if (!daily || !daily.id) return;
+            let banner = document.getElementById('daily-mission-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'daily-mission-banner';
+                listEl.parentElement.insertBefore(banner, listEl);
+            }
+            const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
+                '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
+            } as Record<string, string>)[ch] || ch);
+            const streak = Number(daily.flight_streak_days) || 0;
+            const bonus = Number(daily.daily_bonus_points) || 0;
+            const done = daily.completed_today === true;
+            banner.innerHTML = `
+                <div style="border:1px solid rgba(255,210,80,.55);border-radius:6px;padding:8px 10px;margin-bottom:8px;background:linear-gradient(180deg,rgba(40,32,0,.55),rgba(20,16,0,.45))">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                        <span style="font-family:Orbitron,monospace;font-size:9px;color:#ffe27a;letter-spacing:.12em">MISSÃO DO DIA${done ? ' ✓' : ''}</span>
+                        ${bonus > 0 ? `<span style="font-size:9px;color:#ffe27a;white-space:nowrap">+${bonus} pts bônus</span>` : ''}
+                    </div>
+                    <div style="font-size:11px;color:rgba(255,255,255,.9);margin-top:4px;font-weight:600">${esc(daily.title)}</div>
+                    ${streak > 0 ? `<div style="font-size:9px;color:rgba(100,240,180,.7);margin-top:3px">🔥 Streak de voo: ${streak} dia(s)</div>` : ''}
+                </div>
+            `;
+        } catch (err) {
+            console.warn('[Mission] Daily mission banner load failed:', err);
+        }
+    }
+
     async loadMissions(): Promise<void> {
         const listEl = document.getElementById('missions-list');
         if (!listEl) return;
         listEl.textContent = 'Loading...';
 
         this.wireMissionsToolbar();
+        void this.loadDailyMissionBanner();
 
         const token = localStorage.getItem('auth_token') || '';
         if (!token) {

@@ -34,6 +34,8 @@ export class MultiplayerClient {
     private onAuthFailureCb: (() => void) | null = null;
     private onNoFlightHoursCb: (() => void) | null = null;
     private _onFlightLogEndedCb: ((msg: any) => void) | null = null;
+    private _onAchievementsUnlockedCb: ((achievements: any[]) => void) | null = null;
+    private _onDailyBonusCb: ((msg: any) => void) | null = null;
     private _onlineCount = 0;
     private _pendingCrash: { reason: string; altitudeFt: number; verticalSpeedFpm: number } | null = null;
 
@@ -74,6 +76,14 @@ export class MultiplayerClient {
             }
             if (msg.type === 'flightLogSkipped') {
                 console.warn(`[FlightLog] SKIPPED reason=${msg.reason} received=${msg.received}`);
+            }
+            if (msg.type === 'achievementsUnlocked' && Array.isArray(msg.achievements) && msg.achievements.length) {
+                console.log(`[Achievements] Unlocked: ${msg.achievements.map((a: any) => a.code).join(', ')}`);
+                this._onAchievementsUnlockedCb?.(msg.achievements);
+            }
+            if (msg.type === 'dailyBonus') {
+                console.log(`[Daily] Bonus received: streakDays=${msg.streakDays} streakPoints=${msg.streakPoints} dailyMissionPoints=${msg.dailyMissionPoints}`);
+                this._onDailyBonusCb?.(msg);
             }
         });
 
@@ -159,6 +169,14 @@ export class MultiplayerClient {
 
     onFlightLogEnded(cb: (msg: any) => void): void {
         this._onFlightLogEndedCb = cb;
+    }
+
+    onAchievementsUnlocked(cb: (achievements: any[]) => void): void {
+        this._onAchievementsUnlockedCb = cb;
+    }
+
+    onDailyBonus(cb: (msg: any) => void): void {
+        this._onDailyBonusCb = cb;
     }
 
     getLastMessageAgeMs(): number {

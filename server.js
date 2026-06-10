@@ -703,11 +703,40 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
         }
     }
 
+    let dailyBonuses = null;
+    if (status === 'landed') {
+        dailyBonuses = await awardDailyRetentionBonuses(userId, entry, flightLogId);
+    }
+
     const ok = await recalculateStats(userId);
     if (ok) {
         entry.distanceNm = 0;
         entry.lastPersist = Date.now();
         entry.statsRecalculated = true;
+    }
+
+    if (dailyBonuses && (dailyBonuses.streakPoints > 0 || dailyBonuses.dailyMissionPoints > 0)
+        && entry.ws && entry.ws.readyState === 1) {
+        try {
+            entry.ws.send(JSON.stringify({
+                type: 'dailyBonus',
+                streakDays: dailyBonuses.streakDays,
+                streakPoints: dailyBonuses.streakPoints,
+                dailyMissionPoints: dailyBonuses.dailyMissionPoints,
+            }));
+        } catch (_) {}
+    }
+
+    try {
+        const unlockedAchievements = await evaluateAchievements(userId);
+        if (unlockedAchievements.length && entry.ws && entry.ws.readyState === 1) {
+            entry.ws.send(JSON.stringify({
+                type: 'achievementsUnlocked',
+                achievements: unlockedAchievements,
+            }));
+        }
+    } catch (achErr) {
+        console.error(`[Achievements] Post-flight evaluation failed for user ${userId}:`, achErr.message);
     }
 
     entry.lastFlightEndTime = Date.now();
@@ -783,6 +812,112 @@ async function logPointsHistory(userId, points, sourceType, sourceId, descriptio
         console.error(`[Points] Audit log INSERT failed user=${userId} source=${safeSourceType}:`, err.message);
         return false;
     }
+}
+
+// ── Daily mission + flight streak (retention) ────────────────────────────────
+const POINTS_SOURCE_DAILY_STREAK = 'daily_streak';
+const POINTS_SOURCE_DAILY_MISSION = 'daily_mission';
+const POINTS_SOURCE_MARKETPLACE = 'marketplace_purchase';
+const MARKETPLACE_POINTS_PER_CURRENCY = 100;
+const DAILY_STREAK_BASE_POINTS = 10;
+const DAILY_STREAK_MAX_MULT_DAYS = 7;
+const DAILY_MISSION_BONUS_POINTS = 50;
+const FLIGHT_STREAK_LOOKBACK_DAYS = 60;
+const MS_PER_DAY = 86400000;
+
+let _dailyMissionCache = { dayNumber: -1, mission: null };
+
+async function getDailyMission() {
+    if (!dbPool) return null;
+    const dayNumber = Math.floor(Date.now() / MS_PER_DAY);
+    if (_dailyMissionCache.dayNumber === dayNumber) return _dailyMissionCache.mission;
+    try {
+        const [rows] = await dbPool.execute(
+            `SELECT id, title, description, type, difficulty, reward_points, distance_nm,
+                    departure_airport_id, arrival_airport_id
+             FROM missions WHERE is_active = 1 AND is_enabled = 1 ORDER BY id`
+        );
+        const mission = rows.length ? rows[dayNumber % rows.length] : null;
+        _dailyMissionCache = { dayNumber, mission };
+        if (mission) console.log(`[Daily] Mission of the day #${mission.id}: ${mission.title}`);
+        return mission;
+    } catch (err) {
+        console.error('[Daily] getDailyMission error:', err.message);
+        return null;
+    }
+}
+
+async function computeFlightDayStreak(userId) {
+    if (!dbPool) return 0;
+    try {
+        const [rows] = await dbPool.execute(
+            `SELECT DISTINCT DATE(departure_time) AS d
+             FROM flight_logs
+             WHERE user_id = ? AND status = 'landed' AND departure_time IS NOT NULL
+             ORDER BY d DESC LIMIT ${FLIGHT_STREAK_LOOKBACK_DAYS}`,
+            [userId]
+        );
+        if (!rows.length) return 0;
+        const dayMs = rows.map((r) => new Date(r.d).setHours(0, 0, 0, 0));
+        const today = new Date().setHours(0, 0, 0, 0);
+        if (dayMs[0] !== today && dayMs[0] !== today - MS_PER_DAY) return 0;
+        let streak = 1;
+        for (let i = 1; i < dayMs.length; i++) {
+            if (dayMs[i - 1] - dayMs[i] === MS_PER_DAY) streak++;
+            else break;
+        }
+        return streak;
+    } catch (err) {
+        console.error(`[Daily] computeFlightDayStreak error for user ${userId}:`, err.message);
+        return 0;
+    }
+}
+
+async function awardDailyRetentionBonuses(userId, entry, flightLogId) {
+    if (!dbPool) return null;
+    const result = { streakDays: 0, streakPoints: 0, dailyMissionPoints: 0 };
+    try {
+        const [[streakLog]] = await dbPool.execute(
+            `SELECT id FROM user_points_log
+             WHERE user_id = ? AND source_type = ? AND DATE(created_at) = CURDATE() LIMIT 1`,
+            [userId, POINTS_SOURCE_DAILY_STREAK]
+        );
+        if (!streakLog) {
+            const streak = await computeFlightDayStreak(userId);
+            if (streak >= 1) {
+                const points = DAILY_STREAK_BASE_POINTS * Math.min(streak, DAILY_STREAK_MAX_MULT_DAYS);
+                const logged = await logPointsHistory(
+                    userId, points, POINTS_SOURCE_DAILY_STREAK, flightLogId,
+                    `Daily flight streak: ${streak} day(s)`
+                );
+                if (logged) {
+                    result.streakDays = streak;
+                    result.streakPoints = points;
+                }
+            }
+        }
+
+        if (entry && entry.missionId && entry.missionExternalCompleteSent) {
+            const daily = await getDailyMission();
+            if (daily && Number(entry.missionId) === Number(daily.id)) {
+                const [[dailyLog]] = await dbPool.execute(
+                    `SELECT id FROM user_points_log
+                     WHERE user_id = ? AND source_type = ? AND DATE(created_at) = CURDATE() LIMIT 1`,
+                    [userId, POINTS_SOURCE_DAILY_MISSION]
+                );
+                if (!dailyLog) {
+                    const logged = await logPointsHistory(
+                        userId, DAILY_MISSION_BONUS_POINTS, POINTS_SOURCE_DAILY_MISSION, Number(daily.id),
+                        `Daily mission bonus: ${daily.title}`
+                    );
+                    if (logged) result.dailyMissionPoints = DAILY_MISSION_BONUS_POINTS;
+                }
+            }
+        }
+    } catch (err) {
+        console.error(`[Daily] awardDailyRetentionBonuses error for user ${userId}:`, err.message);
+    }
+    return result;
 }
 
 // ── Recalculate full stats for a user ────────────────────────────────────────
@@ -870,6 +1005,96 @@ async function recalculateStats(userId) {
     } catch (err) {
         console.error(`[DB] recalculateStats error for user ${userId}:`, err.message);
         return false;
+    }
+}
+
+// ── Achievement evaluation (post-flight) ─────────────────────────────────────
+async function evaluateAchievements(userId) {
+    if (!dbPool) return [];
+    if (!Number.isFinite(userId) || userId <= 0) return [];
+    try {
+        const [pendingRows] = await dbPool.execute(
+            `SELECT a.id, a.code, a.title, a.description, a.icon, a.criteria_type, a.criteria_value, a.credit_reward
+             FROM achievements a
+             LEFT JOIN user_achievements ua ON ua.achievement_id = a.id AND ua.user_id = ?
+             WHERE a.is_active = 1 AND ua.id IS NULL`,
+            [userId]
+        );
+        if (!pendingRows.length) return [];
+
+        const [[stats]] = await dbPool.execute(
+            `SELECT total_flights, total_flight_hours, total_distance_km, total_missions_completed, total_reward_points
+             FROM user_flight_stats WHERE user_id = ?`,
+            [userId]
+        );
+        if (!stats) return [];
+
+        const [[flightExtra]] = await dbPool.execute(
+            `SELECT
+                COALESCE(SUM(CASE WHEN status = 'landed' THEN 1 ELSE 0 END), 0) AS successful_landings,
+                MIN(CASE WHEN status = 'landed' AND landing_rate_fpm IS NOT NULL THEN ABS(landing_rate_fpm) END) AS best_abs_landing_fpm,
+                COALESCE(MAX(max_altitude_ft), 0) AS max_altitude_ft,
+                COALESCE(MAX(CASE WHEN status = 'landed' THEN avg_speed_knots END), 0) AS best_avg_speed_knots
+             FROM flight_logs WHERE user_id = ?`,
+            [userId]
+        );
+
+        const [[airportAgg]] = await dbPool.execute(
+            `SELECT COUNT(DISTINCT airport_id) AS distinct_airports FROM (
+                SELECT departure_airport_id AS airport_id FROM flight_logs WHERE user_id = ? AND departure_airport_id IS NOT NULL
+                UNION
+                SELECT arrival_airport_id FROM flight_logs WHERE user_id = ? AND arrival_airport_id IS NOT NULL
+             ) t`,
+            [userId, userId]
+        );
+
+        const metrics = {
+            total_flights: Number(stats.total_flights) || 0,
+            total_flight_hours: Number(stats.total_flight_hours) || 0,
+            total_distance_km: Number(stats.total_distance_km) || 0,
+            missions_completed: Number(stats.total_missions_completed) || 0,
+            total_reward_points: Number(stats.total_reward_points) || 0,
+            successful_landings: Number(flightExtra?.successful_landings) || 0,
+            max_altitude_ft: Number(flightExtra?.max_altitude_ft) || 0,
+            avg_speed_knots: Number(flightExtra?.best_avg_speed_knots) || 0,
+            distinct_airports: Number(airportAgg?.distinct_airports) || 0,
+        };
+        const bestAbsLandingFpm = flightExtra?.best_abs_landing_fpm != null
+            ? Number(flightExtra.best_abs_landing_fpm)
+            : null;
+
+        const unlocked = [];
+        for (const ach of pendingRows) {
+            const target = Number(ach.criteria_value) || 0;
+            let met = false;
+            if (ach.criteria_type === 'smooth_landing') {
+                met = bestAbsLandingFpm != null && Number.isFinite(bestAbsLandingFpm) && bestAbsLandingFpm <= target;
+            } else if (Object.prototype.hasOwnProperty.call(metrics, ach.criteria_type)) {
+                met = metrics[ach.criteria_type] >= target;
+            }
+            if (!met) continue;
+            try {
+                await dbPool.execute(
+                    `INSERT INTO user_achievements (user_id, achievement_id, unlocked_at) VALUES (?, ?, NOW())`,
+                    [userId, ach.id]
+                );
+                unlocked.push({
+                    id: ach.id,
+                    code: ach.code,
+                    title: ach.title,
+                    description: ach.description,
+                    icon: ach.icon,
+                    credit_reward: Number(ach.credit_reward) || 0,
+                });
+                console.log(`[Achievements] Unlocked '${ach.code}' for user ${userId}`);
+            } catch (insErr) {
+                console.error(`[Achievements] Insert failed for user ${userId} achievement ${ach.id}:`, insErr.message);
+            }
+        }
+        return unlocked;
+    } catch (err) {
+        console.error(`[Achievements] evaluateAchievements error for user ${userId}:`, err.message);
+        return [];
     }
 }
 
@@ -1010,6 +1235,35 @@ const server = http.createServer(async (req, res) => {
             return jsonResponse(res, 200, { data: rows, total, page, limit });
         } catch (err) {
             console.error('[API] GET /api/missions error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/missions/daily') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: null });
+        try {
+            const mission = await getDailyMission();
+            if (!mission) return jsonResponse(res, 200, { data: null });
+            const streak = await computeFlightDayStreak(user.id);
+            const [[dailyLog]] = await dbPool.execute(
+                `SELECT id FROM user_points_log
+                 WHERE user_id = ? AND source_type = ? AND DATE(created_at) = CURDATE() LIMIT 1`,
+                [user.id, POINTS_SOURCE_DAILY_MISSION]
+            );
+            return jsonResponse(res, 200, {
+                data: {
+                    ...mission,
+                    daily_bonus_points: DAILY_MISSION_BONUS_POINTS,
+                    completed_today: !!dailyLog,
+                    flight_streak_days: streak,
+                    streak_base_points: DAILY_STREAK_BASE_POINTS,
+                    streak_max_mult_days: DAILY_STREAK_MAX_MULT_DAYS,
+                },
+            });
+        } catch (err) {
+            console.error('[API] GET /api/missions/daily error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
         }
     }
@@ -1248,6 +1502,28 @@ const server = http.createServer(async (req, res) => {
 
     // ── Flight Stats API ─────────────────────────────────────────────────
 
+    if (req.method === 'GET' && urlPath === '/api/achievements') {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 200, { data: [] });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT a.id, a.code, a.title, a.description, a.icon, a.category,
+                        a.criteria_type, a.criteria_value, a.credit_reward, a.sort_order,
+                        ua.unlocked_at
+                 FROM achievements a
+                 LEFT JOIN user_achievements ua ON ua.achievement_id = a.id AND ua.user_id = ?
+                 WHERE a.is_active = 1
+                 ORDER BY a.sort_order, a.id`,
+                [user.id]
+            );
+            return jsonResponse(res, 200, { data: rows });
+        } catch (err) {
+            console.error('[API] GET /api/achievements error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
     if (req.method === 'GET' && urlPath === '/api/flight-stats/leaderboard') {
         if (!dbPool) return jsonResponse(res, 200, { data: [] });
         try {
@@ -1256,7 +1532,20 @@ const server = http.createServer(async (req, res) => {
                  FROM user_flight_stats ufs
                  JOIN users u ON ufs.user_id = u.id
                  ORDER BY ufs.total_flight_hours DESC LIMIT 20`);
-            return jsonResponse(res, 200, { data: rows });
+            let me = null;
+            const user = tryAuthenticate(req);
+            if (user) {
+                const [[myStats]] = await dbPool.execute(
+                    `SELECT ufs.*, u.username FROM user_flight_stats ufs
+                     JOIN users u ON ufs.user_id = u.id WHERE ufs.user_id = ?`, [user.id]);
+                if (myStats) {
+                    const [[{ ahead }]] = await dbPool.execute(
+                        `SELECT COUNT(*) AS ahead FROM user_flight_stats
+                         WHERE total_flight_hours > ?`, [myStats.total_flight_hours]);
+                    me = { ...myStats, rank: (Number(ahead) || 0) + 1 };
+                }
+            }
+            return jsonResponse(res, 200, { data: rows, me });
         } catch (err) {
             console.error('[API] GET /api/flight-stats/leaderboard error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
@@ -1385,16 +1674,46 @@ const server = http.createServer(async (req, res) => {
                 `SELECT id FROM purchase_history WHERE user_id = ? AND listing_id = ? AND status = 'completed'`,
                 [user.id, id]);
             if (dup.length) return jsonResponse(res, 409, { error: 'Already acquired' });
+
+            const listingPrice = Number(listing.price) || 0;
+            const pointsCost = listingPrice > 0 ? Math.ceil(listingPrice * MARKETPLACE_POINTS_PER_CURRENCY) : 0;
+            let paymentMethod = 'free';
+            if (pointsCost > 0) {
+                const [[pointsAgg]] = await dbPool.execute(
+                    `SELECT COALESCE(SUM(points), 0) AS total FROM user_points_log WHERE user_id = ?`,
+                    [user.id]);
+                const available = Math.max(0, Number(pointsAgg.total) || 0);
+                if (available < pointsCost) {
+                    return jsonResponse(res, 402, {
+                        error: 'Insufficient reward points',
+                        required_points: pointsCost,
+                        available_points: available,
+                    });
+                }
+                paymentMethod = 'points';
+            }
+
             const [result] = await dbPool.execute(
                 `INSERT INTO purchase_history (user_id, listing_id, listing_type, title, price, currency, status, payment_method)
-                 VALUES (?, ?, ?, ?, ?, ?, 'completed', 'free')`,
-                [user.id, id, listing.listing_type, listing.title, listing.price, listing.currency]);
+                 VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)`,
+                [user.id, id, listing.listing_type, listing.title, listing.price, listing.currency, paymentMethod]);
+            if (pointsCost > 0) {
+                await logPointsHistory(
+                    user.id, -pointsCost, POINTS_SOURCE_MARKETPLACE, Number(id),
+                    `Marketplace purchase: ${listing.title}`);
+                await recalculateStats(user.id);
+            }
             if (listing.listing_type === 'airport' && listing.airport_id) {
                 await dbPool.execute(
                     `INSERT IGNORE INTO user_airports (user_id, airport_id, is_owned) VALUES (?, ?, 1)`,
                     [user.id, listing.airport_id]);
             }
-            return jsonResponse(res, 201, { id: result.insertId, message: 'Item acquired successfully' });
+            return jsonResponse(res, 201, {
+                id: result.insertId,
+                message: 'Item acquired successfully',
+                payment_method: paymentMethod,
+                points_debited: pointsCost,
+            });
         } catch (err) {
             console.error('[API] POST /api/marketplace/:id/acquire error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });

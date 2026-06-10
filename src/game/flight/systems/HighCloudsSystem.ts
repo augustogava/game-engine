@@ -35,6 +35,7 @@ import {
 
 const SUN_INTENSITY_EPSILON = 0.002;
 const TINT_EPSILON = 0.003;
+const SHADOW_FBM_SAMPLE_INTERVAL_MS = 250;
 
 export class HighCloudsSystem {
     private readonly scene: any;
@@ -55,6 +56,8 @@ export class HighCloudsSystem {
     private _reflect: number = HIGH_CLOUDS_DEFAULT_REFLECT;
     private _timeAccum = 0;
     private _lastAppliedSunIntensity = Number.NaN;
+    private _lastShadowSampleMs = 0;
+    private _lastShadowDl = 0;
     private _sceneRef: BABYLON.Scene | null = null;
     private _autoTintEnabled = true;
     private _lastTintR = Number.NaN;
@@ -207,11 +210,17 @@ export class HighCloudsSystem {
         const sx = planeRoot.position.x - sd.x * t;
         const sz = planeRoot.position.z - sd.z * t;
 
-        const uvScale = HIGH_CLOUDS_NOISE_UV_SCALE * this._scale;
-        const ux = sx * uvScale + this._timeAccum * this._speed;
-        const uz = sz * uvScale + this._timeAccum * this._speed * 0.5;
-        const cl = fbm9(ux, uz);
-        const dl = smoothstep01(-0.2 + 0.4 * this._cover, 0.6, cl);
+        const nowMs = performance.now();
+        let dl = this._lastShadowDl;
+        if (nowMs - this._lastShadowSampleMs >= SHADOW_FBM_SAMPLE_INTERVAL_MS) {
+            this._lastShadowSampleMs = nowMs;
+            const uvScale = HIGH_CLOUDS_NOISE_UV_SCALE * this._scale;
+            const ux = sx * uvScale + this._timeAccum * this._speed;
+            const uz = sz * uvScale + this._timeAccum * this._speed * 0.5;
+            const cl = fbm9(ux, uz);
+            dl = smoothstep01(-0.2 + 0.4 * this._cover, 0.6, cl);
+            this._lastShadowDl = dl;
+        }
         const shade = 1.0 - this._reflect * dl;
         const target = baseIntensity * shade;
 

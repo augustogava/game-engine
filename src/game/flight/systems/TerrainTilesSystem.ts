@@ -25,8 +25,9 @@ const ADAPT_EVAL_INTERVAL_MS = 3000;
 const ADAPT_WARMUP_MS = 8000;
 const ADAPT_FPS_LOW = 18;
 const ADAPT_FPS_HIGH = 40;
-const ADAPT_MAX_STEPS = 2;
+const ADAPT_MAX_STEPS = 4;
 const ADAPT_STEP_COOLDOWN_MS = 7000;
+const ADAPT_TILE_SHADOW_FPS_OFF = 30;
 const ADAPT_UPGRADE_STREAK = 2;
 const ADAPT_ERROR_TARGET_MULT_PER_STEP = 2.0;
 const ADAPT_LRU_MULT_PER_STEP = 0.75;
@@ -43,6 +44,8 @@ export class TerrainTilesSystem {
     private _adaptLastEvalMs = 0;
     private _adaptLastStepMs = 0;
     private _highFpsStreak = 0;
+    private _tileShadowsAdaptiveOff = false;
+    private readonly _tileShadowReceivers = new Set<any>();
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -154,7 +157,8 @@ export class TerrainTilesSystem {
                     const meshes = (tileScene as any).getChildMeshes
                         ? (tileScene as any).getChildMeshes(false)
                         : [];
-                    const wantShadows = !!this.scene._premium.tileShadows;
+                    const shadowsPremium = !!this.scene._premium.tileShadows;
+                    const wantShadows = shadowsPremium && !this._tileShadowsAdaptiveOff;
                     let maxAniso = 1;
                     try {
                         const caps = this.scene.scene?.getEngine()?.getCaps();
@@ -168,8 +172,11 @@ export class TerrainTilesSystem {
                     const hasClipZones = !!(clipZones && clipZones.length);
                     for (const mesh of meshes) {
                         try {
-                            if (wantShadows && mesh.receiveShadows !== true) {
-                                mesh.receiveShadows = true;
+                            if (shadowsPremium) {
+                                this._tileShadowReceivers.add(mesh);
+                                if (mesh.receiveShadows !== wantShadows) {
+                                    mesh.receiveShadows = wantShadows;
+                                }
                             }
                             if (hasClipZones) {
                                 try {
@@ -236,6 +243,17 @@ export class TerrainTilesSystem {
                 try {
                     const key = event && event.tile && event.tile.__h ? String(event.tile.__h) : null;
                     if (key) this.scene._tileFadeEntries.delete(key);
+                    if (this._tileShadowReceivers.size > 0) {
+                        try {
+                            const tileSceneForShadows: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
+                            const shadowMeshes: any[] = tileSceneForShadows && (tileSceneForShadows as any).getChildMeshes
+                                ? (tileSceneForShadows as any).getChildMeshes(false)
+                                : [];
+                            for (const mesh of shadowMeshes) this._tileShadowReceivers.delete(mesh);
+                        } catch (shadowErr) {
+                            console.warn('[3DTiles] Shadow receiver cleanup failed:', shadowErr);
+                        }
+                    }
                     if (this.scene._waterMaterial) {
                         try {
                             const tileScene: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
@@ -283,6 +301,16 @@ export class TerrainTilesSystem {
         try { fps = engine.getFps(); } catch (_) { fps = 0; }
         if (!Number.isFinite(fps) || fps <= 0) return;
 
+        if (this.scene._premium?.tileShadows) {
+            if (!this._tileShadowsAdaptiveOff && fps < ADAPT_TILE_SHADOW_FPS_OFF) {
+                this._setTileShadowsEnabled(false);
+                console.log(`[3DTiles] Tile shadows disabled adaptively (fps=${fps.toFixed(0)})`);
+            } else if (this._tileShadowsAdaptiveOff && fps > ADAPT_FPS_HIGH) {
+                this._setTileShadowsEnabled(true);
+                console.log(`[3DTiles] Tile shadows re-enabled (fps=${fps.toFixed(0)})`);
+            }
+        }
+
         const prevStep = this._adaptStep;
         if (fps < ADAPT_FPS_LOW && this._adaptStep < ADAPT_MAX_STEPS) {
             this._adaptStep++;
@@ -302,6 +330,16 @@ export class TerrainTilesSystem {
         this._adaptLastStepMs = now;
         this._applyAdaptiveStep(engine);
         console.log(`[3DTiles] Adaptive quality step ${prevStep}->${this._adaptStep} (fps=${fps.toFixed(0)} errorTarget=${tiles.errorTarget})`);
+    }
+
+    private _setTileShadowsEnabled(enabled: boolean): void {
+        this._tileShadowsAdaptiveOff = !enabled;
+        for (const mesh of this._tileShadowReceivers) {
+            try {
+                if (!mesh || mesh.isDisposed?.()) continue;
+                mesh.receiveShadows = enabled;
+            } catch (_) { /* ignore */ }
+        }
     }
 
     private _applyAdaptiveStep(engine: any): void {

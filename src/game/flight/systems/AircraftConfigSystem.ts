@@ -31,6 +31,23 @@ export class AircraftConfigSystem {
     }
 
     applyAircraftConfig(cfg: AircraftConfig): void {
+        const massRaw = Number(cfg.mass_kg);
+        if (!Number.isFinite(massRaw) || massRaw <= 0) {
+            console.error(`[AircraftConfig] Invalid mass_kg=${cfg.mass_kg} for ${cfg.code ?? 'unknown'}, using default ${DEFAULT_AIRCRAFT_CONFIG.mass_kg}`);
+            cfg.mass_kg = DEFAULT_AIRCRAFT_CONFIG.mass_kg;
+        }
+        const thrustRaw = Number(cfg.max_thrust_n);
+        if (!Number.isFinite(thrustRaw) || thrustRaw <= 0) {
+            console.error(`[AircraftConfig] Invalid max_thrust_n=${cfg.max_thrust_n} for ${cfg.code ?? 'unknown'}, using default ${DEFAULT_AIRCRAFT_CONFIG.max_thrust_n}`);
+            cfg.max_thrust_n = DEFAULT_AIRCRAFT_CONFIG.max_thrust_n;
+        }
+        const surfacesValid = Array.isArray(cfg.surfaces)
+            && cfg.surfaces.length >= 4
+            && cfg.surfaces.every((s: any) => Number.isFinite(Number(s?.area)) && Number(s.area) > 0);
+        if (!surfacesValid) {
+            console.error(`[AircraftConfig] Invalid surfaces for ${cfg.code ?? 'unknown'} (count=${Array.isArray(cfg.surfaces) ? cfg.surfaces.length : 'none'}), using default surfaces`);
+            cfg.surfaces = DEFAULT_AIRCRAFT_CONFIG.surfaces;
+        }
         if (cfg.engine_type == null) cfg.engine_type = DEFAULT_AIRCRAFT_CONFIG.engine_type;
         if (cfg.engine_count == null) cfg.engine_count = DEFAULT_AIRCRAFT_CONFIG.engine_count;
         if (cfg.fuel_capacity_kg == null) cfg.fuel_capacity_kg = DEFAULT_AIRCRAFT_CONFIG.fuel_capacity_kg;
@@ -218,6 +235,7 @@ export class AircraftConfigSystem {
         const token = localStorage.getItem('auth_token') || '';
         if (!token) return;
 
+        const switchToken = ++this.scene._aircraftConfigToken;
         try {
             if (!proOnly) {
                 const selectResp = await fetch(`/api/user-aircrafts/${aircraftId}/select`, {
@@ -233,6 +251,10 @@ export class AircraftConfigSystem {
             }
 
             const cfg = await fetchAircraftConfig(aircraftId);
+            if (this.scene._aircraftConfigToken !== switchToken) {
+                console.log(`[Aircraft] Discarding stale switch to id=${aircraftId} — newer switch in progress`);
+                return;
+            }
             this.applyAircraftConfig(cfg);
             this.initSurfaces();
 

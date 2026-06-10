@@ -29,6 +29,11 @@ import {
 } from '../constants/index.js';
 
 const LIVE_TRAFFIC_MODEL_LOAD_TIMEOUT_MS = 15000;
+const LIVE_TRAFFIC_MAX_ENTITIES = 200;
+const LIVE_TRAFFIC_LOD_DISTANCE_M = 20000;
+const LIVE_TRAFFIC_LOD_BOX_WIDTH_M = 30;
+const LIVE_TRAFFIC_LOD_BOX_HEIGHT_M = 8;
+const LIVE_TRAFFIC_LOD_BOX_DEPTH_M = 30;
 
 interface LiveTrafficEntity {
     fr24Id: string;
@@ -58,6 +63,8 @@ interface LiveTrafficEntity {
     currentLat: number;
     currentLon: number;
     currentAltFt: number;
+    lodBox: BABYLON.Mesh | null;
+    lodFar: boolean;
 }
 
 export interface LiveTrafficMinimapEntry {
@@ -231,7 +238,7 @@ export class LiveTrafficSystem {
             const existing = this.entities.get(flight.fr24_id);
             if (existing) {
                 this._refreshEntity(existing, flight, now);
-            } else {
+            } else if (this.entities.size < LIVE_TRAFFIC_MAX_ENTITIES) {
                 const created = this._createEntity(flight, now);
                 if (created) this.entities.set(flight.fr24_id, created);
             }
@@ -306,6 +313,8 @@ export class LiveTrafficSystem {
             currentLat: flight.lat,
             currentLon: flight.lon,
             currentAltFt: flight.alt,
+            lodBox: null,
+            lodFar: false,
         };
 
         try {
@@ -614,6 +623,55 @@ export class LiveTrafficSystem {
             entity.root.rotationQuaternion = BABYLON.Quaternion.Identity();
         }
         entity.root.rotationQuaternion.copyFrom(yawQ);
+
+        this._applyEntityLod(entity);
+    }
+
+    private _lodBoxMaterial: BABYLON.StandardMaterial | null = null;
+
+    private _getLodBoxMaterial(): BABYLON.StandardMaterial {
+        if (!this._lodBoxMaterial) {
+            const mat = new BABYLON.StandardMaterial('liveTrafficLodMat', this.scene.scene);
+            mat.diffuseColor = new BABYLON.Color3(0.85, 0.85, 0.9);
+            mat.specularColor = BABYLON.Color3.Black();
+            mat.disableLighting = false;
+            this._lodBoxMaterial = mat;
+        }
+        return this._lodBoxMaterial;
+    }
+
+    private _applyEntityLod(entity: LiveTrafficEntity): void {
+        const cam = this.scene.camera;
+        const refPos = cam ? cam.position : this.scene.planeRoot?.position;
+        if (!refPos) return;
+        const distSq = BABYLON.Vector3.DistanceSquared(entity.root.position, refPos);
+        const isFar = distSq > LIVE_TRAFFIC_LOD_DISTANCE_M * LIVE_TRAFFIC_LOD_DISTANCE_M;
+        if (isFar === entity.lodFar) return;
+        entity.lodFar = isFar;
+        try {
+            if (entity.modelPivot) entity.modelPivot.setEnabled(!isFar);
+            for (const m of entity.meshes) {
+                try { m.setEnabled(!isFar); } catch (_) { /* ignore */ }
+            }
+            if (isFar) {
+                if (!entity.lodBox) {
+                    const box = BABYLON.MeshBuilder.CreateBox(`ltlod_${entity.fr24Id}`, {
+                        width: LIVE_TRAFFIC_LOD_BOX_WIDTH_M,
+                        height: LIVE_TRAFFIC_LOD_BOX_HEIGHT_M,
+                        depth: LIVE_TRAFFIC_LOD_BOX_DEPTH_M,
+                    }, this.scene.scene);
+                    box.material = this._getLodBoxMaterial();
+                    box.parent = entity.root;
+                    box.isPickable = false;
+                    entity.lodBox = box;
+                }
+                entity.lodBox.setEnabled(true);
+            } else if (entity.lodBox) {
+                entity.lodBox.setEnabled(false);
+            }
+        } catch (err) {
+            console.warn(`[LiveTraffic] LOD toggle failed for ${entity.fr24Id}:`, err);
+        }
     }
 
     private _disposeEntity(entity: LiveTrafficEntity): void {
@@ -628,6 +686,8 @@ export class LiveTrafficSystem {
             try { m.dispose(); } catch (_) { /* ignore */ }
         }
         entity.meshes.length = 0;
+        try { entity.lodBox?.dispose(); } catch (_) { /* ignore */ }
+        entity.lodBox = null;
         try { entity.bodyMaterial?.dispose(); } catch (_) { /* ignore */ }
         if (entity.modelPivot) {
             try { entity.modelPivot.dispose(); } catch (_) { /* ignore */ }

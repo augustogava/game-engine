@@ -39,7 +39,7 @@ export class PostProcessingSystem {
         if (!isMobile) {
             this.scene._ssao = new BABYLON.SSAO2RenderingPipeline('ssao', scene, {
                 ssaoRatio: 0.5,
-                blurRatio: 0.5,
+                blurRatio: 0.35,
             });
             this.scene._ssao.radius = 3.0;
             this.scene._ssao.totalStrength = 1.2;

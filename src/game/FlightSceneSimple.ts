@@ -759,6 +759,10 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ _logbookBtnEl: HTMLElement | null = null;
     /** @internal */ _efbPanelEl: HTMLElement | null = null;
     /** @internal */ _efbBtnEl: HTMLElement | null = null;
+    /** @internal */ _achievementsPanelEl: HTMLElement | null = null;
+    /** @internal */ _achievementsBtnEl: HTMLElement | null = null;
+    /** @internal */ _leaderboardPanelEl: HTMLElement | null = null;
+    /** @internal */ _leaderboardBtnEl: HTMLElement | null = null;
     private _pendingFlightPlanLat: number | null = null;
     private _pendingFlightPlanLon: number | null = null;
     private _pendingFlightPlanHdg: number | null = null;
@@ -984,9 +988,14 @@ export class FlightSceneSimple extends Scene3D {
         this._applyAircraftConfig(initialAircraftConfig);
         const initialModelFile = initialAircraftConfig.model_file;
 
+        const bootConfigToken = this._aircraftConfigToken;
         fetchSelectedAircraftConfig().then((cfg) => {
             if (this._disposed || !this.scene) {
                 console.debug('[Aircraft] Discarding async config fetch — scene disposed');
+                return;
+            }
+            if (this._aircraftConfigToken !== bootConfigToken) {
+                console.log('[Aircraft] Discarding stale boot config fetch — aircraft switched during load');
                 return;
             }
             this._applyAircraftConfig(cfg);
@@ -1023,6 +1032,10 @@ export class FlightSceneSimple extends Scene3D {
             this._skipInitialModelLoad = false;
             console.warn('[Aircraft] fetchSelectedAircraftConfig failed:', err);
             if (this._disposed || !this.scene) return;
+            if (this._aircraftConfigToken !== bootConfigToken) {
+                console.log('[Aircraft] Skipping fallback model load — aircraft switched during boot fetch');
+                return;
+            }
             if (wasDeferred && this.planeRoot) {
                 console.warn('[Aircraft] Config fetch failed — loading fallback model so aircraft still spawns.');
                 this._loadAircraftModel(scene);
@@ -1881,6 +1894,7 @@ export class FlightSceneSimple extends Scene3D {
     private _propellerAnimGroup: BABYLON.AnimationGroup | null = null;
     private _modelLoadVersion = 0;
     public _skipInitialModelLoad = false;
+    public _aircraftConfigToken = 0;
 
     private _loadAircraftModel(scene: BABYLON.Scene): void {
         this._aircraftModelSystem.loadAircraftModel(scene);

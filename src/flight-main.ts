@@ -183,7 +183,7 @@ let multiplayerStarted = false;
 
 function ensureGameCore(): GameCore3D {
     if (game) return game;
-    game = new GameCore3D({ canvas, antialias: true });
+    game = new GameCore3D({ canvas, antialias: false });
     scene.onSpawned = () => {
         sceneReady = true;
         console.log('[flight-main] Scene spawned');

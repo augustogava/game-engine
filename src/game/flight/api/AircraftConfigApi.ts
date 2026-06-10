@@ -90,9 +90,20 @@ export async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
                 || list.find((ua: any) => ua?.has_access && ua.aircraft);
         }
         if (selected?.aircraft) {
-            const cfg = selected.aircraft as AircraftConfig;
-            console.debug('[Aircraft] selected aircraft config:', JSON.stringify(cfg));
-            console.log(`[Aircraft] Using ${selected.is_selected === 1 ? 'SELECTED' : 'FALLBACK (first owned)'} aircraft: id=${cfg.id} code=${cfg.code} name=${cfg.name}`);
+            const embedded = selected.aircraft as AircraftConfig;
+            console.debug('[Aircraft] selected aircraft config:', JSON.stringify(embedded));
+            console.log(`[Aircraft] Using ${selected.is_selected === 1 ? 'SELECTED' : 'FALLBACK (first owned)'} aircraft: id=${embedded.id} code=${embedded.code} name=${embedded.name}`);
+            let cfg = embedded;
+            const selectedId = Number(embedded.id);
+            if (Number.isFinite(selectedId) && selectedId > 0) {
+                const full = await fetchAircraftConfig(selectedId);
+                if (full && Number(full.id) === selectedId) {
+                    cfg = full;
+                    console.debug(`[Aircraft] Unified boot config via /api/aircrafts/${selectedId}`);
+                } else {
+                    console.warn(`[Aircraft] Dedicated config fetch failed for id=${selectedId}, using embedded config from /api/user-aircrafts`);
+                }
+            }
             normalizeAircraftConfig(cfg);
             cacheSelectedAircraftConfig(cfg);
             return cfg;

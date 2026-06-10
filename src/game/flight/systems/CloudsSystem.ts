@@ -39,6 +39,7 @@ import {
 } from '../constants/index.js';
 
 const CLOUD_TINT_EPSILON = 0.005;
+const CLOUD_MAX_TOTAL_INSTANCES = 2500;
 
 export class CloudsSystem {
     private readonly scene: any;
@@ -58,6 +59,7 @@ export class CloudsSystem {
         ];
 
         let baseCloudTex: BABYLON.Texture | null = null;
+        let totalInstances = 0;
         for (const layer of layers) {
             const variantTemplates: BABYLON.Mesh[] = [];
             for (let v = 0; v < CLOUD_VARIANT_COUNT; v++) {
@@ -97,12 +99,12 @@ export class CloudsSystem {
 
             const effectiveCount = Math.max(1, Math.round(layer.count * this.scene._cloudDensityMult));
             const puffPerCluster = this.scene._cloudVolumetric ? CLOUD_VOLUMETRIC_PUFFS_PER_CLUSTER : 1;
-            for (let i = 0; i < effectiveCount; i++) {
+            for (let i = 0; i < effectiveCount && totalInstances < CLOUD_MAX_TOTAL_INSTANCES; i++) {
                 const ox = (Math.random() - 0.5) * layer.spread;
                 const oz = (Math.random() - 0.5) * layer.spread;
                 const oy = layer.yMin + Math.random() * layer.yRange;
                 const clusterScale = 0.5 + Math.random() * 2.0;
-                for (let j = 0; j < puffPerCluster; j++) {
+                for (let j = 0; j < puffPerCluster && totalInstances < CLOUD_MAX_TOTAL_INSTANCES; j++) {
                     const variant = (Math.random() * CLOUD_VARIANT_COUNT) | 0;
                     const tpl = variantTemplates[variant];
                     const ci = tpl.createInstance(`c_${layer.yMin}_${i}_${j}_v${variant}`);
@@ -122,8 +124,12 @@ export class CloudsSystem {
                     ci.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
                     ci.isPickable = false;
                     this.scene.cloudInstances.push({ mesh: ci, yBase: oy + jy, spread: layer.spread, windMult: layer.windMult, wrapFade: 1, baseScaleX, baseScaleY });
+                    totalInstances++;
                 }
             }
+        }
+        if (totalInstances >= CLOUD_MAX_TOTAL_INSTANCES) {
+            console.debug(`[Clouds] Instance cap reached: ${totalInstances}/${CLOUD_MAX_TOTAL_INSTANCES}`);
         }
     }
 

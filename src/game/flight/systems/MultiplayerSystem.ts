@@ -19,10 +19,19 @@ const LABEL_PLANE_HEIGHT = 5.6;
 const LABEL_Y_OFFSET = 10;
 const REMOTE_AIRSPEED_KMH_TO_MS = 1 / 3.6;
 const REMOTE_CONTRAIL_FALLBACK_HALF_SPAN = 8;
+const REMOTE_RIBBON_FAR_DIST_M = 8000;
+const REMOTE_RIBBON_FAR_UPDATE_INTERVAL_S = 0.2;
 
 export class MultiplayerSystem {
     private readonly scene: any;
     private _lastUpdateMs: number = 0;
+    private readonly _tmpYawQ = new BABYLON.Quaternion();
+    private readonly _tmpPitchQ = new BABYLON.Quaternion();
+    private readonly _tmpRollQ = new BABYLON.Quaternion();
+    private readonly _tmpTargetQ = new BABYLON.Quaternion();
+    private readonly _axisUp = BABYLON.Vector3.Up();
+    private readonly _axisRight = BABYLON.Vector3.Right();
+    private readonly _axisForward = BABYLON.Vector3.Forward();
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -122,6 +131,31 @@ export class MultiplayerSystem {
             this.scene._activeFlightPlanArrivalAirportId = null;
         });
 
+        this.scene.mpClient.onAchievementsUnlocked((achievements: any[]) => {
+            try {
+                this.scene._hudSystem?.showAchievementToast(achievements);
+            } catch (err) {
+                console.warn('[Achievements] Toast display failed:', err);
+            }
+        });
+
+        this.scene.mpClient.onDailyBonus((msg: any) => {
+            try {
+                const items: { title: string }[] = [];
+                if (Number(msg?.streakPoints) > 0) {
+                    items.push({ title: `Streak de ${Number(msg.streakDays)} dia(s): +${Number(msg.streakPoints)} pts` });
+                }
+                if (Number(msg?.dailyMissionPoints) > 0) {
+                    items.push({ title: `Missão do dia: +${Number(msg.dailyMissionPoints)} pts` });
+                }
+                if (items.length) {
+                    this.scene._hudSystem?.showAchievementToast(items, 'BÔNUS DIÁRIO');
+                }
+            } catch (err) {
+                console.warn('[Daily] Bonus toast display failed:', err);
+            }
+        });
+
         if (this.scene.dbgMpUserId) this.scene.dbgMpUserId.textContent = '…';
         this.scene.mpClient.connect();
     }
@@ -161,6 +195,7 @@ export class MultiplayerSystem {
             contrailPSLeft: null, contrailPSRight: null,
             contrailRibbonLeft: null, contrailRibbonRight: null,
             contrailHalfSpan: REMOTE_CONTRAIL_FALLBACK_HALF_SPAN,
+            ribbonDtAccum: 0,
             modelPivot: null, modelOriginalSize: 0, modelOriginalHalfWidth: 0,
             aircraftConfigCached: null, pendingConfigApply: false,
             modelLoadToken: 0,
@@ -608,7 +643,7 @@ export class MultiplayerSystem {
                 const t = Math.min(1, elapsed / 60);
                 const ps = remote.prevState;
                 const prevPos = this.scene._latLonToLocal(ps.lat, ps.lon, ps.alt);
-                remote.root.position = BABYLON.Vector3.Lerp(prevPos, targetPos, t);
+                BABYLON.Vector3.LerpToRef(prevPos, targetPos, t, remote.root.position);
             } else {
                 remote.root.position.copyFrom(targetPos);
             }
@@ -617,14 +652,15 @@ export class MultiplayerSystem {
             const pitchRad = -ns.pitch * Math.PI / 180;
             const rollRad = ns.roll * Math.PI / 180;
 
-            const yawQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
-            const pitchQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Right(), pitchRad);
-            const rollQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Forward(), rollRad);
-            const targetQ = yawQ.multiply(pitchQ).multiply(rollQ);
+            BABYLON.Quaternion.RotationAxisToRef(this._axisUp, yawRad, this._tmpYawQ);
+            BABYLON.Quaternion.RotationAxisToRef(this._axisRight, pitchRad, this._tmpPitchQ);
+            BABYLON.Quaternion.RotationAxisToRef(this._axisForward, rollRad, this._tmpRollQ);
+            this._tmpYawQ.multiplyToRef(this._tmpPitchQ, this._tmpTargetQ);
+            this._tmpTargetQ.multiplyToRef(this._tmpRollQ, this._tmpTargetQ);
 
             BABYLON.Quaternion.SlerpToRef(
                 remote.root.rotationQuaternion!,
-                targetQ,
+                this._tmpTargetQ,
                 0.15,
                 remote.root.rotationQuaternion!,
             );
@@ -660,7 +696,16 @@ export class MultiplayerSystem {
 
                     if ((remote.contrailRibbonLeft || remote.contrailRibbonRight) && typeof vfx.updateRemoteRibbonPair === 'function') {
                         const intensity = targetRate > 0 ? Math.min(1, targetRate / Math.max(1, CONTRAIL_EMIT_RATE_MAX)) : 0;
-                        vfx.updateRemoteRibbonPair(remote.contrailRibbonLeft, remote.contrailRibbonRight, dt, intensity);
+                        remote.ribbonDtAccum = (remote.ribbonDtAccum || 0) + dt;
+                        const camForRibbon = this.scene.camera;
+                        const distToCamSq = camForRibbon
+                            ? BABYLON.Vector3.DistanceSquared(remote.root.position, camForRibbon.position)
+                            : 0;
+                        const isFarRemote = distToCamSq > REMOTE_RIBBON_FAR_DIST_M * REMOTE_RIBBON_FAR_DIST_M;
+                        if (!isFarRemote || remote.ribbonDtAccum >= REMOTE_RIBBON_FAR_UPDATE_INTERVAL_S) {
+                            vfx.updateRemoteRibbonPair(remote.contrailRibbonLeft, remote.contrailRibbonRight, remote.ribbonDtAccum, intensity);
+                            remote.ribbonDtAccum = 0;
+                        }
                     }
                 }
             } catch (_) { /* ignore */ }

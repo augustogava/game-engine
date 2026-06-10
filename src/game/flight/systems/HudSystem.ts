@@ -116,6 +116,10 @@ export class HudSystem {
 
     private _hudSpeedUnitEl: Element | null = null;
     private _hudAltUnitEl: Element | null = null;
+    private _lastHudCanvasDrawMs = 0;
+    private _lastMapUpdateMs = 0;
+    private static readonly HUD_CANVAS_DRAW_INTERVAL_MS = 33;
+    private static readonly MINIMAP_UPDATE_INTERVAL_MS = 80;
 
     private _setText(el: { textContent: string | null } | null | undefined, value: string): void {
         if (!el) return;
@@ -1149,10 +1153,10 @@ export class HudSystem {
             medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'auto',
                       tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false,
                       highClouds: true,  highCloudsCover: 0.89, highCloudsSpeed: 0.03, highCloudsScale: 4.00, highCloudsAlpha: 0.82, highCloudsReflect: 0.24 },
-            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'auto',
+            high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, milkyway: false, hdrEnv: 'auto',
                       tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false,
                       highClouds: true,  highCloudsCover: 0.89, highCloudsSpeed: 0.03, highCloudsScale: 4.00, highCloudsAlpha: 0.82, highCloudsReflect: 0.24 },
-            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '8', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,  hdrEnv: 'auto',
+            ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, milkyway: true,  hdrEnv: 'auto',
                       tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false,
                       highClouds: true,  highCloudsCover: 0.89, highCloudsSpeed: 0.03, highCloudsScale: 4.00, highCloudsAlpha: 0.82, highCloudsReflect: 0.24 },
         };
@@ -1620,6 +1624,7 @@ export class HudSystem {
 <div style="position:absolute;top:4px;right:6px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:10px;font-family:'Inter',sans-serif;padding:4px 6px">
   <div id="hfps" style="color:rgba(100,240,180,.4)"></div>
   <div id="h-online" style="color:rgba(100,240,180,.4)">0 ONLINE</div>
+  <div id="h-rank" style="display:none;color:#ffe27a;font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.1em;text-shadow:0 0 6px rgba(255,210,80,.4)"></div>
 </div>
 <div id="hud-utc" style="position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
 <div class="hp" id="hw">&#9888; STALL &#9888;</div>
@@ -1938,6 +1943,44 @@ export class HudSystem {
   <div class="panel-resize" data-panel="efb-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
+<div id="achievements-btn" style="position:absolute;top:264px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Conquistas">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 0 12 0V3H6z"/><path d="M6 5H3v2a4 4 0 0 0 4 4"/><path d="M18 5h3v2a4 4 0 0 1-4 4"/><line x1="12" y1="15" x2="12" y2="18"/><path d="M8 21h8"/><path d="M10 18h4v3h-4z"/></svg>
+</div>
+
+<div id="achievements-panel" class="game-panel" style="display:none;position:absolute;top:254px;right:54px;width:340px;height:420px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="achievements-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">CONQUISTAS</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="achievements-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="achievements-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="achievements-panel" data-btn="achievements-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 36px)">
+    <div id="achievements-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+  </div>
+  <div class="panel-resize" data-panel="achievements-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
+</div>
+
+<div id="leaderboard-btn" style="position:absolute;top:300px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Leaderboard">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="5" height="10"/><rect x="9.5" y="5" width="5" height="16"/><rect x="16" y="14" width="5" height="7"/></svg>
+</div>
+
+<div id="leaderboard-panel" class="game-panel" style="display:none;position:absolute;top:290px;right:54px;width:340px;height:420px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="leaderboard-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">LEADERBOARD</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="leaderboard-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="leaderboard-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="leaderboard-panel" data-btn="leaderboard-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 36px)">
+    <div id="leaderboard-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+  </div>
+  <div class="panel-resize" data-panel="leaderboard-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
+</div>
+
 <div id="instrument-dock" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:6px;background:rgba(2,10,20,.85);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;box-shadow:0 0 12px rgba(0,255,128,.1);z-index:250">
   <div id="pfd-btn" style="width:32px;height:32px;background:rgba(2,10,20,.6);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="PFD (Shift+I)">
     <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><path d="M3.6 12a8.4 8.4 0 0 1 16.8 0z" fill="#2e6db4"/><path d="M3.6 12a8.4 8.4 0 0 0 16.8 0z" fill="#6b4a2a"/><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><line x1="7" y1="12" x2="17" y2="12" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="12" r="1.2" fill="#fff"/></svg>
@@ -2075,6 +2118,15 @@ export class HudSystem {
         this.scene._efbPanelEl = document.getElementById('efb-panel');
         this.scene._setupEfbBtn();
 
+        this.scene._achievementsBtnEl = document.getElementById('achievements-btn');
+        this.scene._achievementsPanelEl = document.getElementById('achievements-panel');
+        this.setupAchievementsBtn();
+        void this.loadPilotRankBadge();
+
+        this.scene._leaderboardBtnEl = document.getElementById('leaderboard-btn');
+        this.scene._leaderboardPanelEl = document.getElementById('leaderboard-panel');
+        this.setupLeaderboardBtn();
+
         this.scene._setupPanelControls();
         this.setupPfdPanel();
         this.setupAutopilotToggle();
@@ -2087,6 +2139,266 @@ export class HudSystem {
         this.scene._initTapeMarks();
         this.scene._initFlapBar();
         this.scene._buildDebugPanel();
+    }
+
+    private _achievementsLoading = false;
+
+    setupAchievementsBtn(): void {
+        const btn = this.scene._achievementsBtnEl as HTMLElement | null;
+        const panel = this.scene._achievementsPanelEl as HTMLElement | null;
+        if (!btn || !panel) return;
+
+        btn.addEventListener('mouseenter', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; } });
+        btn.addEventListener('mouseleave', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; } });
+        btn.addEventListener('click', () => {
+            const visible = panel.style.display !== 'none';
+            this.scene._closeAllPanels(visible ? null : panel);
+            if (visible) {
+                panel.style.display = 'none';
+                btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none';
+            } else {
+                panel.style.display = 'block';
+                btn.style.borderColor = 'rgba(80,255,160,.9)'; btn.style.boxShadow = '0 0 12px rgba(0,255,128,.35)';
+                void this.loadAchievements();
+            }
+        });
+    }
+
+    async loadAchievements(): Promise<void> {
+        const listEl = document.getElementById('achievements-list');
+        if (!listEl || this._achievementsLoading) return;
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) {
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login required</div>';
+            return;
+        }
+        this._achievementsLoading = true;
+        listEl.textContent = 'Loading...';
+        try {
+            const resp = await fetch('/api/achievements', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const rows: any[] = Array.isArray(data?.data) ? data.data : [];
+            if (!rows.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">Nenhuma conquista disponível</div>';
+                return;
+            }
+            const unlockedCount = rows.filter((r) => r.unlocked_at != null).length;
+            const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
+                '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
+            } as Record<string, string>)[ch] || ch);
+            let html = `<div style="font-family:Orbitron,monospace;font-size:10px;color:#40ffaa;letter-spacing:.1em;margin-bottom:8px">${unlockedCount}/${rows.length} DESBLOQUEADAS</div>`;
+            for (const a of rows) {
+                const unlocked = a.unlocked_at != null;
+                const border = unlocked ? 'rgba(80,255,160,.5)' : 'rgba(255,255,255,.1)';
+                const bg = unlocked ? 'rgba(0,40,30,.5)' : 'rgba(0,20,15,.35)';
+                const titleColor = unlocked ? '#79ffaa' : 'rgba(255,255,255,.55)';
+                html += `<div style="border:1px solid ${border};border-radius:6px;padding:8px 10px;margin-bottom:6px;background:${bg}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                        <span style="font-weight:600;color:${titleColor}">${unlocked ? '🏆 ' : ''}${esc(a.title)}</span>
+                        ${Number(a.credit_reward) > 0 ? `<span style="font-size:9px;color:#ffe27a;white-space:nowrap">+${Number(a.credit_reward)} cr</span>` : ''}
+                    </div>
+                    ${a.description ? `<div style="font-size:10px;color:rgba(255,255,255,.5);margin-top:3px">${esc(a.description)}</div>` : ''}
+                    ${unlocked ? `<div style="font-size:9px;color:rgba(100,240,180,.6);margin-top:3px">Desbloqueada em ${new Date(a.unlocked_at).toLocaleDateString()}</div>` : ''}
+                </div>`;
+            }
+            listEl.innerHTML = html;
+        } catch (err) {
+            console.error('[Achievements] Failed to load list:', err);
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+        } finally {
+            this._achievementsLoading = false;
+        }
+    }
+
+    private _leaderboardLoading = false;
+
+    setupLeaderboardBtn(): void {
+        const btn = this.scene._leaderboardBtnEl as HTMLElement | null;
+        const panel = this.scene._leaderboardPanelEl as HTMLElement | null;
+        if (!btn || !panel) return;
+
+        btn.addEventListener('mouseenter', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.7)'; btn.style.boxShadow = '0 0 8px rgba(0,255,128,.2)'; } });
+        btn.addEventListener('mouseleave', () => { if (panel.style.display === 'none') { btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none'; } });
+        btn.addEventListener('click', () => {
+            const visible = panel.style.display !== 'none';
+            this.scene._closeAllPanels(visible ? null : panel);
+            if (visible) {
+                panel.style.display = 'none';
+                btn.style.borderColor = 'rgba(80,255,160,.3)'; btn.style.boxShadow = 'none';
+            } else {
+                panel.style.display = 'block';
+                btn.style.borderColor = 'rgba(80,255,160,.9)'; btn.style.boxShadow = '0 0 12px rgba(0,255,128,.35)';
+                void this.loadLeaderboard();
+            }
+        });
+    }
+
+    async loadLeaderboard(): Promise<void> {
+        const listEl = document.getElementById('leaderboard-list');
+        if (!listEl || this._leaderboardLoading) return;
+        this._leaderboardLoading = true;
+        listEl.textContent = 'Loading...';
+        try {
+            const token = localStorage.getItem('auth_token') || '';
+            const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
+            const resp = await fetch('/api/flight-stats/leaderboard', { headers });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const rows: any[] = Array.isArray(data?.data) ? data.data : [];
+            const me = data?.me ?? null;
+            if (!rows.length) {
+                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">Sem dados ainda</div>';
+                return;
+            }
+            const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
+                '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
+            } as Record<string, string>)[ch] || ch);
+            const fmtHours = (h: unknown): string => (Number(h) || 0).toFixed(1);
+            const myUserId = me ? Number(me.user_id) : -1;
+            let html = '';
+            if (me) {
+                html += `<div style="border:1px solid rgba(255,210,80,.55);border-radius:6px;padding:8px 10px;margin-bottom:8px;background:rgba(40,32,0,.5)">
+                    <span style="font-family:Orbitron,monospace;font-size:10px;color:#ffe27a;letter-spacing:.1em">SUA POSIÇÃO: #${Number(me.rank) || '-'}</span>
+                    <div style="font-size:10px;color:rgba(255,255,255,.7);margin-top:3px">${fmtHours(me.total_flight_hours)}h de voo · ${Number(me.total_flights) || 0} voos</div>
+                </div>`;
+            }
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
+                const isMe = Number(r.user_id) === myUserId;
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                const border = isMe ? 'rgba(255,210,80,.55)' : 'rgba(255,255,255,.1)';
+                const bg = isMe ? 'rgba(40,32,0,.4)' : 'rgba(0,20,15,.35)';
+                html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid ${border};border-radius:6px;padding:6px 10px;margin-bottom:4px;background:${bg}">
+                    <span style="color:${isMe ? '#ffe27a' : 'rgba(255,255,255,.85)'};font-weight:${isMe ? '700' : '500'}">${medal} ${esc(r.username)}</span>
+                    <span style="font-size:10px;color:rgba(100,240,180,.8);white-space:nowrap">${fmtHours(r.total_flight_hours)}h</span>
+                </div>`;
+            }
+            listEl.innerHTML = html;
+        } catch (err) {
+            console.error('[Leaderboard] Failed to load:', err);
+            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+        } finally {
+            this._leaderboardLoading = false;
+        }
+    }
+
+    showAchievementToast(achievements: any[], headerText = 'CONQUISTA DESBLOQUEADA'): void {
+        try {
+            if (typeof document === 'undefined' || !document.body) return;
+            if (!Array.isArray(achievements) || !achievements.length) return;
+            const existing = document.getElementById('achievement-toast');
+            if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
+
+            const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
+                '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
+            } as Record<string, string>)[ch] || ch);
+
+            const toast = document.createElement('div');
+            toast.id = 'achievement-toast';
+            const items = achievements.slice(0, HudSystem.ACHIEVEMENT_TOAST_MAX_ITEMS)
+                .map((a) => `<div class="ach-item">🏆 ${esc(a.title)}</div>`)
+                .join('');
+            const extra = achievements.length > HudSystem.ACHIEVEMENT_TOAST_MAX_ITEMS
+                ? `<div class="ach-item">+${achievements.length - HudSystem.ACHIEVEMENT_TOAST_MAX_ITEMS} outras</div>`
+                : '';
+            toast.innerHTML = `
+                <div class="ach-card">
+                    <div class="ach-title">${esc(headerText)}</div>
+                    ${items}${extra}
+                </div>
+            `;
+            toast.style.cssText = [
+                'position:fixed',
+                'top:140px',
+                'left:50%',
+                'transform:translateX(-50%) translateY(-12px)',
+                'z-index:10000',
+                'pointer-events:none',
+                'opacity:0',
+                'transition:opacity 400ms ease, transform 400ms ease',
+                'font-family:Orbitron,monospace',
+            ].join(';');
+
+            const style = document.createElement('style');
+            style.textContent = `
+                #achievement-toast .ach-card {
+                    background: linear-gradient(180deg, rgba(40,32,0,0.92), rgba(20,16,0,0.92));
+                    border: 1px solid rgba(255,210,80,0.7);
+                    border-radius: 8px;
+                    padding: 12px 26px;
+                    color: #ffe27a;
+                    text-align: center;
+                    box-shadow: 0 4px 24px rgba(255,210,80,0.25), 0 0 40px rgba(255,210,80,0.12);
+                    min-width: 240px;
+                }
+                #achievement-toast .ach-title {
+                    font-size: 14px;
+                    font-weight: 700;
+                    letter-spacing: 0.16em;
+                    text-shadow: 0 0 10px rgba(255,210,80,0.6);
+                }
+                #achievement-toast .ach-item {
+                    font-family: Inter, sans-serif;
+                    font-size: 12px;
+                    color: rgba(255,255,255,0.9);
+                    margin-top: 6px;
+                    letter-spacing: 0.04em;
+                }
+            `;
+            toast.appendChild(style);
+            document.body.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                if (this.scene._disposed || !toast.isConnected) return;
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateX(-50%) translateY(0)';
+            });
+
+            this.scene._safeSetTimeout(() => {
+                if (!toast.isConnected) return;
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(-12px)';
+                this.scene._safeSetTimeout(() => {
+                    if (toast.parentElement) toast.parentElement.removeChild(toast);
+                }, HudSystem.ACHIEVEMENT_TOAST_FADE_MS);
+            }, HudSystem.ACHIEVEMENT_TOAST_VISIBLE_MS);
+        } catch (err) {
+            console.warn('[Achievements] Failed to show unlock toast:', err);
+        }
+    }
+
+    private static readonly ACHIEVEMENT_TOAST_MAX_ITEMS = 3;
+    private static readonly ACHIEVEMENT_TOAST_VISIBLE_MS = 6000;
+    private static readonly ACHIEVEMENT_TOAST_FADE_MS = 400;
+
+    private static readonly PILOT_RANK_LABELS: Record<string, string> = {
+        student: 'STUDENT',
+        private_pilot: 'PRIVATE PILOT',
+        commercial_pilot: 'COMMERCIAL PILOT',
+        airline_pilot: 'AIRLINE PILOT',
+        captain: 'CAPTAIN',
+        senior_captain: 'SENIOR CAPTAIN',
+    };
+
+    async loadPilotRankBadge(): Promise<void> {
+        try {
+            const el = document.getElementById('h-rank');
+            if (!el) return;
+            const token = localStorage.getItem('auth_token') || '';
+            if (!token) return;
+            const resp = await fetch('/api/flight-stats', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const rank = typeof data?.pilot_rank === 'string' ? data.pilot_rank : '';
+            const label = HudSystem.PILOT_RANK_LABELS[rank];
+            if (label) {
+                el.textContent = label;
+                el.style.display = '';
+            }
+        } catch (err) {
+            console.warn('[HUD] Failed to load pilot rank badge:', err);
+        }
     }
 
     setText(id: string, text: string): void {
@@ -2588,11 +2900,18 @@ export class HudSystem {
 
         this.scene._updateTapeMarks(speedKts, altitudeFt);
 
-        this.scene._drawFlightHUD();
-        if (this.scene._pfdPanelEl && this.scene._pfdPanelEl.style.display !== 'none') {
-            this.drawFullPfd(this.scene._pfdPanelCtx, this.scene._pfdPanelCanvas);
+        const nowPerfMs = performance.now();
+        if (nowPerfMs - this._lastHudCanvasDrawMs >= HudSystem.HUD_CANVAS_DRAW_INTERVAL_MS) {
+            this._lastHudCanvasDrawMs = nowPerfMs;
+            this.scene._drawFlightHUD();
+            if (this.scene._pfdPanelEl && this.scene._pfdPanelEl.style.display !== 'none') {
+                this.drawFullPfd(this.scene._pfdPanelCtx, this.scene._pfdPanelCanvas);
+            }
         }
-        this.scene._updateMap();
+        if (nowPerfMs - this._lastMapUpdateMs >= HudSystem.MINIMAP_UPDATE_INTERVAL_MS) {
+            this._lastMapUpdateMs = nowPerfMs;
+            this.scene._updateMap();
+        }
         this.scene._updateDebugReadouts();
 
         try {

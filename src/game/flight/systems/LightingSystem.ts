@@ -135,7 +135,7 @@ export class LightingSystem {
         this.scene._fillLight.specular = BABYLON.Color3.Black();
 
         const isMobile = this.scene.isMobile === true;
-        const shadowMapSize = isMobile ? 1024 : 4096;
+        const shadowMapSize = isMobile ? 1024 : 2048;
         this.scene._shadowGen = new BABYLON.CascadedShadowGenerator(shadowMapSize, this.scene._sunLight);
         this.scene._shadowGen.lambda                 = 0.75;
         this.scene._shadowGen.cascadeBlendPercentage = 0.1;
@@ -413,10 +413,16 @@ export class LightingSystem {
         this.scene._moonHaloMat = mat;
     }
 
+    private _starTwinkleAccumS = 0;
+    private static readonly STAR_TWINKLE_INTERVAL_S = 1 / 15;
+
     updateStarTwinkle(dt: number): void {
         if (!this.scene._starRoot || !this.scene._starRoot.isEnabled()) return;
         this.scene._starTime += dt;
         if (this.scene._starTime > 10000) this.scene._starTime -= 10000;
+        this._starTwinkleAccumS += dt;
+        if (this._starTwinkleAccumS < LightingSystem.STAR_TWINKLE_INTERVAL_S) return;
+        this._starTwinkleAccumS = 0;
         for (let i = 0; i < this.scene._starInstances.length; i++) {
             const phase = this.scene._starPhases[i];
             const base = this.scene._starBaseScales[i];
