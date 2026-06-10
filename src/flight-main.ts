@@ -49,6 +49,7 @@ if (token) {
 
 const FREE_HOUR_FIRST_DELAY_MS = 2000;
 const FREE_HOUR_INTERVAL_MS = 5 * 60 * 1000;
+const FREE_HOUR_BANNER_VISIBLE_MS = 5000;
 let freeHourTimer: number | undefined;
 
 let sceneReady = false;
@@ -824,10 +825,93 @@ async function claimFreeFlightHour(authToken: string): Promise<void> {
         const data = await resp.json();
         if (typeof data?.granted === 'number' && data.granted > 0) {
             console.log(`[FreeHour] Granted ${data.granted}h (reward_type=${data.reward_type}, total=${data.free_flight_hours_given_total}, remaining=${data.free_flight_hours_remaining_limit})`);
+            showFreeHourBanner(data.granted);
         } else {
             console.log(`[FreeHour] No grant (reason_code=${data?.reason_code}, next_available_at=${data?.next_available_at ?? 'null'})`);
         }
     } catch (err) {
         console.warn('[FreeHour] Claim error:', err);
+    }
+}
+
+function showFreeHourBanner(grantedHours: number): void {
+    try {
+        if (typeof document === 'undefined' || !document.body) {
+            console.warn('[FreeHour] Banner skipped: document or body unavailable');
+            return;
+        }
+        const safeHours = Number.isFinite(grantedHours) && grantedHours > 0
+            ? (Math.round(grantedHours * 100) / 100)
+            : 0;
+        if (safeHours <= 0) return;
+
+        const existing = document.getElementById('free-hour-banner');
+        if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
+
+        const banner = document.createElement('div');
+        banner.id = 'free-hour-banner';
+        banner.innerHTML = `
+            <div class="fhb-card">
+                <div class="fhb-title">+${safeHours}h DE VOO GRÁTIS</div>
+                <div class="fhb-sub">Recompensa adicionada à sua conta</div>
+            </div>
+        `;
+        banner.style.cssText = [
+            'position:fixed',
+            'top:140px',
+            'left:50%',
+            'transform:translateX(-50%) translateY(-12px)',
+            'z-index:10000',
+            'pointer-events:none',
+            'opacity:0',
+            'transition:opacity 300ms ease, transform 300ms ease',
+            'font-family:Orbitron,monospace',
+        ].join(';');
+
+        const style = document.createElement('style');
+        style.textContent = `
+            #free-hour-banner .fhb-card {
+                background: linear-gradient(180deg, rgba(40,30,0,0.92), rgba(20,14,0,0.92));
+                border: 1px solid rgba(255,210,80,0.7);
+                border-radius: 8px;
+                padding: 12px 26px;
+                color: #ffe27a;
+                text-align: center;
+                box-shadow: 0 4px 24px rgba(255,210,80,0.25), 0 0 40px rgba(255,210,80,0.15);
+                min-width: 240px;
+            }
+            #free-hour-banner .fhb-title {
+                font-size: 17px;
+                font-weight: 700;
+                letter-spacing: 0.14em;
+                text-shadow: 0 0 10px rgba(255,210,80,0.6);
+            }
+            #free-hour-banner .fhb-sub {
+                font-family: Inter, sans-serif;
+                font-size: 12px;
+                color: rgba(255,255,255,0.85);
+                margin-top: 6px;
+                letter-spacing: 0.04em;
+            }
+        `;
+        banner.appendChild(style);
+        document.body.appendChild(banner);
+
+        requestAnimationFrame(() => {
+            if (!banner.isConnected) return;
+            banner.style.opacity = '1';
+            banner.style.transform = 'translateX(-50%) translateY(0)';
+        });
+
+        window.setTimeout(() => {
+            if (!banner.isConnected) return;
+            banner.style.opacity = '0';
+            banner.style.transform = 'translateX(-50%) translateY(-12px)';
+            window.setTimeout(() => {
+                if (banner.parentElement) banner.parentElement.removeChild(banner);
+            }, 300);
+        }, FREE_HOUR_BANNER_VISIBLE_MS);
+    } catch (err) {
+        console.warn('[FreeHour] Failed to show banner:', err);
     }
 }

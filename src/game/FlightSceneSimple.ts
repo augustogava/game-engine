@@ -1606,8 +1606,8 @@ export class FlightSceneSimple extends Scene3D {
         return this._missionSystem.completeActiveMission();
     }
 
-    private _showMissionCompleteToast(missionTitle: string): void {
-        this._missionSystem.showMissionCompleteToast(missionTitle);
+    private _showMissionCompleteToast(missionTitle: string, rewardPoints = 0): void {
+        this._missionSystem.showMissionCompleteToast(missionTitle, rewardPoints);
     }
 
     // ── 3D Tiles (Step 1: just load, no coord changes) ────────────────────────

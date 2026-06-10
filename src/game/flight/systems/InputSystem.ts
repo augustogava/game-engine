@@ -519,22 +519,6 @@ export class InputSystem {
         }
 
         if (!this.scene.isOnGround && this.scene.planeRoot) {
-            const speedSq = this.scene.velocity.lengthSquared();
-            if (speedSq > 1) {
-                const altitudeForQ = (this.scene.refAlt ?? 0) + this.scene.planeRoot.position.y;
-                const airDensityHere = getAirDensity(altitudeForQ, this.scene._isaDeltaTempK);
-                const dynamicPressure = 0.5 * airDensityHere * speedSq;
-                const qRef = (this.scene.aircraftConfig.control_q_reference_pa != null && this.scene.aircraftConfig.control_q_reference_pa > 0)
-                    ? this.scene.aircraftConfig.control_q_reference_pa
-                    : CONTROL_Q_REFERENCE_PA;
-                if (dynamicPressure > qRef) {
-                    const qScale = Math.sqrt(qRef / dynamicPressure);
-                    this.scene.surfaces[0].controlInput *= qScale;
-                    this.scene.surfaces[1].controlInput *= qScale;
-                    this.scene.surfaces[2].controlInput *= qScale;
-                    this.scene.surfaces[3].controlInput *= qScale;
-                }
-            }
             if (this.scene._failures?.hydraulicFailed === true && this.scene.surfaces.length >= 4) {
                 const hydraulicLossScale = 0.3;
                 this.scene.surfaces[0].controlInput *= hydraulicLossScale;
@@ -580,6 +564,25 @@ export class InputSystem {
 
         this.scene._maybeDisengageAutopilotByInput();
         this.scene._updateAutopilot(_dt);
+
+        if (!this.scene.isOnGround && this.scene.planeRoot && this.scene.surfaces.length >= 4) {
+            const speedSqForQ = this.scene.velocity.lengthSquared();
+            if (speedSqForQ > 1) {
+                const altitudeForQ = (this.scene.refAlt ?? 0) + this.scene.planeRoot.position.y;
+                const airDensityForQ = getAirDensity(altitudeForQ, this.scene._isaDeltaTempK);
+                const dynamicPressureForQ = 0.5 * airDensityForQ * speedSqForQ;
+                const qRefForQ = (this.scene.aircraftConfig.control_q_reference_pa != null && this.scene.aircraftConfig.control_q_reference_pa > 0)
+                    ? this.scene.aircraftConfig.control_q_reference_pa
+                    : CONTROL_Q_REFERENCE_PA;
+                if (dynamicPressureForQ > qRefForQ) {
+                    const qScale = Math.sqrt(qRefForQ / dynamicPressureForQ);
+                    this.scene.surfaces[0].controlInput *= qScale;
+                    this.scene.surfaces[1].controlInput *= qScale;
+                    this.scene.surfaces[2].controlInput *= qScale;
+                    this.scene.surfaces[3].controlInput *= qScale;
+                }
+            }
+        }
 
         this.scene._applyFlaps(_dt);
         this.scene._applySpoilers(_dt, this.scene.isOnGround);

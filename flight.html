@@ -325,6 +325,27 @@
         }
         .preflight-cta-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .preflight-msg { padding: 16px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 12px; }
+        .preflight-lb-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 12px;
+            color: #fff;
+        }
+        .preflight-lb-head {
+            color: rgba(255, 255, 255, 0.45);
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .preflight-lb-top .preflight-lb-pos { color: #ffe27a; font-weight: 700; }
+        .preflight-lb-pos { width: 32px; flex: none; text-align: center; color: rgba(255, 255, 255, 0.7); }
+        .preflight-lb-pilot { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .preflight-lb-num { width: 56px; flex: none; text-align: right; color: rgba(80, 255, 160, 0.9); }
+        .preflight-lb-head .preflight-lb-num { color: rgba(255, 255, 255, 0.45); }
         .preflight-hero-img {
             width: 100%;
             max-height: 160px;
@@ -563,6 +584,7 @@
             <button type="button" class="preflight-tab" data-tab="airport">Aeroporto</button>
             <button type="button" class="preflight-tab" data-tab="missions">Missões</button>
             <button type="button" class="preflight-tab" data-tab="plans">Plano de voo</button>
+            <button type="button" class="preflight-tab" data-tab="leaderboard">Ranking</button>
         </div>
         <div class="preflight-body">
             <div class="preflight-panel active" id="preflight-panel-aircraft">
@@ -595,6 +617,9 @@
                     <button type="button" class="preflight-detail-back" data-back="missions">← Voltar</button>
                     <div class="preflight-detail-scroll" id="preflight-mission-detail-body"></div>
                 </div>
+            </div>
+            <div class="preflight-panel" id="preflight-panel-leaderboard">
+                <div class="preflight-list" id="preflight-leaderboard-list"></div>
             </div>
             <div class="preflight-panel" id="preflight-panel-plans">
                 <div class="preflight-list" id="preflight-plans-list"></div>

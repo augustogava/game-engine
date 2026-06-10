@@ -266,6 +266,8 @@ export class MissionSystem {
         if (!umId || this.scene._completedUserMissionIds.has(umId) || this.scene._missionCompletionInFlight) return;
         this.scene._missionCompletionInFlight = true;
         const completedTitle = this.scene._activeMission?.mission_title || '';
+        const completedRewardRaw = Number(this.scene._activeMission?.reward_points);
+        const completedReward = Number.isFinite(completedRewardRaw) && completedRewardRaw > 0 ? completedRewardRaw : 0;
         try {
             const token = localStorage.getItem('auth_token') || '';
             const res = await fetch(`/api/user-missions/${umId}/complete`, {
@@ -279,7 +281,7 @@ export class MissionSystem {
                 this.scene._activeUserMissionId = null;
                 this.scene._activeMission = null;
                 this.scene._missionWaypoints = [];
-                this.showMissionCompleteToast(completedTitle);
+                this.showMissionCompleteToast(completedTitle, completedReward);
                 this.loadMissions();
             } else {
                 console.warn(`[Mission] Complete failed: HTTP ${res.status}`);
@@ -291,7 +293,7 @@ export class MissionSystem {
         }
     }
 
-    showMissionCompleteToast(missionTitle: string): void {
+    showMissionCompleteToast(missionTitle: string, rewardPoints = 0): void {
         try {
             if (typeof document === 'undefined' || !document.body) {
                 console.warn('[Mission] Toast skipped: document or body unavailable');
@@ -305,10 +307,12 @@ export class MissionSystem {
             const safeTitle = String(missionTitle ?? '').replace(/[<>&"']/g, (ch) => ({
                 '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
             } as Record<string, string>)[ch] || ch);
+            const safeReward = Number.isFinite(rewardPoints) && rewardPoints > 0 ? Math.round(rewardPoints) : 0;
             toast.innerHTML = `
                 <div class="mct-card">
                     <div class="mct-title">MISSÃO CONCLUÍDA</div>
                     ${safeTitle ? `<div class="mct-sub">${safeTitle}</div>` : ''}
+                    ${safeReward > 0 ? `<div class="mct-pts">+${safeReward} pts</div>` : ''}
                 </div>
             `;
             toast.style.cssText = [
@@ -347,6 +351,14 @@ export class MissionSystem {
                     color: rgba(255,255,255,0.85);
                     margin-top: 6px;
                     letter-spacing: 0.04em;
+                }
+                #mission-complete-toast .mct-pts {
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: #ffe27a;
+                    margin-top: 8px;
+                    letter-spacing: 0.08em;
+                    text-shadow: 0 0 10px rgba(255,210,80,0.55);
                 }
             `;
             toast.appendChild(style);

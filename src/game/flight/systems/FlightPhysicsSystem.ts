@@ -409,7 +409,10 @@ export class FlightPhysicsSystem {
                     ? ISA_TROPOPAUSE_TEMP_K
                     : ISA_SEA_LEVEL_TEMP_K - ISA_LAPSE_RATE_K_PER_M * Math.max(0, altitude);
                 const speedOfSoundEng = Math.sqrt(SPECIFIC_HEAT_RATIO_AIR * GAS_CONSTANT_AIR_J_PER_KG_K * tempKEng);
-                const machNow = this.scene.velocity.length() / Math.max(1, speedOfSoundEng);
+                const trueAirspeedEng = Number.isFinite(this.scene._lastTasMs) && this.scene._lastTasMs >= 0
+                    ? this.scene._lastTasMs
+                    : this.scene.velocity.length();
+                const machNow = trueAirspeedEng / Math.max(1, speedOfSoundEng);
                 const machLapseFloor = cfg.mach_lapse_floor ?? JET_THRUST_MACH_MIN_FACTOR;
                 const machLapseCoef = cfg.mach_lapse_coef ?? JET_THRUST_MACH_LAPSE_COEF;
                 thrustMachLapse = Math.max(

@@ -38,6 +38,14 @@ const I18N: Record<Lang, Record<string, string>> = {
         'tab.airport': 'Aeroporto',
         'tab.missions': 'Missões',
         'tab.plans': 'Plano de voo',
+        'tab.leaderboard': 'Ranking',
+        'leaderboard.rank': 'Pos',
+        'leaderboard.pilot': 'Piloto',
+        'leaderboard.hours': 'Horas',
+        'leaderboard.flights': 'Voos',
+        'leaderboard.loading': 'Carregando ranking...',
+        'leaderboard.empty': 'Sem dados de ranking ainda',
+        'leaderboard.error': 'Falha ao carregar ranking',
         'airport.airport': 'Aeroporto',
         'airport.runway': 'Pista',
         'airport.end': 'Extremidade',
@@ -88,6 +96,14 @@ const I18N: Record<Lang, Record<string, string>> = {
         'tab.airport': 'Airport',
         'tab.missions': 'Missions',
         'tab.plans': 'Flight plan',
+        'tab.leaderboard': 'Leaderboard',
+        'leaderboard.rank': 'Pos',
+        'leaderboard.pilot': 'Pilot',
+        'leaderboard.hours': 'Hours',
+        'leaderboard.flights': 'Flights',
+        'leaderboard.loading': 'Loading leaderboard...',
+        'leaderboard.empty': 'No leaderboard data yet',
+        'leaderboard.error': 'Failed to load leaderboard',
         'airport.airport': 'Airport',
         'airport.runway': 'Runway',
         'airport.end': 'Runway end',
@@ -225,6 +241,7 @@ export class PreflightController {
     private selectedAirportId: number | null = null;
     private searchTimer: number | undefined;
     private flyResolve: (() => void) | null = null;
+    private leaderboardLoading = false;
 
     constructor(token: string) {
         this.token = token;
@@ -318,6 +335,7 @@ export class PreflightController {
         set('.preflight-tab[data-tab="airport"]', this.t('tab.airport'));
         set('.preflight-tab[data-tab="missions"]', this.t('tab.missions'));
         set('.preflight-tab[data-tab="plans"]', this.t('tab.plans'));
+        set('.preflight-tab[data-tab="leaderboard"]', this.t('tab.leaderboard'));
         set('label[for="preflight-airport-search"]', this.t('airport.airport'));
         set('label[for="preflight-runway-select"]', this.t('airport.runway'));
         set('label[for="preflight-runway-end"]', this.t('airport.end'));
@@ -332,7 +350,7 @@ export class PreflightController {
     private updateFooterVisibility(tab: string): void {
         const footer = document.querySelector('.preflight-footer') as HTMLElement | null;
         if (!footer) return;
-        footer.style.display = (tab === 'missions' || tab === 'plans') ? 'none' : '';
+        footer.style.display = (tab === 'missions' || tab === 'plans' || tab === 'leaderboard') ? 'none' : '';
     }
 
     private wireTabs(): void {
@@ -345,6 +363,7 @@ export class PreflightController {
                 document.querySelectorAll('.preflight-panel').forEach((p) => p.classList.remove('active'));
                 document.getElementById(`preflight-panel-${tab === 'plans' ? 'plans' : tab}`)?.classList.add('active');
                 this.updateFooterVisibility(tab);
+                if (tab === 'leaderboard') void this.loadLeaderboard();
             });
         });
     }
@@ -352,6 +371,59 @@ export class PreflightController {
     private wireFlyButton(): void {
         const btn = document.getElementById('preflight-fly-btn') as HTMLButtonElement | null;
         btn?.addEventListener('click', () => void this.onFlyFree());
+    }
+
+    private async loadLeaderboard(): Promise<void> {
+        const list = document.getElementById('preflight-leaderboard-list');
+        if (!list) {
+            console.warn('[Preflight] Leaderboard list element missing');
+            return;
+        }
+        if (this.leaderboardLoading) return;
+        this.leaderboardLoading = true;
+        list.innerHTML = `<div class="preflight-msg">${this.t('leaderboard.loading')}</div>`;
+        try {
+            const res = await fetch('/api/flight-stats/leaderboard', { headers: authHeaders(this.token) });
+            if (!res.ok) {
+                console.warn(`[Preflight] Leaderboard load failed: HTTP ${res.status}`);
+                list.innerHTML = `<div class="preflight-msg">${this.t('leaderboard.error')}</div>`;
+                return;
+            }
+            const body = await res.json();
+            const rows = Array.isArray(body?.data) ? body.data : [];
+            if (rows.length === 0) {
+                list.innerHTML = `<div class="preflight-msg">${this.t('leaderboard.empty')}</div>`;
+                return;
+            }
+            const header = `
+                <div class="preflight-lb-row preflight-lb-head">
+                    <div class="preflight-lb-pos">${this.t('leaderboard.rank')}</div>
+                    <div class="preflight-lb-pilot">${this.t('leaderboard.pilot')}</div>
+                    <div class="preflight-lb-num">${this.t('leaderboard.hours')}</div>
+                    <div class="preflight-lb-num">${this.t('leaderboard.flights')}</div>
+                </div>`;
+            const items = rows.map((r: any, idx: number) => {
+                const pos = idx + 1;
+                const name = escapeHtml(String(r?.username ?? '—'));
+                const hoursRaw = Number(r?.total_flight_hours);
+                const hours = Number.isFinite(hoursRaw) ? hoursRaw.toFixed(1) : '0.0';
+                const flightsRaw = Number(r?.total_flights);
+                const flights = Number.isFinite(flightsRaw) ? String(flightsRaw) : '0';
+                return `
+                    <div class="preflight-lb-row${pos <= 3 ? ' preflight-lb-top' : ''}">
+                        <div class="preflight-lb-pos">${pos}</div>
+                        <div class="preflight-lb-pilot">${name}</div>
+                        <div class="preflight-lb-num">${hours}</div>
+                        <div class="preflight-lb-num">${flights}</div>
+                    </div>`;
+            }).join('');
+            list.innerHTML = header + items;
+        } catch (err) {
+            console.error('[Preflight] Leaderboard load error:', err);
+            list.innerHTML = `<div class="preflight-msg">${this.t('leaderboard.error')}</div>`;
+        } finally {
+            this.leaderboardLoading = false;
+        }
     }
 
     private wireDetailBack(): void {

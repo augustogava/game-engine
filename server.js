@@ -181,7 +181,7 @@ const NEAREST_AIRPORT_RADIUS_NM = 5;
 const NEAREST_AIRPORT_FALLBACK_NM = 15;
 const PERIODIC_FLUSH_MS = 30000;
 const PERIODIC_MIN_SESSION_MIN = 0.5;
-const MISSION_WAYPOINT_REACH_NM = 2.0;
+const MISSION_WAYPOINT_REACH_NM = 2.4;
 
 // ── HTTP infrastructure helpers ──────────────────────────────────────────────
 function parseBody(req) {
