@@ -141,7 +141,7 @@ export class LightingSystem {
         const qMult = PARTICLE_QUALITY_MULT[FabulusPrefs.get().gfxParticleQuality] ?? 1;
         for (let i = 0; i < FIRE_POSITIONS.length; i++) {
             const [x, z] = FIRE_POSITIONS[i];
-            const origin = new BABYLON.Vector3(x, FIRE_HEIGHT, z);
+            const origin = new BABYLON.Vector3(x, this.scene.mapSystem.getHeightAt(x, z) + FIRE_HEIGHT, z);
 
             const light = new BABYLON.PointLight(`fab_fire_${i}`, origin.clone(), s);
             light.diffuse = new BABYLON.Color3(1.0, 0.55, 0.22);
@@ -261,7 +261,7 @@ export class LightingSystem {
         const t = this.scene.now() * 0.001;
 
         if (this.torch) {
-            this.torch.position.set(root.position.x, TORCH_HEIGHT, root.position.z);
+            this.torch.position.set(root.position.x, root.position.y + TORCH_HEIGHT, root.position.z);
             // Warm, lively flicker so the player torch matches the campfire mood.
             const torchFlicker = 0.85
                 + 0.1 * Math.sin(t * 13.3)

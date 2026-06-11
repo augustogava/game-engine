@@ -11,6 +11,18 @@ export const MAP_BORDER_MARGIN = 1.0;
 export const OBSTACLE_COUNT = 60;
 export const OBSTACLE_SEED = 1337;
 
+export const TERRAIN_AMPLITUDE = 8;
+export const TERRAIN_GRID_RESOLUTION = 257;
+export const TERRAIN_NOISE_SCALE = 0.016;
+export const TERRAIN_PATH_COUNT = 4;
+export const TERRAIN_PATH_WIDTH = 5;
+export const SPAWN_PLATEAU_RADIUS = 10;
+export const POND_BASIN_COUNT = 4;
+export const POND_BASIN_RADIUS_MIN = 6;
+export const POND_BASIN_RADIUS_MAX = 9;
+export const FOREST_TREE_COUNT = 120;
+export const GROUND_TEXTURE_BASE_URL = 'src/game/assets/textures/ground/';
+
 export const PLAYER_HEIGHT_UNITS = 2.6;
 export const PLAYER_COLLIDER_RADIUS = 0.55;
 export const ENEMY_COLLIDER_RADIUS = 0.5;

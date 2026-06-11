@@ -61,7 +61,7 @@ export class NpcSystem {
     private async _spawn(def: NpcDef): Promise<void> {
         const s = this.scene.bScene;
         const root = new BABYLON.TransformNode(`fab_npc_${def.id}`, s);
-        root.position.set(def.pos_x, 0, def.pos_z);
+        root.position.set(def.pos_x, this.scene.mapSystem.getHeightAt(def.pos_x, def.pos_z), def.pos_z);
         root.rotation.y = def.rot_y;
 
         const instance: NpcInstance = {

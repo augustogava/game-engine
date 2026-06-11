@@ -4,18 +4,12 @@ import { FabulusPrefs } from '../FabulusPrefs.js';
 import {
     FAB_WATER_SHADER_VERTEX_URL,
     FAB_WATER_SHADER_FRAGMENT_URL,
-    WATER_LEVEL,
-    WATER_POOL_COUNT,
     WATER_LAVA_CHANCE,
-    MAP_HALF,
 } from '../constants/index.js';
 
 const TIME_CLAMP = 0.25;
 const WATER_FBM_OCTAVES_HIGH = 4;
 const WATER_FBM_OCTAVES_LOW = 2;
-const POOL_MIN_RADIUS = 4;
-const POOL_MAX_RADIUS = 8;
-const POOL_MIN_DIST_FROM_CENTER = 12;
 const WATER_BASE = new BABYLON.Color3(0.02, 0.08, 0.13);
 const WATER_TINT = new BABYLON.Color3(0.18, 0.34, 0.4);
 const LAVA_BASE = new BABYLON.Color3(0.12, 0.02, 0.0);
@@ -98,23 +92,22 @@ export class WaterSystem {
         const s = this.scene.bScene;
         if (s.isDisposed) return;
 
+        // Pools live in the flat basins carved into the terrain heightfield.
         const rand = mulberry32(1337);
-        for (let i = 0; i < WATER_POOL_COUNT; i++) {
-            const x = (rand() * 2 - 1) * (MAP_HALF - POOL_MAX_RADIUS - 4);
-            const z = (rand() * 2 - 1) * (MAP_HALF - POOL_MAX_RADIUS - 4);
-            if (Math.hypot(x, z) < POOL_MIN_DIST_FROM_CENTER) continue;
-            const radius = POOL_MIN_RADIUS + rand() * (POOL_MAX_RADIUS - POOL_MIN_RADIUS);
+        const basins = this.scene.mapSystem.getPondBasins();
+        for (let i = 0; i < basins.length; i++) {
+            const basin = basins[i];
             const lava = rand() < WATER_LAVA_CHANCE;
-            this._createPool(s, x, z, radius, lava, i);
+            this._createPool(s, basin.x, basin.z, basin.radius, basin.waterY, lava, i);
         }
         this.enabled = true;
         console.debug(`[Fabulus] Water ready (${this.pools.length} pools)`);
     }
 
-    private _createPool(s: BABYLON.Scene, x: number, z: number, radius: number, lava: boolean, i: number): void {
+    private _createPool(s: BABYLON.Scene, x: number, z: number, radius: number, waterY: number, lava: boolean, i: number): void {
         const disc = BABYLON.MeshBuilder.CreateDisc(`fab_water_${i}`, { radius, tessellation: 48 }, s);
         disc.rotation.x = Math.PI / 2;
-        disc.position.set(x, WATER_LEVEL, z);
+        disc.position.set(x, waterY, z);
         disc.isPickable = false;
         disc.applyFog = true;
         disc.receiveShadows = true;

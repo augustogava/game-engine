@@ -28,7 +28,7 @@ export class PlayerSystem {
         const s = this.scene.bScene;
         const c = this.scene.classDef;
         const root = new BABYLON.TransformNode('fab_player_root', s);
-        root.position.set(this.scene.player.pos_x, 0, this.scene.player.pos_z);
+        root.position.set(this.scene.player.pos_x, this.scene.mapSystem.getHeightAt(this.scene.player.pos_x, this.scene.player.pos_z), this.scene.player.pos_z);
         this.spawnX = this.scene.player.pos_x;
         this.spawnZ = this.scene.player.pos_z;
         this.scene.playerRoot = root;
@@ -205,7 +205,7 @@ export class PlayerSystem {
         this.scene.combatSystem.resetSwing();
         const root = this.scene.playerRoot;
         if (root) {
-            root.position.set(this.spawnX, 0, this.spawnZ);
+            root.position.set(this.spawnX, this.scene.mapSystem.getHeightAt(this.spawnX, this.spawnZ), this.spawnZ);
             root.rotation.x = 0;
             root.rotation.z = 0;
         }
@@ -270,7 +270,7 @@ export class PlayerSystem {
         const step = Math.min(dist, speed * dt);
         root.position.x += (dx / dist) * step;
         root.position.z += (dz / dist) * step;
-        root.position.y = 0;
+        root.position.y = this.scene.mapSystem.getHeightAt(root.position.x, root.position.z);
 
         this._faceTowards(dx, dz, dt, false);
 

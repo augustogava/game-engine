@@ -458,7 +458,9 @@ export class VfxSystem {
         const disc = BABYLON.MeshBuilder.CreateDisc('fab_blood_pool', { radius, tessellation: 18 }, s);
         disc.rotation.x = Math.PI / 2;
         disc.rotation.y = Math.random() * Math.PI * 2;
-        disc.position.set(x + (Math.random() - 0.5) * 0.3, 0.025, z + (Math.random() - 0.5) * 0.3);
+        const bx = x + (Math.random() - 0.5) * 0.3;
+        const bz = z + (Math.random() - 0.5) * 0.3;
+        disc.position.set(bx, this.scene.mapSystem.getHeightAt(bx, bz) + 0.025, bz);
         disc.isPickable = false;
         disc.material = this._acquireBloodPoolMaterial(s, radius);
         this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: BLOOD_POOL_LIFETIME_MS, growTo: 1.25, poolKey: null, baseAlpha: BLOOD_POOL_BASE_ALPHA, matPool: this.bloodMatPool });
@@ -608,9 +610,10 @@ export class VfxSystem {
         return mat;
     }
 
+    /** `y` is an offset above the terrain surface at (x, z). */
     private _spawnRing(diameter: number, thickness: number, color: BABYLON.Color3, alpha: number, x: number, y: number, z: number, lifetimeMs: number, growTo: number): void {
         const ring = this._acquireRing(diameter, thickness, color, alpha);
-        ring.position.set(x, y, z);
+        ring.position.set(x, this.scene.mapSystem.getHeightAt(x, z) + y, z);
         this.timedMeshes.push({
             mesh: ring, bornAt: this.scene.now(), lifetimeMs, growTo,
             poolKey: `${diameter.toFixed(2)}_${thickness.toFixed(2)}`, baseAlpha: alpha,
@@ -623,7 +626,7 @@ export class VfxSystem {
 
     aoeRing(x: number, z: number, radius: number, color: BABYLON.Color3, element?: string | null): void {
         this._spawnRing(radius * 0.4, 0.12, color, 0.6, x, 0.06, z, AOE_RING_LIFETIME_MS, radius / (radius * 0.4));
-        this.elementImpact(new BABYLON.Vector3(x, 0, z), element);
+        this.elementImpact(new BABYLON.Vector3(x, this.scene.mapSystem.getHeightAt(x, z), z), element);
     }
 
     levelUpBurst(): void {
@@ -652,7 +655,7 @@ export class VfxSystem {
         const disc = BABYLON.MeshBuilder.CreateDisc('fab_slash', { radius: 1.4, arc: 0.4, tessellation: 24, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, s);
         disc.rotation.x = Math.PI / 2;
         disc.rotation.y = yaw - Math.PI * 0.4;
-        disc.position.set(x, 1.0, z);
+        disc.position.set(x, this.scene.mapSystem.getHeightAt(x, z) + 1.0, z);
         disc.isPickable = false;
         const mat = this._acquireStdMat(this.slashMatPool, 'fab_slash_mat');
         mat.emissiveColor = color;
@@ -679,7 +682,7 @@ export class VfxSystem {
         const s = this.scene.bScene;
         const disc = BABYLON.MeshBuilder.CreateDisc('fab_decal', { radius, tessellation: 20 }, s);
         disc.rotation.x = Math.PI / 2;
-        disc.position.set(x, 0.02, z);
+        disc.position.set(x, this.scene.mapSystem.getHeightAt(x, z) + 0.02, z);
         disc.isPickable = false;
         const mat = this._acquireStdMat(this.decalMatPool, 'fab_decal_mat');
         mat.diffuseColor = new BABYLON.Color3(0.08, 0.03, 0.02);

@@ -178,6 +178,7 @@ export class AtmosphereSystem {
         if (this.mistMesh && this.mistTexture && root) {
             this.mistMesh.position.x = root.position.x;
             this.mistMesh.position.z = root.position.z;
+            this.mistMesh.position.y = root.position.y + ATMO_MIST_HEIGHT;
             this.scroll += dt * ATMO_MIST_SCROLL;
             this.mistTexture.uOffset = this.scroll;
             this.mistTexture.vOffset = this.scroll * 0.6;

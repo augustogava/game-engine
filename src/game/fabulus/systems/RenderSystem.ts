@@ -176,8 +176,12 @@ export class RenderSystem {
         const height = maxY - minY;
         if (height <= 0.01) return 1;
         const scale = targetHeight / height;
+        // Bounds are in world space: subtract the parent's world Y so entity roots
+        // placed at terrain height don't get their offset cancelled (feet stay at root Y).
+        const parent = modelRoot.parent as BABYLON.TransformNode | null;
+        const baseY = parent ? parent.getAbsolutePosition().y : 0;
         modelRoot.scaling.scaleInPlace(scale);
-        modelRoot.position.y -= minY * scale;
+        modelRoot.position.y -= (minY - baseY) * scale;
         return scale;
     }
 

@@ -184,7 +184,7 @@ export class SkillSystem {
 
         const color = SKILL_VFX_COLORS[def.vfx_key] ?? SKILL_VFX_COLORS.default;
         const pooled = this._acquireProjectile(color);
-        pooled.mesh.position.set(root.position.x + dirX * 0.6, PROJECTILE_HEIGHT, root.position.z + dirZ * 0.6);
+        pooled.mesh.position.set(root.position.x + dirX * 0.6, root.position.y + PROJECTILE_HEIGHT, root.position.z + dirZ * 0.6);
 
         this.projectiles.push({
             mesh: pooled.mesh,
@@ -330,6 +330,8 @@ export class SkillSystem {
             const step = proj.speed * dt;
             proj.mesh.position.x += proj.dirX * step;
             proj.mesh.position.z += proj.dirZ * step;
+            // Hug the terrain so projectiles neither bury into hills nor float over valleys.
+            proj.mesh.position.y = this.scene.mapSystem.getHeightAt(proj.mesh.position.x, proj.mesh.position.z) + PROJECTILE_HEIGHT;
             proj.traveled += step;
 
             let hit: EnemyInstance | null = null;

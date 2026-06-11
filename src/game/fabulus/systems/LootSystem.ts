@@ -15,6 +15,7 @@ import { FabulusApi } from '../api/FabulusApi.js';
 
 const DROP_SPAWN_HEIGHT = 1.2;
 const DROP_REST_Y = 0.02;
+const DROP_ITEM_REST_Y = 0.06;
 const LABEL_TEX_W = 256;
 const LABEL_TEX_H = 48;
 const RARE_LIGHT_MIN_RARITY = 3;
@@ -250,8 +251,9 @@ export class LootSystem {
 
     private _spawnGoldDrop(x: number, z: number, amount: number): void {
         const dropId = this.nextDropId;
+        const ground = this.scene.mapSystem.getHeightAt(x, z);
         const root = this._makeCoinMesh();
-        root.position.set(x, DROP_SPAWN_HEIGHT, z);
+        root.position.set(x, ground + DROP_SPAWN_HEIGHT, z);
         const pickMeshes = root instanceof BABYLON.AbstractMesh ? [root as BABYLON.AbstractMesh] : root.getChildMeshes(false);
         for (const m of pickMeshes) {
             m.isPickable = true;
@@ -270,7 +272,7 @@ export class LootSystem {
             velocity: this._ejectVelocity(),
             bounces: 0,
             resting: false,
-            restY: DROP_REST_Y,
+            restY: ground + DROP_REST_Y,
             spawnedAt: now,
             expiresAt: now + DROP_DESPAWN_MS,
         };
@@ -304,8 +306,9 @@ export class LootSystem {
         const colorHex = rarity ? rarity.color_hex : UI_RARITY_FALLBACK;
         const color = BABYLON.Color3.FromHexString(colorHex);
 
+        const ground = this.scene.mapSystem.getHeightAt(x, z);
         const root = new BABYLON.TransformNode(`fab_drop_${dropId}`, s);
-        root.position.set(x, DROP_SPAWN_HEIGHT, z);
+        root.position.set(x, ground + DROP_SPAWN_HEIGHT, z);
         this._attachPickProxy(root, dropId, LOOT_PICK_PROXY_RADIUS_ITEM);
 
         const pedestal = BABYLON.MeshBuilder.CreateBox(`fab_drop_ped_${dropId}`, { width: 0.4, height: 0.12, depth: 0.4 }, s);
@@ -389,7 +392,7 @@ export class LootSystem {
             velocity: this._ejectVelocity(),
             bounces: 0,
             resting: false,
-            restY: 0.06,
+            restY: ground + DROP_ITEM_REST_Y,
             spawnedAt: now,
             expiresAt: now + DROP_DESPAWN_MS,
         };
@@ -496,6 +499,9 @@ export class LootSystem {
                 drop.root.position.x += drop.velocity.x * dt;
                 drop.root.position.y += drop.velocity.y * dt;
                 drop.root.position.z += drop.velocity.z * dt;
+                // Drops scatter in XZ while falling: track the terrain under the new spot.
+                const restOffset = drop.kind === DROP_KIND.GOLD ? DROP_REST_Y : DROP_ITEM_REST_Y;
+                drop.restY = this.scene.mapSystem.getHeightAt(drop.root.position.x, drop.root.position.z) + restOffset;
                 if (drop.kind === DROP_KIND.GOLD) {
                     drop.root.rotation.x += COIN_SPIN_SPEED * 2 * dt;
                     drop.root.rotation.y += COIN_SPIN_SPEED * dt;

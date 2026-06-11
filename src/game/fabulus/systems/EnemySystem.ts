@@ -100,7 +100,7 @@ export class EnemySystem {
         const s = this.scene.bScene;
         const instanceId = this.nextInstanceId++;
         const root = new BABYLON.TransformNode(`fab_enemy_${instanceId}`, s);
-        root.position.set(x, 0, z);
+        root.position.set(x, this.scene.mapSystem.getHeightAt(x, z), z);
 
         const level = def.level + Math.floor(Math.random() * (ENEMY_LEVEL_VARIANCE + 1));
         const levelDelta = level - def.level;
@@ -401,7 +401,7 @@ export class EnemySystem {
     private _respawn(instance: EnemyInstance): void {
         instance.state = ENEMY_STATE.IDLE;
         instance.hp = instance.maxHp;
-        instance.root.position.set(instance.spawnPos.x, 0, instance.spawnPos.z);
+        instance.root.position.set(instance.spawnPos.x, this.scene.mapSystem.getHeightAt(instance.spawnPos.x, instance.spawnPos.z), instance.spawnPos.z);
         instance.root.rotation.x = 0;
         const modelRoot = instance.meshes[0];
         if (modelRoot && modelRoot.position !== undefined) modelRoot.position.z = 0;
@@ -579,7 +579,7 @@ export class EnemySystem {
         const step = Math.min(dist, effectiveSpeed * dt);
         e.root.position.x += (dx / dist) * step;
         e.root.position.z += (dz / dist) * step;
-        e.root.position.y = 0;
+        e.root.position.y = this.scene.mapSystem.getHeightAt(e.root.position.x, e.root.position.z);
         this._face(e, dx, dz);
         this._playEnemyAnim(e, animKey, 1);
     }

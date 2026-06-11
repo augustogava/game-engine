@@ -1,22 +1,52 @@
 import * as BABYLON from '@babylonjs/core';
+import { TerrainMaterial } from '@babylonjs/materials/terrain/terrainMaterial.js';
 import type { FabulusScene } from '../FabulusScene.js';
 import {
+    FOREST_TREE_COUNT, GROUND_TEXTURE_BASE_URL,
     MAP_BORDER_MARGIN, MAP_HALF, MAP_MODEL_FILE, MAP_SIZE, MODELS_BASE_PATH,
-    OBSTACLE_COUNT, OBSTACLE_SEED,
-    GROUND_ULTRA_TEXTURE_SIZE, GROUND_ULTRA_NORMAL_SIZE, GROUND_ULTRA_CLEARCOAT,
+    OBSTACLE_COUNT, OBSTACLE_SEED, SPAWN_PLATEAU_RADIUS,
 } from '../constants/index.js';
 import { FabulusPrefs } from '../FabulusPrefs.js';
+import { TerrainHeightField, type PondBasin } from './TerrainHeightField.js';
 
-const GROUND_TEXTURE_SIZE = 1024;
-const GROUND_TILE_CELLS = 32;
 const BORDER_WALL_THICKNESS = 4;
 const OBSTACLE_MIN_DIST_FROM_CENTER = 6;
-const NORMAL_MAP_SIZE = 512;
-const DECOR_COUNT = 40;
-const BIOME_PATCH_COUNT = 14;
+const DECOR_COUNT = 70;
 const BIOME_PROP_COUNT = 26;
 const DETAIL_DENSITY: Record<string, number> = { low: 0.4, medium: 1, high: 1.6 };
 const BIOME_ZONE_THRESHOLD = 0.2;
+
+const GROUND_SUBDIVISIONS: Record<string, number> = { low: 96, medium: 160, high: 220 };
+const GROUND_SUBDIVISIONS_ULTRA = 240;
+const SPLAT_SIZE = 512;
+const SPLAT_SIZE_ULTRA = 1024;
+const COMPOSITE_BASE_SIZE = 1024;
+const GRASS_BLEND_PERIOD = 8;
+const GRASS_BLEND_LOW = 0.46;
+const GRASS_BLEND_HIGH = 0.62;
+const GRASS_BLEND_MAX_ALPHA = 0.85;
+
+const TILE_FOREST_FLOOR = 26;
+const TILE_DIRT_PATH = 30;
+const TILE_ROCK = 14;
+const ROCK_SLOPE_START = 0.38;
+const ROCK_SLOPE_RANGE = 0.4;
+const ROCK_ALTITUDE_START = 4.5;
+const ROCK_ALTITUDE_FACTOR = 0.25;
+const SPLAT_NOISE_JITTER = 0.16;
+
+const TREE_MODEL_FILE = 'tree_pin.glb';
+const TREE_BASE_HEIGHT = 9;
+const TREE_MIN_SCALE = 0.7;
+const TREE_MAX_SCALE = 1.35;
+const TREE_COLLIDER_RADIUS = 0.55;
+const TREE_PATH_MASK_LIMIT = 0.12;
+const TREE_MAX_SLOPE = 1.0;
+const TREE_MIN_DIST_FROM_CENTER = SPAWN_PLATEAU_RADIUS + 4;
+const TREE_POND_MARGIN = 2;
+const TREE_PLACEMENT_TRIES_FACTOR = 5;
+
+const SCATTER_PATH_MASK_LIMIT = 0.3;
 
 function mulberry32(seed: number): () => number {
     let a = seed >>> 0;
@@ -29,11 +59,47 @@ function mulberry32(seed: number): () => number {
     };
 }
 
+function hash2(ix: number, iz: number, seed: number): number {
+    let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(seed, 974711)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return (((h ^ (h >>> 16)) >>> 0) / 4294967296);
+}
+
+// Value noise whose lattice wraps every `period` cells, so the result tiles seamlessly.
+function wrappedNoise(x: number, z: number, period: number, seed: number): number {
+    const ix = Math.floor(x);
+    const iz = Math.floor(z);
+    const fx = x - ix;
+    const fz = z - iz;
+    const wrap = (v: number) => ((v % period) + period) % period;
+    const v00 = hash2(wrap(ix), wrap(iz), seed);
+    const v10 = hash2(wrap(ix + 1), wrap(iz), seed);
+    const v01 = hash2(wrap(ix), wrap(iz + 1), seed);
+    const v11 = hash2(wrap(ix + 1), wrap(iz + 1), seed);
+    const sx = fx * fx * (3 - 2 * fx);
+    const sz = fz * fz * (3 - 2 * fz);
+    return (v00 * (1 - sx) + v10 * sx) * (1 - sz) + (v01 * (1 - sx) + v11 * sx) * sz;
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`Image load failed: ${url}`));
+        img.src = url;
+    });
+}
+
 export class MapSystem {
     private scene: FabulusScene;
+    private heightField: TerrainHeightField | null = null;
+    private groundMaterial: TerrainMaterial | null = null;
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
+        // Built eagerly so other systems (lighting, props, NPCs) can query terrain
+        // height regardless of their init order relative to MapSystem.init().
+        if (!MAP_MODEL_FILE) this.heightField = new TerrainHeightField(OBSTACLE_SEED);
     }
 
     init(): void {
@@ -42,214 +108,266 @@ export class MapSystem {
         } else {
             this._buildProceduralGround();
             this._scatterObstacles();
+            void this._scatterForest();
         }
         this._buildBorderWalls();
         console.debug(`[Fabulus] Map ready (${this.scene.staticColliders.length} colliders)`);
     }
 
+    /** Terrain height at world XZ (0 when no heightfield, e.g. external maps). */
+    getHeightAt(x: number, z: number): number {
+        return this.heightField ? this.heightField.getHeightAt(x, z) : 0;
+    }
+
+    getSlopeAt(x: number, z: number): number {
+        return this.heightField ? this.heightField.getSlopeAt(x, z) : 0;
+    }
+
+    getPathMask(x: number, z: number): number {
+        return this.heightField ? this.heightField.getPathMask(x, z) : 0;
+    }
+
+    getPondBasins(): PondBasin[] {
+        return this.heightField ? this.heightField.getPondBasins() : [];
+    }
+
+    // ── Ground mesh ──────────────────────────────────────────────────────────
+
     private _buildProceduralGround(): void {
-        if (FabulusPrefs.get().gfxGroundUltra) {
-            this._buildUltraGround();
+        const s = this.scene.bScene;
+        const prefs = FabulusPrefs.get();
+        const subdivisions = prefs.gfxGroundUltra
+            ? GROUND_SUBDIVISIONS_ULTRA
+            : (GROUND_SUBDIVISIONS[prefs.gfxDetailLevel] ?? GROUND_SUBDIVISIONS.medium);
+
+        const ground = BABYLON.MeshBuilder.CreateGround('fab_ground', {
+            width: MAP_SIZE, height: MAP_SIZE, subdivisions, updatable: true,
+        }, s);
+        ground.isPickable = true;
+        ground.receiveShadows = true;
+
+        this._displaceGround(ground);
+        ground.material = this._buildGroundMaterial(s, prefs.gfxGroundUltra);
+
+        this.scene.renderSystem.prepareMeshes([ground], { castShadow: false, receiveShadow: true });
+        this.scene.groundMesh = ground;
+        console.debug(`[Fabulus] Terrain ground built (${subdivisions} subdivisions)`);
+    }
+
+    private _displaceGround(ground: BABYLON.Mesh): void {
+        const hf = this.heightField;
+        if (!hf) return;
+        const positions = ground.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+        const indices = ground.getIndices();
+        if (!positions || !indices) return;
+
+        for (let i = 0; i < positions.length; i += 3) {
+            positions[i + 1] = hf.getHeightAt(positions[i], positions[i + 2]);
+        }
+        const normals: number[] = [];
+        BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+        ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
+        ground.updateVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
+        ground.refreshBoundingInfo();
+    }
+
+    // ── Ground material (real PBR texture sets, splat-blended) ───────────────
+
+    private _buildGroundMaterial(s: BABYLON.Scene, ultra: boolean): TerrainMaterial {
+        const mat = new TerrainMaterial('fab_ground_mat', s);
+        mat.mixTexture = this._buildSplatTexture(s, ultra ? SPLAT_SIZE_ULTRA : SPLAT_SIZE);
+
+        const diffuse1 = new BABYLON.Texture(GROUND_TEXTURE_BASE_URL + 'forest_floor_color.jpg', s);
+        const diffuse2 = new BABYLON.Texture(GROUND_TEXTURE_BASE_URL + 'dirt_path_color.jpg', s);
+        const diffuse3 = new BABYLON.Texture(GROUND_TEXTURE_BASE_URL + 'rock_color.jpg', s);
+        const bump1 = new BABYLON.Texture(GROUND_TEXTURE_BASE_URL + 'forest_floor_normal.jpg', s);
+        const bump2 = new BABYLON.Texture(GROUND_TEXTURE_BASE_URL + 'dirt_path_normal.jpg', s);
+        const bump3 = new BABYLON.Texture(GROUND_TEXTURE_BASE_URL + 'rock_normal.jpg', s);
+
+        diffuse1.uScale = diffuse1.vScale = TILE_FOREST_FLOOR;
+        bump1.uScale = bump1.vScale = TILE_FOREST_FLOOR;
+        diffuse2.uScale = diffuse2.vScale = TILE_DIRT_PATH;
+        bump2.uScale = bump2.vScale = TILE_DIRT_PATH;
+        diffuse3.uScale = diffuse3.vScale = TILE_ROCK;
+        bump3.uScale = bump3.vScale = TILE_ROCK;
+
+        mat.diffuseTexture1 = diffuse1;
+        mat.diffuseTexture2 = diffuse2;
+        mat.diffuseTexture3 = diffuse3;
+        mat.bumpTexture1 = bump1;
+        mat.bumpTexture2 = bump2;
+        mat.bumpTexture3 = bump3;
+
+        mat.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+        mat.specularPower = 48;
+        mat.maxSimultaneousLights = 8;
+        this.groundMaterial = mat;
+
+        void this._applyCompositeBase(s);
+        return mat;
+    }
+
+    // Blends the grass set over the forest floor with seamless noise, so the base
+    // layer alternates between leafy ground and grass patches when it tiles.
+    private async _applyCompositeBase(s: BABYLON.Scene): Promise<void> {
+        try {
+            const [floorImg, grassImg] = await Promise.all([
+                loadImage(GROUND_TEXTURE_BASE_URL + 'forest_floor_color.jpg'),
+                loadImage(GROUND_TEXTURE_BASE_URL + 'grass_color.jpg'),
+            ]);
+            if (s.isDisposed || !this.groundMaterial) return;
+
+            const size = COMPOSITE_BASE_SIZE;
+            const overlay = document.createElement('canvas');
+            overlay.width = overlay.height = size;
+            const octx = overlay.getContext('2d');
+            if (!octx) return;
+            octx.drawImage(grassImg, 0, 0, size, size);
+            const img = octx.getImageData(0, 0, size, size);
+            const cellScale = GRASS_BLEND_PERIOD / size;
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const n = wrappedNoise(x * cellScale, y * cellScale, GRASS_BLEND_PERIOD, OBSTACLE_SEED + 401);
+                    const t = Math.max(0, Math.min(1, (n - GRASS_BLEND_LOW) / (GRASS_BLEND_HIGH - GRASS_BLEND_LOW)));
+                    img.data[(y * size + x) * 4 + 3] = Math.round(t * t * (3 - 2 * t) * GRASS_BLEND_MAX_ALPHA * 255);
+                }
+            }
+            octx.putImageData(img, 0, 0);
+
+            const tex = new BABYLON.DynamicTexture('fab_ground_base', size, s, true);
+            const ctx = tex.getContext() as CanvasRenderingContext2D;
+            ctx.drawImage(floorImg, 0, 0, size, size);
+            ctx.drawImage(overlay, 0, 0);
+            tex.update();
+            tex.uScale = tex.vScale = TILE_FOREST_FLOOR;
+
+            const old = this.groundMaterial.diffuseTexture1;
+            this.groundMaterial.diffuseTexture1 = tex;
+            old?.dispose();
+            console.debug('[Fabulus] Ground base composite (forest floor + grass) applied');
+        } catch (err) {
+            console.warn('[Fabulus] Ground composite failed, keeping plain forest floor:', err);
+        }
+    }
+
+    // Splat weights: R = forest floor base, G = dirt paths, B = rock on steep/high terrain.
+    private _buildSplatTexture(s: BABYLON.Scene, size: number): BABYLON.DynamicTexture {
+        const hf = this.heightField;
+        const tex = new BABYLON.DynamicTexture('fab_ground_splat', size, s, true);
+        const ctx = tex.getContext() as CanvasRenderingContext2D;
+        const img = ctx.createImageData(size, size);
+
+        for (let py = 0; py < size; py++) {
+            // DynamicTexture uses invertY: canvas row 0 is texture v = 1 (world +Z edge).
+            const wz = (1 - py / (size - 1)) * MAP_SIZE - MAP_HALF;
+            for (let px = 0; px < size; px++) {
+                const wx = (px / (size - 1)) * MAP_SIZE - MAP_HALF;
+                let path = 0;
+                let rock = 0;
+                if (hf) {
+                    const jitter = (hash2(px, py, OBSTACLE_SEED + 19) - 0.5) * SPLAT_NOISE_JITTER;
+                    path = Math.max(0, Math.min(1, hf.getPathMask(wx, wz) * 1.15 + jitter * 0.5));
+                    const slope = hf.getSlopeAt(wx, wz);
+                    const height = hf.getHeightAt(wx, wz);
+                    rock = Math.max(0, Math.min(1,
+                        (slope - ROCK_SLOPE_START) / ROCK_SLOPE_RANGE
+                        + Math.max(0, height - ROCK_ALTITUDE_START) * ROCK_ALTITUDE_FACTOR
+                        + jitter,
+                    ));
+                    rock *= (1 - path);
+                }
+                const base = Math.max(0, 1 - path - rock);
+                const idx = (py * size + px) * 4;
+                img.data[idx] = Math.round(base * 255);
+                img.data[idx + 1] = Math.round(path * 255);
+                img.data[idx + 2] = Math.round(rock * 255);
+                img.data[idx + 3] = 255;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        tex.update();
+        return tex;
+    }
+
+    // ── Forest ───────────────────────────────────────────────────────────────
+
+    private async _scatterForest(): Promise<void> {
+        const s = this.scene.bScene;
+        const hf = this.heightField;
+        if (!hf) return;
+        let template: BABYLON.Mesh | null = null;
+        try {
+            template = await this._buildTreeTemplate(s);
+        } catch (err) {
+            console.warn('[Fabulus] Forest template load failed:', err);
             return;
         }
-        const s = this.scene.bScene;
-        const ground = BABYLON.MeshBuilder.CreateGround('fab_ground', { width: MAP_SIZE, height: MAP_SIZE, subdivisions: 4 }, s);
-        ground.position.y = 0;
-        ground.isPickable = true;
-        ground.receiveShadows = true;
+        if (!template || s.isDisposed) return;
 
-        const tex = new BABYLON.DynamicTexture('fab_ground_tex', GROUND_TEXTURE_SIZE, s, true);
-        const ctx = tex.getContext() as CanvasRenderingContext2D;
-        const cell = GROUND_TEXTURE_SIZE / GROUND_TILE_CELLS;
-        const rand = mulberry32(OBSTACLE_SEED + 7);
-        for (let y = 0; y < GROUND_TILE_CELLS; y++) {
-            for (let x = 0; x < GROUND_TILE_CELLS; x++) {
-                const base = 62 + Math.floor(rand() * 24);
-                ctx.fillStyle = `rgb(${base + 8},${base},${Math.max(34, base - 14)})`;
-                ctx.fillRect(x * cell, y * cell, cell, cell);
-                ctx.fillStyle = `rgba(0,0,0,${0.05 + rand() * 0.08})`;
-                ctx.fillRect(x * cell, y * cell, cell, 2);
-                ctx.fillRect(x * cell, y * cell, 2, cell);
+        const rand = mulberry32(OBSTACLE_SEED + 97);
+        const density = DETAIL_DENSITY[FabulusPrefs.get().gfxDetailLevel] ?? 1;
+        const targetCount = Math.round(FOREST_TREE_COUNT * density);
+        const basins = hf.getPondBasins();
+
+        let placed = 0;
+        let templateUsed = false;
+        for (let attempt = 0; attempt < targetCount * TREE_PLACEMENT_TRIES_FACTOR && placed < targetCount; attempt++) {
+            const x = (rand() * 2 - 1) * (MAP_HALF - 4);
+            const z = (rand() * 2 - 1) * (MAP_HALF - 4);
+            const scale = TREE_MIN_SCALE + rand() * (TREE_MAX_SCALE - TREE_MIN_SCALE);
+            const yaw = rand() * Math.PI * 2;
+            if (Math.hypot(x, z) < TREE_MIN_DIST_FROM_CENTER) continue;
+            if (hf.getPathMask(x, z) > TREE_PATH_MASK_LIMIT) continue;
+            if (hf.getSlopeAt(x, z) > TREE_MAX_SLOPE) continue;
+            if (basins.some(b => Math.hypot(b.x - x, b.z - z) < b.radius * 1.6 + TREE_POND_MARGIN)) continue;
+
+            const y = hf.getHeightAt(x, z);
+            let node: BABYLON.AbstractMesh;
+            if (!templateUsed) {
+                node = template;
+                templateUsed = true;
+            } else {
+                node = template.createInstance(`fab_forest_${placed}`);
             }
-        }
-        for (let i = 0; i < BIOME_PATCH_COUNT; i++) {
-            const px = rand() * GROUND_TEXTURE_SIZE;
-            const py = rand() * GROUND_TEXTURE_SIZE;
-            const r = 60 + rand() * 160;
-            const grad = ctx.createRadialGradient(px, py, 0, px, py, r);
-            const mossy = rand() < 0.5;
-            grad.addColorStop(0, mossy ? 'rgba(58,72,40,0.30)' : 'rgba(96,78,54,0.28)');
-            grad.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(px, py, r, 0, Math.PI * 2);
-            ctx.fill();
-        }
-        for (let i = 0; i < 380; i++) {
-            const px = rand() * GROUND_TEXTURE_SIZE;
-            const py = rand() * GROUND_TEXTURE_SIZE;
-            const r = 1 + rand() * 4;
-            ctx.fillStyle = `rgba(${90 + rand() * 36},${76 + rand() * 30},${52 + rand() * 22},0.35)`;
-            ctx.beginPath();
-            ctx.arc(px, py, r, 0, Math.PI * 2);
-            ctx.fill();
-        }
-        tex.update();
+            node.position.set(x, y, z);
+            node.rotation.y = yaw;
+            node.scaling.setAll(scale);
+            node.isPickable = false;
 
-        const mat = new BABYLON.PBRMaterial('fab_ground_mat', s);
-        mat.albedoTexture = tex;
-        (mat.albedoTexture as BABYLON.Texture).uScale = 6;
-        (mat.albedoTexture as BABYLON.Texture).vScale = 6;
-        mat.metallic = 0.02;
-        mat.roughness = 0.95;
-        const bump = this._buildGroundNormalMap(s);
-        mat.bumpTexture = bump;
-        bump.uScale = 12;
-        bump.vScale = 12;
-        ground.material = mat;
-        ground.receiveShadows = true;
-
-        this.scene.renderSystem.prepareMeshes([ground], { castShadow: false, receiveShadow: true });
-        this.scene.groundMesh = ground;
+            const r = TREE_COLLIDER_RADIUS * scale;
+            this.scene.staticColliders.push({
+                minX: x - r, maxX: x + r,
+                minZ: z - r, maxZ: z + r,
+            });
+            placed++;
+        }
+        if (!templateUsed) template.setEnabled(false);
+        console.debug(`[Fabulus] Forest ready (${placed} trees)`);
     }
 
-    private _buildGroundNormalMap(s: BABYLON.Scene, size: number = NORMAL_MAP_SIZE): BABYLON.DynamicTexture {
-        const tex = new BABYLON.DynamicTexture('fab_ground_normal', size, s, true);
-        const ctx = tex.getContext() as CanvasRenderingContext2D;
-        const rand = mulberry32(OBSTACLE_SEED + 31);
-
-        const height = new Float32Array(size * size);
-        for (let i = 0; i < height.length; i++) height[i] = rand();
-        const blurred = new Float32Array(size * size);
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                let sum = 0;
-                for (let dy = -2; dy <= 2; dy++) {
-                    for (let dx = -2; dx <= 2; dx++) {
-                        const sx = (x + dx + size) % size;
-                        const sy = (y + dy + size) % size;
-                        sum += height[sy * size + sx];
-                    }
-                }
-                blurred[y * size + x] = sum / 25;
-            }
+    private async _buildTreeTemplate(s: BABYLON.Scene): Promise<BABYLON.Mesh | null> {
+        const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(MODELS_BASE_PATH, TREE_MODEL_FILE, s);
+        const entries = container.instantiateModelsToScene(name => `fab_tree_src_${name}`, false, { doNotInstantiate: true });
+        const modelRoot = entries.rootNodes[0] as BABYLON.TransformNode;
+        const meshes = this.scene.renderSystem.collectModelMeshes(modelRoot)
+            .filter((m): m is BABYLON.Mesh => m instanceof BABYLON.Mesh && m.getTotalVertices() > 0);
+        if (!meshes.length) {
+            modelRoot.dispose(false, true);
+            return null;
         }
+        this.scene.renderSystem.normalizeModelHeight(modelRoot, meshes, TREE_BASE_HEIGHT);
+        for (const m of meshes) m.computeWorldMatrix(true);
 
-        const img = ctx.createImageData(size, size);
-        const strength = 2.2;
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                const hl = blurred[y * size + ((x - 1 + size) % size)];
-                const hr = blurred[y * size + ((x + 1) % size)];
-                const hu = blurred[((y - 1 + size) % size) * size + x];
-                const hd = blurred[((y + 1) % size) * size + x];
-                let nx = (hl - hr) * strength;
-                let ny = (hu - hd) * strength;
-                const nz = 1;
-                const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-                nx /= len; ny /= len;
-                const idx = (y * size + x) * 4;
-                img.data[idx] = Math.round((nx * 0.5 + 0.5) * 255);
-                img.data[idx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
-                img.data[idx + 2] = Math.round(((nz / len) * 0.5 + 0.5) * 255);
-                img.data[idx + 3] = 255;
-            }
-        }
-        ctx.putImageData(img, 0, 0);
-        tex.update();
-        return tex;
+        const merged = BABYLON.Mesh.MergeMeshes(meshes, true, true, undefined, false, true);
+        modelRoot.dispose(false, true);
+        if (!merged) return null;
+        merged.name = 'fab_tree_template';
+        merged.isPickable = false;
+        this.scene.renderSystem.prepareMeshes([merged]);
+        return merged;
     }
 
-    // Ultra ground: higher-res FBM multi-biome albedo with radial distance darkening,
-    // stronger detail normals and a wetness clearcoat near the lit center. Still a PBR
-    // material so it keeps receiving cascaded shadows and scene fog.
-    private _buildUltraGround(): void {
-        const s = this.scene.bScene;
-        const ground = BABYLON.MeshBuilder.CreateGround('fab_ground', { width: MAP_SIZE, height: MAP_SIZE, subdivisions: 8 }, s);
-        ground.position.y = 0;
-        ground.isPickable = true;
-        ground.receiveShadows = true;
-
-        const tex = this._buildUltraAlbedo(s);
-        const mat = new BABYLON.PBRMaterial('fab_ground_mat', s);
-        mat.albedoTexture = tex;
-        tex.uScale = 4;
-        tex.vScale = 4;
-        mat.metallic = 0.0;
-        mat.roughness = 0.92;
-
-        const bump = this._buildGroundNormalMap(s, GROUND_ULTRA_NORMAL_SIZE);
-        bump.uScale = 16;
-        bump.vScale = 16;
-        mat.bumpTexture = bump;
-        mat.bumpTexture.level = 1.4;
-
-        mat.clearCoat.isEnabled = true;
-        mat.clearCoat.intensity = GROUND_ULTRA_CLEARCOAT;
-        mat.clearCoat.roughness = 0.45;
-
-        ground.material = mat;
-        this.scene.renderSystem.prepareMeshes([ground], { castShadow: false, receiveShadow: true });
-        this.scene.groundMesh = ground;
-        console.debug('[Fabulus] Ultra ground built');
-    }
-
-    private _buildUltraAlbedo(s: BABYLON.Scene): BABYLON.DynamicTexture {
-        const size = GROUND_ULTRA_TEXTURE_SIZE;
-        const tex = new BABYLON.DynamicTexture('fab_ground_tex', size, s, true);
-        const ctx = tex.getContext() as CanvasRenderingContext2D;
-        const rand = mulberry32(OBSTACLE_SEED + 11);
-
-        // Precompute a stable per-octave phase so the noise is deterministic across reloads
-        // (calling rand() inside the per-pixel loop would desync the texture every load).
-        const octavePhase = [0, 0, 0, 0, 0].map(() => rand() * Math.PI * 2);
-        const fbm = (x: number, y: number): number => {
-            let amp = 0.5;
-            let freq = 1;
-            let sum = 0;
-            for (let o = 0; o < 5; o++) {
-                const sx = Math.sin((x * freq + o * 13.1) * 0.013 + octavePhase[o]);
-                const sy = Math.cos((y * freq + o * 7.7) * 0.013);
-                sum += amp * (sx * sy);
-                amp *= 0.5;
-                freq *= 2.07;
-            }
-            return sum * 0.5 + 0.5;
-        };
-
-        const dirt: [number, number, number] = [78, 64, 44];
-        const rock: [number, number, number] = [86, 84, 80];
-        const moss: [number, number, number] = [54, 70, 42];
-        const center = size / 2;
-        const maxDist = Math.hypot(center, center);
-        const img = ctx.createImageData(size, size);
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                const n = fbm(x, y);
-                const m = fbm(x * 0.5 + 512, y * 0.5 - 256);
-                let r: number, g: number, b: number;
-                if (m > 0.62) {
-                    [r, g, b] = rock;
-                } else if (n > 0.55) {
-                    [r, g, b] = moss;
-                } else {
-                    [r, g, b] = dirt;
-                }
-                const grain = 0.82 + n * 0.4;
-                // Radial darkening toward the map edges for a moody vignette.
-                const dist = Math.hypot(x - center, y - center) / maxDist;
-                const darken = 1 - dist * 0.55;
-                const idx = (y * size + x) * 4;
-                img.data[idx] = Math.min(255, r * grain * darken);
-                img.data[idx + 1] = Math.min(255, g * grain * darken);
-                img.data[idx + 2] = Math.min(255, b * grain * darken);
-                img.data[idx + 3] = 255;
-            }
-        }
-        ctx.putImageData(img, 0, 0);
-        tex.update();
-        return tex;
-    }
+    // ── Obstacles, decor and biome props ─────────────────────────────────────
 
     private _scatterObstacles(): void {
         const s = this.scene.bScene;
@@ -267,16 +385,18 @@ export class MapSystem {
         for (let i = 0; i < OBSTACLE_COUNT; i++) {
             const x = (rand() * 2 - 1) * (MAP_HALF - 6);
             const z = (rand() * 2 - 1) * (MAP_HALF - 6);
-            if (Math.hypot(x, z) < OBSTACLE_MIN_DIST_FROM_CENTER) continue;
-
             const kind = rand();
+            if (Math.hypot(x, z) < OBSTACLE_MIN_DIST_FROM_CENTER) continue;
+            if (this.getPathMask(x, z) > SCATTER_PATH_MASK_LIMIT) continue;
+            const ground = this.getHeightAt(x, z);
+
             let mesh: BABYLON.Mesh;
             let halfX: number;
             let halfZ: number;
             if (kind < 0.45) {
                 const scale = 0.8 + rand() * 1.6;
                 mesh = BABYLON.MeshBuilder.CreateIcoSphere(`fab_rock_${i}`, { radius: scale, subdivisions: 1 }, s);
-                mesh.position.set(x, scale * 0.45, z);
+                mesh.position.set(x, ground + scale * 0.45, z);
                 mesh.scaling.y = 0.6 + rand() * 0.3;
                 mesh.rotation.y = rand() * Math.PI * 2;
                 mesh.material = stoneMat;
@@ -285,13 +405,13 @@ export class MapSystem {
                 const h = 1.6 + rand() * 2.2;
                 const r = 0.5 + rand() * 0.5;
                 mesh = BABYLON.MeshBuilder.CreateCylinder(`fab_pillar_${i}`, { height: h, diameter: r * 2, tessellation: 8 }, s);
-                mesh.position.set(x, h / 2, z);
+                mesh.position.set(x, ground + h / 2, z);
                 mesh.material = stoneMat;
                 halfX = r; halfZ = r;
             } else {
                 const w = 0.9 + rand() * 1.4;
                 mesh = BABYLON.MeshBuilder.CreateBox(`fab_crate_${i}`, { size: w }, s);
-                mesh.position.set(x, w / 2, z);
+                mesh.position.set(x, ground + w / 2, z);
                 mesh.rotation.y = rand() * Math.PI * 0.5;
                 mesh.material = woodMat;
                 halfX = w * 0.75; halfZ = w * 0.75;
@@ -333,6 +453,7 @@ export class MapSystem {
             const x = (rand() * 2 - 1) * (MAP_HALF - 6);
             const z = (rand() * 2 - 1) * (MAP_HALF - 6);
             if (Math.hypot(x, z) < OBSTACLE_MIN_DIST_FROM_CENTER) continue;
+            if (this.getPathMask(x, z) > SCATTER_PATH_MASK_LIMIT) continue;
 
             if (z > zoneEdge) {
                 this._buildDeadTree(s, rand, trunkMat, x, z, i);
@@ -345,12 +466,13 @@ export class MapSystem {
     }
 
     private _buildDeadTree(s: BABYLON.Scene, rand: () => number, trunkMat: BABYLON.PBRMaterial, x: number, z: number, i: number): void {
+        const ground = this.getHeightAt(x, z);
         const h = 2.4 + rand() * 1.8;
         const r = 0.18 + rand() * 0.16;
         const trunk = BABYLON.MeshBuilder.CreateCylinder(`fab_tree_${i}`, {
             height: h, diameterBottom: r * 2.4, diameterTop: r * 0.9, tessellation: 7,
         }, s);
-        trunk.position.set(x, h / 2, z);
+        trunk.position.set(x, ground + h / 2, z);
         trunk.rotation.y = rand() * Math.PI * 2;
         trunk.rotation.z = (rand() - 0.5) * 0.16;
         trunk.material = trunkMat;
@@ -373,9 +495,10 @@ export class MapSystem {
     }
 
     private _buildCrystal(s: BABYLON.Scene, rand: () => number, crystalMat: BABYLON.PBRMaterial, x: number, z: number, i: number): void {
+        const ground = this.getHeightAt(x, z);
         const h = 0.8 + rand() * 1.4;
         const crystal = BABYLON.MeshBuilder.CreatePolyhedron(`fab_crystal_${i}`, { type: 1, size: h * 0.4 }, s);
-        crystal.position.set(x, h * 0.35, z);
+        crystal.position.set(x, ground + h * 0.35, z);
         crystal.scaling.y = 1.7 + rand() * 0.6;
         crystal.rotation.y = rand() * Math.PI * 2;
         crystal.rotation.z = (rand() - 0.5) * 0.3;
@@ -393,18 +516,19 @@ export class MapSystem {
         for (let j = 0; j < count; j++) {
             const mx = x + (rand() - 0.5) * 1.2;
             const mz = z + (rand() - 0.5) * 1.2;
+            const ground = this.getHeightAt(mx, mz);
             const stemH = 0.18 + rand() * 0.3;
             const stem = BABYLON.MeshBuilder.CreateCylinder(`fab_mush_stem_${i}_${j}`, {
                 height: stemH, diameter: stemH * 0.45, tessellation: 6,
             }, s);
-            stem.position.set(mx, stemH / 2, mz);
+            stem.position.set(mx, ground + stemH / 2, mz);
             stem.material = stemMat;
             stem.isPickable = false;
 
             const cap = BABYLON.MeshBuilder.CreateSphere(`fab_mush_cap_${i}_${j}`, {
                 diameter: stemH * 1.5, slice: 0.55, segments: 8,
             }, s);
-            cap.position.set(mx, stemH, mz);
+            cap.position.set(mx, ground + stemH, mz);
             cap.material = capMat;
             cap.isPickable = false;
             this.scene.renderSystem.prepareMeshes([stem, cap]);
@@ -423,11 +547,13 @@ export class MapSystem {
             const x = (rand() * 2 - 1) * (MAP_HALF - 4);
             const z = (rand() * 2 - 1) * (MAP_HALF - 4);
             if (Math.hypot(x, z) < OBSTACLE_MIN_DIST_FROM_CENTER * 0.6) continue;
+            if (this.getPathMask(x, z) > SCATTER_PATH_MASK_LIMIT) continue;
+            const ground = this.getHeightAt(x, z);
 
             if (rand() < 0.5) {
                 const r = 0.12 + rand() * 0.22;
                 const pebble = BABYLON.MeshBuilder.CreateIcoSphere(`fab_pebble_${i}`, { radius: r, subdivisions: 1 }, s);
-                pebble.position.set(x, r * 0.4, z);
+                pebble.position.set(x, ground + r * 0.4, z);
                 pebble.scaling.y = 0.5;
                 pebble.rotation.y = rand() * Math.PI * 2;
                 pebble.material = stoneMat;
@@ -436,7 +562,7 @@ export class MapSystem {
             } else {
                 const h = 0.25 + rand() * 0.3;
                 const tuft = BABYLON.MeshBuilder.CreatePlane(`fab_tuft_${i}`, { width: 0.5, height: h }, s);
-                tuft.position.set(x, h / 2, z);
+                tuft.position.set(x, ground + h / 2, z);
                 tuft.rotation.y = rand() * Math.PI;
                 tuft.material = grassMat;
                 tuft.isPickable = false;
@@ -474,8 +600,10 @@ export class MapSystem {
             console.debug('[Fabulus] External map loaded');
         }, undefined, (_s, message) => {
             console.warn('[Fabulus] External map load failed, falling back to procedural:', message);
+            this.heightField = new TerrainHeightField(OBSTACLE_SEED);
             this._buildProceduralGround();
             this._scatterObstacles();
+            void this._scatterForest();
         });
     }
 }

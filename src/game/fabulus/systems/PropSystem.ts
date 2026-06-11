@@ -71,7 +71,8 @@ export class PropSystem {
         if (!container) return null;
         const s = this.scene.bScene;
         const root = new BABYLON.TransformNode(`fab_prop_${def.id}`, s);
-        root.position.set(def.pos_x, def.pos_y, def.pos_z);
+        // pos_y is stored as an offset relative to the terrain surface.
+        root.position.set(def.pos_x, def.pos_y + this.scene.mapSystem.getHeightAt(def.pos_x, def.pos_z), def.pos_z);
         root.rotation.y = def.rot_y;
 
         const entries = container.instantiateModelsToScene(name => `p${def.id}_${name}`, false);
@@ -245,6 +246,7 @@ export class PropSystem {
         const instance = this.selected;
         instance.root.position.x = pick.pickedPoint.x;
         instance.root.position.z = pick.pickedPoint.z;
+        instance.root.position.y = instance.def.pos_y + pick.pickedPoint.y;
         instance.def.pos_x = Number(pick.pickedPoint.x.toFixed(2));
         instance.def.pos_z = Number(pick.pickedPoint.z.toFixed(2));
         this._refreshCollider(instance);
