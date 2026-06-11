@@ -1,0 +1,30 @@
+---
+description: Run Fabulus RPG database seed after data changes
+alwaysApply: true
+---
+
+# Fabulus RPG Seed
+
+After modifying Fabulus RPG catalog data, always run the database seed before finishing the task.
+
+## When to run
+
+Run the seed when any of these change:
+
+- `db/fabulus_seed.sql`, `db/fabulus-extended-seed.sql`, or `db/fabulus_schema.sql`
+- `src/game/fabulus/data/mockData.ts`, `extendedItems.ts`, or `data/fabulus-extended.json`
+- Fabulus mock item/loot data in `server/fabulus-routes.js`
+
+If you regenerate SQL from JSON, run the seed after that too.
+
+## Command
+
+```bash
+node scripts/seed-rpg.js
+```
+
+Uses `DATABASE_RPG_URL` from `.env`. Do not skip this step unless the user explicitly says not to seed.
+
+## After seeding
+
+Confirm key counts when relevant: `rpg_items` should match the catalog (currently 50), and `rpg_loot_tables` should include extended entries.

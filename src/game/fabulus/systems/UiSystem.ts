@@ -71,6 +71,7 @@ export class UiSystem {
     private activeSettingsTab: 'graphics' | 'game' | 'audio' = 'graphics';
     private keybindListening: FabulusActionId | null = null;
     private dialogueNpc: NpcDef | null = null;
+    private _dragPlayerItemId: number | null = null;
     private _onKeybindCapture: ((e: KeyboardEvent) => void) | null = null;
     private _onPrefsChange = (prefs: FabulusPrefsData): void => {
         this.$('fps-indicator')?.classList.toggle('hidden', !prefs.showFps);
@@ -993,6 +994,7 @@ export class UiSystem {
             } else {
                 cell.innerHTML = `<span class="doll-empty">${slotDef.label}</span>`;
             }
+            this._bindDollSlotDrop(cell, slotDef.type);
             parent.appendChild(cell);
         };
         for (const slotDef of PAPERDOLL_LEFT) buildSlot(slotDef, left);
@@ -1002,6 +1004,76 @@ export class UiSystem {
     private _setEquipHint(itemType: number, on: boolean): void {
         document.querySelectorAll<HTMLElement>(`.doll-slot[data-item-type="${itemType}"]`).forEach(slot => {
             slot.classList.toggle('equip-hint', on);
+        });
+    }
+
+    private _clearDropHints(): void {
+        document.querySelectorAll<HTMLElement>('.doll-slot.drop-target, .doll-slot.drop-invalid').forEach(slot => {
+            slot.classList.remove('drop-target', 'drop-invalid');
+        });
+    }
+
+    private _getDraggedPlayerItem(e?: DragEvent): PlayerItem | null {
+        let id = this._dragPlayerItemId;
+        if (id == null && e?.dataTransfer) {
+            const raw = e.dataTransfer.getData('application/x-fabulus-item');
+            id = raw ? Number(raw) : null;
+        }
+        if (id == null || !Number.isFinite(id)) return null;
+        return this.scene.playerItems.find(pi => pi.id === id && !pi.is_equipped) ?? null;
+    }
+
+    private _bindGearDrag(cell: HTMLElement, pi: PlayerItem, def: ItemDef): void {
+        cell.draggable = true;
+        cell.addEventListener('dragstart', (e) => {
+            if (!e.dataTransfer) return;
+            if ((e.target as HTMLElement).closest('.inv-action')) {
+                e.preventDefault();
+                return;
+            }
+            this._dragPlayerItemId = pi.id;
+            e.dataTransfer.setData('application/x-fabulus-item', String(pi.id));
+            e.dataTransfer.effectAllowed = 'move';
+            cell.classList.add('dragging');
+            this._setEquipHint(def.item_type, true);
+        });
+        cell.addEventListener('dragend', () => {
+            this._dragPlayerItemId = null;
+            cell.classList.remove('dragging');
+            this._clearDropHints();
+            this._setEquipHint(def.item_type, false);
+        });
+    }
+
+    private _bindDollSlotDrop(cell: HTMLElement, slotType: number): void {
+        cell.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const pi = this._getDraggedPlayerItem();
+            if (!pi) return;
+            const def = this.scene.getItemDef(pi.item_id);
+            const valid = !!def
+                && def.item_type === slotType
+                && def.required_level <= this.scene.player.level;
+            if (e.dataTransfer) e.dataTransfer.dropEffect = valid ? 'move' : 'none';
+            cell.classList.toggle('drop-target', valid);
+            cell.classList.toggle('drop-invalid', !valid);
+        });
+        cell.addEventListener('dragleave', () => {
+            cell.classList.remove('drop-target', 'drop-invalid');
+        });
+        cell.addEventListener('drop', (e) => {
+            e.preventDefault();
+            cell.classList.remove('drop-target', 'drop-invalid');
+            const pi = this._getDraggedPlayerItem(e);
+            if (!pi) return;
+            const def = this.scene.getItemDef(pi.item_id);
+            if (!def || def.item_type !== slotType) return;
+            if (def.required_level > this.scene.player.level) {
+                this.toast(`Requer level ${def.required_level}`);
+                return;
+            }
+            this._dragPlayerItemId = null;
+            void this._equip(pi, def);
         });
     }
 
@@ -1055,12 +1127,13 @@ export class UiSystem {
                     cell.appendChild(actions);
 
                     cell.title = this._itemTooltip(def, pi)
-                        + (isConsumable ? '\n\nClique para usar' : '\n\nClique para equipar');
+                        + (isConsumable ? '\n\nClique para usar' : '\n\nClique ou arraste para equipar');
                     cell.addEventListener('click', () => {
                         if (isConsumable) this._consumeItem(pi, def);
                         else this._equip(pi, def);
                     });
                     if (!isConsumable) {
+                        this._bindGearDrag(cell, pi, def);
                         cell.addEventListener('mouseenter', () => this._setEquipHint(def.item_type, true));
                         cell.addEventListener('mouseleave', () => this._setEquipHint(def.item_type, false));
                     }
