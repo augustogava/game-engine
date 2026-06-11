@@ -4,6 +4,7 @@ precision highp float;
 
 varying vec2 vUv;
 varying vec3 vWorld;
+varying vec4 vClip;
 
 uniform float time;
 uniform float lava;
@@ -12,9 +13,21 @@ uniform vec3  sunDir;
 uniform vec3  baseColor;
 uniform vec3  tintColor;
 uniform float octaves;
+#ifdef MIRROR
+uniform sampler2D mirrorSampler;
+#endif
 #ifdef REFLECTION
 uniform samplerCube reflectionSampler;
 #endif
+
+const float MIRROR_DISTORTION = 0.045;
+const float MIRROR_STRENGTH = 0.7;
+const float FOAM_NOISE_SCALE = 2.6;
+const float FOAM_BAND_START = 0.78;
+const float FOAM_BAND_END = 0.92;
+const float FOAM_INTENSITY = 0.55;
+const float SHORE_ALPHA_MIN = 0.18;
+const float DEEP_ALPHA_MAX = 0.88;
 
 const int ITER = 4;
 const float PI = 3.141592;
@@ -80,8 +93,15 @@ void main(void) {
     vec3 deep = baseColor * 0.5;
     vec3 color = mix(deep, sky, fresnel);
 
-#ifdef REFLECTION
-    // Mirror the surrounding environment, fresnel-weighted (water only, not lava).
+#ifdef MIRROR
+    // Real planar reflection: the mirror RTT shares the screen projection, so
+    // the fragment clip position maps straight to its UV; waves distort it.
+    vec2 mirrorUv = vClip.xy / vClip.w * 0.5 + 0.5;
+    mirrorUv += n.xz * MIRROR_DISTORTION;
+    vec3 mirrorCol = texture2D(mirrorSampler, clamp(mirrorUv, 0.0, 1.0)).rgb;
+    color = mix(color, mirrorCol, fresnel * MIRROR_STRENGTH * (1.0 - lava));
+#elif defined(REFLECTION)
+    // Fallback: mirror the environment cube, fresnel-weighted (water only).
     vec3 refl = reflect(-eye, n);
     vec3 envCol = textureCube(reflectionSampler, refl).rgb;
     color = mix(color, envCol, fresnel * 0.6 * (1.0 - lava));
@@ -96,9 +116,21 @@ void main(void) {
     vec3 lavaCol = mix(vec3(0.35, 0.05, 0.0), vec3(1.0, 0.55, 0.12), glow);
     color = mix(color, lavaCol, lava);
 
-    // Soft shoreline: fade the alpha toward the rim of the disc so edges blend with the ground.
+    // The pool is a disc of known radius: depth and foam are analytic in vUv.
     float radial = length(vUv - vec2(0.5)) * 2.0;
-    float shore = smoothstep(1.0, 0.78, radial);
-    float alpha = mix(0.82, 1.0, lava) * shore;
+
+    // Animated foam band hugging the shoreline (water only).
+    float foamN = noise(p * FOAM_NOISE_SCALE + vec2(t * 0.8, -t * 0.6));
+    float foamBand = smoothstep(FOAM_BAND_START, FOAM_BAND_END, radial + foamN * 0.10)
+        * (1.0 - smoothstep(0.97, 1.0, radial))
+        * (1.0 - lava);
+    color = mix(color, vec3(0.8, 0.88, 0.9), foamBand * FOAM_INTENSITY);
+
+    // Depth-based transparency: shallow rim reveals the ground, center stays deep.
+    float depthT = smoothstep(1.0, 0.55, radial);
+    float alphaWater = mix(SHORE_ALPHA_MIN, DEEP_ALPHA_MAX, depthT);
+    float rimFade = smoothstep(1.0, 0.96, radial);
+    float alpha = mix(alphaWater, 1.0, lava) * rimFade;
+    alpha = max(alpha, foamBand * 0.7);
     gl_FragColor = vec4(max(color, 0.0), alpha);
 }

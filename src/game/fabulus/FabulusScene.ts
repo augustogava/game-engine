@@ -38,6 +38,7 @@ import { SkySystem } from './systems/SkySystem.js';
 import { AtmosphereSystem } from './systems/AtmosphereSystem.js';
 import { WaterSystem } from './systems/WaterSystem.js';
 import { WeatherSystem } from './systems/WeatherSystem.js';
+import { GrassSystem } from './systems/GrassSystem.js';
 
 export class FabulusScene extends Scene3D {
     bScene!: BABYLON.Scene;
@@ -100,6 +101,7 @@ export class FabulusScene extends Scene3D {
     readonly atmosphereSystem = new AtmosphereSystem(this);
     readonly waterSystem = new WaterSystem(this);
     readonly weatherSystem = new WeatherSystem(this);
+    readonly grassSystem = new GrassSystem(this);
 
     private _lastStateSaveAt = 0;
 
@@ -173,6 +175,7 @@ export class FabulusScene extends Scene3D {
         this.cameraSystem.init();
         this.renderSystem.init();
         this.mapSystem.init();
+        this.grassSystem.init();
         await this.propSystem.init();
         this.vfxSystem.init();
         await this.skySystem.init();
@@ -226,6 +229,7 @@ export class FabulusScene extends Scene3D {
         this.atmosphereSystem.update(dt);
         this.waterSystem.update(dt);
         this.weatherSystem.update(dt);
+        this.grassSystem.update(dt);
         this.uiSystem.update(dt);
         this.minimapSystem.update(dt);
         this._maybePersistState();
@@ -445,6 +449,7 @@ export class FabulusScene extends Scene3D {
         this.atmosphereSystem.dispose();
         this.waterSystem.dispose();
         this.weatherSystem.dispose();
+        this.grassSystem.dispose();
         this.lightingSystem.dispose();
         this.renderSystem.dispose();
     }

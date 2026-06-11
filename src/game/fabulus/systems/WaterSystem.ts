@@ -14,11 +14,14 @@ const WATER_BASE = new BABYLON.Color3(0.02, 0.08, 0.13);
 const WATER_TINT = new BABYLON.Color3(0.18, 0.34, 0.4);
 const LAVA_BASE = new BABYLON.Color3(0.12, 0.02, 0.0);
 const LAVA_TINT = new BABYLON.Color3(0.55, 0.18, 0.04);
+const MIRROR_TEXTURE_SIZE = 256;
+const MIRROR_RENDER_LIST_REFRESH_S = 3;
 
 interface WaterPool {
     mesh: BABYLON.Mesh;
     material: BABYLON.ShaderMaterial;
     lava: boolean;
+    mirror: BABYLON.MirrorTexture | null;
 }
 
 function mulberry32(seed: number): () => number {
@@ -38,6 +41,7 @@ export class WaterSystem {
     private enabled = false;
     private initialized = false;
     private timeAccum = 0;
+    private mirrorRefreshAccum = 0;
     private shadersRegistered = false;
     private shadersRegistering: Promise<boolean> | null = null;
     private readonly fallbackSunDir = new BABYLON.Vector3(-0.72, -0.48, -0.52).normalize();
@@ -84,6 +88,8 @@ export class WaterSystem {
     private async _build(): Promise<void> {
         if (this.pools.length > 0) {
             for (const p of this.pools) p.mesh.setEnabled(true);
+            this._setMirrorsActive(true);
+            this._refreshMirrorRenderLists();
             this.enabled = true;
             return;
         }
@@ -100,6 +106,7 @@ export class WaterSystem {
             const lava = rand() < WATER_LAVA_CHANCE;
             this._createPool(s, basin.x, basin.z, basin.radius, basin.waterY, lava, i);
         }
+        this._refreshMirrorRenderLists();
         this.enabled = true;
         console.debug(`[Fabulus] Water ready (${this.pools.length} pools)`);
     }
@@ -112,14 +119,19 @@ export class WaterSystem {
         disc.applyFog = true;
         disc.receiveShadows = true;
 
-        // Bind the scene environment cube as a reflection source when it is already available.
+        // Planar mirrors re-render the whole scene per pool — use env cube instead.
+        const useMirror = false;
         const envTex = s.environmentTexture;
         const reflective = !lava && !!envTex;
+        const samplers: string[] = [];
+        const defines: string[] = [];
+        if (useMirror) { samplers.push('mirrorSampler'); defines.push('#define MIRROR'); }
+        if (reflective) { samplers.push('reflectionSampler'); defines.push('#define REFLECTION'); }
         const mat = new BABYLON.ShaderMaterial(`fab_water_mat_${i}`, s, { vertex: 'fabWater', fragment: 'fabWater' }, {
             attributes: ['position', 'uv'],
             uniforms: ['world', 'worldViewProjection', 'time', 'lava', 'cameraPosition', 'sunDir', 'baseColor', 'tintColor', 'octaves'],
-            samplers: reflective ? ['reflectionSampler'] : [],
-            defines: reflective ? ['#define REFLECTION'] : [],
+            samplers,
+            defines,
             needAlphaBlending: true,
         });
         mat.backFaceCulling = false;
@@ -129,10 +141,47 @@ export class WaterSystem {
         mat.setColor3('baseColor', lava ? LAVA_BASE : WATER_BASE);
         mat.setColor3('tintColor', lava ? LAVA_TINT : WATER_TINT);
         mat.setFloat('lava', lava ? 1 : 0);
-        if (reflective && envTex) mat.setTexture('reflectionSampler', envTex);
+
+        let mirror: BABYLON.MirrorTexture | null = null;
+        if (useMirror) {
+            mirror = new BABYLON.MirrorTexture(`fab_water_mirror_${i}`, MIRROR_TEXTURE_SIZE, s, true);
+            mirror.mirrorPlane = new BABYLON.Plane(0, -1, 0, waterY);
+            mirror.renderList = [];
+            s.customRenderTargets.push(mirror);
+            mat.setTexture('mirrorSampler', mirror);
+        } else if (reflective && envTex) {
+            mat.setTexture('reflectionSampler', envTex);
+        }
         disc.material = mat;
 
-        this.pools.push({ mesh: disc, material: mat, lava });
+        this.pools.push({ mesh: disc, material: mat, lava, mirror });
+    }
+
+    // The mirror render list stays minimal (ground, trees, sky dome) and is
+    // refreshed periodically because the forest loads asynchronously.
+    private _refreshMirrorRenderLists(): void {
+        const s = this.scene.bScene;
+        const list: BABYLON.AbstractMesh[] = [];
+        if (this.scene.groundMesh) list.push(this.scene.groundMesh);
+        const sky = s.getMeshByName('fab_sky_dome');
+        if (sky && sky.isEnabled()) list.push(sky);
+        const treeTemplate = s.getMeshByName('fab_tree_template');
+        if (treeTemplate instanceof BABYLON.Mesh && treeTemplate.isEnabled()) {
+            list.push(treeTemplate, ...treeTemplate.instances);
+        }
+        for (const p of this.pools) {
+            if (p.mirror) p.mirror.renderList = list;
+        }
+    }
+
+    private _setMirrorsActive(active: boolean): void {
+        const s = this.scene.bScene;
+        for (const p of this.pools) {
+            if (!p.mirror) continue;
+            const idx = s.customRenderTargets.indexOf(p.mirror);
+            if (active && idx < 0) s.customRenderTargets.push(p.mirror);
+            else if (!active && idx >= 0) s.customRenderTargets.splice(idx, 1);
+        }
     }
 
     setEnabled(enabled: boolean): void {
@@ -142,6 +191,7 @@ export class WaterSystem {
             this._build().catch(err => console.warn('[Fabulus] Water enable failed:', err));
         } else {
             for (const p of this.pools) p.mesh.setEnabled(false);
+            this._setMirrorsActive(false);
         }
     }
 
@@ -149,6 +199,12 @@ export class WaterSystem {
         if (!this.enabled || this.pools.length === 0) return;
         const dtClamp = Math.max(0, Math.min(TIME_CLAMP, dt));
         this.timeAccum += dtClamp;
+
+        this.mirrorRefreshAccum += dtClamp;
+        if (this.mirrorRefreshAccum >= MIRROR_RENDER_LIST_REFRESH_S) {
+            this.mirrorRefreshAccum = 0;
+            this._refreshMirrorRenderLists();
+        }
 
         const sun = this.scene.lightingSystem.getSun();
         const sunDir = sun ? sun.direction : this.fallbackSunDir;
@@ -165,7 +221,9 @@ export class WaterSystem {
     }
 
     dispose(): void {
+        this._setMirrorsActive(false);
         for (const p of this.pools) {
+            try { p.mirror?.dispose(); } catch { /* disposed */ }
             try { p.material.dispose(true, true); } catch { /* disposed */ }
             try { p.mesh.dispose(); } catch { /* disposed */ }
         }

@@ -1,6 +1,6 @@
 import * as BABYLON from '@babylonjs/core';
-import { TerrainMaterial } from '@babylonjs/materials/terrain/terrainMaterial.js';
 import type { FabulusScene } from '../FabulusScene.js';
+import { FabTerrainMaterial } from './FabTerrainMaterial.js';
 import {
     FOREST_TREE_COUNT, GROUND_TEXTURE_BASE_URL,
     MAP_BORDER_MARGIN, MAP_HALF, MAP_MODEL_FILE, MAP_SIZE, MODELS_BASE_PATH,
@@ -8,6 +8,7 @@ import {
 } from '../constants/index.js';
 import { FabulusPrefs } from '../FabulusPrefs.js';
 import { TerrainHeightField, type PondBasin } from './TerrainHeightField.js';
+import { applyTreeWind } from './GrassSystem.js';
 
 const BORDER_WALL_THICKNESS = 4;
 const OBSTACLE_MIN_DIST_FROM_CENTER = 6;
@@ -93,7 +94,7 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 export class MapSystem {
     private scene: FabulusScene;
     private heightField: TerrainHeightField | null = null;
-    private groundMaterial: TerrainMaterial | null = null;
+    private groundMaterial: FabTerrainMaterial | null = null;
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
@@ -173,8 +174,8 @@ export class MapSystem {
 
     // ── Ground material (real PBR texture sets, splat-blended) ───────────────
 
-    private _buildGroundMaterial(s: BABYLON.Scene, ultra: boolean): TerrainMaterial {
-        const mat = new TerrainMaterial('fab_ground_mat', s);
+    private _buildGroundMaterial(s: BABYLON.Scene, ultra: boolean): FabTerrainMaterial {
+        const mat = new FabTerrainMaterial('fab_ground_mat', s, ultra);
         mat.mixTexture = this._buildSplatTexture(s, ultra ? SPLAT_SIZE_ULTRA : SPLAT_SIZE);
 
         const diffuse1 = new BABYLON.Texture(GROUND_TEXTURE_BASE_URL + 'forest_floor_color.jpg', s);
@@ -363,6 +364,7 @@ export class MapSystem {
         if (!merged) return null;
         merged.name = 'fab_tree_template';
         merged.isPickable = false;
+        if (FabulusPrefs.get().gfxDetailLevel !== 'low') applyTreeWind(merged.material);
         this.scene.renderSystem.prepareMeshes([merged]);
         return merged;
     }

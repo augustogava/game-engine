@@ -10,9 +10,11 @@ uniform mat4 worldViewProjection;
 
 varying vec2 vUv;
 varying vec3 vWorld;
+varying vec4 vClip;
 
 void main(void) {
     vUv = uv;
     vWorld = (world * vec4(position, 1.0)).xyz;
-    gl_Position = worldViewProjection * vec4(position, 1.0);
+    vClip = worldViewProjection * vec4(position, 1.0);
+    gl_Position = vClip;
 }

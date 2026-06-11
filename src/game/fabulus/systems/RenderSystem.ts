@@ -1,6 +1,12 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FabulusScene } from '../FabulusScene.js';
 import { FabulusPrefs, type FabulusPrefsData } from '../FabulusPrefs.js';
+import {
+    POSTFX_DOF_FSTOP, POSTFX_DOF_FOCAL_LENGTH,
+    POSTFX_MOTION_BLUR_STRENGTH, POSTFX_MOTION_BLUR_SAMPLES,
+    POSTFX_SSR_STRENGTH, POSTFX_SSR_MAX_DISTANCE,
+    PP_EXPOSURE_KHR, PP_CONTRAST_KHR, PP_CONTRAST_KHR_ULTRA,
+} from '../constants/graphicsConstants.js';
 
 const ENV_URL_LOCAL = 'models/rpg/env/environmentSpecular.env';
 const ENV_URL_CDN = 'https://assets.babylonjs.com/environments/environmentSpecular.env';
@@ -25,6 +31,10 @@ export class RenderSystem {
     private pipeline: BABYLON.DefaultRenderingPipeline | null = null;
     private ssao: BABYLON.SSAO2RenderingPipeline | null = null;
     private ssaoAttached = false;
+    private motionBlur: BABYLON.MotionBlurPostProcess | null = null;
+    private ssr: BABYLON.SSRRenderingPipeline | null = null;
+    private ssrAttached = false;
+    private dofObserver: BABYLON.Nullable<BABYLON.Observer<BABYLON.Scene>> = null;
     private highlight: BABYLON.HighlightLayer | null = null;
     private colorCurves: BABYLON.ColorCurves | null = null;
     private envReady = false;
@@ -74,6 +84,9 @@ export class RenderSystem {
         pipeline.chromaticAberration.aberrationAmount = CHROMATIC_ABERRATION_AMOUNT;
         pipeline.chromaticAberration.radialIntensity = CHROMATIC_RADIAL_INTENSITY;
         pipeline.chromaticAberrationEnabled = false;
+        // Subtle DOF (enabled by gfxAdvancedVfx): focus tracks the camera target distance.
+        pipeline.depthOfFieldBlurLevel = BABYLON.DepthOfFieldEffectBlurLevel.Low;
+        pipeline.depthOfFieldEnabled = false;
         this.pipeline = pipeline;
 
         const highlight = new BABYLON.HighlightLayer('fab_highlight', s, { blurHorizontalSize: 0.6, blurVerticalSize: 0.6 });
@@ -110,14 +123,18 @@ export class RenderSystem {
                 this.colorCurves = new BABYLON.ColorCurves();
                 this.colorCurves.globalSaturation = GLOBAL_SATURATION;
             }
+            // KHR PBR Neutral keeps hues truer than ACES (less washed-out colors);
+            // contrast/exposure retuned because Neutral is flatter than ACES.
             pipeline.imageProcessing.toneMappingEnabled = true;
-            pipeline.imageProcessing.contrast = cinematic ? PP_CONTRAST_ULTRA : PP_CONTRAST;
-            pipeline.imageProcessing.exposure = PP_EXPOSURE;
+            pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL;
+            pipeline.imageProcessing.contrast = cinematic ? PP_CONTRAST_KHR_ULTRA : PP_CONTRAST_KHR;
+            pipeline.imageProcessing.exposure = PP_EXPOSURE_KHR;
             pipeline.imageProcessing.colorCurves = this.colorCurves;
             pipeline.imageProcessing.colorCurvesEnabled = true;
         } else {
-            // Keep ACES tone mapping active while bloom is on so HDR highlights stay compressed.
+            // ACES fallback: keep tone mapping active while bloom is on so HDR highlights stay compressed.
             pipeline.imageProcessing.toneMappingEnabled = prefs.gfxBloom;
+            pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
             pipeline.imageProcessing.contrast = 1.0;
             pipeline.imageProcessing.exposure = 1.0;
             pipeline.imageProcessing.colorCurvesEnabled = false;
@@ -144,6 +161,8 @@ export class RenderSystem {
             }
         }
 
+        this._applyAdvancedPostFx(prefs, camera ?? null);
+
         this.scene.lightingSystem.applyShadowQuality(prefs.gfxShadowQuality);
 
         // Toggle the optional Ultra systems live (they may not exist yet during init).
@@ -151,6 +170,7 @@ export class RenderSystem {
         this.scene.atmosphereSystem?.setEnabled(prefs.gfxVolumetrics);
         this.scene.waterSystem?.setEnabled(prefs.gfxWater);
         this.scene.weatherSystem?.setEnabled(prefs.gfxWeather);
+        this.scene.atmosphereSystem?.setAmbientParticles(prefs.gfxAdvancedVfx);
         this.scene.vfxSystem.setAdvancedEnabled(prefs.gfxAdvancedVfx);
         this.scene.lightingSystem.setAdvancedFx(prefs.gfxAdvancedVfx);
     }
@@ -282,7 +302,53 @@ export class RenderSystem {
         return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     }
 
+    /** DOF / motion blur / SSR disabled — too heavy for isometric + caused blur at 1 FPS. */
+    private _applyAdvancedPostFx(prefs: FabulusPrefsData, camera: BABYLON.Camera | null): void {
+        const s = this.scene.bScene;
+        const pipeline = this.pipeline;
+        if (!pipeline || s.isDisposed) return;
+
+        pipeline.depthOfFieldEnabled = false;
+        if (this.dofObserver) {
+            s.onBeforeRenderObservable.remove(this.dofObserver);
+            this.dofObserver = null;
+        }
+
+        if (this.motionBlur) {
+            try { this.motionBlur.dispose(camera ?? undefined); } catch { /* already disposed */ }
+            this.motionBlur = null;
+        }
+
+        if (this.ssr) {
+            if (this.ssrAttached && camera) {
+                s.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('fab_ssr', camera);
+            }
+            try { this.ssr.dispose(); } catch { /* already disposed */ }
+            this.ssr = null;
+            this.ssrAttached = false;
+        }
+        void prefs;
+    }
+
     dispose(): void {
         FabulusPrefs.offChange(this._onPrefsChange);
+        const s = this.scene.bScene;
+        const camera = s.activeCamera;
+        if (this.dofObserver) {
+            s.onBeforeRenderObservable.remove(this.dofObserver);
+            this.dofObserver = null;
+        }
+        if (this.motionBlur) {
+            try { this.motionBlur.dispose(camera ?? undefined); } catch { /* already disposed */ }
+            this.motionBlur = null;
+        }
+        if (this.ssr) {
+            if (this.ssrAttached && camera) {
+                s.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('fab_ssr', camera);
+            }
+            try { this.ssr.dispose(); } catch { /* already disposed */ }
+            this.ssr = null;
+            this.ssrAttached = false;
+        }
     }
 }

@@ -77,9 +77,26 @@ void main(void) {
 
     vec3 sky = mix(base, cCol, cloudAmount);
 
+    // Stars on the open night sky, hidden by clouds, daylight and the horizon.
+    vec2 sgrid = dir.xz / max(dir.y + 0.5, 0.35) * 28.0;
+    vec2 scell = floor(sgrid);
+    vec2 sf = fract(sgrid) - 0.5;
+    float sh = hash1(scell);
+    vec2 soff = vec2(hash1(scell + 17.0), hash1(scell + 41.0)) - 0.5;
+    float sd = length(sf - soff * 0.7);
+    float twinkle = 0.6 + 0.4 * sin(time * (1.5 + sh * 3.0) + sh * 31.0);
+    float star = smoothstep(0.06, 0.012, sd) * step(0.82, sh) * twinkle;
+    star *= smoothstep(0.04, 0.25, dir.y) * (1.0 - cloudAmount) * (1.0 - dayFactor * 0.8);
+    sky += vec3(0.78, 0.84, 1.0) * star * 0.5;
+
     // Sun bloom / glow on the open sky.
     sky += sunColor * pow(sun, 64.0) * 0.55;
     sky += sunColor * pow(sun, 8.0) * 0.10 * dayFactor;
+
+    // Moon: bright disc plus a broad cold halo (the key light doubles as moon).
+    float moonDisc = smoothstep(0.99955, 0.99985, sun);
+    sky += sunColor * moonDisc * 0.9 * (1.0 - cloudAmount * 0.85);
+    sky += sunColor * pow(sun, 24.0) * 0.18 * (1.0 - cloudAmount * 0.6);
 
     // Subtle horizon haze band.
     float horizonW = 1.0 - smoothstep(0.0, 0.18, dir.y);
