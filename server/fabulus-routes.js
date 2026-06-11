@@ -57,7 +57,7 @@ const mockEnemies = [
     },
     {
         id: 2, name: 'Goblin Brute', model_path: 'enemies/goblin_Merged_Animations.glb', level: 3,
-        max_health: 90, damage_min: 6, damage_max: 11, armor: 9,
+        max_health: 50, damage_min: 6, damage_max: 11, armor: 9,
         walk_speed: 1.3, run_speed: 2.8, aggro_range: 8, attack_range: 1.8, leash_range: 18,
         attack_cooldown_ms: 2000, experience_reward: 70, gold_min: 5, gold_max: 12,
         health_scale_pct: 20, damage_scale_pct: 14, ...ELITE_DEFAULTS,
@@ -65,7 +65,7 @@ const mockEnemies = [
     },
     {
         id: 3, name: 'Goblin Shaman', model_path: 'enemies/goblin_Merged_Animations.glb', level: 2,
-        max_health: 30, damage_min: 5, damage_max: 9, armor: 2,
+        max_health: 18, damage_min: 5, damage_max: 9, armor: 2,
         walk_speed: 1.5, run_speed: 3.0, aggro_range: 11, attack_range: 1.6, leash_range: 20,
         attack_cooldown_ms: 1900, experience_reward: 48, gold_min: 3, gold_max: 9,
         health_scale_pct: 16, damage_scale_pct: 12, ...ELITE_DEFAULTS,
@@ -73,7 +73,7 @@ const mockEnemies = [
     },
     {
         id: 4, name: 'Rotwalker', model_path: 'enemies/Meshy_AI_Rotwalker_biped_Meshy_AI_Meshy_Merged_Animations.glb', level: 4,
-        max_health: 110, damage_min: 8, damage_max: 14, armor: 12,
+        max_health: 60, damage_min: 8, damage_max: 14, armor: 12,
         walk_speed: 1.4, run_speed: 3.0, aggro_range: 10, attack_range: 1.8, leash_range: 20,
         attack_cooldown_ms: 2100, experience_reward: 95, gold_min: 6, gold_max: 14,
         health_scale_pct: 20, damage_scale_pct: 14, ...ELITE_DEFAULTS,
