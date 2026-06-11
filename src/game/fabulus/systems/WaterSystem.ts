@@ -11,6 +11,8 @@ import {
 } from '../constants/index.js';
 
 const TIME_CLAMP = 0.25;
+const WATER_FBM_OCTAVES_HIGH = 4;
+const WATER_FBM_OCTAVES_LOW = 2;
 const POOL_MIN_RADIUS = 4;
 const POOL_MAX_RADIUS = 8;
 const POOL_MIN_DIST_FROM_CENTER = 12;
@@ -44,6 +46,8 @@ export class WaterSystem {
     private timeAccum = 0;
     private shadersRegistered = false;
     private shadersRegistering: Promise<boolean> | null = null;
+    private readonly fallbackSunDir = new BABYLON.Vector3(-0.72, -0.48, -0.52).normalize();
+    private readonly zeroCamPos = BABYLON.Vector3.Zero();
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
@@ -113,16 +117,26 @@ export class WaterSystem {
         disc.position.set(x, WATER_LEVEL, z);
         disc.isPickable = false;
         disc.applyFog = true;
+        disc.receiveShadows = true;
 
+        // Bind the scene environment cube as a reflection source when it is already available.
+        const envTex = s.environmentTexture;
+        const reflective = !lava && !!envTex;
         const mat = new BABYLON.ShaderMaterial(`fab_water_mat_${i}`, s, { vertex: 'fabWater', fragment: 'fabWater' }, {
             attributes: ['position', 'uv'],
-            uniforms: ['world', 'worldViewProjection', 'time', 'lava', 'cameraPosition', 'sunDir', 'baseColor', 'tintColor'],
+            uniforms: ['world', 'worldViewProjection', 'time', 'lava', 'cameraPosition', 'sunDir', 'baseColor', 'tintColor', 'octaves'],
+            samplers: reflective ? ['reflectionSampler'] : [],
+            defines: reflective ? ['#define REFLECTION'] : [],
             needAlphaBlending: true,
         });
         mat.backFaceCulling = false;
+        // Transparent surface: blend and avoid depth fighting with the ground at the same level.
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        mat.zOffset = -2;
         mat.setColor3('baseColor', lava ? LAVA_BASE : WATER_BASE);
         mat.setColor3('tintColor', lava ? LAVA_TINT : WATER_TINT);
         mat.setFloat('lava', lava ? 1 : 0);
+        if (reflective && envTex) mat.setTexture('reflectionSampler', envTex);
         disc.material = mat;
 
         this.pools.push({ mesh: disc, material: mat, lava });
@@ -144,13 +158,16 @@ export class WaterSystem {
         this.timeAccum += dtClamp;
 
         const sun = this.scene.lightingSystem.getSun();
-        const sunDir = sun ? sun.direction : new BABYLON.Vector3(-0.72, -0.48, -0.52).normalize();
-        const camPos = this.scene.bScene.activeCamera ? this.scene.bScene.activeCamera.globalPosition : BABYLON.Vector3.Zero();
+        const sunDir = sun ? sun.direction : this.fallbackSunDir;
+        const camPos = this.scene.bScene.activeCamera ? this.scene.bScene.activeCamera.globalPosition : this.zeroCamPos;
 
+        const lowDetail = this.scene.renderSystem.isMobileDevice() || FabulusPrefs.get().gfxDetailLevel === 'low';
+        const octaves = lowDetail ? WATER_FBM_OCTAVES_LOW : WATER_FBM_OCTAVES_HIGH;
         for (const p of this.pools) {
             p.material.setFloat('time', this.timeAccum);
             p.material.setVector3('sunDir', sunDir);
             p.material.setVector3('cameraPosition', camPos);
+            p.material.setFloat('octaves', octaves);
         }
     }
 

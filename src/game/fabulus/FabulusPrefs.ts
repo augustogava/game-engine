@@ -74,28 +74,28 @@ export const GFX_PRESETS: Record<GfxPreset, Partial<FabulusPrefsData>> = {
         gfxBloom: false, gfxVignette: false, gfxColorGrading: false, gfxSharpen: false,
         gfxParticleQuality: 'low', gfxDetailLevel: 'low',
         gfxSky: false, gfxVolumetrics: false, gfxGroundUltra: false, gfxWater: false,
-        gfxWeather: false, gfxAdvancedVfx: false,
+        gfxWeather: false, gfxAdvancedVfx: false, weatherMode: 'clear',
     },
     medium: {
         gfxAntialiasing: 'fxaa', gfxRenderScale: 1.0, gfxShadowQuality: 'medium', gfxSsao: 'off',
         gfxBloom: true, gfxVignette: true, gfxColorGrading: true, gfxSharpen: false,
         gfxParticleQuality: 'medium', gfxDetailLevel: 'medium',
         gfxSky: false, gfxVolumetrics: false, gfxGroundUltra: false, gfxWater: false,
-        gfxWeather: false, gfxAdvancedVfx: false,
+        gfxWeather: false, gfxAdvancedVfx: false, weatherMode: 'clear',
     },
     high: {
         gfxAntialiasing: 'msaa4', gfxRenderScale: 1.0, gfxShadowQuality: 'high', gfxSsao: 'low',
         gfxBloom: true, gfxVignette: true, gfxColorGrading: true, gfxSharpen: true,
         gfxParticleQuality: 'high', gfxDetailLevel: 'high',
         gfxSky: true, gfxVolumetrics: false, gfxGroundUltra: true, gfxWater: false,
-        gfxWeather: false, gfxAdvancedVfx: false,
+        gfxWeather: false, gfxAdvancedVfx: false, weatherMode: 'clear',
     },
     ultra: {
         gfxAntialiasing: 'msaa4', gfxRenderScale: 1.25, gfxShadowQuality: 'high', gfxSsao: 'high',
         gfxBloom: true, gfxVignette: true, gfxColorGrading: true, gfxSharpen: true,
         gfxParticleQuality: 'high', gfxDetailLevel: 'high',
         gfxSky: true, gfxVolumetrics: true, gfxGroundUltra: true, gfxWater: true,
-        gfxWeather: true, gfxAdvancedVfx: true,
+        gfxWeather: true, gfxAdvancedVfx: true, weatherMode: 'ambient',
     },
 };
 

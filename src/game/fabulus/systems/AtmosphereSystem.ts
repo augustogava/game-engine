@@ -27,6 +27,8 @@ export class AtmosphereSystem {
     private initialized = false;
     private scroll = 0;
     private baseFogDensity: number | null = null;
+    private readonly tmpDir = new BABYLON.Vector3();
+    private readonly tmpSunPos = new BABYLON.Vector3();
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
@@ -121,6 +123,19 @@ export class AtmosphereSystem {
         if (this.mistMesh) this.mistMesh.setEnabled(visible);
     }
 
+    /** Fully detaches and frees the god-rays post-process so it stops costing GPU when disabled. */
+    private _disableGodrays(): void {
+        if (!this.godrays) return;
+        try {
+            const cam = this.scene.bScene.activeCamera;
+            if (cam) this.godrays.dispose(cam);
+        } catch (err) {
+            console.warn('[Fabulus] God rays disable failed:', err);
+        }
+        this.godrays = null;
+        this.sunMesh = null;
+    }
+
     /** Thickens scene fog for rain/fog weather without touching the base density permanently. */
     setFogBoost(boost: boolean): void {
         const s = this.scene.bScene;
@@ -135,7 +150,9 @@ export class AtmosphereSystem {
         if (enabled) {
             this._build();
         } else {
+            this._disableGodrays();
             this._setVisible(false);
+            this.setFogBoost(false);
         }
     }
 
@@ -145,11 +162,17 @@ export class AtmosphereSystem {
         const sun = this.scene.lightingSystem.getSun();
         const root = this.scene.playerRoot;
         if (this.godrays && sun) {
-            const dir = sun.direction.clone().normalize();
-            const center = root ? root.position : BABYLON.Vector3.Zero();
-            const sunPos = center.subtract(dir.scale(SUN_DISTANCE));
-            this.godrays.setCustomMeshPosition(sunPos);
-            if (this.sunMesh) this.sunMesh.position.copyFrom(sunPos);
+            sun.direction.normalizeToRef(this.tmpDir);
+            const cx = root ? root.position.x : 0;
+            const cy = root ? root.position.y : 0;
+            const cz = root ? root.position.z : 0;
+            this.tmpSunPos.set(
+                cx - this.tmpDir.x * SUN_DISTANCE,
+                cy - this.tmpDir.y * SUN_DISTANCE,
+                cz - this.tmpDir.z * SUN_DISTANCE,
+            );
+            this.godrays.setCustomMeshPosition(this.tmpSunPos);
+            if (this.sunMesh) this.sunMesh.position.copyFrom(this.tmpSunPos);
         }
 
         if (this.mistMesh && this.mistTexture && root) {

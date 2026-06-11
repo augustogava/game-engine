@@ -11,6 +11,10 @@ uniform vec3  cameraPosition;
 uniform vec3  sunDir;
 uniform vec3  baseColor;
 uniform vec3  tintColor;
+uniform float octaves;
+#ifdef REFLECTION
+uniform samplerCube reflectionSampler;
+#endif
 
 const int ITER = 4;
 const float PI = 3.141592;
@@ -46,6 +50,7 @@ float mapHeight(vec2 p, float t) {
     uv.x *= 0.75;
     float h = 0.0;
     for (int i = 0; i < ITER; i++) {
+        if (float(i) >= octaves) break;
         float d = seaOctave((uv + t) * freq, choppy);
         d += seaOctave((uv - t) * freq, choppy);
         h += d * amp;
@@ -75,6 +80,13 @@ void main(void) {
     vec3 deep = baseColor * 0.5;
     vec3 color = mix(deep, sky, fresnel);
 
+#ifdef REFLECTION
+    // Mirror the surrounding environment, fresnel-weighted (water only, not lava).
+    vec3 refl = reflect(-eye, n);
+    vec3 envCol = textureCube(reflectionSampler, refl).rgb;
+    color = mix(color, envCol, fresnel * 0.6 * (1.0 - lava));
+#endif
+
     vec3 l = normalize(-sunDir);
     float spec = pow(max(dot(reflect(-eye, n), l), 0.0), 60.0);
     color += vec3(1.0, 0.95, 0.85) * spec * (1.0 - lava * 0.6);
@@ -84,6 +96,9 @@ void main(void) {
     vec3 lavaCol = mix(vec3(0.35, 0.05, 0.0), vec3(1.0, 0.55, 0.12), glow);
     color = mix(color, lavaCol, lava);
 
-    float alpha = mix(0.82, 1.0, lava);
+    // Soft shoreline: fade the alpha toward the rim of the disc so edges blend with the ground.
+    float radial = length(vUv - vec2(0.5)) * 2.0;
+    float shore = smoothstep(1.0, 0.78, radial);
+    float alpha = mix(0.82, 1.0, lava) * shore;
     gl_FragColor = vec4(max(color, 0.0), alpha);
 }

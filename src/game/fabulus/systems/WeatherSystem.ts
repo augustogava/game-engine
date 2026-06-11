@@ -10,6 +10,7 @@ import {
 
 const SPAWN_HEIGHT = 22;
 const PARTICLE_CAPACITY = 4000;
+const PARTICLE_QUALITY_MULT: Record<string, number> = { low: 0.35, medium: 0.65, high: 1 };
 
 export class WeatherSystem {
     private scene: FabulusScene;
@@ -32,8 +33,8 @@ export class WeatherSystem {
         this.initialized = true;
         if (FabulusPrefs.get().gfxWeather !== true) return;
         this._build();
-        this.setMode(FabulusPrefs.get().weatherMode);
         this.enabled = true;
+        this.setMode(FabulusPrefs.get().weatherMode);
     }
 
     private _build(): void {
@@ -95,7 +96,7 @@ export class WeatherSystem {
         ps.maxScaleY = 14;
         ps.minLifeTime = 0.9;
         ps.maxLifeTime = 1.3;
-        ps.emitRate = WEATHER_RAIN_RATE;
+        ps.emitRate = WEATHER_RAIN_RATE * (PARTICLE_QUALITY_MULT[FabulusPrefs.get().gfxParticleQuality] ?? 1);
         ps.gravity = new BABYLON.Vector3(0, -90, 0);
         ps.direction1 = new BABYLON.Vector3(-1.5, -22, -1.5);
         ps.direction2 = new BABYLON.Vector3(1.5, -28, 1.5);
@@ -155,6 +156,7 @@ export class WeatherSystem {
 
     setMode(mode: WeatherMode): void {
         this.mode = mode;
+        if (!this.enabled) return;
         if (!this.built) this._build();
         const rainOn = mode === 'rain';
         const dustOn = mode === 'dust' || mode === 'ambient';
@@ -185,6 +187,8 @@ export class WeatherSystem {
             this._toggle(this.rain, false);
             this._toggle(this.dust, false);
             this._toggle(this.ember, false);
+            const atmo = this.scene.atmosphereSystem;
+            if (atmo && typeof atmo.setFogBoost === 'function') atmo.setFogBoost(false);
         }
     }
 

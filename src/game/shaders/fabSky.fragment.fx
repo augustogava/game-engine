@@ -15,6 +15,7 @@ uniform vec3  sunDir;
 uniform vec3  sunColor;
 uniform vec3  zenithColor;
 uniform vec3  horizonColor;
+uniform float octaves;
 
 float hash1(vec2 p) {
     p = 50.0 * fract(p * 0.3183099);
@@ -40,6 +41,7 @@ float fbm9(in vec2 x) {
     float a = 0.0;
     float b = 0.5;
     for (int i = 0; i < 9; i++) {
+        if (float(i) >= octaves) break;
         float n = noiseIq(x);
         a += b * n;
         b *= s;

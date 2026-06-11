@@ -26,6 +26,7 @@ export class RenderSystem {
     private ssao: BABYLON.SSAO2RenderingPipeline | null = null;
     private ssaoAttached = false;
     private highlight: BABYLON.HighlightLayer | null = null;
+    private colorCurves: BABYLON.ColorCurves | null = null;
     private envReady = false;
     private _onPrefsChange = (prefs: FabulusPrefsData): void => this.applyGraphicsSettings(prefs);
 
@@ -75,19 +76,6 @@ export class RenderSystem {
         pipeline.chromaticAberrationEnabled = false;
         this.pipeline = pipeline;
 
-        if (!isMobile) {
-            try {
-                const ssao = new BABYLON.SSAO2RenderingPipeline('fab_ssao', s, SSAO_RATIO, [camera]);
-                ssao.totalStrength = 0.9;
-                ssao.radius = 1.6;
-                ssao.samples = 12;
-                this.ssao = ssao;
-                this.ssaoAttached = true;
-            } catch (err) {
-                console.warn('[Fabulus] SSAO unavailable:', err);
-            }
-        }
-
         const highlight = new BABYLON.HighlightLayer('fab_highlight', s, { blurHorizontalSize: 0.6, blurVerticalSize: 0.6 });
         highlight.innerGlow = false;
         this.highlight = highlight;
@@ -118,15 +106,18 @@ export class RenderSystem {
         const cinematic = prefs.gfxVolumetrics || prefs.gfxWeather;
 
         if (prefs.gfxColorGrading) {
+            if (!this.colorCurves) {
+                this.colorCurves = new BABYLON.ColorCurves();
+                this.colorCurves.globalSaturation = GLOBAL_SATURATION;
+            }
             pipeline.imageProcessing.toneMappingEnabled = true;
             pipeline.imageProcessing.contrast = cinematic ? PP_CONTRAST_ULTRA : PP_CONTRAST;
             pipeline.imageProcessing.exposure = PP_EXPOSURE;
-            const curves = new BABYLON.ColorCurves();
-            curves.globalSaturation = GLOBAL_SATURATION;
-            pipeline.imageProcessing.colorCurves = curves;
+            pipeline.imageProcessing.colorCurves = this.colorCurves;
             pipeline.imageProcessing.colorCurvesEnabled = true;
         } else {
-            pipeline.imageProcessing.toneMappingEnabled = false;
+            // Keep ACES tone mapping active while bloom is on so HDR highlights stay compressed.
+            pipeline.imageProcessing.toneMappingEnabled = prefs.gfxBloom;
             pipeline.imageProcessing.contrast = 1.0;
             pipeline.imageProcessing.exposure = 1.0;
             pipeline.imageProcessing.colorCurvesEnabled = false;
@@ -138,16 +129,19 @@ export class RenderSystem {
         pipeline.chromaticAberrationEnabled = !this._isMobile() && cinematic;
 
         const camera = s.activeCamera;
-        if (this.ssao && camera) {
-            const wantSsao = prefs.gfxSsao !== 'off';
-            if (wantSsao && !this.ssaoAttached) {
-                s.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('fab_ssao', camera);
-                this.ssaoAttached = true;
-            } else if (!wantSsao && this.ssaoAttached) {
-                s.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('fab_ssao', camera);
-                this.ssaoAttached = false;
+        const wantSsao = prefs.gfxSsao !== 'off';
+        if (camera) {
+            if (wantSsao && !this.ssao) this._createSsao(camera);
+            if (this.ssao) {
+                if (wantSsao && !this.ssaoAttached) {
+                    s.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('fab_ssao', camera);
+                    this.ssaoAttached = true;
+                } else if (!wantSsao && this.ssaoAttached) {
+                    s.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('fab_ssao', camera);
+                    this.ssaoAttached = false;
+                }
+                this.ssao.totalStrength = prefs.gfxSsao === 'high' ? 1.25 : 0.9;
             }
-            this.ssao.totalStrength = prefs.gfxSsao === 'high' ? 1.25 : 0.9;
         }
 
         this.scene.lightingSystem.applyShadowQuality(prefs.gfxShadowQuality);
@@ -239,6 +233,22 @@ export class RenderSystem {
                 const lum = std.diffuseColor.r * 0.299 + std.diffuseColor.g * 0.587 + std.diffuseColor.b * 0.114;
                 if (lum < 0.15) std.diffuseColor = std.diffuseColor.scale(1.25);
             }
+        }
+    }
+
+    /** Lazily builds the SSAO2 pipeline on first request so it also works on touch devices. */
+    private _createSsao(camera: BABYLON.Camera): void {
+        try {
+            const ssao = new BABYLON.SSAO2RenderingPipeline('fab_ssao', this.scene.bScene, SSAO_RATIO, [camera]);
+            ssao.totalStrength = 0.9;
+            ssao.radius = 1.6;
+            ssao.samples = 12;
+            this.ssao = ssao;
+            this.ssaoAttached = true;
+        } catch (err) {
+            console.warn('[Fabulus] SSAO unavailable:', err);
+            this.ssao = null;
+            this.ssaoAttached = false;
         }
     }
 

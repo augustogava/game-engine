@@ -18,6 +18,10 @@ const SHADOW_NORMAL_BIAS = 0.04;
 const FIRE_HEIGHT = 1.1;
 const FIRE_INTENSITY = 2.4;
 const FIRE_RANGE = 16;
+// hemi + sun + fill + torch already consume 4 of the PBR light budget (8); cap lit campfires
+// to the remaining slots and keep only the ones nearest the player active.
+const MAX_ACTIVE_FIRE_LIGHTS = 4;
+const PARTICLE_QUALITY_MULT: Record<string, number> = { low: 0.35, medium: 0.65, high: 1 };
 const FIRE_POSITIONS: ReadonlyArray<readonly [number, number]> = [
     [-11, 14],
     [13, 12],
@@ -134,6 +138,7 @@ export class LightingSystem {
     private _addFireLights(): void {
         const s = this.scene.bScene;
         const flameTex = this._buildFlameTexture();
+        const qMult = PARTICLE_QUALITY_MULT[FabulusPrefs.get().gfxParticleQuality] ?? 1;
         for (let i = 0; i < FIRE_POSITIONS.length; i++) {
             const [x, z] = FIRE_POSITIONS[i];
             const origin = new BABYLON.Vector3(x, FIRE_HEIGHT, z);
@@ -157,7 +162,7 @@ export class LightingSystem {
             ps.maxSize = 0.95;
             ps.minLifeTime = 0.25;
             ps.maxLifeTime = 0.6;
-            ps.emitRate = 110;
+            ps.emitRate = 110 * qMult;
             ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
             ps.gravity = new BABYLON.Vector3(0, 2.2, 0);
             ps.direction1 = new BABYLON.Vector3(-0.25, 1.6, -0.25);
@@ -253,8 +258,15 @@ export class LightingSystem {
         const root = this.scene.playerRoot;
         if (!root) return;
 
+        const t = this.scene.now() * 0.001;
+
         if (this.torch) {
             this.torch.position.set(root.position.x, TORCH_HEIGHT, root.position.z);
+            // Warm, lively flicker so the player torch matches the campfire mood.
+            const torchFlicker = 0.85
+                + 0.1 * Math.sin(t * 13.3)
+                + 0.05 * Math.sin(t * 31.7);
+            this.torch.intensity = TORCH_INTENSITY * torchFlicker;
         }
 
         if (this.sun) {
@@ -266,8 +278,18 @@ export class LightingSystem {
         }
 
         if (this.fires.length > 0) {
-            const t = this.scene.now() * 0.001;
-            for (const fire of this.fires) {
+            const px = root.position.x;
+            const pz = root.position.z;
+            // Rank campfires by distance to the player so only the nearest stay lit, keeping the
+            // total simultaneous dynamic lights within the PBR budget (avoids per-mesh light pop).
+            const ranked = this.fires
+                .map((fire, idx) => ({ idx, d: (fire.light.position.x - px) ** 2 + (fire.light.position.z - pz) ** 2 }))
+                .sort((a, b) => a.d - b.d);
+            for (let r = 0; r < ranked.length; r++) {
+                const fire = this.fires[ranked[r].idx];
+                const active = r < MAX_ACTIVE_FIRE_LIGHTS;
+                if (fire.light.isEnabled() !== active) fire.light.setEnabled(active);
+                if (!active) continue;
                 const flicker = 0.78
                     + 0.16 * Math.sin(t * 11 + fire.phase)
                     + 0.06 * Math.sin(t * 27 + fire.phase * 2);

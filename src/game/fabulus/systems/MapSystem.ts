@@ -109,11 +109,11 @@ export class MapSystem {
         ground.material = mat;
         ground.receiveShadows = true;
 
+        this.scene.renderSystem.prepareMeshes([ground], { castShadow: false, receiveShadow: true });
         this.scene.groundMesh = ground;
     }
 
-    private _buildGroundNormalMap(s: BABYLON.Scene): BABYLON.DynamicTexture {
-        const size = NORMAL_MAP_SIZE;
+    private _buildGroundNormalMap(s: BABYLON.Scene, size: number = NORMAL_MAP_SIZE): BABYLON.DynamicTexture {
         const tex = new BABYLON.DynamicTexture('fab_ground_normal', size, s, true);
         const ctx = tex.getContext() as CanvasRenderingContext2D;
         const rand = mulberry32(OBSTACLE_SEED + 31);
@@ -178,7 +178,7 @@ export class MapSystem {
         mat.metallic = 0.0;
         mat.roughness = 0.92;
 
-        const bump = this._buildGroundNormalMap(s);
+        const bump = this._buildGroundNormalMap(s, GROUND_ULTRA_NORMAL_SIZE);
         bump.uScale = 16;
         bump.vScale = 16;
         mat.bumpTexture = bump;
@@ -189,6 +189,7 @@ export class MapSystem {
         mat.clearCoat.roughness = 0.45;
 
         ground.material = mat;
+        this.scene.renderSystem.prepareMeshes([ground], { castShadow: false, receiveShadow: true });
         this.scene.groundMesh = ground;
         console.debug('[Fabulus] Ultra ground built');
     }
@@ -199,12 +200,15 @@ export class MapSystem {
         const ctx = tex.getContext() as CanvasRenderingContext2D;
         const rand = mulberry32(OBSTACLE_SEED + 11);
 
+        // Precompute a stable per-octave phase so the noise is deterministic across reloads
+        // (calling rand() inside the per-pixel loop would desync the texture every load).
+        const octavePhase = [0, 0, 0, 0, 0].map(() => rand() * Math.PI * 2);
         const fbm = (x: number, y: number): number => {
             let amp = 0.5;
             let freq = 1;
             let sum = 0;
             for (let o = 0; o < 5; o++) {
-                const sx = Math.sin((x * freq + o * 13.1) * 0.013 + rand() * 0.0001);
+                const sx = Math.sin((x * freq + o * 13.1) * 0.013 + octavePhase[o]);
                 const sy = Math.cos((y * freq + o * 7.7) * 0.013);
                 sum += amp * (sx * sy);
                 amp *= 0.5;
@@ -428,6 +432,7 @@ export class MapSystem {
                 pebble.rotation.y = rand() * Math.PI * 2;
                 pebble.material = stoneMat;
                 pebble.isPickable = false;
+                this.scene.renderSystem.prepareMeshes([pebble], { castShadow: false, receiveShadow: true });
             } else {
                 const h = 0.25 + rand() * 0.3;
                 const tuft = BABYLON.MeshBuilder.CreatePlane(`fab_tuft_${i}`, { width: 0.5, height: h }, s);
@@ -435,6 +440,7 @@ export class MapSystem {
                 tuft.rotation.y = rand() * Math.PI;
                 tuft.material = grassMat;
                 tuft.isPickable = false;
+                this.scene.renderSystem.prepareMeshes([tuft], { castShadow: false, receiveShadow: true });
             }
         }
     }

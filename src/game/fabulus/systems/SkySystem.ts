@@ -18,6 +18,11 @@ import {
 const ZENITH_COLOR = new BABYLON.Color3(0.035, 0.045, 0.075);
 const HORIZON_COLOR = new BABYLON.Color3(0.12, 0.09, 0.085);
 const TIME_CLAMP = 0.25;
+const SKY_DAY_ELEVATION_GAIN = 0.5;
+const SKY_HORIZON_FOG_BLEND = 0.5;
+const SKY_ZENITH_SUN_TINT = 0.05;
+const SKY_FBM_OCTAVES_HIGH = 9;
+const SKY_FBM_OCTAVES_LOW = 5;
 
 export class SkySystem {
     private scene: FabulusScene;
@@ -29,6 +34,10 @@ export class SkySystem {
     private shadersRegistering: Promise<boolean> | null = null;
     private timeAccum = 0;
     private readonly cloudColor = new BABYLON.Color3(SKY_CLOUD_COLOR_R, SKY_CLOUD_COLOR_G, SKY_CLOUD_COLOR_B);
+    private readonly fallbackSunDir = new BABYLON.Vector3(-0.72, -0.48, -0.52).normalize();
+    private readonly fallbackSunColor = new BABYLON.Color3(0.78, 0.8, 0.92);
+    private readonly dynamicZenith = new BABYLON.Color3();
+    private readonly dynamicHorizon = new BABYLON.Color3();
     private savedClearColor: BABYLON.Color4 | null = null;
 
     constructor(scene: FabulusScene) {
@@ -91,7 +100,7 @@ export class SkySystem {
             attributes: ['position'],
             uniforms: [
                 'worldViewProjection', 'time', 'cover', 'intensity', 'speed', 'scale',
-                'dayFactor', 'cloudColor', 'sunDir', 'sunColor', 'zenithColor', 'horizonColor',
+                'dayFactor', 'cloudColor', 'sunDir', 'sunColor', 'zenithColor', 'horizonColor', 'octaves',
             ],
         });
         mat.backFaceCulling = false;
@@ -122,20 +131,40 @@ export class SkySystem {
         this.timeAccum += dtClamp;
 
         const sun = this.scene.lightingSystem.getSun();
-        const sunDir = sun ? sun.direction : new BABYLON.Vector3(-0.72, -0.48, -0.52).normalize();
-        const sunColor = sun ? sun.diffuse : new BABYLON.Color3(0.78, 0.8, 0.92);
+        const sunDir = sun ? sun.direction : this.fallbackSunDir;
+        const sunColor = sun ? sun.diffuse : this.fallbackSunColor;
+        const fog = this.scene.bScene.fogColor;
+
+        // Brighter sky the higher the sun sits (direction points down, so -y is elevation).
+        const elevation = Math.max(0, -sunDir.y);
+        const dayFactor = Math.min(1, SKY_DAY_FACTOR + elevation * SKY_DAY_ELEVATION_GAIN);
+
+        // Horizon blends toward the scene fog tint so the skyline matches the ground haze.
+        this.dynamicHorizon.set(
+            HORIZON_COLOR.r * (1 - SKY_HORIZON_FOG_BLEND) + fog.r * SKY_HORIZON_FOG_BLEND,
+            HORIZON_COLOR.g * (1 - SKY_HORIZON_FOG_BLEND) + fog.g * SKY_HORIZON_FOG_BLEND,
+            HORIZON_COLOR.b * (1 - SKY_HORIZON_FOG_BLEND) + fog.b * SKY_HORIZON_FOG_BLEND,
+        );
+        // Zenith keeps its deep base with a faint hint of the sun colour.
+        this.dynamicZenith.set(
+            ZENITH_COLOR.r + sunColor.r * SKY_ZENITH_SUN_TINT,
+            ZENITH_COLOR.g + sunColor.g * SKY_ZENITH_SUN_TINT,
+            ZENITH_COLOR.b + sunColor.b * SKY_ZENITH_SUN_TINT,
+        );
 
         this.material.setFloat('time', this.timeAccum);
         this.material.setFloat('cover', SKY_CLOUD_COVER);
         this.material.setFloat('intensity', SKY_CLOUD_INTENSITY);
         this.material.setFloat('speed', SKY_CLOUD_SPEED);
         this.material.setFloat('scale', SKY_CLOUD_SCALE);
-        this.material.setFloat('dayFactor', SKY_DAY_FACTOR);
+        this.material.setFloat('dayFactor', dayFactor);
         this.material.setColor3('cloudColor', this.cloudColor);
         this.material.setVector3('sunDir', sunDir);
         this.material.setColor3('sunColor', sunColor);
-        this.material.setColor3('zenithColor', ZENITH_COLOR);
-        this.material.setColor3('horizonColor', HORIZON_COLOR);
+        this.material.setColor3('zenithColor', this.dynamicZenith);
+        this.material.setColor3('horizonColor', this.dynamicHorizon);
+        const lowDetail = this.scene.renderSystem.isMobileDevice() || FabulusPrefs.get().gfxDetailLevel === 'low';
+        this.material.setFloat('octaves', lowDetail ? SKY_FBM_OCTAVES_LOW : SKY_FBM_OCTAVES_HIGH);
     }
 
     dispose(): void {

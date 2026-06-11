@@ -15,6 +15,7 @@ interface TimedMesh {
     growTo: number;
     poolKey: string | null;
     baseAlpha: number;
+    matPool?: BABYLON.Material[];
 }
 
 const FLARE_TEX_SIZE = 64;
@@ -175,6 +176,9 @@ export class VfxSystem {
     private bloodTexture: BABYLON.DynamicTexture | null = null;
     private frostTexture: BABYLON.DynamicTexture | null = null;
     private ringPools: Map<string, BABYLON.Mesh[]> = new Map();
+    private slashMatPool: BABYLON.Material[] = [];
+    private decalMatPool: BABYLON.Material[] = [];
+    private bloodMatPool: BABYLON.Material[] = [];
     private burstPools: Map<BurstKind, BABYLON.ParticleSystem[]> = new Map();
     private activeBursts: Set<BABYLON.ParticleSystem> = new Set();
     private pendingTimeouts: Set<number> = new Set();
@@ -214,7 +218,7 @@ export class VfxSystem {
     }
 
     private _buildFlareTexture(): void {
-        const tex = new BABYLON.DynamicTexture('fab_flare_tex', { width: FLARE_TEX_SIZE, height: FLARE_TEX_SIZE }, this.scene.bScene, false);
+        const tex = new BABYLON.DynamicTexture('fab_flare_tex', { width: FLARE_TEX_SIZE, height: FLARE_TEX_SIZE }, this.scene.bScene, true);
         const ctx = tex.getContext() as CanvasRenderingContext2D;
         const c = FLARE_TEX_SIZE / 2;
         const gradient = ctx.createRadialGradient(c, c, 0, c, c, c);
@@ -231,7 +235,7 @@ export class VfxSystem {
 
     /** Radial gradient sprite with optional mottling for organic look (flame/smoke/blood). */
     private _buildGradientTexture(name: string, stops: { stop: number; color: string }[], mottled: boolean): BABYLON.DynamicTexture {
-        const tex = new BABYLON.DynamicTexture(name, { width: TEX_SIZE, height: TEX_SIZE }, this.scene.bScene, false);
+        const tex = new BABYLON.DynamicTexture(name, { width: TEX_SIZE, height: TEX_SIZE }, this.scene.bScene, true);
         const ctx = tex.getContext() as CanvasRenderingContext2D;
         const c = TEX_SIZE / 2;
         ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
@@ -262,7 +266,7 @@ export class VfxSystem {
 
     /** Star-shaped icy shard sprite. */
     private _buildFrostTexture(): BABYLON.DynamicTexture {
-        const tex = new BABYLON.DynamicTexture('fab_frost_tex', { width: TEX_SIZE, height: TEX_SIZE }, this.scene.bScene, false);
+        const tex = new BABYLON.DynamicTexture('fab_frost_tex', { width: TEX_SIZE, height: TEX_SIZE }, this.scene.bScene, true);
         const ctx = tex.getContext() as CanvasRenderingContext2D;
         const c = TEX_SIZE / 2;
         ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
@@ -456,8 +460,23 @@ export class VfxSystem {
         disc.rotation.y = Math.random() * Math.PI * 2;
         disc.position.set(x + (Math.random() - 0.5) * 0.3, 0.025, z + (Math.random() - 0.5) * 0.3);
         disc.isPickable = false;
-        disc.material = this._buildBloodPoolMaterial(s, radius);
-        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: BLOOD_POOL_LIFETIME_MS, growTo: 1.25, poolKey: null, baseAlpha: BLOOD_POOL_BASE_ALPHA });
+        disc.material = this._acquireBloodPoolMaterial(s, radius);
+        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: BLOOD_POOL_LIFETIME_MS, growTo: 1.25, poolKey: null, baseAlpha: BLOOD_POOL_BASE_ALPHA, matPool: this.bloodMatPool });
+    }
+
+    private _acquireBloodPoolMaterial(s: BABYLON.Scene, radius: number): BABYLON.Material {
+        const recycled = this.bloodMatPool.pop();
+        if (recycled) {
+            if (recycled instanceof BABYLON.ShaderMaterial) {
+                recycled.setFloat('uRadius', Math.max(radius, 1e-3));
+                recycled.setFloat('uAlpha', BLOOD_POOL_BASE_ALPHA);
+                recycled.setFloat('time', this.scene.now() / 1000);
+            } else {
+                (recycled as BABYLON.StandardMaterial).alpha = BLOOD_POOL_BASE_ALPHA;
+            }
+            return recycled;
+        }
+        return this._buildBloodPoolMaterial(s, radius);
     }
 
     private _buildBloodPoolMaterial(s: BABYLON.Scene, radius: number): BABYLON.Material {
@@ -564,14 +583,29 @@ export class VfxSystem {
     }
 
     private _releaseRing(tm: TimedMesh): void {
-        if (!tm.poolKey) {
-            tm.mesh.dispose(false, true);
+        if (tm.poolKey) {
+            tm.mesh.setEnabled(false);
+            const pool = this.ringPools.get(tm.poolKey) ?? [];
+            pool.push(tm.mesh);
+            this.ringPools.set(tm.poolKey, pool);
             return;
         }
-        tm.mesh.setEnabled(false);
-        const pool = this.ringPools.get(tm.poolKey) ?? [];
-        pool.push(tm.mesh);
-        this.ringPools.set(tm.poolKey, pool);
+        if (tm.matPool) {
+            // Recycle the material; the disc geometry is cheap and disposed without its material.
+            const mat = tm.mesh.material;
+            tm.mesh.dispose(false, false);
+            if (mat) tm.matPool.push(mat);
+            return;
+        }
+        tm.mesh.dispose(false, true);
+    }
+
+    private _acquireStdMat(pool: BABYLON.Material[], name: string): BABYLON.StandardMaterial {
+        const recycled = pool.pop();
+        if (recycled instanceof BABYLON.StandardMaterial) return recycled;
+        const mat = new BABYLON.StandardMaterial(name, this.scene.bScene);
+        mat.disableLighting = true;
+        return mat;
     }
 
     private _spawnRing(diameter: number, thickness: number, color: BABYLON.Color3, alpha: number, x: number, y: number, z: number, lifetimeMs: number, growTo: number): void {
@@ -620,13 +654,13 @@ export class VfxSystem {
         disc.rotation.y = yaw - Math.PI * 0.4;
         disc.position.set(x, 1.0, z);
         disc.isPickable = false;
-        const mat = new BABYLON.StandardMaterial('fab_slash_mat', s);
+        const mat = this._acquireStdMat(this.slashMatPool, 'fab_slash_mat');
         mat.emissiveColor = color;
         mat.alpha = 0.65;
         mat.disableLighting = true;
         mat.backFaceCulling = false;
         disc.material = mat;
-        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: 180, growTo: 1.5, poolKey: null, baseAlpha: 0.65 });
+        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: 180, growTo: 1.5, poolKey: null, baseAlpha: 0.65, matPool: this.slashMatPool });
     }
 
     deathBurst(position: BABYLON.Vector3): void {
@@ -647,13 +681,13 @@ export class VfxSystem {
         disc.rotation.x = Math.PI / 2;
         disc.position.set(x, 0.02, z);
         disc.isPickable = false;
-        const mat = new BABYLON.StandardMaterial('fab_decal_mat', s);
+        const mat = this._acquireStdMat(this.decalMatPool, 'fab_decal_mat');
         mat.diffuseColor = new BABYLON.Color3(0.08, 0.03, 0.02);
         mat.emissiveColor = new BABYLON.Color3(0.12, 0.02, 0.01);
         mat.alpha = 0.55;
         mat.disableLighting = true;
         disc.material = mat;
-        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: 2600, growTo: 1.15, poolKey: null, baseAlpha: 0.55 });
+        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: 2600, growTo: 1.15, poolKey: null, baseAlpha: 0.55, matPool: this.decalMatPool });
     }
 
     attachProjectileTrail(mesh: BABYLON.Mesh, color: BABYLON.Color3, element?: string | null): BABYLON.ParticleSystem | null {
@@ -683,25 +717,27 @@ export class VfxSystem {
     }
 
     hitFlash(meshes: BABYLON.AbstractMesh[]): void {
-        const flashed: { mesh: BABYLON.AbstractMesh; prev: BABYLON.Color3 | null }[] = [];
+        const flashed: { mesh: BABYLON.AbstractMesh; baseMat: BABYLON.Material; flashMat: BABYLON.Material }[] = [];
         for (const m of meshes) {
+            const meta = (m.metadata ?? (m.metadata = {})) as { __fabHitFlash?: boolean };
+            if (meta.__fabHitFlash) continue;
             const mat = m.material as BABYLON.StandardMaterial | BABYLON.PBRMaterial | null;
-            if (!mat) continue;
-            const anyMat = mat as any;
-            if (anyMat.emissiveColor === undefined) continue;
-            if (anyMat.__fabHitFlash) continue;
-            anyMat.__fabHitFlash = true;
-            flashed.push({ mesh: m, prev: anyMat.emissiveColor ? anyMat.emissiveColor.clone() : null });
-            anyMat.emissiveColor = HIT_FLASH_COLOR;
+            if (!mat || (mat as any).emissiveColor === undefined || typeof (mat as any).clone !== 'function') continue;
+            const flashMat = (mat as any).clone(`${mat.name}__flash`) as BABYLON.Material | null;
+            if (!flashMat) continue;
+            meta.__fabHitFlash = true;
+            (flashMat as any).emissiveColor = HIT_FLASH_COLOR;
+            m.material = flashMat;
+            flashed.push({ mesh: m, baseMat: mat, flashMat });
         }
+        if (!flashed.length) return;
         const handle = window.setTimeout(() => {
             this.pendingTimeouts.delete(handle);
             for (const f of flashed) {
-                const anyMat = f.mesh.material as any;
-                if (anyMat && anyMat.emissiveColor !== undefined) {
-                    anyMat.emissiveColor = f.prev ?? new BABYLON.Color3(0, 0, 0);
-                    anyMat.__fabHitFlash = false;
-                }
+                f.mesh.material = f.baseMat;
+                try { f.flashMat.dispose(); } catch { /* already disposed */ }
+                const meta = f.mesh.metadata as { __fabHitFlash?: boolean } | null;
+                if (meta) meta.__fabHitFlash = false;
             }
         }, HIT_FLASH_MS);
         this.pendingTimeouts.add(handle);
@@ -741,6 +777,12 @@ export class VfxSystem {
             }
         }
         this.ringPools.clear();
+        for (const pool of [this.slashMatPool, this.decalMatPool, this.bloodMatPool]) {
+            for (const mat of pool) {
+                try { mat.dispose(); } catch { /* already disposed */ }
+            }
+            pool.length = 0;
+        }
         for (const handle of this.pendingTimeouts) clearTimeout(handle);
         this.pendingTimeouts.clear();
         for (const ps of this.activeBursts) {
