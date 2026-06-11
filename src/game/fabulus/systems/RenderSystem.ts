@@ -8,7 +8,13 @@ const PBR_MAX_SIMULTANEOUS_LIGHTS = 8;
 const PIPELINE_SAMPLES_MOBILE = 1;
 const SSAO_RATIO = 0.75;
 const GRAIN_INTENSITY = 7;
-const ENVIRONMENT_INTENSITY = 0.7;
+const ENVIRONMENT_INTENSITY = 0.4;
+
+// Diablo-like grade: dark desaturated world with high contrast and a strong vignette.
+const PP_EXPOSURE = 1.0;
+const PP_CONTRAST = 1.3;
+const VIGNETTE_WEIGHT = 1.6;
+const GLOBAL_SATURATION = -25;
 
 export class RenderSystem {
     private scene: FabulusScene;
@@ -27,8 +33,8 @@ export class RenderSystem {
         const s = this.scene.bScene;
         const isMobile = this._isMobile();
 
-        s.clearColor = new BABYLON.Color4(0.04, 0.042, 0.06, 1);
-        s.ambientColor = new BABYLON.Color3(0.04, 0.035, 0.03);
+        s.clearColor = new BABYLON.Color4(0.02, 0.022, 0.032, 1);
+        s.ambientColor = new BABYLON.Color3(0.02, 0.018, 0.016);
         s.environmentIntensity = ENVIRONMENT_INTENSITY;
 
         this._loadEnvironment(s);
@@ -44,10 +50,10 @@ export class RenderSystem {
         pipeline.imageProcessingEnabled = true;
         pipeline.imageProcessing.toneMappingEnabled = true;
         pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
-        pipeline.imageProcessing.exposure = 1.15;
-        pipeline.imageProcessing.contrast = 1.12;
+        pipeline.imageProcessing.exposure = PP_EXPOSURE;
+        pipeline.imageProcessing.contrast = PP_CONTRAST;
         pipeline.imageProcessing.vignetteEnabled = !isMobile;
-        pipeline.imageProcessing.vignetteWeight = 1.0;
+        pipeline.imageProcessing.vignetteWeight = VIGNETTE_WEIGHT;
         pipeline.imageProcessing.vignetteBlendMode = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
         pipeline.bloomEnabled = !isMobile;
         pipeline.bloomThreshold = 0.82;
@@ -102,12 +108,17 @@ export class RenderSystem {
 
         if (prefs.gfxColorGrading) {
             pipeline.imageProcessing.toneMappingEnabled = true;
-            pipeline.imageProcessing.contrast = 1.12;
-            pipeline.imageProcessing.exposure = 1.15;
+            pipeline.imageProcessing.contrast = PP_CONTRAST;
+            pipeline.imageProcessing.exposure = PP_EXPOSURE;
+            const curves = new BABYLON.ColorCurves();
+            curves.globalSaturation = GLOBAL_SATURATION;
+            pipeline.imageProcessing.colorCurves = curves;
+            pipeline.imageProcessing.colorCurvesEnabled = true;
         } else {
             pipeline.imageProcessing.toneMappingEnabled = false;
             pipeline.imageProcessing.contrast = 1.0;
             pipeline.imageProcessing.exposure = 1.0;
+            pipeline.imageProcessing.colorCurvesEnabled = false;
         }
 
         const camera = s.activeCamera;

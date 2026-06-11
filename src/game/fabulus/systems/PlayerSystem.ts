@@ -2,8 +2,8 @@ import * as BABYLON from '@babylonjs/core';
 import type { FabulusScene } from '../FabulusScene.js';
 import { ENEMY_STATE } from '../types/index.js';
 import {
-    ARRIVAL_THRESHOLD, MODELS_BASE_PATH, PLAYER_HEIGHT_UNITS, PLAYER_RESPAWN_MS,
-    PLAYER_TURN_LERP, RUN_ANIM_REFERENCE_SPEED, WALK_ANIM_REFERENCE_SPEED,
+    ARRIVAL_THRESHOLD, ATTACK_STOP_RANGE_FACTOR, HP_REGEN_IN_COMBAT_MULT, HP_REGEN_OUT_OF_COMBAT_MULT, MODELS_BASE_PATH,
+    PLAYER_HEIGHT_UNITS, PLAYER_RESPAWN_MS, PLAYER_TURN_LERP, RUN_ANIM_REFERENCE_SPEED, WALK_ANIM_REFERENCE_SPEED,
 } from '../constants/index.js';
 
 const PLAYER_MODEL_YAW_OFFSET = 0;
@@ -259,13 +259,14 @@ export class PlayerSystem {
         this._regen(dt);
 
         if (this.scene.playerLogicalState === 'attack' || now < this.attackLockUntil) return;
+        if (this.scene.combatSystem.isSwinging) return;
 
         let target: BABYLON.Vector3 | null = null;
         let stopDistance = ARRIVAL_THRESHOLD;
         const attackTarget = this.scene.attackTarget;
         if (attackTarget && attackTarget.state !== ENEMY_STATE.DEAD && attackTarget.root) {
             target = attackTarget.root.position;
-            stopDistance = this.scene.derived.attackRange * 0.75;
+            stopDistance = this.scene.derived.attackRange * ATTACK_STOP_RANGE_FACTOR;
         } else if (this.scene.moveTarget) {
             target = this.scene.moveTarget;
         }
@@ -316,8 +317,9 @@ export class PlayerSystem {
     private _regen(dt: number): void {
         const p = this.scene.player;
         const d = this.scene.derived;
+        const hpRegenMult = this.scene.isInCombat() ? HP_REGEN_IN_COMBAT_MULT : HP_REGEN_OUT_OF_COMBAT_MULT;
         if (p.current_health < d.maxHealth) {
-            p.current_health = Math.min(d.maxHealth, p.current_health + d.hpRegen * dt);
+            p.current_health = Math.min(d.maxHealth, p.current_health + d.hpRegen * hpRegenMult * dt);
         }
         if (p.current_mana < d.maxMana) {
             p.current_mana = Math.min(d.maxMana, p.current_mana + d.manaRegen * dt);

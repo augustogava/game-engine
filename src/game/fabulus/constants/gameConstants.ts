@@ -23,7 +23,7 @@ export const ENEMY_WANDER_RADIUS = 4;
 export const ENEMY_WANDER_INTERVAL_MS = 3500;
 export const ENEMY_HEIGHT_UNITS = 2.2;
 
-export const STATE_SAVE_THROTTLE_MS = 15000;
+export const STATE_SAVE_THROTTLE_MS = 5000;
 
 export const CLASS_STORAGE_KEY = 'fabulus_class_id';
 

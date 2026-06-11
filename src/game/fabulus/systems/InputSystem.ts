@@ -72,7 +72,7 @@ export class InputSystem {
         }
         const pick = this._pick(x, y);
         if (pick?.pickedMesh) {
-            const meta = pick.pickedMesh.metadata as { enemyInstanceId?: number; npcId?: number } | null;
+            const meta = pick.pickedMesh.metadata as { enemyInstanceId?: number; npcId?: number; lootDropId?: number } | null;
             if (meta?.npcId != null) {
                 this.scene.enemySystem.setHovered(null);
                 this._canvas.style.cursor = CURSOR_TALK;
@@ -85,6 +85,11 @@ export class InputSystem {
                     this._canvas.style.cursor = CURSOR_ATTACK;
                     return;
                 }
+            }
+            if (meta?.lootDropId != null) {
+                this.scene.enemySystem.setHovered(null);
+                this._canvas.style.cursor = 'pointer';
+                return;
             }
         }
         this.scene.enemySystem.setHovered(null);

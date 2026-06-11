@@ -26,13 +26,30 @@ async function main() {
         process.exit(1);
     }
 
+    // Columns added after initial release; CREATE TABLE IF NOT EXISTS won't add them to existing DBs.
+    const MIGRATIONS = [
+        "ALTER TABLE rpg_classes ADD COLUMN health_regen FLOAT NOT NULL DEFAULT 0.5",
+        "ALTER TABLE rpg_classes ADD COLUMN mana_regen FLOAT NOT NULL DEFAULT 1.0",
+    ];
+
     const conn = await mysql.createConnection({ uri: url, multipleStatements: true });
     try {
-        for (const file of ['fabulus_schema.sql', 'fabulus_seed.sql']) {
-            const sql = fs.readFileSync(path.join(__dirname, '..', 'db', file), 'utf8');
-            console.log(`[Seed:RPG] Running ${file}...`);
-            await conn.query(sql);
+        const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'fabulus_schema.sql'), 'utf8');
+        console.log('[Seed:RPG] Running fabulus_schema.sql...');
+        await conn.query(schemaSql);
+
+        for (const migration of MIGRATIONS) {
+            try {
+                await conn.query(migration);
+                console.log(`[Seed:RPG] Migration applied: ${migration}`);
+            } catch (err) {
+                if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+            }
         }
+
+        const seedSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'fabulus_seed.sql'), 'utf8');
+        console.log('[Seed:RPG] Running fabulus_seed.sql...');
+        await conn.query(seedSql);
         const [tables] = await conn.query("SHOW TABLES LIKE 'rpg\\_%'");
         console.log(`[Seed:RPG] Done. ${tables.length} rpg_* tables present:`);
         for (const t of tables) console.log('  -', Object.values(t)[0]);

@@ -12,8 +12,8 @@ import { FabulusPrefs } from './FabulusPrefs.js';
 import {
     ARMOR_K, ARMOR_PER_STR, ARMOR_PER_VIT, ATK_SPEED_PER_DEX, BASE_ATTACK_RANGE,
     BASE_ATTACK_SPEED, BASE_HAND_DMG_MAX, BASE_HAND_DMG_MIN, CLASS_STORAGE_KEY, CRIT_BASE_PCT,
-    CRIT_DMG_BASE, CRIT_DMG_PER_DEX, CRIT_PER_DEX, HEALTH_PER_VIT, HP_REGEN_BASE, HP_REGEN_PER_VIT,
-    MAIN_STAT_DMG_PER_POINT, MANA_PER_INT, MANA_REGEN_BASE, MANA_REGEN_PER_INT,
+    COMBAT_EXIT_DELAY_MS, CRIT_DMG_BASE, CRIT_DMG_PER_DEX, CRIT_PER_DEX, HEALTH_PER_VIT, HP_REGEN_PER_VIT,
+    MAIN_STAT_DMG_PER_POINT, MANA_PER_INT, MANA_REGEN_PER_INT,
     MOVE_SPEED_PER_DEX, SKILL_DMG_PER_INT, STATE_SAVE_THROTTLE_MS, XP_CURVE_BASE, XP_CURVE_EXPONENT,
 } from './constants/index.js';
 import { CameraSystem } from './systems/CameraSystem.js';
@@ -65,6 +65,7 @@ export class FabulusScene extends Scene3D {
     moveTarget: BABYLON.Vector3 | null = null;
     attackTarget: EnemyInstance | null = null;
     runMode = false;
+    lastCombatAt = 0;
 
     enemies: EnemyInstance[] = [];
     staticColliders: Aabb[] = [];
@@ -96,7 +97,7 @@ export class FabulusScene extends Scene3D {
 
     onCreate(scene: BABYLON.Scene, _input: InputManager): void {
         this.bScene = scene;
-        scene.clearColor = new BABYLON.Color4(0.04, 0.045, 0.06, 1);
+        scene.clearColor = new BABYLON.Color4(0.02, 0.022, 0.032, 1);
         this._asyncInit().catch(err => {
             console.error('[Fabulus] Scene init failed:', err);
             this.uiSystem.showLoadingError('Falha ao carregar o mundo. Recarregue a pagina.');
@@ -193,7 +194,7 @@ export class FabulusScene extends Scene3D {
     }
 
     private _onPageHide = (): void => {
-        if (this.ready) this.persistState(true);
+        if (this.ready) this.persistState(true, true);
     };
 
     update(dt: number): void {
@@ -216,6 +217,10 @@ export class FabulusScene extends Scene3D {
 
     now(): number {
         return performance.now();
+    }
+
+    isInCombat(): boolean {
+        return this.now() - this.lastCombatAt < COMBAT_EXIT_DELAY_MS;
     }
 
     get inputManager(): InputManager {
@@ -349,9 +354,9 @@ export class FabulusScene extends Scene3D {
         const moveSpeedMult = (1 + dexterity * MOVE_SPEED_PER_DEX)
             * (1 + (flatOf(ATTRIBUTE_TYPE.MOVE_SPEED_PCT) + (pct[ATTRIBUTE_TYPE.MOVE_SPEED_PCT] ?? 0)) / 100);
 
-        const hpRegen = (HP_REGEN_BASE + vitality * HP_REGEN_PER_VIT + flatOf(ATTRIBUTE_TYPE.HP_REGEN))
+        const hpRegen = (c.health_regen + vitality * HP_REGEN_PER_VIT + flatOf(ATTRIBUTE_TYPE.HP_REGEN))
             * pctMult(ATTRIBUTE_TYPE.HP_REGEN);
-        const manaRegen = (MANA_REGEN_BASE + intelligence * MANA_REGEN_PER_INT + flatOf(ATTRIBUTE_TYPE.MANA_REGEN))
+        const manaRegen = (c.mana_regen + intelligence * MANA_REGEN_PER_INT + flatOf(ATTRIBUTE_TYPE.MANA_REGEN))
             * pctMult(ATTRIBUTE_TYPE.MANA_REGEN);
 
         this.derived = {
@@ -368,7 +373,7 @@ export class FabulusScene extends Scene3D {
         };
     }
 
-    persistState(force = false): void {
+    persistState(force = false, keepalive = false): void {
         const now = this.now();
         if (!force && now - this._lastStateSaveAt < STATE_SAVE_THROTTLE_MS) return;
         this._lastStateSaveAt = now;
@@ -388,7 +393,7 @@ export class FabulusScene extends Scene3D {
             skill_points: p.skill_points,
             pos_x: pos ? Number(pos.x.toFixed(2)) : p.pos_x,
             pos_z: pos ? Number(pos.z.toFixed(2)) : p.pos_z,
-        }).catch(err => console.warn('[Fabulus] persistState failed:', err));
+        }, keepalive).catch(err => console.warn('[Fabulus] persistState failed:', err));
     }
 
     private _maybePersistState(): void {

@@ -4,18 +4,18 @@
 INSERT INTO rpg_classes
     (id, name, description, model_path, icon_path, max_level, starting_gold, main_stat,
      base_health, base_mana, base_strength, base_dexterity, base_intelligence, base_vitality,
-     health_per_level, mana_per_level, attribute_points_per_level, skill_points_per_level,
+     health_per_level, mana_per_level, health_regen, mana_regen, attribute_points_per_level, skill_points_per_level,
      walk_speed, run_speed, anim_idle, anim_walk, anim_run, anim_attack, anim_hit, anim_death)
 VALUES
     (1, 'Knight', 'A heavily armored melee fighter. Strength fuels his blade.',
      'classes/armored_animation.glb', 'models/rpg/icons/classes/knight.png', 50, 100, 1,
      120, 40, 12, 8, 5, 10,
-     12, 4, 3, 1,
+     12, 4, 0.8, 0.8, 3, 1,
      2.4, 5.0, NULL, 'Walking', 'Running', 'Attack', NULL, NULL),
     (2, 'Wizard', 'A master of the arcane. Intelligence empowers every spell.',
      'classes/armored_animation.glb', 'models/rpg/icons/classes/wizard.png', 50, 100, 3,
      80, 90, 5, 9, 14, 7,
-     8, 9, 3, 1,
+     8, 9, 0.4, 1.6, 3, 1,
      2.4, 4.8, NULL, 'Walking', 'Running', 'Attack', NULL, NULL)
 ON DUPLICATE KEY UPDATE
     name = VALUES(name), description = VALUES(description), model_path = VALUES(model_path), icon_path = VALUES(icon_path),
@@ -24,6 +24,7 @@ ON DUPLICATE KEY UPDATE
     base_strength = VALUES(base_strength), base_dexterity = VALUES(base_dexterity),
     base_intelligence = VALUES(base_intelligence), base_vitality = VALUES(base_vitality),
     health_per_level = VALUES(health_per_level), mana_per_level = VALUES(mana_per_level),
+    health_regen = VALUES(health_regen), mana_regen = VALUES(mana_regen),
     attribute_points_per_level = VALUES(attribute_points_per_level), skill_points_per_level = VALUES(skill_points_per_level),
     walk_speed = VALUES(walk_speed), run_speed = VALUES(run_speed),
     anim_idle = VALUES(anim_idle), anim_walk = VALUES(anim_walk), anim_run = VALUES(anim_run),

@@ -34,6 +34,7 @@ export class CombatSystem {
 
     private _startSwing(target: EnemyInstance, coeffPct: number, animOverride: string | null, staggerMs: number, isSkill = false): void {
         this.swinging = true;
+        this.scene.lastCombatAt = this.scene.now();
         const d = this.scene.derived;
         const weapon = this.scene.getEquippedWeapon();
         const override = animOverride ?? (weapon ? weapon.anim_attack_override : null);
@@ -59,7 +60,9 @@ export class CombatSystem {
             },
             () => {
                 this.swinging = false;
-                if (!this.scene.playerDead) this.scene.playerSystem.playLogical('idle');
+                if (!this.scene.playerDead && this.scene.playerLogicalState === 'attack') {
+                    this.scene.playerSystem.playLogical('idle');
+                }
             },
             ATTACK_DAMAGE_POINT,
         );
@@ -67,6 +70,10 @@ export class CombatSystem {
 
     resetSwing(): void {
         this.swinging = false;
+    }
+
+    get isSwinging(): boolean {
+        return this.swinging;
     }
 
     castMeleeSkill(target: EnemyInstance, coeffPct: number, animOverride: string | null, staggerMs: number): boolean {
@@ -149,11 +156,14 @@ export class CombatSystem {
             this.scene.uiSystem.toast(`Level ${p.level} alcancado!`);
             this.scene.persistState(true);
             console.debug(`[Fabulus] Level up: ${p.level}`);
+        } else {
+            this.scene.persistState(false);
         }
     }
 
     damagePlayer(dmgMin: number, dmgMax: number, _enemyLevel: number): void {
         if (this.scene.playerDead) return;
+        this.scene.lastCombatAt = this.scene.now();
         const p = this.scene.player;
         const d = this.scene.derived;
         const raw = dmgMin + Math.random() * (dmgMax - dmgMin);

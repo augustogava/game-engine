@@ -17,13 +17,17 @@ export const BASE_HAND_DMG_MIN = 1;
 export const BASE_HAND_DMG_MAX = 3;
 export const BASE_ATTACK_SPEED = 1.0;
 export const BASE_ATTACK_RANGE = 2.2;
+// Slightly inside attack range so CombatSystem can swing as soon as the player stops.
+export const ATTACK_STOP_RANGE_FACTOR = 0.95;
 
 export const HEALTH_PER_VIT = 3;
 export const MANA_PER_INT = 2;
-export const HP_REGEN_BASE = 0.5;
 export const HP_REGEN_PER_VIT = 0.08;
-export const MANA_REGEN_BASE = 1.0;
 export const MANA_REGEN_PER_INT = 0.12;
+
+export const COMBAT_EXIT_DELAY_MS = 5000;
+export const HP_REGEN_IN_COMBAT_MULT = 0.25;
+export const HP_REGEN_OUT_OF_COMBAT_MULT = 2.0;
 
 export const ATTACK_DAMAGE_POINT = 0.6;
 export const PLAYER_RESPAWN_MS = 3000;

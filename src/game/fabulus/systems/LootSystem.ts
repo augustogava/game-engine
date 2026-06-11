@@ -8,12 +8,13 @@ import {
     COIN_BOUNCE_DAMPING, COIN_MAX_BOUNCES, COIN_MODEL_FILE, COIN_REST_BOB_AMPL,
     COIN_REST_BOB_SPEED, COIN_SCALE, COIN_SPIN_SPEED, DROP_DESPAWN_MS, DROP_EJECT_SPEED_MAX,
     DROP_EJECT_SPEED_MIN, DROP_FADE_WARN_MS, DROP_GRAVITY, DROP_SCATTER_RADIUS,
-    ITEM_BEAM_HEIGHT, ITEM_BEAM_RADIUS, MAP_HALF, MAX_INVENTORY, MODELS_BASE_PATH, PICKUP_RADIUS,
+    ITEM_BEAM_HEIGHT, ITEM_BEAM_RADIUS, LOOT_PICK_PROXY_HEIGHT, LOOT_PICK_PROXY_RADIUS_GOLD,
+    LOOT_PICK_PROXY_RADIUS_ITEM, MAP_HALF, MAX_INVENTORY, MODELS_BASE_PATH, PICKUP_RADIUS,
 } from '../constants/index.js';
 import { FabulusApi } from '../api/FabulusApi.js';
 
 const DROP_SPAWN_HEIGHT = 1.2;
-const DROP_REST_Y = 0.12;
+const DROP_REST_Y = 0.02;
 const LABEL_TEX_W = 256;
 const LABEL_TEX_H = 48;
 const RARE_LIGHT_MIN_RARITY = 3;
@@ -166,11 +167,14 @@ export class LootSystem {
 
     private _makeCoinMesh(): BABYLON.TransformNode {
         const s = this.scene.bScene;
+        // Wrapper keeps the drop root's origin at the model base, so physics/rest Y maps to the ground.
+        const wrapper = new BABYLON.TransformNode(`fab_coin_root_${this.nextDropId}`, s);
         if (this.coinContainer) {
             const entries = this.coinContainer.instantiateModelsToScene(name => `coin_${this.nextDropId}_${name}`, false);
             const root = entries.rootNodes[0] as BABYLON.TransformNode;
             const childMeshes = root.getChildMeshes(false);
             let maxDim = 0;
+            let minY = Infinity;
             for (const m of childMeshes) {
                 m.computeWorldMatrix(true);
                 if (!m.getTotalVertices()) continue;
@@ -179,10 +183,14 @@ export class LootSystem {
                     bb.maximumWorld.x - bb.minimumWorld.x,
                     bb.maximumWorld.y - bb.minimumWorld.y,
                     bb.maximumWorld.z - bb.minimumWorld.z);
+                minY = Math.min(minY, bb.minimumWorld.y);
                 m.isPickable = false;
             }
-            if (maxDim > 0.001) root.scaling.scaleInPlace(COIN_SCALE / maxDim);
-            return root;
+            const scale = maxDim > 0.001 ? COIN_SCALE / maxDim : 1;
+            if (maxDim > 0.001) root.scaling.scaleInPlace(scale);
+            root.parent = wrapper;
+            if (Number.isFinite(minY)) root.position.y = -minY * scale;
+            return wrapper;
         }
         const coin = BABYLON.MeshBuilder.CreateCylinder(`fab_coin_${this.nextDropId}`, { height: 0.05, diameter: 0.3, tessellation: 16 }, s);
         const mat = new BABYLON.StandardMaterial('fab_coin_mat', s);
@@ -190,7 +198,23 @@ export class LootSystem {
         mat.emissiveColor = new BABYLON.Color3(0.25, 0.18, 0.04);
         coin.material = mat;
         coin.isPickable = false;
-        return coin;
+        coin.parent = wrapper;
+        coin.position.y = 0.025;
+        return wrapper;
+    }
+
+    /** Invisible cylinder enlarging the clickable area of a drop without changing its visuals. */
+    private _attachPickProxy(root: BABYLON.TransformNode, dropId: number, radius: number): void {
+        const proxy = BABYLON.MeshBuilder.CreateCylinder(
+            `fab_drop_pick_${dropId}`,
+            { height: LOOT_PICK_PROXY_HEIGHT, diameter: radius * 2, tessellation: 12 },
+            this.scene.bScene,
+        );
+        proxy.parent = root;
+        proxy.position.y = LOOT_PICK_PROXY_HEIGHT / 2;
+        proxy.visibility = 0;
+        proxy.isPickable = true;
+        proxy.metadata = { lootDropId: dropId, isPickProxy: true };
     }
 
     private _ejectVelocity(): { x: number; y: number; z: number } {
@@ -212,6 +236,7 @@ export class LootSystem {
             m.isPickable = true;
             m.metadata = { ...(m.metadata ?? {}), lootDropId: dropId };
         }
+        this._attachPickProxy(root, dropId, LOOT_PICK_PROXY_RADIUS_GOLD);
         const now = this.scene.now();
         const drop: GroundDrop = {
             kind: DROP_KIND.GOLD,
@@ -260,6 +285,7 @@ export class LootSystem {
 
         const root = new BABYLON.TransformNode(`fab_drop_${dropId}`, s);
         root.position.set(x, DROP_SPAWN_HEIGHT, z);
+        this._attachPickProxy(root, dropId, LOOT_PICK_PROXY_RADIUS_ITEM);
 
         const pedestal = BABYLON.MeshBuilder.CreateBox(`fab_drop_ped_${dropId}`, { width: 0.4, height: 0.12, depth: 0.4 }, s);
         pedestal.parent = root;
@@ -427,6 +453,7 @@ export class LootSystem {
         this.scene.uiSystem.floatText(pos.x, pos.y + 0.8, pos.z, `+${drop.amount} gold`, 'gold');
         this.scene.vfxSystem.goldSparkle(pos);
         this._dispose(drop);
+        this.scene.persistState(true);
     }
 
     private _dispose(drop: GroundDrop): void {
@@ -477,7 +504,10 @@ export class LootSystem {
             } else if (remaining < DROP_FADE_WARN_MS) {
                 const vis = remaining / DROP_FADE_WARN_MS;
                 const meshes = drop.root.getChildMeshes ? drop.root.getChildMeshes(false) : [];
-                for (const m of meshes) m.visibility = vis;
+                for (const m of meshes) {
+                    if ((m.metadata as { isPickProxy?: boolean } | null)?.isPickProxy) continue;
+                    m.visibility = vis;
+                }
                 if ((drop.root as any).visibility !== undefined) (drop.root as any).visibility = vis;
             }
         }

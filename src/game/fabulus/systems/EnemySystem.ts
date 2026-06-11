@@ -346,6 +346,11 @@ export class EnemySystem {
         const group = instance.anims[key] ?? instance.anims.walk;
         if (!group) return;
         if (instance.currentAnim === group) {
+            // A stopped/paused group must be restarted; an early-return here would leave the enemy frozen.
+            if (!group.isPlaying) {
+                group.start(true, speedRatio);
+                return;
+            }
             if (group.speedRatio !== speedRatio) group.speedRatio = speedRatio;
             return;
         }
@@ -357,7 +362,8 @@ export class EnemySystem {
     private _stopEnemyAnim(instance: EnemyInstance): void {
         if (instance.currentAnim) {
             instance.currentAnim.goToFrame(instance.currentAnim.from);
-            instance.currentAnim.pause();
+            instance.currentAnim.stop();
+            instance.currentAnim = null;
         }
     }
 

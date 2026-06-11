@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS rpg_classes (
     base_vitality INT NOT NULL,
     health_per_level INT NOT NULL,
     mana_per_level INT NOT NULL,
+    health_regen FLOAT NOT NULL DEFAULT 0.5,
+    mana_regen FLOAT NOT NULL DEFAULT 1.0,
     attribute_points_per_level INT NOT NULL DEFAULT 3,
     skill_points_per_level INT NOT NULL DEFAULT 1,
     walk_speed FLOAT NOT NULL DEFAULT 2.4,

@@ -1,15 +1,15 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FabulusScene } from '../FabulusScene.js';
 
-const HEMI_INTENSITY = 0.2;
-const SUN_INTENSITY = 0.85;
-const FILL_INTENSITY = 0.18;
+const HEMI_INTENSITY = 0.1;
+const SUN_INTENSITY = 0.5;
+const FILL_INTENSITY = 0.1;
 const SHADOW_MAP_SIZE_DESKTOP = 4096;
 const SHADOW_MAP_SIZE_MOBILE = 2048;
-const FOG_DENSITY = 0.0022;
+const FOG_DENSITY = 0.0035;
 const TORCH_ENABLED = true;
-const TORCH_INTENSITY = 1.25;
-const TORCH_RANGE = 12;
+const TORCH_INTENSITY = 1.8;
+const TORCH_RANGE = 14;
 const TORCH_HEIGHT = 2.6;
 const SHADOW_BIAS = 0.0008;
 const SHADOW_NORMAL_BIAS = 0.04;
@@ -61,8 +61,9 @@ export class LightingSystem {
         );
         sun.position = new BABYLON.Vector3(40, 70, 35);
         sun.intensity = SUN_INTENSITY;
-        sun.diffuse = new BABYLON.Color3(1.0, 0.94, 0.82);
-        sun.specular = new BABYLON.Color3(0.85, 0.8, 0.65);
+        // Cold moonlit key light: the warm accents come from torch/fire point lights.
+        sun.diffuse = new BABYLON.Color3(0.78, 0.8, 0.92);
+        sun.specular = new BABYLON.Color3(0.6, 0.62, 0.72);
         sun.shadowEnabled = true;
         this.sun = sun;
 
@@ -93,7 +94,7 @@ export class LightingSystem {
 
         s.fogMode = BABYLON.Scene.FOGMODE_EXP2;
         s.fogDensity = FOG_DENSITY;
-        s.fogColor = new BABYLON.Color3(0.05, 0.045, 0.06);
+        s.fogColor = new BABYLON.Color3(0.03, 0.028, 0.04);
 
         if (TORCH_ENABLED) {
             const torch = new BABYLON.PointLight('fab_torch', new BABYLON.Vector3(0, TORCH_HEIGHT, 0), s);

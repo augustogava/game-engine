@@ -369,7 +369,7 @@ export const FabulusApi = {
         });
     },
 
-    async savePlayerState(partial: Partial<PlayerState>): Promise<void> {
+    async savePlayerState(partial: Partial<PlayerState>, keepalive = false): Promise<void> {
         if (USE_MOCK) {
             Object.assign(mockState.player, partial);
             saveMockState();
@@ -378,6 +378,8 @@ export const FabulusApi = {
         await apiFetch('/player/state', {
             method: 'PUT',
             body: JSON.stringify(partial),
+            // keepalive lets the browser finish the request while the page is unloading.
+            keepalive,
         });
     },
 };
