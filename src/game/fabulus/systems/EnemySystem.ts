@@ -7,6 +7,7 @@ import {
     ENEMY_RESPAWN_MS, ENEMY_SPAWN_COUNT, ENEMY_SPAWN_MIN_DIST, ENEMY_WANDER_INTERVAL_MS,
     ENEMY_WANDER_RADIUS, MAP_HALF, MODELS_BASE_PATH,
 } from '../constants/index.js';
+import { FabulusPrefs } from '../FabulusPrefs.js';
 
 const HP_BAR_WIDTH = 1.1;
 const HP_BAR_HEIGHT = 0.14;
@@ -16,6 +17,9 @@ const ENEMY_LEVEL_VARIANCE = 2;
 const RETURN_REGEN_PER_SEC_PCT = 10;
 const DEATH_FADE_SECONDS = 1.2;
 const ATTACK_DAMAGE_POINT_PCT = 0.5;
+const ELITE_SCALE_MULT = 1.25;
+const ELITE_TINT = { r: 1.0, g: 0.82, b: 0.45 };
+const ELITE_EMISSIVE = { r: 0.22, g: 0.15, b: 0.03 };
 
 // Visual variants per enemy def (shared goblin GLB differentiated by scale + tint).
 const ENEMY_VARIANT_STYLES: Record<number, { scale: number; tint: { r: number; g: number; b: number } }> = {
@@ -29,12 +33,18 @@ export class EnemySystem {
     private nextInstanceId = 1;
     private highlightedTarget: EnemyInstance | null = null;
     private hoveredEnemy: EnemyInstance | null = null;
+    private _onPrefsChange = (): void => {
+        for (const e of this.scene.enemies) {
+            if (e.state !== ENEMY_STATE.DEAD) this.refreshHpBar(e);
+        }
+    };
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
     }
 
     async init(): Promise<void> {
+        FabulusPrefs.onChange(this._onPrefsChange);
         for (const def of this.scene.enemyDefs) {
             try {
                 const lastSlash = def.model_path.lastIndexOf('/');
@@ -88,8 +98,11 @@ export class EnemySystem {
 
         const level = def.level + Math.floor(Math.random() * (ENEMY_LEVEL_VARIANCE + 1));
         const levelDelta = level - def.level;
-        const maxHp = Math.round(def.max_health * (1 + levelDelta * def.health_scale_pct / 100));
-        const dmgScale = 1 + levelDelta * def.damage_scale_pct / 100;
+        const isElite = Math.random() * 100 < (def.elite_chance ?? 0);
+        const eliteHpMult = isElite ? (def.elite_hp_mult ?? 1) : 1;
+        const eliteDmgMult = isElite ? (def.elite_dmg_mult ?? 1) : 1;
+        const maxHp = Math.round(def.max_health * (1 + levelDelta * def.health_scale_pct / 100) * eliteHpMult);
+        const dmgScale = (1 + levelDelta * def.damage_scale_pct / 100) * eliteDmgMult;
 
         const instance: EnemyInstance = {
             instanceId,
@@ -117,6 +130,9 @@ export class EnemySystem {
             deathStartedAt: 0,
             slowPct: 0,
             slowUntil: 0,
+            isElite,
+            xpMult: isElite ? (def.elite_xp_mult ?? 1) : 1,
+            lootRollsBonus: isElite ? (def.elite_loot_rolls ?? 0) : 0,
         };
 
         const container = this.containers.get(def.id);
@@ -133,6 +149,11 @@ export class EnemySystem {
                 modelRoot.scaling.scaleInPlace(variant.scale);
                 instance.colliderRadius = ENEMY_COLLIDER_RADIUS * variant.scale;
                 this._applyVariantTint(allMeshes, variant.tint);
+            }
+            if (isElite) {
+                modelRoot.scaling.scaleInPlace(ELITE_SCALE_MULT);
+                instance.colliderRadius *= ELITE_SCALE_MULT;
+                this._applyEliteLook(allMeshes);
             }
             for (const m of allMeshes) {
                 m.isPickable = true;
@@ -161,6 +182,11 @@ export class EnemySystem {
             mat.diffuseColor = new BABYLON.Color3(0.35, 0.55, 0.3);
             body.material = mat;
             instance.meshes = [body];
+            if (isElite) {
+                body.scaling.scaleInPlace(ELITE_SCALE_MULT);
+                instance.colliderRadius *= ELITE_SCALE_MULT;
+                this._applyEliteLook([body]);
+            }
         }
 
         this._buildHpBar(instance);
@@ -168,6 +194,42 @@ export class EnemySystem {
         this._stopEnemyAnim(instance);
         this.scene.enemies.push(instance);
         return instance;
+    }
+
+    /** Elites get cloned materials (containers share materials between instances) with a golden tint + glow. */
+    private _applyEliteLook(meshes: BABYLON.AbstractMesh[]): void {
+        for (const m of meshes) {
+            const mat = m.material;
+            if (!mat) continue;
+            const cloned = mat.clone(`${mat.name}_elite_${m.uniqueId}`);
+            if (!cloned) continue;
+            if (cloned instanceof BABYLON.PBRMaterial) {
+                cloned.albedoColor = cloned.albedoColor.multiply(new BABYLON.Color3(ELITE_TINT.r, ELITE_TINT.g, ELITE_TINT.b));
+                cloned.emissiveColor = new BABYLON.Color3(ELITE_EMISSIVE.r, ELITE_EMISSIVE.g, ELITE_EMISSIVE.b);
+            } else if (cloned instanceof BABYLON.StandardMaterial) {
+                cloned.diffuseColor = cloned.diffuseColor.multiply(new BABYLON.Color3(ELITE_TINT.r, ELITE_TINT.g, ELITE_TINT.b));
+                cloned.emissiveColor = new BABYLON.Color3(ELITE_EMISSIVE.r, ELITE_EMISSIVE.g, ELITE_EMISSIVE.b);
+            }
+            m.material = cloned;
+        }
+        const layer = this.scene.renderSystem.getHighlightLayer();
+        if (layer) {
+            for (const m of meshes) {
+                if (m instanceof BABYLON.Mesh && m.getTotalVertices() > 0) {
+                    try { layer.addMesh(m, new BABYLON.Color3(0.95, 0.75, 0.25)); } catch { /* skinned edge cases */ }
+                }
+            }
+        }
+    }
+
+    private _restoreEliteGlow(instance: EnemyInstance): void {
+        const layer = this.scene.renderSystem.getHighlightLayer();
+        if (!layer) return;
+        for (const m of instance.meshes) {
+            if (m instanceof BABYLON.Mesh && m.getTotalVertices() > 0) {
+                try { layer.addMesh(m, new BABYLON.Color3(0.95, 0.75, 0.25)); } catch { /* skinned edge cases */ }
+            }
+        }
     }
 
     private _applyVariantTint(meshes: BABYLON.AbstractMesh[], tint: { r: number; g: number; b: number }): void {
@@ -191,7 +253,7 @@ export class EnemySystem {
         const variant = ENEMY_VARIANT_STYLES[instance.def.id];
         const plane = BABYLON.MeshBuilder.CreatePlane(`fab_hpbar_${instance.instanceId}`, { width: HP_BAR_WIDTH, height: HP_BAR_HEIGHT * 2 }, s);
         plane.parent = instance.root;
-        plane.position.y = ENEMY_HEIGHT_UNITS * (variant ? variant.scale : 1) + 0.35;
+        plane.position.y = ENEMY_HEIGHT_UNITS * (variant ? variant.scale : 1) * (instance.isElite ? ELITE_SCALE_MULT : 1) + 0.35;
         plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
         plane.isPickable = false;
 
@@ -213,6 +275,9 @@ export class EnemySystem {
     private _drawHpBar(instance: EnemyInstance): void {
         const tex = instance.hpBarTexture as BABYLON.DynamicTexture | null;
         if (!tex) return;
+        const drawKey = `${Math.round(instance.hp)}_${instance.level}${(instance as any).isElite ? '_e' : ''}`;
+        if ((instance as any).__hpDrawKey === drawKey) return;
+        (instance as any).__hpDrawKey = drawKey;
         const ctx = tex.getContext() as CanvasRenderingContext2D;
         const nameH = HP_BAR_TEX_H;
         const totalH = HP_BAR_TEX_H * 2;
@@ -222,8 +287,9 @@ export class EnemySystem {
         ctx.textBaseline = 'middle';
         ctx.fillStyle = 'rgba(8,6,5,0.7)';
         ctx.fillRect(0, 0, HP_BAR_TEX_W, nameH);
-        ctx.fillStyle = '#e8dcc4';
-        ctx.fillText(`${instance.def.name} Lv${instance.level}`, HP_BAR_TEX_W / 2, nameH / 2 + 2, HP_BAR_TEX_W - 8);
+        ctx.fillStyle = instance.isElite ? '#f0c860' : '#e8dcc4';
+        const displayName = instance.isElite ? `Elite ${instance.def.name}` : instance.def.name;
+        ctx.fillText(`${displayName} Lv${instance.level}`, HP_BAR_TEX_W / 2, nameH / 2 + 2, HP_BAR_TEX_W - 8);
         ctx.fillStyle = 'rgba(10,8,8,0.85)';
         ctx.fillRect(0, nameH, HP_BAR_TEX_W, HP_BAR_TEX_H);
         const pct = Math.max(0, instance.hp / instance.maxHp);
@@ -235,9 +301,10 @@ export class EnemySystem {
     refreshHpBar(instance: EnemyInstance): void {
         this._drawHpBar(instance);
         if (instance.hpBarPlane) {
-            const show = instance.hp < instance.maxHp
+            const prefs = FabulusPrefs.get();
+            const show = prefs.showEnemyHpBars && (instance.hp < instance.maxHp
                 || this.scene.attackTarget === instance
-                || this.hoveredEnemy === instance;
+                || this.hoveredEnemy === instance);
             instance.hpBarPlane.setEnabled(show && instance.state !== ENEMY_STATE.DEAD);
         }
     }
@@ -257,11 +324,13 @@ export class EnemySystem {
         const layer = this.scene.renderSystem.getHighlightLayer();
         if (!layer) return;
         if (this.highlightedTarget) {
-            for (const m of this.highlightedTarget.meshes) {
+            const prev = this.highlightedTarget;
+            for (const m of prev.meshes) {
                 if (m instanceof BABYLON.Mesh) {
                     try { layer.removeMesh(m); } catch { /* mesh may be disposed */ }
                 }
             }
+            if (prev.isElite) this._restoreEliteGlow(prev);
         }
         this.highlightedTarget = effective;
         if (effective) {
@@ -309,6 +378,8 @@ export class EnemySystem {
         instance.hp = instance.maxHp;
         instance.root.position.set(instance.spawnPos.x, 0, instance.spawnPos.z);
         instance.root.rotation.x = 0;
+        const modelRoot = instance.meshes[0];
+        if (modelRoot && modelRoot.position !== undefined) modelRoot.position.z = 0;
         for (const m of instance.meshes) {
             if (m.visibility !== undefined) m.visibility = 1;
         }
@@ -316,6 +387,10 @@ export class EnemySystem {
         instance.nextWanderAt = 0;
         instance.slowPct = 0;
         instance.slowUntil = 0;
+        instance.lungeStartedAt = 0;
+        instance.lastAttackAt = 0;
+        instance.deathStartedAt = 0;
+        instance.staggeredUntil = 0;
         this.refreshHpBar(instance);
     }
 
@@ -484,5 +559,20 @@ export class EnemySystem {
 
     findByInstanceId(id: number): EnemyInstance | null {
         return this.scene.enemies.find(e => e.instanceId === id) ?? null;
+    }
+
+    dispose(): void {
+        for (const e of this.scene.enemies) {
+            if (e.hpBarTexture) e.hpBarTexture.dispose();
+            try { e.root.dispose(false, true); } catch { /* already disposed */ }
+        }
+        this.scene.enemies = [];
+        for (const container of this.containers.values()) {
+            try { container.dispose(); } catch { /* already disposed */ }
+        }
+        this.containers.clear();
+        this.highlightedTarget = null;
+        this.hoveredEnemy = null;
+        FabulusPrefs.offChange(this._onPrefsChange);
     }
 }

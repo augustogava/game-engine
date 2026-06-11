@@ -19,5 +19,7 @@ export interface SkillDef {
     projectile_speed: number | null;
     anim_override: string | null;
     vfx_key: string;
+    vfx_element: string;
+    icon_path: string | null;
     effects: ItemModifier[];
 }

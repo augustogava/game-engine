@@ -3,16 +3,18 @@
 --   attribute_type: 1=strength 2=dexterity 3=intelligence 4=vitality 5=max_health
 --                   6=max_mana 7=armor 8=damage_pct 9=move_speed_pct 10=crit_chance_pct
 --                   11=crit_damage_pct 12=attack_speed_pct 13=hp_regen 14=mana_regen
---   item_type:      1=weapon 2=helmet 3=chest 4=boots 5=ring 6=amulet 7=offhand
+--   item_type:      1=weapon 2=helmet 3=chest 4=boots 5=ring 6=amulet 7=offhand 8=consumable
 --   value_type:     1=flat 2=percent
 --   skill_type:     1=melee_strike 2=projectile 3=aoe 4=buff 5=heal
 --   loot_type:      1=gold 2=item
+--   affix_type:     1=prefix 2=suffix
 
 CREATE TABLE IF NOT EXISTS rpg_classes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(50) NOT NULL,
     description TEXT,
     model_path VARCHAR(255) NOT NULL,
+    icon_path VARCHAR(255) NULL,
     max_level INT NOT NULL DEFAULT 50,
     starting_gold INT NOT NULL DEFAULT 100,
     main_stat TINYINT NOT NULL DEFAULT 1,
@@ -96,6 +98,11 @@ CREATE TABLE IF NOT EXISTS rpg_enemies (
     gold_max INT NOT NULL DEFAULT 0,
     health_scale_pct FLOAT NOT NULL DEFAULT 0,
     damage_scale_pct FLOAT NOT NULL DEFAULT 0,
+    elite_chance FLOAT NOT NULL DEFAULT 0,
+    elite_hp_mult FLOAT NOT NULL DEFAULT 2.5,
+    elite_dmg_mult FLOAT NOT NULL DEFAULT 1.5,
+    elite_xp_mult FLOAT NOT NULL DEFAULT 3,
+    elite_loot_rolls INT NOT NULL DEFAULT 1,
     anim_idle VARCHAR(80) NULL,
     anim_walk VARCHAR(80) NULL,
     anim_run VARCHAR(80) NULL,
@@ -120,6 +127,7 @@ CREATE TABLE IF NOT EXISTS rpg_items (
     item_type TINYINT NOT NULL,
     main_stat TINYINT NULL,
     model_path VARCHAR(255) NULL,
+    icon_path VARCHAR(255) NULL,
     rarity_id INT NOT NULL,
     required_level INT NOT NULL DEFAULT 1,
     damage_min INT NULL,
@@ -127,6 +135,11 @@ CREATE TABLE IF NOT EXISTS rpg_items (
     attack_speed FLOAT NULL,
     armor INT NULL,
     anim_attack_override VARCHAR(80) NULL,
+    sell_value INT NULL,
+    restore_health INT NULL,
+    restore_mana INT NULL,
+    use_cooldown_ms INT NULL,
+    max_stack INT NULL,
     KEY idx_rpg_items_type (item_type),
     KEY idx_rpg_items_rarity (rarity_id),
     CONSTRAINT fk_rpg_items_rarity FOREIGN KEY (rarity_id) REFERENCES rpg_rarities (id)
@@ -148,6 +161,8 @@ CREATE TABLE IF NOT EXISTS rpg_player_items (
     item_id INT NOT NULL,
     is_equipped TINYINT NOT NULL DEFAULT 0,
     slot TINYINT NULL,
+    quantity INT NOT NULL DEFAULT 1,
+    affixes JSON NULL,
     acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     KEY idx_rpg_player_items_player (player_id),
     CONSTRAINT fk_rpg_player_items_player FOREIGN KEY (player_id) REFERENCES rpg_players (id) ON DELETE CASCADE,
@@ -173,6 +188,8 @@ CREATE TABLE IF NOT EXISTS rpg_skills (
     projectile_speed FLOAT NULL,
     anim_override VARCHAR(80) NULL,
     vfx_key VARCHAR(60) NOT NULL DEFAULT 'default',
+    vfx_element VARCHAR(20) NOT NULL DEFAULT 'physical',
+    icon_path VARCHAR(255) NULL,
     KEY idx_rpg_skills_class (class_id),
     CONSTRAINT fk_rpg_skills_class FOREIGN KEY (class_id) REFERENCES rpg_classes (id)
 );
@@ -199,6 +216,19 @@ CREATE TABLE IF NOT EXISTS rpg_player_skills (
     CONSTRAINT fk_rpg_player_skills_skill FOREIGN KEY (skill_id) REFERENCES rpg_skills (id)
 );
 
+CREATE TABLE IF NOT EXISTS rpg_affixes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(60) NOT NULL,
+    affix_type TINYINT NOT NULL,
+    attribute_type TINYINT NOT NULL,
+    value_type TINYINT NOT NULL DEFAULT 1,
+    min_roll FLOAT NOT NULL,
+    max_roll FLOAT NOT NULL,
+    min_rarity INT NOT NULL DEFAULT 1,
+    weight INT NOT NULL DEFAULT 1,
+    KEY idx_rpg_affixes_type (affix_type)
+);
+
 CREATE TABLE IF NOT EXISTS rpg_loot_tables (
     id INT AUTO_INCREMENT PRIMARY KEY,
     enemy_id INT NOT NULL,
@@ -210,4 +240,35 @@ CREATE TABLE IF NOT EXISTS rpg_loot_tables (
     KEY idx_rpg_loot_enemy (enemy_id),
     CONSTRAINT fk_rpg_loot_enemy FOREIGN KEY (enemy_id) REFERENCES rpg_enemies (id) ON DELETE CASCADE,
     CONSTRAINT fk_rpg_loot_item FOREIGN KEY (item_id) REFERENCES rpg_items (id)
+);
+
+-- Static props placed on the map (model_path relative to models/rpg/).
+-- scale is the target height in world units (models are normalized on load).
+CREATE TABLE IF NOT EXISTS rpg_map_props (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    model_path VARCHAR(255) NOT NULL,
+    pos_x FLOAT NOT NULL DEFAULT 0,
+    pos_y FLOAT NOT NULL DEFAULT 0,
+    pos_z FLOAT NOT NULL DEFAULT 0,
+    rot_y FLOAT NOT NULL DEFAULT 0,
+    scale FLOAT NOT NULL DEFAULT 1,
+    collidable TINYINT NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- NPCs with a pre-configured dialogue tree stored as JSON:
+-- { "start": "<nodeKey>", "nodes": { "<nodeKey>": { "text": "...",
+--   "options": [{ "label": "...", "next": "<nodeKey>|null" }] } } }
+-- next = null closes the dialogue.
+CREATE TABLE IF NOT EXISTS rpg_npcs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(60) NOT NULL,
+    title VARCHAR(80) NULL,
+    model_path VARCHAR(255) NOT NULL,
+    pos_x FLOAT NOT NULL DEFAULT 0,
+    pos_z FLOAT NOT NULL DEFAULT 0,
+    rot_y FLOAT NOT NULL DEFAULT 0,
+    scale FLOAT NOT NULL DEFAULT 1,
+    idle_anim VARCHAR(80) NULL,
+    dialog JSON NULL
 );

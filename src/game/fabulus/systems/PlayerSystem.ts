@@ -126,7 +126,9 @@ export class PlayerSystem {
     private _stopAllAnims(): void {
         for (const key of Object.keys(this.anims)) {
             const g = this.anims[key];
-            if (g?.isPlaying) g.stop();
+            // isStarted also covers paused groups (isPlaying is false while paused),
+            // which would otherwise make the next start() a silent no-op.
+            if (g && (g.isStarted || g.isPlaying)) g.stop();
         }
         this.currentLoop = null;
     }
@@ -204,8 +206,14 @@ export class PlayerSystem {
         if (this.scene.playerDead) return;
         this.scene.playerDead = true;
         this._clearAttackTimeouts();
+        this.scene.combatSystem.resetSwing();
         this.scene.moveTarget = null;
         this.scene.attackTarget = null;
+        this.scene.lootSystem.cancelPendingPickup();
+        if (this.scene.activeBuffs.length) {
+            this.scene.activeBuffs = [];
+            this.scene.recomputeDerivedStats();
+        }
         this.respawnAt = this.scene.now() + PLAYER_RESPAWN_MS;
         this.deathFadeT = 0;
         this.playLogical('dead');
@@ -217,6 +225,7 @@ export class PlayerSystem {
     private _respawn(): void {
         this.scene.playerDead = false;
         this.deathFadeT = 0;
+        this.scene.combatSystem.resetSwing();
         const root = this.scene.playerRoot;
         if (root) {
             root.position.set(this.spawnX, 0, this.spawnZ);

@@ -1,20 +1,23 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FabulusScene } from '../FabulusScene.js';
+import { FabulusPrefs, type FabulusPrefsData } from '../FabulusPrefs.js';
 
 const ENV_URL_LOCAL = 'models/rpg/env/environmentSpecular.env';
 const ENV_URL_CDN = 'https://assets.babylonjs.com/environments/environmentSpecular.env';
 const PBR_MAX_SIMULTANEOUS_LIGHTS = 8;
-const PIPELINE_SAMPLES_DESKTOP = 4;
 const PIPELINE_SAMPLES_MOBILE = 1;
 const SSAO_RATIO = 0.75;
 const GRAIN_INTENSITY = 7;
+const ENVIRONMENT_INTENSITY = 0.7;
 
 export class RenderSystem {
     private scene: FabulusScene;
     private pipeline: BABYLON.DefaultRenderingPipeline | null = null;
     private ssao: BABYLON.SSAO2RenderingPipeline | null = null;
+    private ssaoAttached = false;
     private highlight: BABYLON.HighlightLayer | null = null;
     private envReady = false;
+    private _onPrefsChange = (prefs: FabulusPrefsData): void => this.applyGraphicsSettings(prefs);
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
@@ -24,9 +27,9 @@ export class RenderSystem {
         const s = this.scene.bScene;
         const isMobile = this._isMobile();
 
-        s.clearColor = new BABYLON.Color4(0.07, 0.075, 0.1, 1);
-        s.ambientColor = new BABYLON.Color3(0.08, 0.07, 0.06);
-        s.environmentIntensity = 1.35;
+        s.clearColor = new BABYLON.Color4(0.04, 0.042, 0.06, 1);
+        s.ambientColor = new BABYLON.Color3(0.04, 0.035, 0.03);
+        s.environmentIntensity = ENVIRONMENT_INTENSITY;
 
         this._loadEnvironment(s);
 
@@ -37,7 +40,7 @@ export class RenderSystem {
         }
 
         const pipeline = new BABYLON.DefaultRenderingPipeline('fab_pp', true, s, [camera]);
-        pipeline.samples = isMobile ? PIPELINE_SAMPLES_MOBILE : PIPELINE_SAMPLES_DESKTOP;
+        pipeline.samples = PIPELINE_SAMPLES_MOBILE;
         pipeline.imageProcessingEnabled = true;
         pipeline.imageProcessing.toneMappingEnabled = true;
         pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
@@ -65,6 +68,7 @@ export class RenderSystem {
                 ssao.radius = 1.6;
                 ssao.samples = 12;
                 this.ssao = ssao;
+                this.ssaoAttached = true;
             } catch (err) {
                 console.warn('[Fabulus] SSAO unavailable:', err);
             }
@@ -74,7 +78,52 @@ export class RenderSystem {
         highlight.innerGlow = false;
         this.highlight = highlight;
 
+        this.applyGraphicsSettings(FabulusPrefs.get());
+        FabulusPrefs.onChange(this._onPrefsChange);
+
         console.debug('[Fabulus] Render pipeline ready');
+    }
+
+    /** Applies the gfx_* settings to the live pipeline (runtime, no reload required). */
+    applyGraphicsSettings(prefs: FabulusPrefsData): void {
+        const s = this.scene.bScene;
+        const pipeline = this.pipeline;
+        if (!pipeline || s.isDisposed) return;
+
+        pipeline.fxaaEnabled = prefs.gfxAntialiasing === 'fxaa';
+        pipeline.samples = prefs.gfxAntialiasing === 'msaa4' ? 4 : prefs.gfxAntialiasing === 'msaa2' ? 2 : 1;
+
+        const scale = Math.max(0.5, Math.min(1.5, prefs.gfxRenderScale));
+        s.getEngine().setHardwareScalingLevel(1 / scale);
+
+        pipeline.bloomEnabled = prefs.gfxBloom;
+        pipeline.sharpenEnabled = prefs.gfxSharpen;
+        pipeline.imageProcessing.vignetteEnabled = prefs.gfxVignette;
+
+        if (prefs.gfxColorGrading) {
+            pipeline.imageProcessing.toneMappingEnabled = true;
+            pipeline.imageProcessing.contrast = 1.12;
+            pipeline.imageProcessing.exposure = 1.15;
+        } else {
+            pipeline.imageProcessing.toneMappingEnabled = false;
+            pipeline.imageProcessing.contrast = 1.0;
+            pipeline.imageProcessing.exposure = 1.0;
+        }
+
+        const camera = s.activeCamera;
+        if (this.ssao && camera) {
+            const wantSsao = prefs.gfxSsao !== 'off';
+            if (wantSsao && !this.ssaoAttached) {
+                s.postProcessRenderPipelineManager.attachCamerasToRenderPipeline('fab_ssao', camera);
+                this.ssaoAttached = true;
+            } else if (!wantSsao && this.ssaoAttached) {
+                s.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline('fab_ssao', camera);
+                this.ssaoAttached = false;
+            }
+            this.ssao.totalStrength = prefs.gfxSsao === 'high' ? 1.25 : 0.9;
+        }
+
+        this.scene.lightingSystem.applyShadowQuality(prefs.gfxShadowQuality);
     }
 
     getHighlightLayer(): BABYLON.HighlightLayer | null {
@@ -103,6 +152,16 @@ export class RenderSystem {
         return scale;
     }
 
+    /** All renderable meshes under a loaded GLB root (nested children included). */
+    collectModelMeshes(modelRoot: BABYLON.Node): BABYLON.AbstractMesh[] {
+        const meshes = modelRoot.getChildMeshes(true);
+        if (meshes.length > 0) return meshes;
+        if (modelRoot instanceof BABYLON.AbstractMesh && modelRoot.getTotalVertices() > 0) {
+            return [modelRoot];
+        }
+        return [];
+    }
+
     prepareMeshes(meshes: BABYLON.AbstractMesh[], options?: { castShadow?: boolean; receiveShadow?: boolean }): void {
         const castShadow = options?.castShadow !== false;
         const receiveShadow = options?.receiveShadow !== false;
@@ -111,6 +170,7 @@ export class RenderSystem {
         for (const mesh of meshes) {
             if (!mesh || mesh.getTotalVertices() <= 0) continue;
             mesh.alwaysSelectAsActiveMesh = true;
+            mesh.refreshBoundingInfo(true, false);
             if (receiveShadow) mesh.receiveShadows = true;
             if (castShadow) this.scene.lightingSystem.addShadowCaster(mesh);
 
@@ -160,7 +220,7 @@ export class RenderSystem {
             s.environmentTexture = envTex;
             envTex.onLoadObservable.add(() => {
                 if (this.scene.bScene.isDisposed) return;
-                s.environmentIntensity = 1.35;
+                s.environmentIntensity = ENVIRONMENT_INTENSITY;
                 this.envReady = true;
                 console.debug('[Fabulus] Environment map loaded:', url);
             });
@@ -171,5 +231,9 @@ export class RenderSystem {
 
     private _isMobile(): boolean {
         return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    }
+
+    dispose(): void {
+        FabulusPrefs.offChange(this._onPrefsChange);
     }
 }

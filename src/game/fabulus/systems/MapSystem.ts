@@ -4,6 +4,7 @@ import {
     MAP_BORDER_MARGIN, MAP_HALF, MAP_MODEL_FILE, MAP_SIZE, MODELS_BASE_PATH,
     OBSTACLE_COUNT, OBSTACLE_SEED,
 } from '../constants/index.js';
+import { FabulusPrefs } from '../FabulusPrefs.js';
 
 const GROUND_TEXTURE_SIZE = 1024;
 const GROUND_TILE_CELLS = 32;
@@ -13,6 +14,7 @@ const NORMAL_MAP_SIZE = 512;
 const DECOR_COUNT = 40;
 const BIOME_PATCH_COUNT = 14;
 const BIOME_PROP_COUNT = 26;
+const DETAIL_DENSITY: Record<string, number> = { low: 0.4, medium: 1, high: 1.6 };
 const BIOME_ZONE_THRESHOLD = 0.2;
 
 function mulberry32(seed: number): () => number {
@@ -230,7 +232,8 @@ export class MapSystem {
         mushroomMat.roughness = 0.85;
 
         const zoneEdge = MAP_HALF * BIOME_ZONE_THRESHOLD;
-        for (let i = 0; i < BIOME_PROP_COUNT; i++) {
+        const propCount = Math.round(BIOME_PROP_COUNT * (DETAIL_DENSITY[FabulusPrefs.get().gfxDetailLevel] ?? 1));
+        for (let i = 0; i < propCount; i++) {
             const x = (rand() * 2 - 1) * (MAP_HALF - 6);
             const z = (rand() * 2 - 1) * (MAP_HALF - 6);
             if (Math.hypot(x, z) < OBSTACLE_MIN_DIST_FROM_CENTER) continue;
@@ -319,7 +322,8 @@ export class MapSystem {
         grassMat.roughness = 0.95;
         grassMat.backFaceCulling = false;
 
-        for (let i = 0; i < DECOR_COUNT; i++) {
+        const decorCount = Math.round(DECOR_COUNT * (DETAIL_DENSITY[FabulusPrefs.get().gfxDetailLevel] ?? 1));
+        for (let i = 0; i < decorCount; i++) {
             const x = (rand() * 2 - 1) * (MAP_HALF - 4);
             const z = (rand() * 2 - 1) * (MAP_HALF - 4);
             if (Math.hypot(x, z) < OBSTACLE_MIN_DIST_FROM_CENTER * 0.6) continue;

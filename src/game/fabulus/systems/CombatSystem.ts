@@ -65,6 +65,10 @@ export class CombatSystem {
         );
     }
 
+    resetSwing(): void {
+        this.swinging = false;
+    }
+
     castMeleeSkill(target: EnemyInstance, coeffPct: number, animOverride: string | null, staggerMs: number): boolean {
         if (this.swinging) return false;
         this.lastSwingAt = this.scene.now();
@@ -92,6 +96,8 @@ export class CombatSystem {
         if (staggerMs > 0) enemy.staggeredUntil = this.scene.now() + staggerMs;
         this.scene.enemySystem.refreshHpBar(enemy);
         this.scene.vfxSystem.hitFlash(enemy.meshes);
+        this.scene.vfxSystem.bloodSplatter(enemy.root.position);
+        if (!isSkill) this.scene.vfxSystem.meleeImpact(enemy.root.position);
         this.scene.audioSystem.playHit(crit);
 
         const pos = enemy.root.position;
@@ -111,7 +117,7 @@ export class CombatSystem {
 
         const p = this.scene.player;
         const gapMult = Math.max(XP_GAP_MIN_MULT, Math.min(XP_GAP_MAX_MULT, 1 + (enemy.level - p.level) * XP_GAP_FACTOR));
-        const xp = Math.round(enemy.def.experience_reward * gapMult);
+        const xp = Math.round(enemy.def.experience_reward * gapMult * (enemy.xpMult || 1));
         this.scene.uiSystem.floatText(pos.x, pos.y + 2.2, pos.z, `+${xp} XP`, 'xp');
         this.gainXp(xp);
     }

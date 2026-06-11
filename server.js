@@ -5,7 +5,7 @@ const zlib = require('zlib');
 const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
-const { handleFabulusRoutes } = require('./server/fabulus-routes');
+const { handleFabulusRoutes, setDbPool: setFabulusDbPool } = require('./server/fabulus-routes');
 
 const PORT = process.env.PORT || 3000;
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -41,6 +41,7 @@ function loadEnv() {
 }
 const env = loadEnv();
 const DATABASE_URL = process.env.DATABASE_URL || env.DATABASE_URL || '';
+const DATABASE_RPG_URL = process.env.DATABASE_RPG_URL || env.DATABASE_RPG_URL || '';
 const SECRET_KEY = process.env.SECRET_KEY || env.SECRET_KEY || '';
 const MAIN_API_URL = process.env.MAIN_API_URL || env.MAIN_API_URL || '';
 const ALLOWED_ORIGINS_RAW = process.env.ALLOWED_ORIGINS || env.ALLOWED_ORIGINS || '';
@@ -110,6 +111,29 @@ async function initDatabase() {
     } catch (err) {
         console.error('[DB] Init failed:', err.message);
         dbPool = null;
+    }
+}
+
+// ── MySQL pool (Fabulus RPG) ─────────────────────────────────────────────────
+let rpgDbPool = null;
+
+async function initRpgDatabase() {
+    if (!DATABASE_RPG_URL) {
+        console.warn('[DB:RPG] No DATABASE_RPG_URL — Fabulus API disabled (503).');
+        return;
+    }
+    try {
+        rpgDbPool = mysql.createPool({
+            uri: DATABASE_RPG_URL,
+            waitForConnections: true,
+            connectionLimit: 10,
+        });
+        await rpgDbPool.query('SELECT 1');
+        setFabulusDbPool(rpgDbPool);
+        console.log('[DB:RPG] Connected.');
+    } catch (err) {
+        console.error('[DB:RPG] Init failed:', err.message);
+        rpgDbPool = null;
     }
 }
 
@@ -2732,6 +2756,9 @@ async function gracefulShutdown() {
     if (dbPool) {
         try { await dbPool.end(); } catch (_) {}
     }
+    if (rpgDbPool) {
+        try { await rpgDbPool.end(); } catch (_) {}
+    }
 
     console.log('[Server] Shutdown complete.');
     process.exit(0);
@@ -2741,7 +2768,7 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 // ── Start ────────────────────────────────────────────────────────────────────
-initDatabase().then(() => {
+Promise.all([initDatabase(), initRpgDatabase()]).then(() => {
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`Production server running on port ${PORT}`);
     });

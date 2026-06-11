@@ -18,6 +18,11 @@ export interface EnemyDef {
     gold_max: number;
     health_scale_pct: number;
     damage_scale_pct: number;
+    elite_chance: number;
+    elite_hp_mult: number;
+    elite_dmg_mult: number;
+    elite_xp_mult: number;
+    elite_loot_rolls: number;
     anim_idle: string | null;
     anim_walk: string | null;
     anim_run: string | null;

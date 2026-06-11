@@ -1,7 +1,8 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FabulusScene } from '../FabulusScene.js';
-import type { EnemyInstance, GroundDrop, ItemDef } from '../types/index.js';
-import { DROP_KIND, LOOT_TYPE } from '../types/index.js';
+import type { EnemyInstance, GroundDrop, ItemDef, RolledAffix } from '../types/index.js';
+import { AFFIX_TYPE, DROP_KIND, ITEM_TYPE, LOOT_TYPE } from '../types/index.js';
+import { FabulusPrefs } from '../FabulusPrefs.js';
 import { RARITY_FALLBACK_COLOR as UI_RARITY_FALLBACK } from '../constants/uiConstants.js';
 import {
     COIN_BOUNCE_DAMPING, COIN_MAX_BOUNCES, COIN_MODEL_FILE, COIN_REST_BOB_AMPL,
@@ -31,6 +32,7 @@ export class LootSystem {
     }
 
     async init(): Promise<void> {
+        FabulusPrefs.onChange(this._onPrefsChange);
         try {
             this.coinContainer = await BABYLON.SceneLoader.LoadAssetContainerAsync(MODELS_BASE_PATH, COIN_MODEL_FILE, this.scene.bScene);
             console.debug('[Fabulus] Coin model loaded');
@@ -39,6 +41,13 @@ export class LootSystem {
             this.coinContainer = null;
         }
     }
+
+    private _onPrefsChange = (): void => {
+        const show = FabulusPrefs.get().showDropLabels;
+        for (const drop of this.scene.groundDrops) {
+            if (drop.label) drop.label.setEnabled(show);
+        }
+    };
 
     private _findClearDropPosition(x: number, z: number): { x: number; z: number } {
         const clearance = 0.4;
@@ -60,35 +69,47 @@ export class LootSystem {
     onEnemyDeath(enemy: EnemyInstance): void {
         const entries = this.scene.lootTables.filter(lt => lt.enemy_id === enemy.def.id);
         const pos = enemy.root.position;
+        const elite = enemy.isElite;
         for (const entry of entries) {
             if (Math.random() * 100 >= entry.drop_chance_pct) continue;
             if (entry.loot_type === LOOT_TYPE.GOLD) {
                 const min = entry.gold_min ?? enemy.def.gold_min;
                 const max = entry.gold_max ?? enemy.def.gold_max;
-                const amount = min + Math.floor(Math.random() * (max - min + 1));
+                let amount = min + Math.floor(Math.random() * (max - min + 1));
+                if (elite) amount *= 2;
                 if (amount > 0) {
                     const clear = this._findClearDropPosition(pos.x, pos.z);
                     this._spawnGoldDrop(clear.x, clear.z, amount);
                 }
             } else if (entry.loot_type === LOOT_TYPE.ITEM) {
-                const itemDef = entry.item_id != null
-                    ? this.scene.getItemDef(entry.item_id)
-                    : this._rollRandomItem();
-                if (itemDef) {
-                    const clear = this._findClearDropPosition(pos.x, pos.z);
-                    this._spawnItemDrop(clear.x, clear.z, itemDef);
-                }
+                this._spawnRolledItem(pos.x, pos.z, entry.item_id, elite);
             }
+        }
+        // Elite bonus: extra guaranteed random rolls with a bias toward higher rarities.
+        for (let i = 0; i < enemy.lootRollsBonus; i++) {
+            this._spawnRolledItem(pos.x, pos.z, null, true);
         }
     }
 
-    private _rollRandomItem(): ItemDef | null {
+    private _spawnRolledItem(x: number, z: number, itemId: number | null, eliteBias: boolean): void {
+        const itemDef = itemId != null
+            ? this.scene.getItemDef(itemId)
+            : this._rollRandomItem(eliteBias);
+        if (!itemDef) return;
+        const affixes = itemId == null ? this._rollAffixes(itemDef) : null;
+        const clear = this._findClearDropPosition(x, z);
+        this._spawnItemDrop(clear.x, clear.z, itemDef, affixes);
+    }
+
+    private _rollRandomItem(eliteBias = false): ItemDef | null {
         const items = this.scene.itemsCatalog;
         if (!items.length) return null;
         let totalWeight = 0;
         const weighted = items.map(item => {
             const rarity = this.scene.getRarity(item.rarity_id);
-            const weight = rarity ? rarity.drop_weight : 1;
+            let weight = rarity ? rarity.drop_weight : 1;
+            // Elite kills flatten the weight curve so rare drops become noticeably more likely.
+            if (eliteBias) weight = Math.sqrt(weight);
             totalWeight += weight;
             return { item, weight };
         });
@@ -98,6 +119,49 @@ export class LootSystem {
             if (roll <= 0) return w.item;
         }
         return weighted[weighted.length - 1].item;
+    }
+
+    /** Rolls 1-2 affixes for procedurally dropped equipment, driven by the rpg_affixes catalog. */
+    private _rollAffixes(itemDef: ItemDef): RolledAffix[] | null {
+        if (itemDef.item_type === ITEM_TYPE.CONSUMABLE) return null;
+        const pool = this.scene.affixesCatalog.filter(a => a.min_rarity <= itemDef.rarity_id);
+        if (!pool.length) return null;
+        const count = 1 + (Math.random() < 0.4 ? 1 : 0);
+        const rolled: RolledAffix[] = [];
+        const usedTypes = new Set<number>();
+        for (let i = 0; i < count; i++) {
+            const candidates = pool.filter(a => !usedTypes.has(a.affix_type));
+            if (!candidates.length) break;
+            let totalWeight = 0;
+            for (const a of candidates) totalWeight += a.weight;
+            let roll = Math.random() * totalWeight;
+            let chosen = candidates[candidates.length - 1];
+            for (const a of candidates) {
+                roll -= a.weight;
+                if (roll <= 0) { chosen = a; break; }
+            }
+            usedTypes.add(chosen.affix_type);
+            const value = Math.round((chosen.min_roll + Math.random() * (chosen.max_roll - chosen.min_roll)) * 10) / 10;
+            rolled.push({
+                affix_id: chosen.id,
+                name: chosen.name,
+                affix_type: chosen.affix_type,
+                attribute_type: chosen.attribute_type,
+                value_type: chosen.value_type,
+                value,
+            });
+        }
+        return rolled.length ? rolled : null;
+    }
+
+    private _composeDropName(itemDef: ItemDef, affixes: RolledAffix[] | null): string {
+        if (!affixes || !affixes.length) return itemDef.name;
+        const prefix = affixes.find(a => a.affix_type === AFFIX_TYPE.PREFIX);
+        const suffix = affixes.find(a => a.affix_type === AFFIX_TYPE.SUFFIX);
+        let name = itemDef.name;
+        if (prefix) name = `${prefix.name} ${name}`;
+        if (suffix) name = `${name} ${suffix.name}`;
+        return name;
     }
 
     private _makeCoinMesh(): BABYLON.TransformNode {
@@ -140,13 +204,20 @@ export class LootSystem {
     }
 
     private _spawnGoldDrop(x: number, z: number, amount: number): void {
+        const dropId = this.nextDropId;
         const root = this._makeCoinMesh();
         root.position.set(x, DROP_SPAWN_HEIGHT, z);
+        const pickMeshes = root instanceof BABYLON.AbstractMesh ? [root as BABYLON.AbstractMesh] : root.getChildMeshes(false);
+        for (const m of pickMeshes) {
+            m.isPickable = true;
+            m.metadata = { ...(m.metadata ?? {}), lootDropId: dropId };
+        }
         const now = this.scene.now();
-        this.scene.groundDrops.push({
+        const drop: GroundDrop = {
             kind: DROP_KIND.GOLD,
             amount,
             itemDef: null,
+            affixes: null,
             root,
             beam: null,
             label: null,
@@ -156,7 +227,10 @@ export class LootSystem {
             restY: DROP_REST_Y,
             spawnedAt: now,
             expiresAt: now + DROP_DESPAWN_MS,
-        });
+        };
+        (root as any).__dropId = dropId;
+        (drop as any).dropId = dropId;
+        this.scene.groundDrops.push(drop);
         this.nextDropId++;
     }
 
@@ -177,7 +251,7 @@ export class LootSystem {
         return tex;
     }
 
-    private _spawnItemDrop(x: number, z: number, itemDef: ItemDef): void {
+    private _spawnItemDrop(x: number, z: number, itemDef: ItemDef, affixes: RolledAffix[] | null = null): void {
         const s = this.scene.bScene;
         const dropId = this.nextDropId++;
         const rarity = this.scene.getRarity(itemDef.rarity_id);
@@ -246,7 +320,7 @@ export class LootSystem {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = colorHex;
-        ctx.fillText(itemDef.name, LABEL_TEX_W / 2, LABEL_TEX_H / 2);
+        ctx.fillText(this._composeDropName(itemDef, affixes), LABEL_TEX_W / 2, LABEL_TEX_H / 2);
         labelTex.update();
         const labelMat = new BABYLON.StandardMaterial(`fab_drop_label_mat_${dropId}`, s);
         labelMat.diffuseTexture = labelTex;
@@ -254,12 +328,14 @@ export class LootSystem {
         labelMat.disableLighting = true;
         labelMat.backFaceCulling = false;
         label.material = labelMat;
+        label.setEnabled(FabulusPrefs.get().showDropLabels);
 
         const now = this.scene.now();
         const drop: GroundDrop = {
             kind: DROP_KIND.ITEM,
             amount: 0,
             itemDef,
+            affixes,
             root,
             beam,
             label,
@@ -277,7 +353,8 @@ export class LootSystem {
 
     pickupByDropId(dropId: number): void {
         const drop = this.scene.groundDrops.find(d => (d as any).dropId === dropId);
-        if (!drop || drop.kind !== DROP_KIND.ITEM || !drop.itemDef) return;
+        if (!drop) return;
+        if (drop.kind === DROP_KIND.ITEM && !drop.itemDef) return;
         const root = this.scene.playerRoot;
         if (root) {
             const dist = Math.hypot(drop.root.position.x - root.position.x, drop.root.position.z - root.position.z);
@@ -288,7 +365,12 @@ export class LootSystem {
                 return;
             }
         }
-        this._collectItem(drop);
+        this._collect(drop);
+    }
+
+    private _collect(drop: GroundDrop): void {
+        if (drop.kind === DROP_KIND.GOLD) this._collectGold(drop);
+        else this._collectItem(drop);
     }
 
     cancelPendingPickup(): void {
@@ -307,7 +389,7 @@ export class LootSystem {
         const dist = Math.hypot(drop.root.position.x - root.position.x, drop.root.position.z - root.position.z);
         if (dist <= PICKUP_RADIUS * 3) {
             this.pendingPickupDropId = null;
-            this._collectItem(drop);
+            this._collect(drop);
         }
     }
 
@@ -319,15 +401,23 @@ export class LootSystem {
             return;
         }
         const itemDef = drop.itemDef;
-        FabulusApi.addPlayerItem(itemDef.id)
+        if ((drop as any).collecting) return;
+        (drop as any).collecting = true;
+        FabulusApi.addPlayerItem(itemDef.id, drop.affixes)
             .then(row => {
-                this.scene.playerItems.push(row);
-                this.scene.uiSystem.toast(`Voce obteve: ${itemDef.name}`);
+                const existing = this.scene.playerItems.find(pi => pi.id === row.id);
+                if (existing) existing.quantity = row.quantity;
+                else this.scene.playerItems.push(row);
+                this.scene.audioSystem.playItemPickup();
+                this.scene.uiSystem.toast(`Voce obteve: ${this._composeDropName(itemDef, drop.affixes)}`);
                 this.scene.uiSystem.refreshPanels();
+                this._dispose(drop);
             })
-            .catch(err => console.warn('[Fabulus] addPlayerItem failed:', err));
-        this.scene.audioSystem.playItemPickup();
-        this._dispose(drop);
+            .catch(err => {
+                console.warn('[Fabulus] addPlayerItem failed:', err);
+                (drop as any).collecting = false;
+                this.scene.uiSystem.toast('Falha ao coletar o item, tente novamente');
+            });
     }
 
     private _collectGold(drop: GroundDrop): void {
@@ -381,14 +471,6 @@ export class LootSystem {
                 drop.root.position.y = drop.restY + Math.sin(now / 1000 * COIN_REST_BOB_SPEED * Math.PI) * COIN_REST_BOB_AMPL;
             }
 
-            if (drop.kind === DROP_KIND.GOLD && playerRoot && !this.scene.playerDead) {
-                const dist = Math.hypot(drop.root.position.x - playerRoot.position.x, drop.root.position.z - playerRoot.position.z);
-                if (dist <= PICKUP_RADIUS) {
-                    this._collectGold(drop);
-                    continue;
-                }
-            }
-
             const remaining = drop.expiresAt - now;
             if (remaining <= 0) {
                 this._dispose(drop);
@@ -398,6 +480,13 @@ export class LootSystem {
                 for (const m of meshes) m.visibility = vis;
                 if ((drop.root as any).visibility !== undefined) (drop.root as any).visibility = vis;
             }
+        }
+    }
+
+    dispose(): void {
+        FabulusPrefs.offChange(this._onPrefsChange);
+        for (let i = this.scene.groundDrops.length - 1; i >= 0; i--) {
+            this._dispose(this.scene.groundDrops[i]);
         }
     }
 }

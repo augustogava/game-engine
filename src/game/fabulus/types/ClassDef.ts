@@ -3,6 +3,7 @@ export interface ClassDef {
     name: string;
     description: string;
     model_path: string;
+    icon_path: string | null;
     max_level: number;
     starting_gold: number;
     main_stat: number;

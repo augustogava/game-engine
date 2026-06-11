@@ -18,6 +18,7 @@ interface Projectile {
     traveled: number;
     maxRange: number;
     coeffPct: number;
+    element: string | null;
 }
 
 const PROJECTILE_HEIGHT = 1.1;
@@ -126,7 +127,7 @@ export class SkillSystem {
         scene.skillCooldowns.set(def.id, now + def.cooldown_ms);
         this.globalCooldownUntil = now + GLOBAL_COOLDOWN_MS;
         scene.uiSystem.setCastingSlot(def.id);
-        scene.audioSystem.playSkillCast();
+        scene.audioSystem.playSkillCast(def.vfx_element);
     }
 
     private _findTarget(range: number): EnemyInstance | null {
@@ -194,8 +195,9 @@ export class SkillSystem {
             traveled: 0,
             maxRange: def.range > 0 ? def.range : PROJECTILE_MAX_RANGE,
             coeffPct: coeff,
+            element: def.vfx_element ?? null,
         });
-        this.scene.audioSystem.playProjectile();
+        this.scene.audioSystem.playProjectile(def.vfx_element);
         return true;
     }
 
@@ -240,7 +242,11 @@ export class SkillSystem {
                 hits++;
             }
         }
-        this.scene.vfxSystem.aoeRing(cx, cz, def.radius, SKILL_VFX_COLORS[def.vfx_key] ?? SKILL_VFX_COLORS.default);
+        if (hits === 0) {
+            this.scene.uiSystem.toast('Nenhum alvo ao alcance');
+            return false;
+        }
+        this.scene.vfxSystem.aoeRing(cx, cz, def.radius, SKILL_VFX_COLORS[def.vfx_key] ?? SKILL_VFX_COLORS.default, def.vfx_element);
         console.debug(`[Fabulus] AoE ${def.name} hit ${hits} enemies`);
         return true;
     }
@@ -290,6 +296,11 @@ export class SkillSystem {
             await FabulusApi.rankUpSkill(skillId);
         } catch (err) {
             console.warn('[Fabulus] rankUpSkill failed:', err);
+            ps.rank -= 1;
+            scene.player.skill_points += 1;
+            scene.uiSystem.toast('Falha ao evoluir a habilidade, tente novamente');
+            scene.uiSystem.refreshPanels();
+            return false;
         }
         return true;
     }
@@ -333,6 +344,7 @@ export class SkillSystem {
 
             if (hit) {
                 this.scene.combatSystem.dealDamageToEnemy(hit, proj.coeffPct, 0, true);
+                this.scene.vfxSystem.elementImpact(proj.mesh.position, proj.element);
                 this._disposeProjectile(proj, i);
             } else if (proj.traveled >= proj.maxRange) {
                 this._disposeProjectile(proj, i);
@@ -356,6 +368,23 @@ export class SkillSystem {
         this.scene.activeBuffs = this.scene.activeBuffs.filter(b => b.expiresAt > now);
         if (this.scene.activeBuffs.length !== before) {
             this.scene.recomputeDerivedStats();
+            const p = this.scene.player;
+            const d = this.scene.derived;
+            p.current_health = Math.min(p.current_health, d.maxHealth);
+            p.current_mana = Math.min(p.current_mana, d.maxMana);
         }
+    }
+
+    dispose(): void {
+        for (const proj of this.projectiles) {
+            if (proj.trail) proj.trail.dispose();
+            try { proj.mesh.dispose(false, true); } catch { /* already disposed */ }
+        }
+        this.projectiles = [];
+        for (const pooled of this.projectilePool) {
+            if (pooled.trail) pooled.trail.dispose();
+            try { pooled.mesh.dispose(false, true); } catch { /* already disposed */ }
+        }
+        this.projectilePool = [];
     }
 }

@@ -57,7 +57,7 @@ export class CollisionSystem {
                     if (!bucket) continue;
                     for (const j of bucket) {
                         if (j <= i) continue;
-                        this._separateCircles(alive[i].root.position, ENEMY_COLLIDER_RADIUS, alive[j].root.position, ENEMY_COLLIDER_RADIUS, 0.5);
+                        this._separateCircles(alive[i].root.position, alive[i].colliderRadius, alive[j].root.position, alive[j].colliderRadius, 0.5);
                     }
                 }
             }
@@ -96,11 +96,17 @@ export class CollisionSystem {
         b: { x: number; z: number }, rb: number,
         bShare: number,
     ): void {
-        const dx = b.x - a.x;
-        const dz = b.z - a.z;
+        let dx = b.x - a.x;
+        let dz = b.z - a.z;
         const minDist = ra + rb;
-        const distSq = dx * dx + dz * dz;
-        if (distSq >= minDist * minDist || distSq < 0.000001) return;
+        let distSq = dx * dx + dz * dz;
+        if (distSq >= minDist * minDist) return;
+        if (distSq < 0.000001) {
+            const angle = Math.random() * Math.PI * 2;
+            dx = Math.cos(angle) * 0.001;
+            dz = Math.sin(angle) * 0.001;
+            distSq = dx * dx + dz * dz;
+        }
         const dist = Math.sqrt(distSq);
         const overlap = minDist - dist;
         const nx = dx / dist;

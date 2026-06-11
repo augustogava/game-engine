@@ -6,6 +6,7 @@ import { FabulusPrefs, type FabulusActionId } from '../FabulusPrefs.js';
 
 const CURSOR_KNIGHT = `url(${CURSOR_KNIGHT_URL}) ${CURSOR_HOTSPOT_X} ${CURSOR_HOTSPOT_Y}, crosshair`;
 const CURSOR_ATTACK = `url(${CURSOR_ATTACK_URL}) ${CURSOR_HOTSPOT_X} ${CURSOR_HOTSPOT_Y}, crosshair`;
+const CURSOR_TALK = 'pointer';
 
 const HOLD_REPICK_INTERVAL_MS = 90;
 const SKILL_ACTIONS: FabulusActionId[] = ['skill1', 'skill2', 'skill3', 'skill4'];
@@ -19,6 +20,7 @@ export class InputSystem {
     private _onPointerDown: ((e: PointerEvent) => void) | null = null;
     private _onPointerMove: ((e: PointerEvent) => void) | null = null;
     private _onPointerUp: ((e: PointerEvent) => void) | null = null;
+    private _onPointerLeave: (() => void) | null = null;
     private _canvas: HTMLCanvasElement | null = null;
 
     constructor(scene: FabulusScene) {
@@ -38,7 +40,7 @@ export class InputSystem {
             this.lastPointerX = e.offsetX;
             this.lastPointerY = e.offsetY;
             this.pointerHeld = true;
-            this._handleClick(e.offsetX, e.offsetY);
+            this._handleClick(e.offsetX, e.offsetY, e.shiftKey);
         };
         this._onPointerMove = (e: PointerEvent) => {
             this.lastPointerX = e.offsetX;
@@ -49,13 +51,15 @@ export class InputSystem {
             this.pointerHeld = false;
         };
 
+        this._onPointerLeave = () => {
+            if (this._canvas) this._canvas.style.cursor = 'default';
+            this.scene.enemySystem.setHovered(null);
+        };
+
         canvas.addEventListener('pointerdown', this._onPointerDown);
         canvas.addEventListener('pointermove', this._onPointerMove);
         window.addEventListener('pointerup', this._onPointerUp);
-        canvas.addEventListener('pointerleave', () => {
-            if (this._canvas) this._canvas.style.cursor = 'default';
-            this.scene.enemySystem.setHovered(null);
-        });
+        canvas.addEventListener('pointerleave', this._onPointerLeave);
         this._updateCursor(0, 0);
         console.debug('[Fabulus] Input ready');
     }
@@ -68,7 +72,12 @@ export class InputSystem {
         }
         const pick = this._pick(x, y);
         if (pick?.pickedMesh) {
-            const meta = pick.pickedMesh.metadata as { enemyInstanceId?: number } | null;
+            const meta = pick.pickedMesh.metadata as { enemyInstanceId?: number; npcId?: number } | null;
+            if (meta?.npcId != null) {
+                this.scene.enemySystem.setHovered(null);
+                this._canvas.style.cursor = CURSOR_TALK;
+                return;
+            }
             if (meta?.enemyInstanceId != null) {
                 const enemy = this.scene.enemySystem.findByInstanceId(meta.enemyInstanceId);
                 if (enemy && enemy.state !== ENEMY_STATE.DEAD) {
@@ -88,18 +97,42 @@ export class InputSystem {
         return pick && pick.hit ? pick : null;
     }
 
-    private _handleClick(x: number, y: number): void {
+    private _handleClick(x: number, y: number, forceMove = false): void {
         if (this.scene.playerDead) return;
         const pick = this._pick(x, y);
         if (!pick || !pick.pickedMesh) return;
+
+        if (this.scene.propSystem.isEditorActive()) {
+            this.scene.propSystem.handleEditorClick(pick);
+            return;
+        }
+
         const mesh = pick.pickedMesh;
-        const meta = mesh.metadata as { enemyInstanceId?: number; lootDropId?: number } | null;
+        const meta = mesh.metadata as { enemyInstanceId?: number; lootDropId?: number; npcId?: number } | null;
+
+        // Force-move (hold Shift): walk to the clicked point, ignoring enemies/NPCs.
+        if (forceMove && pick.pickedPoint) {
+            this.scene.attackTarget = null;
+            this.scene.lootSystem.cancelPendingPickup();
+            this.scene.npcSystem.cancelInteract();
+            this.scene.moveTarget = new BABYLON.Vector3(pick.pickedPoint.x, 0, pick.pickedPoint.z);
+            this.scene.vfxSystem.moveMarker(pick.pickedPoint.x, pick.pickedPoint.z);
+            return;
+        }
+
+        if (meta && meta.npcId != null) {
+            this.scene.lootSystem.cancelPendingPickup();
+            this.scene.npcSystem.beginInteract(meta.npcId);
+            return;
+        }
 
         if (meta && meta.enemyInstanceId != null) {
             const enemy = this.scene.enemySystem.findByInstanceId(meta.enemyInstanceId);
             if (enemy && enemy.state !== ENEMY_STATE.DEAD) {
                 this.scene.attackTarget = enemy;
                 this.scene.moveTarget = null;
+                this.scene.lootSystem.cancelPendingPickup();
+                this.scene.npcSystem.cancelInteract();
                 this.scene.enemySystem.refreshHpBar(enemy);
                 return;
             }
@@ -113,6 +146,7 @@ export class InputSystem {
         if (pick.pickedPoint) {
             this.scene.attackTarget = null;
             this.scene.lootSystem.cancelPendingPickup();
+            this.scene.npcSystem.cancelInteract();
             this.scene.moveTarget = new BABYLON.Vector3(pick.pickedPoint.x, 0, pick.pickedPoint.z);
             this.scene.vfxSystem.moveMarker(pick.pickedPoint.x, pick.pickedPoint.z);
         }
@@ -120,11 +154,13 @@ export class InputSystem {
 
     private _holdRepick(): void {
         if (!this.pointerHeld || this.scene.playerDead || this.scene.attackTarget) return;
+        if (this.scene.propSystem.isEditorActive()) return;
         const now = this.scene.now();
         if (now - this.lastHoldPickAt < HOLD_REPICK_INTERVAL_MS) return;
         this.lastHoldPickAt = now;
         const pick = this._pick(this.lastPointerX, this.lastPointerY);
         if (pick && pick.pickedPoint && pick.pickedMesh === this.scene.groundMesh) {
+            this.scene.lootSystem.cancelPendingPickup();
             this.scene.moveTarget = new BABYLON.Vector3(pick.pickedPoint.x, 0, pick.pickedPoint.z);
         }
     }
@@ -166,7 +202,7 @@ export class InputSystem {
             this.scene.uiSystem.togglePanel('character');
         }
         if (input.isKeyPressed(FabulusPrefs.codeFor('inventory'))) {
-            this.scene.uiSystem.openInventory();
+            this.scene.uiSystem.toggleInventory();
         }
         if (input.isKeyPressed(FabulusPrefs.codeFor('skills'))) {
             this.scene.uiSystem.togglePanel('skills');
@@ -177,6 +213,18 @@ export class InputSystem {
         if (input.isKeyPressed(FabulusPrefs.codeFor('attackNearest'))) {
             this._attackNearest();
         }
+        if (input.isKeyPressed(FabulusPrefs.codeFor('potion1'))) {
+            this.scene.uiSystem.usePotionSlot(1);
+        }
+        if (input.isKeyPressed(FabulusPrefs.codeFor('potion2'))) {
+            this.scene.uiSystem.usePotionSlot(2);
+        }
+        if (input.isKeyPressed(FabulusPrefs.codeFor('minimap'))) {
+            this.scene.minimapSystem.toggle();
+        }
+        if (input.isKeyPressed(FabulusPrefs.codeFor('editor'))) {
+            this.scene.propSystem.toggleEditor();
+        }
 
         this._holdRepick();
     }
@@ -185,6 +233,7 @@ export class InputSystem {
         if (this._canvas) {
             if (this._onPointerDown) this._canvas.removeEventListener('pointerdown', this._onPointerDown);
             if (this._onPointerMove) this._canvas.removeEventListener('pointermove', this._onPointerMove);
+            if (this._onPointerLeave) this._canvas.removeEventListener('pointerleave', this._onPointerLeave);
         }
         if (this._onPointerUp) window.removeEventListener('pointerup', this._onPointerUp);
     }

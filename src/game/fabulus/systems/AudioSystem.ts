@@ -5,9 +5,12 @@ const SFX_GAIN = 0.25;
 const FOOTSTEP_WALK_INTERVAL_S = 0.45;
 const FOOTSTEP_RUN_INTERVAL_S = 0.3;
 
+const AMBIENCE_GAIN = 0.045;
+
 export class AudioSystem {
     private scene: FabulusScene;
     private footstepTimer = 0;
+    private ambienceNodes: { src: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode; lfo: OscillatorNode; lfoGain: GainNode } | null = null;
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
@@ -15,7 +18,51 @@ export class AudioSystem {
 
     init(): void {
         AudioCore.getCtx();
+        this._startAmbience();
         console.debug('[Fabulus] Audio ready');
+    }
+
+    /** Subtle looping wind ambience (procedural filtered noise with a slow LFO). */
+    private _startAmbience(): void {
+        const ctx = this._ctx();
+        const bus = this._bus();
+        if (!ctx || !bus || this.ambienceNodes) return;
+        try {
+            const seconds = 4;
+            const samples = Math.floor(ctx.sampleRate * seconds);
+            const buffer = ctx.createBuffer(1, samples, ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            let last = 0;
+            for (let i = 0; i < samples; i++) {
+                // Brown-ish noise for a softer wind texture.
+                const white = Math.random() * 2 - 1;
+                last = (last + white * 0.04) / 1.04;
+                data[i] = last * 3;
+            }
+            const src = ctx.createBufferSource();
+            src.buffer = buffer;
+            src.loop = true;
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 420;
+            const gain = ctx.createGain();
+            gain.gain.value = AMBIENCE_GAIN;
+            const lfo = ctx.createOscillator();
+            lfo.type = 'sine';
+            lfo.frequency.value = 0.07;
+            const lfoGain = ctx.createGain();
+            lfoGain.gain.value = AMBIENCE_GAIN * 0.5;
+            lfo.connect(lfoGain);
+            lfoGain.connect(gain.gain);
+            src.connect(filter);
+            filter.connect(gain);
+            gain.connect(bus);
+            src.start();
+            lfo.start();
+            this.ambienceNodes = { src, filter, gain, lfo, lfoGain };
+        } catch (err) {
+            console.warn('[Fabulus] ambience failed:', err);
+        }
     }
 
     private _ctx(): AudioContext | null {
@@ -80,13 +127,18 @@ export class AudioSystem {
         }
     }
 
+    /** Random pitch multiplier so repeated hits/swings don't sound identical. */
+    private _vary(base: number, spreadPct = 0.16): number {
+        return base * (1 + (Math.random() * 2 - 1) * spreadPct);
+    }
+
     playSwing(): void {
-        this._noise(0.18, 1800, 0.18);
+        this._noise(0.18, this._vary(1800), 0.18);
     }
 
     playHit(crit: boolean): void {
-        this._noise(crit ? 0.3 : 0.18, crit ? 900 : 600, crit ? 0.32 : 0.22);
-        if (crit) this._tone('square', 220, 80, 0.18, 0.15);
+        this._noise(crit ? 0.3 : 0.18, this._vary(crit ? 900 : 600), crit ? 0.32 : 0.22);
+        if (crit) this._tone('square', this._vary(220), 80, 0.18, 0.15);
     }
 
     playPlayerHurt(): void {
@@ -113,14 +165,56 @@ export class AudioSystem {
         notes.forEach((freq, i) => {
             setTimeout(() => this._tone('triangle', freq, freq, 0.25, 0.22), i * 110);
         });
+        // Closing chord + shimmer for extra impact.
+        setTimeout(() => {
+            this._tone('triangle', 1046.5, 1046.5, 0.6, 0.2);
+            this._tone('triangle', 1318.51, 1318.51, 0.6, 0.16);
+            this._tone('sine', 1567.98, 1567.98, 0.7, 0.12);
+            this._noise(0.5, 4000, 0.06);
+        }, notes.length * 110);
     }
 
-    playSkillCast(): void {
-        this._tone('sine', 500, 900, 0.15, 0.16);
+    /** Element-aware cast sound (fire/ice/arcane/physical/holy). */
+    playSkillCast(element?: string | null): void {
+        switch (element) {
+            case 'fire':
+                this._noise(0.3, this._vary(1200), 0.2);
+                this._tone('sawtooth', this._vary(180), 60, 0.28, 0.12);
+                break;
+            case 'ice':
+                this._tone('sine', this._vary(1400), 2200, 0.22, 0.14);
+                this._tone('triangle', this._vary(900), 1600, 0.3, 0.1);
+                break;
+            case 'arcane':
+                this._tone('sine', this._vary(400), 1100, 0.3, 0.16);
+                this._tone('sine', this._vary(800), 500, 0.22, 0.1);
+                break;
+            case 'holy':
+                this._tone('sine', 392, 587, 0.35, 0.18);
+                break;
+            default:
+                this._tone('sine', this._vary(500), 900, 0.15, 0.16);
+        }
     }
 
-    playProjectile(): void {
-        this._tone('square', 700, 200, 0.2, 0.14);
+    playProjectile(element?: string | null): void {
+        if (element === 'fire') {
+            this._noise(0.25, this._vary(900), 0.16);
+        } else if (element === 'ice') {
+            this._tone('triangle', this._vary(1200), 400, 0.2, 0.12);
+        } else {
+            this._tone('square', this._vary(700), 200, 0.2, 0.14);
+        }
+    }
+
+    playPotionDrink(): void {
+        this._tone('sine', 320, 520, 0.18, 0.16);
+        this._noise(0.12, 800, 0.08);
+    }
+
+    playSellItem(): void {
+        this._tone('sine', 987.77, 987.77, 0.08, 0.18);
+        setTimeout(() => this._tone('sine', 1174.66, 1174.66, 0.16, 0.16), 60);
     }
 
     playHeal(): void {
@@ -165,6 +259,15 @@ export class AudioSystem {
     }
 
     dispose(): void {
-        // AudioCore is a shared singleton; nothing owned here.
+        if (this.ambienceNodes) {
+            const { src, filter, gain, lfo, lfoGain } = this.ambienceNodes;
+            try { src.stop(); } catch { /* already stopped */ }
+            try { lfo.stop(); } catch { /* already stopped */ }
+            try { src.disconnect(); } catch { /* already disconnected */ }
+            try { filter.disconnect(); } catch { /* already disconnected */ }
+            try { lfoGain.disconnect(); } catch { /* already disconnected */ }
+            try { gain.disconnect(); } catch { /* already disconnected */ }
+            this.ambienceNodes = null;
+        }
     }
 }

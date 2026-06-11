@@ -1,4 +1,5 @@
 import type { ItemDef } from './ItemDef.js';
+import type { RolledAffix } from './AffixDef.js';
 
 export const DROP_KIND = {
     GOLD: 1,
@@ -9,6 +10,7 @@ export interface GroundDrop {
     kind: number;
     amount: number;
     itemDef: ItemDef | null;
+    affixes: RolledAffix[] | null;
     root: any;
     beam: any | null;
     label: any | null;

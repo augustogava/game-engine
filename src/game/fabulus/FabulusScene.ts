@@ -4,10 +4,11 @@ import { Scene3D } from '../../engine/3d/Scene3D.js';
 import { InputManager } from '../../engine/input/InputManager.js';
 import { FabulusApi } from './api/FabulusApi.js';
 import type {
-    Aabb, ActiveBuff, ClassDef, DerivedStats, EnemyDef, EnemyInstance, GroundDrop,
-    ItemDef, LootTableEntry, PlayerItem, PlayerSkill, PlayerState, RarityDef, SkillDef,
+    Aabb, ActiveBuff, AffixDef, ClassDef, DerivedStats, EnemyDef, EnemyInstance, GroundDrop,
+    ItemDef, LootTableEntry, MapPropDef, NpcDef, PlayerItem, PlayerSkill, PlayerState, RarityDef, SkillDef,
 } from './types/index.js';
-import { ATTRIBUTE_TYPE, ITEM_TYPE, VALUE_TYPE } from './types/index.js';
+import { AFFIX_TYPE, ATTRIBUTE_TYPE, ITEM_TYPE, VALUE_TYPE } from './types/index.js';
+import { FabulusPrefs } from './FabulusPrefs.js';
 import {
     ARMOR_K, ARMOR_PER_STR, ARMOR_PER_VIT, ATK_SPEED_PER_DEX, BASE_ATTACK_RANGE,
     BASE_ATTACK_SPEED, BASE_HAND_DMG_MAX, BASE_HAND_DMG_MIN, CLASS_STORAGE_KEY, CRIT_BASE_PCT,
@@ -30,6 +31,9 @@ import { VfxSystem } from './systems/VfxSystem.js';
 import { UiSystem } from './systems/UiSystem.js';
 import { AudioSystem } from './systems/AudioSystem.js';
 import { RenderSystem } from './systems/RenderSystem.js';
+import { MinimapSystem } from './systems/MinimapSystem.js';
+import { PropSystem } from './systems/PropSystem.js';
+import { NpcSystem } from './systems/NpcSystem.js';
 
 export class FabulusScene extends Scene3D {
     bScene!: BABYLON.Scene;
@@ -45,8 +49,11 @@ export class FabulusScene extends Scene3D {
     skillsCatalog: SkillDef[] = [];
     playerSkills: PlayerSkill[] = [];
     playerItems: PlayerItem[] = [];
+    affixesCatalog: AffixDef[] = [];
     lootTables: LootTableEntry[] = [];
     levels: { level: number; experience_required: number }[] = [];
+    npcDefs: NpcDef[] = [];
+    mapProps: MapPropDef[] = [];
     derived!: DerivedStats;
 
     playerRoot: BABYLON.TransformNode | null = null;
@@ -81,6 +88,9 @@ export class FabulusScene extends Scene3D {
     readonly uiSystem = new UiSystem(this);
     readonly audioSystem = new AudioSystem(this);
     readonly renderSystem = new RenderSystem(this);
+    readonly minimapSystem = new MinimapSystem(this);
+    readonly propSystem = new PropSystem(this);
+    readonly npcSystem = new NpcSystem(this);
 
     private _lastStateSaveAt = 0;
 
@@ -95,7 +105,7 @@ export class FabulusScene extends Scene3D {
 
     private async _asyncInit(): Promise<void> {
         this.uiSystem.setLoadingStatus('Consultando os arcanos...');
-        const [classes, fetchedPlayer, enemyDefs, items, rarities, playerItems, levels, lootTables] = await Promise.all([
+        const [classes, fetchedPlayer, enemyDefs, items, rarities, playerItems, levels, lootTables, affixes, npcDefs, mapProps] = await Promise.all([
             FabulusApi.fetchClasses(),
             FabulusApi.fetchPlayer(),
             FabulusApi.fetchEnemies(),
@@ -104,18 +114,24 @@ export class FabulusScene extends Scene3D {
             FabulusApi.fetchPlayerItems(),
             FabulusApi.fetchLevels(),
             FabulusApi.fetchLootTables(),
+            FabulusApi.fetchAffixes(),
+            FabulusApi.fetchNpcs(),
+            FabulusApi.fetchMapProps(),
         ]);
+        await FabulusPrefs.syncFromApi();
         let player = fetchedPlayer;
+        let freshPlayerItems = playerItems;
 
-        let chosenClassId = Number(localStorage.getItem(CLASS_STORAGE_KEY) || 0);
-        if (!classes.some(c => c.id === chosenClassId)) chosenClassId = 0;
-        if (!chosenClassId) {
-            chosenClassId = await this.uiSystem.showClassSelect(classes, player.class_id);
+        if (player.class_id && classes.some(c => c.id === player.class_id)) {
+            localStorage.setItem(CLASS_STORAGE_KEY, String(player.class_id));
+        } else {
+            const chosenClassId = await this.uiSystem.showClassSelect(classes, player.class_id);
             localStorage.setItem(CLASS_STORAGE_KEY, String(chosenClassId));
-        }
-        if (chosenClassId !== player.class_id) {
             await FabulusApi.selectClass(chosenClassId);
-            player = await FabulusApi.fetchPlayer();
+            [player, freshPlayerItems] = await Promise.all([
+                FabulusApi.fetchPlayer(),
+                FabulusApi.fetchPlayerItems(),
+            ]);
         }
 
         this.classes = classes;
@@ -123,9 +139,12 @@ export class FabulusScene extends Scene3D {
         this.enemyDefs = enemyDefs;
         this.itemsCatalog = items;
         this.rarities = rarities;
-        this.playerItems = playerItems;
+        this.playerItems = freshPlayerItems;
         this.levels = levels;
         this.lootTables = lootTables;
+        this.affixesCatalog = affixes;
+        this.npcDefs = npcDefs;
+        this.mapProps = mapProps;
 
         const classDef = classes.find(c => c.id === player.class_id);
         if (!classDef) throw new Error(`Class ${player.class_id} not found`);
@@ -145,6 +164,7 @@ export class FabulusScene extends Scene3D {
         this.cameraSystem.init();
         this.renderSystem.init();
         this.mapSystem.init();
+        await this.propSystem.init();
         this.vfxSystem.init();
 
         this.uiSystem.setLoadingStatus('Invocando o heroi...');
@@ -153,21 +173,28 @@ export class FabulusScene extends Scene3D {
 
         this.uiSystem.setLoadingStatus('Despertando as criaturas...');
         await this.enemySystem.init();
+        await this.npcSystem.init();
         await this.lootSystem.init();
 
         this.inputSystem.init();
         this.uiSystem.init();
         this.audioSystem.init();
         this.skillSystem.init();
+        this.minimapSystem.init();
 
         this.recomputeDerivedStats();
         this.player.current_health = Math.min(this.player.current_health, this.derived.maxHealth);
         this.player.current_mana = Math.min(this.player.current_mana, this.derived.maxMana);
 
         this.ready = true;
+        window.addEventListener('pagehide', this._onPageHide);
         console.debug('[Fabulus] World ready');
         if (this.onReady) this.onReady();
     }
+
+    private _onPageHide = (): void => {
+        if (this.ready) this.persistState(true);
+    };
 
     update(dt: number): void {
         if (!this.ready) return;
@@ -175,12 +202,15 @@ export class FabulusScene extends Scene3D {
         this.playerSystem.update(dt);
         this.skillSystem.update(dt);
         this.enemySystem.update(dt);
+        this.npcSystem.update(dt);
+        this.propSystem.update(dt);
         this.combatSystem.update(dt);
         this.lootSystem.update(dt);
         this.collisionSystem.update(dt);
         this.cameraSystem.update(dt);
         this.vfxSystem.update(dt);
         this.uiSystem.update(dt);
+        this.minimapSystem.update(dt);
         this._maybePersistState();
     }
 
@@ -219,6 +249,18 @@ export class FabulusScene extends Scene3D {
         return equipped ? equipped.def : null;
     }
 
+    /** Composed display name including rolled affixes (e.g. "Sharp Rusty Sword of Haste"). */
+    getItemDisplayName(def: ItemDef, playerItem?: PlayerItem | null): string {
+        const affixes = playerItem?.affixes;
+        if (!affixes || !affixes.length) return def.name;
+        const prefix = affixes.find(a => a.affix_type === AFFIX_TYPE.PREFIX);
+        const suffix = affixes.find(a => a.affix_type === AFFIX_TYPE.SUFFIX);
+        let name = def.name;
+        if (prefix) name = `${prefix.name} ${name}`;
+        if (suffix) name = `${name} ${suffix.name}`;
+        return name;
+    }
+
     xpRequired(level: number): number {
         const row = this.levels.find(l => l.level === level);
         if (row) return row.experience_required;
@@ -250,8 +292,9 @@ export class FabulusScene extends Scene3D {
         };
 
         let itemArmor = 0;
-        for (const { def } of this.getEquippedItems()) {
+        for (const { playerItem, def } of this.getEquippedItems()) {
             accumulate(def.modifiers);
+            if (playerItem.affixes && playerItem.affixes.length) accumulate(playerItem.affixes);
             if (def.armor != null) {
                 const rarity = this.getRarity(def.rarity_id);
                 itemArmor += def.armor * (rarity ? rarity.stat_multiplier : 1);
@@ -306,8 +349,10 @@ export class FabulusScene extends Scene3D {
         const moveSpeedMult = (1 + dexterity * MOVE_SPEED_PER_DEX)
             * (1 + (flatOf(ATTRIBUTE_TYPE.MOVE_SPEED_PCT) + (pct[ATTRIBUTE_TYPE.MOVE_SPEED_PCT] ?? 0)) / 100);
 
-        const hpRegen = HP_REGEN_BASE + vitality * HP_REGEN_PER_VIT + flatOf(ATTRIBUTE_TYPE.HP_REGEN);
-        const manaRegen = MANA_REGEN_BASE + intelligence * MANA_REGEN_PER_INT + flatOf(ATTRIBUTE_TYPE.MANA_REGEN);
+        const hpRegen = (HP_REGEN_BASE + vitality * HP_REGEN_PER_VIT + flatOf(ATTRIBUTE_TYPE.HP_REGEN))
+            * pctMult(ATTRIBUTE_TYPE.HP_REGEN);
+        const manaRegen = (MANA_REGEN_BASE + intelligence * MANA_REGEN_PER_INT + flatOf(ATTRIBUTE_TYPE.MANA_REGEN))
+            * pctMult(ATTRIBUTE_TYPE.MANA_REGEN);
 
         this.derived = {
             strength, dexterity, intelligence, vitality,
@@ -351,8 +396,21 @@ export class FabulusScene extends Scene3D {
     }
 
     onDispose(): void {
+        window.removeEventListener('pagehide', this._onPageHide);
+        if (this.ready) this.persistState(true);
         this.inputSystem.dispose();
         this.uiSystem.dispose();
         this.audioSystem.dispose();
+        this.cameraSystem.dispose();
+        this.skillSystem.dispose();
+        this.vfxSystem.dispose();
+        this.weaponSystem.dispose();
+        this.enemySystem.dispose();
+        this.npcSystem.dispose();
+        this.propSystem.dispose();
+        this.minimapSystem.dispose();
+        this.lootSystem.dispose();
+        this.lightingSystem.dispose();
+        this.renderSystem.dispose();
     }
 }

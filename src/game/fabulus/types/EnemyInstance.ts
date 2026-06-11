@@ -34,4 +34,7 @@ export interface EnemyInstance {
     deathStartedAt: number;
     slowPct: number;
     slowUntil: number;
+    isElite: boolean;
+    xpMult: number;
+    lootRollsBonus: number;
 }

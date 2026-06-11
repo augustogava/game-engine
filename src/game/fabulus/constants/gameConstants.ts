@@ -26,3 +26,34 @@ export const ENEMY_HEIGHT_UNITS = 2.2;
 export const STATE_SAVE_THROTTLE_MS = 15000;
 
 export const CLASS_STORAGE_KEY = 'fabulus_class_id';
+
+export const NPC_INTERACT_RANGE = 3.4;
+export const NPC_LABEL_OFFSET_Y = 0.45;
+export const NPC_INTERACT_STUCK_MS = 700;
+export const NPC_INTERACT_MAX_RANGE = 5.5;
+
+export interface PropCatalogEntry {
+    model_path: string;
+    label: string;
+    default_scale: number;
+    collidable: boolean;
+}
+
+/** Prop models available in the map editor (paths relative to MODELS_BASE_PATH). */
+export const PROP_CATALOG: PropCatalogEntry[] = [
+    { model_path: 'basket.glb', label: 'Basket', default_scale: 0.9, collidable: false },
+    { model_path: 'chair.glb', label: 'Chair', default_scale: 1.4, collidable: true },
+    { model_path: 'chest.glb', label: 'Chest', default_scale: 1.2, collidable: true },
+    { model_path: 'house.glb', label: 'House', default_scale: 8, collidable: true },
+    { model_path: 'house_2.glb', label: 'House 2', default_scale: 7, collidable: true },
+    { model_path: 'stone_sentinel.glb', label: 'Stone Sentinel', default_scale: 3.5, collidable: true },
+    { model_path: 'templte.glb', label: 'Temple', default_scale: 8, collidable: true },
+    { model_path: 'throne.glb', label: 'Throne', default_scale: 2.6, collidable: true },
+    { model_path: 'tree_pin.glb', label: 'Pine Tree', default_scale: 9, collidable: true },
+];
+
+export const EDITOR_ROTATE_STEP_RAD = Math.PI / 8;
+export const EDITOR_SCALE_STEP_PCT = 10;
+export const EDITOR_MIN_SCALE = 0.2;
+export const EDITOR_MAX_SCALE = 30;
+export const EDITOR_SAVE_DEBOUNCE_MS = 600;

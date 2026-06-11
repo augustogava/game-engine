@@ -6,6 +6,7 @@ const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { handleFabulusRoutes, setDbPool: setFabulusDbPool } = require('../server/fabulus-routes');
 
 const PORT = 3002;
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -23,6 +24,7 @@ function loadEnv() {
 }
 const env = loadEnv();
 const DATABASE_URL = process.env.DATABASE_URL || env.DATABASE_URL || '';
+const DATABASE_RPG_URL = process.env.DATABASE_RPG_URL || env.DATABASE_RPG_URL || '';
 const SECRET_KEY = process.env.SECRET_KEY || env.SECRET_KEY || '';
 if (!SECRET_KEY) {
     console.warn('[DEV] SECRET_KEY not configured: WebSocket JWT verification will reject all connections');
@@ -57,6 +59,29 @@ async function initDatabase() {
     } catch (err) {
         console.error('[DB] Init failed:', err.message);
         dbPool = null;
+    }
+}
+
+// ── MySQL pool (Fabulus RPG) ─────────────────────────────────────────────────
+let rpgDbPool = null;
+
+async function initRpgDatabase() {
+    if (!DATABASE_RPG_URL) {
+        console.warn('[DB:RPG] No DATABASE_RPG_URL configured — Fabulus API disabled (503).');
+        return;
+    }
+    try {
+        rpgDbPool = mysql.createPool({
+            uri: DATABASE_RPG_URL,
+            waitForConnections: true,
+            connectionLimit: 10,
+        });
+        await rpgDbPool.query('SELECT 1');
+        setFabulusDbPool(rpgDbPool);
+        console.log('[DB:RPG] Connected.');
+    } catch (err) {
+        console.error('[DB:RPG] Init failed:', err.message);
+        rpgDbPool = null;
     }
 }
 
@@ -133,6 +158,7 @@ ctx2D.then(async (c2D) => {
     await c2D.watch();
     await buildFlight();
     await initDatabase();
+    await initRpgDatabase();
 
     const srcDir = path.join(__dirname, '..', 'src');
     fs.watch(srcDir, { recursive: true }, (eventType, filename) => {
@@ -161,6 +187,8 @@ ctx2D.then(async (c2D) => {
             res.end();
             return;
         }
+
+        if (await handleFabulusRoutes(req, res)) return;
 
         if (req.method === 'POST' && req.url.split('?')[0] === '/api/register') {
             try {

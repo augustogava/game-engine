@@ -10,7 +10,7 @@ const SWING_FLASH_MS = 120;
 export class WeaponSystem {
     private scene: FabulusScene;
     private weaponMesh: BABYLON.Mesh | null = null;
-    private weaponMat: BABYLON.StandardMaterial | null = null;
+    private weaponMats: BABYLON.Material[] = [];
     private refreshToken = 0;
 
     constructor(scene: FabulusScene) {
@@ -41,6 +41,7 @@ export class WeaponSystem {
                 for (const m of meshes) m.isPickable = false;
                 this._attachToHand(root);
                 this.weaponMesh = root;
+                this._collectMaterials(meshes);
             }, undefined, (_s, message) => {
                 if (token !== this.refreshToken) return;
                 console.warn('[Fabulus] Weapon model load failed, using fallback blade:', message);
@@ -70,7 +71,7 @@ export class WeaponSystem {
         guard.material = mat;
         blade.isPickable = false;
         guard.isPickable = false;
-        this.weaponMat = mat;
+        this.weaponMats = [mat];
 
         this._attachToHand(blade);
         this.weaponMesh = blade;
@@ -104,12 +105,31 @@ export class WeaponSystem {
         }
     }
 
+    private _collectMaterials(meshes: BABYLON.AbstractMesh[]): void {
+        const mats = new Set<BABYLON.Material>();
+        for (const m of meshes) {
+            const mat = m.material as any;
+            if (mat && mat.emissiveColor !== undefined) mats.add(mat);
+        }
+        this.weaponMats = [...mats];
+    }
+
     swingFlash(): void {
-        if (!this.weaponMat) return;
-        const mat = this.weaponMat;
-        mat.emissiveColor = new BABYLON.Color3(0.5, 0.5, 0.6);
+        if (!this.weaponMats.length) return;
+        const flashed: { mat: any; prev: BABYLON.Color3 }[] = [];
+        for (const mat of this.weaponMats) {
+            const anyMat = mat as any;
+            if (anyMat.__fabSwingFlash) continue;
+            anyMat.__fabSwingFlash = true;
+            flashed.push({ mat: anyMat, prev: anyMat.emissiveColor.clone() });
+            anyMat.emissiveColor = new BABYLON.Color3(0.5, 0.5, 0.6);
+        }
+        if (!flashed.length) return;
         setTimeout(() => {
-            mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+            for (const f of flashed) {
+                f.mat.emissiveColor = f.prev;
+                f.mat.__fabSwingFlash = false;
+            }
         }, SWING_FLASH_MS);
     }
 
@@ -117,7 +137,12 @@ export class WeaponSystem {
         if (this.weaponMesh) {
             try { this.weaponMesh.dispose(false, true); } catch (err) { console.warn('[Fabulus] weapon dispose failed:', err); }
             this.weaponMesh = null;
-            this.weaponMat = null;
+            this.weaponMats = [];
         }
+    }
+
+    dispose(): void {
+        this.refreshToken++;
+        this._disposeCurrent();
     }
 }

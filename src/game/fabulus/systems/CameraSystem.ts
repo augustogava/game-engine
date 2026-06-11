@@ -64,4 +64,12 @@ export class CameraSystem {
 
         this.scene.lightingSystem.followPlayer();
     }
+
+    dispose(): void {
+        const canvas = this.scene.bScene.getEngine().getRenderingCanvas();
+        if (canvas && this._wheelHandler) {
+            canvas.removeEventListener('wheel', this._wheelHandler);
+            this._wheelHandler = null;
+        }
+    }
 }

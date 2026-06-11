@@ -8,6 +8,9 @@ export * from './SkillDef.js';
 export * from './PlayerSkill.js';
 export * from './LootTableEntry.js';
 export * from './GroundDrop.js';
+export * from './AffixDef.js';
+export * from './NpcDef.js';
+export * from './MapPropDef.js';
 
 export interface Aabb {
     minX: number;
@@ -24,6 +27,7 @@ export const ITEM_TYPE = {
     RING: 5,
     AMULET: 6,
     OFFHAND: 7,
+    CONSUMABLE: 8,
 } as const;
 
 export const ATTRIBUTE_TYPE = {
@@ -94,4 +98,5 @@ export const ITEM_TYPE_LABEL: Record<number, string> = {
     5: 'Ring',
     6: 'Amulet',
     7: 'Offhand',
+    8: 'Consumable',
 };
