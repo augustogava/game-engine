@@ -30,6 +30,10 @@ async function main() {
     const MIGRATIONS = [
         "ALTER TABLE rpg_classes ADD COLUMN health_regen FLOAT NOT NULL DEFAULT 0.5",
         "ALTER TABLE rpg_classes ADD COLUMN mana_regen FLOAT NOT NULL DEFAULT 1.0",
+        "ALTER TABLE rpg_classes ADD COLUMN strength_per_level FLOAT NOT NULL DEFAULT 0",
+        "ALTER TABLE rpg_classes ADD COLUMN dexterity_per_level FLOAT NOT NULL DEFAULT 0",
+        "ALTER TABLE rpg_classes ADD COLUMN intelligence_per_level FLOAT NOT NULL DEFAULT 0",
+        "ALTER TABLE rpg_classes ADD COLUMN vitality_per_level FLOAT NOT NULL DEFAULT 0",
     ];
 
     const conn = await mysql.createConnection({ uri: url, multipleStatements: true });

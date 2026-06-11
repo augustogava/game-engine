@@ -326,10 +326,16 @@ export class FabulusScene extends Scene3D {
         const flatOf = (attr: number) => flat[attr] ?? 0;
         const pctMult = (attr: number) => 1 + (pct[attr] ?? 0) / 100;
 
-        const strength = Math.round((p.strength + flatOf(ATTRIBUTE_TYPE.STRENGTH)) * pctMult(ATTRIBUTE_TYPE.STRENGTH));
-        const dexterity = Math.round((p.dexterity + flatOf(ATTRIBUTE_TYPE.DEXTERITY)) * pctMult(ATTRIBUTE_TYPE.DEXTERITY));
-        const intelligence = Math.round((p.intelligence + flatOf(ATTRIBUTE_TYPE.INTELLIGENCE)) * pctMult(ATTRIBUTE_TYPE.INTELLIGENCE));
-        const vitality = Math.round((p.vitality + flatOf(ATTRIBUTE_TYPE.VITALITY)) * pctMult(ATTRIBUTE_TYPE.VITALITY));
+        const levels = Math.max(0, p.level - 1);
+        const strengthGrowth = Math.floor(levels * c.strength_per_level);
+        const dexterityGrowth = Math.floor(levels * c.dexterity_per_level);
+        const intelligenceGrowth = Math.floor(levels * c.intelligence_per_level);
+        const vitalityGrowth = Math.floor(levels * c.vitality_per_level);
+
+        const strength = Math.round((p.strength + strengthGrowth + flatOf(ATTRIBUTE_TYPE.STRENGTH)) * pctMult(ATTRIBUTE_TYPE.STRENGTH));
+        const dexterity = Math.round((p.dexterity + dexterityGrowth + flatOf(ATTRIBUTE_TYPE.DEXTERITY)) * pctMult(ATTRIBUTE_TYPE.DEXTERITY));
+        const intelligence = Math.round((p.intelligence + intelligenceGrowth + flatOf(ATTRIBUTE_TYPE.INTELLIGENCE)) * pctMult(ATTRIBUTE_TYPE.INTELLIGENCE));
+        const vitality = Math.round((p.vitality + vitalityGrowth + flatOf(ATTRIBUTE_TYPE.VITALITY)) * pctMult(ATTRIBUTE_TYPE.VITALITY));
 
         const maxHealth = Math.round(
             (c.base_health + (p.level - 1) * c.health_per_level + vitality * HEALTH_PER_VIT + flatOf(ATTRIBUTE_TYPE.MAX_HEALTH))
@@ -361,6 +367,9 @@ export class FabulusScene extends Scene3D {
         const additiveMult = pctMult(ATTRIBUTE_TYPE.DAMAGE_PCT);
         const skillDamageMult = 1 + intelligence * SKILL_DMG_PER_INT;
 
+        const effectiveDamageMin = Math.round(weaponDamageMin * mainStatMult * additiveMult);
+        const effectiveDamageMax = Math.round(weaponDamageMax * mainStatMult * additiveMult);
+
         const critChancePct = Math.min(100, CRIT_BASE_PCT + dexterity * CRIT_PER_DEX + (pct[ATTRIBUTE_TYPE.CRIT_CHANCE_PCT] ?? 0) + flatOf(ATTRIBUTE_TYPE.CRIT_CHANCE_PCT));
         const critDamageMult = CRIT_DMG_BASE + dexterity * CRIT_DMG_PER_DEX + ((pct[ATTRIBUTE_TYPE.CRIT_DAMAGE_PCT] ?? 0) + flatOf(ATTRIBUTE_TYPE.CRIT_DAMAGE_PCT)) / 100;
 
@@ -380,6 +389,7 @@ export class FabulusScene extends Scene3D {
             maxHealth, maxMana,
             armor, damageReductionPct,
             weaponDamageMin, weaponDamageMax,
+            effectiveDamageMin, effectiveDamageMax,
             attackSpeed, attackRange: BASE_ATTACK_RANGE,
             dps,
             critChancePct, critDamageMult,

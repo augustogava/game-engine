@@ -9,7 +9,7 @@ import {
     COIN_REST_BOB_SPEED, COIN_SCALE, COIN_SPIN_SPEED, DROP_DESPAWN_MS, DROP_EJECT_SPEED_MAX,
     DROP_EJECT_SPEED_MIN, DROP_FADE_WARN_MS, DROP_GRAVITY, DROP_SCATTER_RADIUS,
     ITEM_BEAM_HEIGHT, ITEM_BEAM_RADIUS, LOOT_PICK_PROXY_HEIGHT, LOOT_PICK_PROXY_RADIUS_GOLD,
-    LOOT_PICK_PROXY_RADIUS_ITEM, MAP_HALF, MAX_INVENTORY, MODELS_BASE_PATH, PICKUP_RADIUS,
+    LOOT_PICK_PROXY_RADIUS_ITEM, MAP_HALF, MAX_INVENTORY, MAX_PROC_LEVEL, MODELS_BASE_PATH, PICKUP_RADIUS,
 } from '../constants/index.js';
 import { FabulusApi } from '../api/FabulusApi.js';
 
@@ -71,6 +71,7 @@ export class LootSystem {
         const entries = this.scene.lootTables.filter(lt => lt.enemy_id === enemy.def.id);
         const pos = enemy.root.position;
         const elite = enemy.isElite;
+        const dropLevel = Math.max(1, Math.min(MAX_PROC_LEVEL, this.scene.player.level));
         for (const entry of entries) {
             if (Math.random() * 100 >= entry.drop_chance_pct) continue;
             if (entry.loot_type === LOOT_TYPE.GOLD) {
@@ -83,33 +84,34 @@ export class LootSystem {
                     this._spawnGoldDrop(clear.x, clear.z, amount);
                 }
             } else if (entry.loot_type === LOOT_TYPE.ITEM) {
-                this._spawnRolledItem(pos.x, pos.z, entry.item_id, elite);
+                this._spawnRolledItem(pos.x, pos.z, entry.item_id, elite, dropLevel);
             }
         }
-        // Elite bonus: extra guaranteed random rolls with a bias toward higher rarities.
         for (let i = 0; i < enemy.lootRollsBonus; i++) {
-            this._spawnRolledItem(pos.x, pos.z, null, true);
+            this._spawnRolledItem(pos.x, pos.z, null, true, dropLevel);
         }
     }
 
-    private _spawnRolledItem(x: number, z: number, itemId: number | null, eliteBias: boolean): void {
+    private _spawnRolledItem(x: number, z: number, itemId: number | null, eliteBias: boolean, dropLevel: number): void {
         const itemDef = itemId != null
             ? this.scene.getItemDef(itemId)
-            : this._rollRandomItem(eliteBias);
+            : this._rollRandomItem(eliteBias, dropLevel);
         if (!itemDef) return;
-        const affixes = itemId == null ? this._rollAffixes(itemDef) : null;
+        const affixes = itemId == null ? this._rollAffixes(itemDef, dropLevel) : null;
         const clear = this._findClearDropPosition(x, z);
         this._spawnItemDrop(clear.x, clear.z, itemDef, affixes);
     }
 
-    private _rollRandomItem(eliteBias = false): ItemDef | null {
-        const items = this.scene.itemsCatalog;
-        if (!items.length) return null;
+    private _rollRandomItem(eliteBias = false, dropLevel = 1): ItemDef | null {
+        const items = this.scene.itemsCatalog.filter(i => i.required_level <= dropLevel);
+        const pool = items.length ? items : this.scene.itemsCatalog;
+        if (!pool.length) return null;
         let totalWeight = 0;
-        const weighted = items.map(item => {
+        const weighted = pool.map(item => {
             const rarity = this.scene.getRarity(item.rarity_id);
             let weight = rarity ? rarity.drop_weight : 1;
-            // Elite kills flatten the weight curve so rare drops become noticeably more likely.
+            const levelGap = Math.max(0, dropLevel - item.required_level);
+            weight *= 1 + levelGap * 0.15;
             if (eliteBias) weight = Math.sqrt(weight);
             totalWeight += weight;
             return { item, weight };
@@ -122,12 +124,31 @@ export class LootSystem {
         return weighted[weighted.length - 1].item;
     }
 
-    /** Rolls 1-2 affixes for procedurally dropped equipment, driven by the rpg_affixes catalog. */
-    private _rollAffixes(itemDef: ItemDef): RolledAffix[] | null {
+    private _levelRollBias(dropLevel: number): number {
+        if (MAX_PROC_LEVEL <= 1) return 0;
+        return (dropLevel - 1) / (MAX_PROC_LEVEL - 1);
+    }
+
+    private _affixCountForDrop(itemDef: ItemDef, dropLevel: number): number {
+        const rarity = this.scene.getRarity(itemDef.rarity_id);
+        const maxMods = rarity?.max_modifiers ?? 1;
+        const levelBonus = dropLevel >= 8 ? 1 : dropLevel >= 5 ? (Math.random() < 0.5 ? 1 : 0) : 0;
+        const baseCount = itemDef.rarity_id >= 3 ? 2 : 1;
+        return Math.min(maxMods, baseCount + levelBonus);
+    }
+
+    private _rollAffixValue(minRoll: number, maxRoll: number, dropLevel: number): number {
+        const bias = this._levelRollBias(dropLevel);
+        const randomSpread = 0.35;
+        const t = Math.min(1, bias * (1 - randomSpread) + Math.random() * randomSpread);
+        return Math.round((minRoll + t * (maxRoll - minRoll)) * 10) / 10;
+    }
+
+    private _rollAffixes(itemDef: ItemDef, dropLevel: number): RolledAffix[] | null {
         if (itemDef.item_type === ITEM_TYPE.CONSUMABLE) return null;
         const pool = this.scene.affixesCatalog.filter(a => a.min_rarity <= itemDef.rarity_id);
         if (!pool.length) return null;
-        const count = 1 + (Math.random() < 0.4 ? 1 : 0);
+        const count = this._affixCountForDrop(itemDef, dropLevel);
         const rolled: RolledAffix[] = [];
         const usedTypes = new Set<number>();
         for (let i = 0; i < count; i++) {
@@ -142,7 +163,7 @@ export class LootSystem {
                 if (roll <= 0) { chosen = a; break; }
             }
             usedTypes.add(chosen.affix_type);
-            const value = Math.round((chosen.min_roll + Math.random() * (chosen.max_roll - chosen.min_roll)) * 10) / 10;
+            const value = this._rollAffixValue(chosen.min_roll, chosen.max_roll, dropLevel);
             rolled.push({
                 affix_id: chosen.id,
                 name: chosen.name,

@@ -1,5 +1,6 @@
 import type { AffixDef, ClassDef, EnemyDef, ItemDef, LootTableEntry, PlayerItem, PlayerSkill, PlayerState, RarityDef, SkillDef } from '../types/index.js';
 import { XP_CURVE_BASE, XP_CURVE_EXPONENT } from '../constants/index.js';
+import { EXTENDED_ITEMS, EXTENDED_LOOT_TABLES } from './extendedItems.js';
 
 export const MOCK_CLASSES: ClassDef[] = [
     {
@@ -19,6 +20,10 @@ export const MOCK_CLASSES: ClassDef[] = [
         base_vitality: 10,
         health_per_level: 12,
         mana_per_level: 4,
+        strength_per_level: 1,
+        dexterity_per_level: 0.5,
+        intelligence_per_level: 0,
+        vitality_per_level: 1,
         health_regen: 0.8,
         mana_regen: 0.8,
         attribute_points_per_level: 3,
@@ -49,6 +54,10 @@ export const MOCK_CLASSES: ClassDef[] = [
         base_vitality: 7,
         health_per_level: 8,
         mana_per_level: 9,
+        strength_per_level: 0,
+        dexterity_per_level: 0.5,
+        intelligence_per_level: 1,
+        vitality_per_level: 0.5,
         health_regen: 0.4,
         mana_regen: 1.6,
         attribute_points_per_level: 3,
@@ -508,6 +517,7 @@ export const MOCK_ITEMS: ItemDef[] = [
         max_stack: 10,
         modifiers: [],
     },
+    ...EXTENDED_ITEMS,
 ];
 
 export const MOCK_AFFIXES: AffixDef[] = [
@@ -623,6 +633,7 @@ export const MOCK_LOOT_TABLES: LootTableEntry[] = [
     { id: 21, enemy_id: 4, loot_type: 2, drop_chance_pct: 8, gold_min: null, gold_max: null, item_id: 12 },
     { id: 22, enemy_id: 4, loot_type: 2, drop_chance_pct: 5, gold_min: null, gold_max: null, item_id: 6 },
     { id: 23, enemy_id: 4, loot_type: 2, drop_chance_pct: 3, gold_min: null, gold_max: null, item_id: 10 },
+    ...EXTENDED_LOOT_TABLES,
 ];
 
 const MOCK_LEVELS_COUNT = 50;

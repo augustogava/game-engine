@@ -18,3 +18,4 @@ export const ITEM_BEAM_RADIUS = 0.22;
 export const LOOT_PICK_PROXY_RADIUS_GOLD = 0.7;
 export const LOOT_PICK_PROXY_RADIUS_ITEM = 0.8;
 export const LOOT_PICK_PROXY_HEIGHT = 1.2;
+export const MAX_PROC_LEVEL = 10;

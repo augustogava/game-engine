@@ -885,7 +885,7 @@ export class UiSystem {
         if (tech) {
             const mainStatBonusPct = Math.round((d.mainStatMult - 1) * 100);
             tech.innerHTML = `<div class="section-head">Details</div>
-                <div class="tech-row"><span>Damage</span><span>${d.weaponDamageMin}-${d.weaponDamageMax}</span></div>
+                <div class="tech-row"><span>Damage</span><span>${d.effectiveDamageMin}-${d.effectiveDamageMax}</span></div>
                 <div class="tech-row"><span>DPS</span><span>${fmt(d.dps)}</span></div>
                 <div class="tech-row"><span>Main Stat Bonus</span><span>+${mainStatBonusPct}%</span></div>
                 <div class="tech-row"><span>Max Life</span><span>${fmt(d.maxHealth)}</span></div>

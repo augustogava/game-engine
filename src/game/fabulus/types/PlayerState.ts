@@ -29,6 +29,8 @@ export interface DerivedStats {
     damageReductionPct: number;
     weaponDamageMin: number;
     weaponDamageMax: number;
+    effectiveDamageMin: number;
+    effectiveDamageMax: number;
     attackSpeed: number;
     attackRange: number;
     dps: number;

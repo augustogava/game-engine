@@ -1,0 +1,1388 @@
+{
+  "items": [
+    {
+      "id": 14,
+      "name": "Bronze Dagger",
+      "description": "A short curved blade favored by rogues and scouts.",
+      "item_type": 1,
+      "main_stat": 2,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/bronze-dagger.png",
+      "rarity_id": 1,
+      "required_level": 1,
+      "damage_min": 3,
+      "damage_max": 5,
+      "attack_speed": 1.2,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 6,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": []
+    },
+    {
+      "id": 15,
+      "name": "Iron Mace",
+      "description": "A heavy flanged mace that crushes bone and shield alike.",
+      "item_type": 1,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/iron-mace.png",
+      "rarity_id": 1,
+      "required_level": 2,
+      "damage_min": 5,
+      "damage_max": 9,
+      "attack_speed": 0.9,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 10,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": []
+    },
+    {
+      "id": 16,
+      "name": "Steel Longsword",
+      "description": "A well-balanced blade of polished steel.",
+      "item_type": 1,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/steel-longsword.png",
+      "rarity_id": 2,
+      "required_level": 3,
+      "damage_min": 8,
+      "damage_max": 13,
+      "attack_speed": 1,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 18,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": []
+    },
+    {
+      "id": 17,
+      "name": "Oak Battle Staff",
+      "description": "A gnarled staff topped with a faintly glowing crystal.",
+      "item_type": 1,
+      "main_stat": 3,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/oak-battle-staff.png",
+      "rarity_id": 2,
+      "required_level": 4,
+      "damage_min": 6,
+      "damage_max": 10,
+      "attack_speed": 1.1,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 22,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 3,
+          "value": 2,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "Serpent Fang Blade",
+      "description": "A curved sword with a venom-green edge and serpent pommel.",
+      "item_type": 1,
+      "main_stat": 2,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/serpent-fang-blade.png",
+      "rarity_id": 3,
+      "required_level": 6,
+      "damage_min": 12,
+      "damage_max": 18,
+      "attack_speed": 1.1,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 45,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 10,
+          "value": 3,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "name": "Warlord's Greataxe",
+      "description": "A massive double-bladed axe forged for champions.",
+      "item_type": 1,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/warlords-greataxe.png",
+      "rarity_id": 4,
+      "required_level": 8,
+      "damage_min": 18,
+      "damage_max": 26,
+      "attack_speed": 0.8,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 75,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 1,
+          "value": 4,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "name": "Dawnbreaker",
+      "description": "A radiant holy blade said to banish the darkest foes.",
+      "item_type": 1,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/dawnbreaker.png",
+      "rarity_id": 5,
+      "required_level": 10,
+      "damage_min": 22,
+      "damage_max": 32,
+      "attack_speed": 1,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 120,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 8,
+          "value": 8,
+          "value_type": 2
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "name": "Leather Cap",
+      "description": "A simple leather cap offering minimal protection.",
+      "item_type": 2,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/leather-cap.png",
+      "rarity_id": 1,
+      "required_level": 1,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 2,
+      "anim_attack_override": null,
+      "sell_value": 5,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": []
+    },
+    {
+      "id": 22,
+      "name": "Bronze Helm",
+      "description": "An open-faced bronze helm with a sturdy nose guard.",
+      "item_type": 2,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/bronze-helm.png",
+      "rarity_id": 1,
+      "required_level": 2,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 4,
+      "anim_attack_override": null,
+      "sell_value": 10,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 1,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "name": "Mage Hood",
+      "description": "A deep blue hood woven with silver arcane thread.",
+      "item_type": 2,
+      "main_stat": 3,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/mage-hood.png",
+      "rarity_id": 2,
+      "required_level": 3,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 1,
+      "anim_attack_override": null,
+      "sell_value": 16,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 3,
+          "value": 2,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 6,
+          "value": 8,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "name": "Steel Greathelm",
+      "description": "A fully enclosed steel helm with a narrow visor.",
+      "item_type": 2,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/steel-greathelm.png",
+      "rarity_id": 3,
+      "required_level": 6,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 7,
+      "anim_attack_override": null,
+      "sell_value": 38,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 3,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "name": "Crown of Kings",
+      "description": "An ornate golden crown set with crimson gemstones.",
+      "item_type": 2,
+      "main_stat": 4,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/crown-of-kings.png",
+      "rarity_id": 4,
+      "required_level": 9,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 5,
+      "anim_attack_override": null,
+      "sell_value": 85,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 1,
+          "value": 3,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 4,
+          "value": 3,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 5,
+          "value": 15,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "name": "Traveler's Vest",
+      "description": "A worn leather vest suited for long journeys.",
+      "item_type": 3,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/travelers-vest.png",
+      "rarity_id": 1,
+      "required_level": 1,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 3,
+      "anim_attack_override": null,
+      "sell_value": 7,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": []
+    },
+    {
+      "id": 27,
+      "name": "Chainmail Hauberk",
+      "description": "Interlinked steel rings offering reliable protection.",
+      "item_type": 3,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/chainmail-hauberk.png",
+      "rarity_id": 2,
+      "required_level": 3,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 6,
+      "anim_attack_override": null,
+      "sell_value": 20,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 2,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "name": "Scholar's Robe",
+      "description": "Flowing blue robes embroidered with arcane sigils.",
+      "item_type": 3,
+      "main_stat": 3,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/scholars-robe.png",
+      "rarity_id": 2,
+      "required_level": 4,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 2,
+      "anim_attack_override": null,
+      "sell_value": 24,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 3,
+          "value": 3,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 6,
+          "value": 15,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "name": "Plate Armor",
+      "description": "Heavy steel plate forged for front-line warriors.",
+      "item_type": 3,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/plate-armor.png",
+      "rarity_id": 3,
+      "required_level": 7,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 10,
+      "anim_attack_override": null,
+      "sell_value": 55,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 1,
+          "value": 4,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "name": "Aegis of the Ancients",
+      "description": "A legendary breastplate engraved with glowing runes.",
+      "item_type": 3,
+      "main_stat": 4,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/aegis-of-the-ancients.png",
+      "rarity_id": 5,
+      "required_level": 10,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 14,
+      "anim_attack_override": null,
+      "sell_value": 130,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 5,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 5,
+          "value": 30,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "name": "Worn Sandals",
+      "description": "Simple leather sandals, light on the feet.",
+      "item_type": 4,
+      "main_stat": 2,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/worn-sandals.png",
+      "rarity_id": 1,
+      "required_level": 1,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 1,
+      "anim_attack_override": null,
+      "sell_value": 4,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 9,
+          "value": 4,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "name": "Hide Boots",
+      "description": "Sturdy hide boots with fur trim for cold trails.",
+      "item_type": 4,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/hide-boots.png",
+      "rarity_id": 1,
+      "required_level": 2,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 3,
+      "anim_attack_override": null,
+      "sell_value": 9,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": []
+    },
+    {
+      "id": 33,
+      "name": "Swiftstride Boots",
+      "description": "Sleek green boots that quicken every step.",
+      "item_type": 4,
+      "main_stat": 2,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/swiftstride-boots.png",
+      "rarity_id": 2,
+      "required_level": 4,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 3,
+      "anim_attack_override": null,
+      "sell_value": 20,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 9,
+          "value": 10,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "name": "Greaves of Valor",
+      "description": "Steel greaves worn by knights of the royal guard.",
+      "item_type": 4,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/greaves-of-valor.png",
+      "rarity_id": 3,
+      "required_level": 6,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 5,
+      "anim_attack_override": null,
+      "sell_value": 35,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 3,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "name": "Boots of the Tempest",
+      "description": "Light boots crackling with storm energy.",
+      "item_type": 4,
+      "main_stat": 2,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/boots-of-the-tempest.png",
+      "rarity_id": 4,
+      "required_level": 9,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 4,
+      "anim_attack_override": null,
+      "sell_value": 70,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 9,
+          "value": 12,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 2,
+          "value": 2,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "name": "Copper Band",
+      "description": "A simple polished copper ring.",
+      "item_type": 5,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/copper-band.png",
+      "rarity_id": 1,
+      "required_level": 1,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 6,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 1,
+          "value": 1,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "name": "Ring of Focus",
+      "description": "A silver ring set with a glowing blue sapphire.",
+      "item_type": 5,
+      "main_stat": 3,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/ring-of-focus.png",
+      "rarity_id": 2,
+      "required_level": 3,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 18,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 3,
+          "value": 4,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 6,
+          "value": 8,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "name": "Band of Vitality",
+      "description": "A golden ring set with a deep green emerald.",
+      "item_type": 5,
+      "main_stat": 4,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/band-of-vitality.png",
+      "rarity_id": 2,
+      "required_level": 5,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 25,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 3,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 5,
+          "value": 15,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "name": "Signet of Fury",
+      "description": "A dark iron signet ring set with a glowing ruby.",
+      "item_type": 5,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/signet-of-fury.png",
+      "rarity_id": 3,
+      "required_level": 7,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 50,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 1,
+          "value": 4,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 10,
+          "value": 5,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "name": "Ring of the Archmage",
+      "description": "An elaborate golden ring with a violet arcane gem.",
+      "item_type": 5,
+      "main_stat": 3,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/ring-of-the-archmage.png",
+      "rarity_id": 4,
+      "required_level": 10,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 90,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 3,
+          "value": 5,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 6,
+          "value": 20,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 14,
+          "value": 1,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "name": "Wooden Pendant",
+      "description": "A carved wooden talisman on a leather cord.",
+      "item_type": 6,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/wooden-pendant.png",
+      "rarity_id": 1,
+      "required_level": 1,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 5,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 5,
+          "value": 5,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "name": "Amulet of Warding",
+      "description": "A silver shield-shaped amulet on a heavy chain.",
+      "item_type": 6,
+      "main_stat": 4,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/amulet-of-warding.png",
+      "rarity_id": 2,
+      "required_level": 3,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 16,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 5,
+          "value": 15,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 4,
+          "value": 1,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "name": "Pendant of Power",
+      "description": "A golden amulet radiating raw strength.",
+      "item_type": 6,
+      "main_stat": 1,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/pendant-of-power.png",
+      "rarity_id": 3,
+      "required_level": 6,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 42,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 1,
+          "value": 2,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 2,
+          "value": 2,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 8,
+          "value": 10,
+          "value_type": 2
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "name": "Heart of the Phoenix",
+      "description": "A legendary phoenix amulet pulsing with fiery life.",
+      "item_type": 6,
+      "main_stat": 4,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/heart-of-the-phoenix.png",
+      "rarity_id": 5,
+      "required_level": 10,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 110,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 5,
+          "value": 40,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 13,
+          "value": 2,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "name": "Iron Targe",
+      "description": "A small round iron shield with a central boss.",
+      "item_type": 7,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/iron-targe.png",
+      "rarity_id": 1,
+      "required_level": 2,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 6,
+      "anim_attack_override": null,
+      "sell_value": 10,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": []
+    },
+    {
+      "id": 46,
+      "name": "Spellbook of Embers",
+      "description": "A leather-bound tome leaking fiery embers.",
+      "item_type": 7,
+      "main_stat": 3,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/spellbook-of-embers.png",
+      "rarity_id": 2,
+      "required_level": 4,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 22,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 3,
+          "value": 3,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 6,
+          "value": 12,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "name": "Tower Shield",
+      "description": "A tall rectangular shield of banded steel.",
+      "item_type": 7,
+      "main_stat": 4,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/tower-shield.png",
+      "rarity_id": 3,
+      "required_level": 7,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 12,
+      "anim_attack_override": null,
+      "sell_value": 48,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 4,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "name": "Bulwark of the Guardian",
+      "description": "A legendary golden kite shield engraved with a lion.",
+      "item_type": 7,
+      "main_stat": 4,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/bulwark-of-the-guardian.png",
+      "rarity_id": 5,
+      "required_level": 10,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": 16,
+      "anim_attack_override": null,
+      "sell_value": 115,
+      "restore_health": null,
+      "restore_mana": null,
+      "use_cooldown_ms": null,
+      "max_stack": null,
+      "modifiers": [
+        {
+          "attribute_type": 4,
+          "value": 5,
+          "value_type": 1
+        },
+        {
+          "attribute_type": 5,
+          "value": 25,
+          "value_type": 1
+        }
+      ]
+    },
+    {
+      "id": 49,
+      "name": "Greater Mana Potion",
+      "description": "A large vial of swirling blue essence. Restores mana.",
+      "item_type": 8,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/greater-mana-potion.png",
+      "rarity_id": 2,
+      "required_level": 5,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 8,
+      "restore_health": null,
+      "restore_mana": 80,
+      "use_cooldown_ms": 5000,
+      "max_stack": 10,
+      "modifiers": []
+    },
+    {
+      "id": 50,
+      "name": "Elixir of Renewal",
+      "description": "A golden elixir that mends body and spirit alike.",
+      "item_type": 8,
+      "main_stat": null,
+      "model_path": null,
+      "icon_path": "models/rpg/icons/items/elixir-of-renewal.png",
+      "rarity_id": 3,
+      "required_level": 8,
+      "damage_min": null,
+      "damage_max": null,
+      "attack_speed": null,
+      "armor": null,
+      "anim_attack_override": null,
+      "sell_value": 25,
+      "restore_health": 100,
+      "restore_mana": 50,
+      "use_cooldown_ms": 8000,
+      "max_stack": 5,
+      "modifiers": []
+    }
+  ],
+  "lootTables": [
+    {
+      "id": 24,
+      "enemy_id": 1,
+      "loot_type": 2,
+      "drop_chance_pct": 4,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 14
+    },
+    {
+      "id": 25,
+      "enemy_id": 1,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 21
+    },
+    {
+      "id": 26,
+      "enemy_id": 1,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 26
+    },
+    {
+      "id": 27,
+      "enemy_id": 1,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 31
+    },
+    {
+      "id": 28,
+      "enemy_id": 1,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 36
+    },
+    {
+      "id": 29,
+      "enemy_id": 1,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 41
+    },
+    {
+      "id": 30,
+      "enemy_id": 2,
+      "loot_type": 2,
+      "drop_chance_pct": 4,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 15
+    },
+    {
+      "id": 31,
+      "enemy_id": 2,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 22
+    },
+    {
+      "id": 32,
+      "enemy_id": 2,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 27
+    },
+    {
+      "id": 33,
+      "enemy_id": 2,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 45
+    },
+    {
+      "id": 34,
+      "enemy_id": 2,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 16
+    },
+    {
+      "id": 35,
+      "enemy_id": 2,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 37
+    },
+    {
+      "id": 36,
+      "enemy_id": 3,
+      "loot_type": 2,
+      "drop_chance_pct": 4,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 17
+    },
+    {
+      "id": 37,
+      "enemy_id": 3,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 23
+    },
+    {
+      "id": 38,
+      "enemy_id": 3,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 28
+    },
+    {
+      "id": 39,
+      "enemy_id": 3,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 33
+    },
+    {
+      "id": 40,
+      "enemy_id": 3,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 42
+    },
+    {
+      "id": 41,
+      "enemy_id": 3,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 46
+    },
+    {
+      "id": 42,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 4,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 18
+    },
+    {
+      "id": 43,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 24
+    },
+    {
+      "id": 44,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 29
+    },
+    {
+      "id": 45,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 34
+    },
+    {
+      "id": 46,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 38
+    },
+    {
+      "id": 47,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 43
+    },
+    {
+      "id": 48,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 47
+    },
+    {
+      "id": 49,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 3,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 49
+    },
+    {
+      "id": 50,
+      "enemy_id": 2,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 19
+    },
+    {
+      "id": 51,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 1,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 20
+    },
+    {
+      "id": 52,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 1,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 25
+    },
+    {
+      "id": 53,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 1,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 30
+    },
+    {
+      "id": 54,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 1,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 35
+    },
+    {
+      "id": 55,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 1,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 40
+    },
+    {
+      "id": 56,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 1,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 44
+    },
+    {
+      "id": 57,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 1,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 48
+    },
+    {
+      "id": 58,
+      "enemy_id": 4,
+      "loot_type": 2,
+      "drop_chance_pct": 2,
+      "gold_min": null,
+      "gold_max": null,
+      "item_id": 50
+    }
+  ]
+}

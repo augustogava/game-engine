@@ -15,6 +15,10 @@ export interface ClassDef {
     base_vitality: number;
     health_per_level: number;
     mana_per_level: number;
+    strength_per_level: number;
+    dexterity_per_level: number;
+    intelligence_per_level: number;
+    vitality_per_level: number;
     health_regen: number;
     mana_regen: number;
     attribute_points_per_level: number;

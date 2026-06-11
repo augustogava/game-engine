@@ -5,6 +5,8 @@
  * the rpg_* tables (see db/fabulus_schema.sql).
  */
 const USE_MOCK = process.env.FABULUS_USE_MOCK === 'true';
+const path = require('path');
+const { items: extendedItems, lootTables: extendedLootTables } = require(path.join(__dirname, '../data/fabulus-extended.json'));
 
 const API_PREFIX = '/api/fabulus';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -210,6 +212,7 @@ const mockItems = [
         ...ITEM_DEFAULTS, sell_value: 3, restore_mana: 40, use_cooldown_ms: 5000, max_stack: 10,
         modifiers: [],
     },
+    ...extendedItems,
 ];
 
 const mockAffixes = [
@@ -316,6 +319,7 @@ const mockLootTables = [
     { id: 21, enemy_id: 4, loot_type: 2, drop_chance_pct: 8, gold_min: null, gold_max: null, item_id: 12 },
     { id: 22, enemy_id: 4, loot_type: 2, drop_chance_pct: 5, gold_min: null, gold_max: null, item_id: 6 },
     { id: 23, enemy_id: 4, loot_type: 2, drop_chance_pct: 3, gold_min: null, gold_max: null, item_id: 10 },
+    ...extendedLootTables,
 ];
 
 const mockLevels = (() => {
