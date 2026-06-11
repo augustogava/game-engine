@@ -17,7 +17,7 @@ export const ENEMY_COLLIDER_RADIUS = 0.5;
 export const ARRIVAL_THRESHOLD = 0.3;
 export const PLAYER_TURN_LERP = 12;
 
-export const ENEMY_SPAWN_COUNT = 8;
+export const ENEMY_SPAWN_COUNT = 16;
 export const ENEMY_SPAWN_MIN_DIST = 12;
 export const ENEMY_NEAR_SPAWN_DIST = 8;
 export const ENEMY_WANDER_RADIUS = 4;

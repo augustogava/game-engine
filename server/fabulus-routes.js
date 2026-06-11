@@ -49,7 +49,7 @@ const ELITE_DEFAULTS = {
 const mockEnemies = [
     {
         id: 1, name: 'Goblin', model_path: 'enemies/goblin_Merged_Animations.glb', level: 1,
-        max_health: 40, damage_min: 3, damage_max: 6, armor: 5,
+        max_health: 24, damage_min: 3, damage_max: 6, armor: 5,
         walk_speed: 1.6, run_speed: 3.4, aggro_range: 9, attack_range: 1.6, leash_range: 18,
         attack_cooldown_ms: 1600, experience_reward: 28, gold_min: 2, gold_max: 6,
         health_scale_pct: 18, damage_scale_pct: 12, ...ELITE_DEFAULTS,
