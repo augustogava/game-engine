@@ -11,12 +11,12 @@ VALUES
      'classes/Meshy_AI_Emerald_Knight_of_the_biped_Meshy_AI_Meshy_Merged_Animations.glb', 'models/rpg/icons/classes/knight.png', 50, 100, 1,
      120, 40, 12, 8, 5, 10,
      12, 4, 0.8, 0.8, 3, 1,
-     2.4, 5.0, 'Idle_02', 'Walking', 'Running', 'Attack', NULL, NULL),
+     2.4, 5.0, 'Run_03', 'Attack', 'Walking', 'Idle_02', NULL, NULL),
     (2, 'Wizard', 'A master of the arcane. Intelligence empowers every spell.',
      'classes/Meshy_AI_Frostbound_Sage_biped_Meshy_AI_Meshy_Merged_Animations.glb', 'models/rpg/icons/classes/wizard.png', 50, 100, 3,
      80, 90, 5, 9, 14, 7,
      8, 9, 0.4, 1.6, 3, 1,
-     2.4, 4.8, 'Idle_12', 'Walking', 'Running', 'Attack', NULL, NULL)
+     2.4, 4.8, 'Attack', 'Run_03', 'Idle_12', 'Running', NULL, NULL)
 ON DUPLICATE KEY UPDATE
     name = VALUES(name), description = VALUES(description), model_path = VALUES(model_path), icon_path = VALUES(icon_path),
     max_level = VALUES(max_level), starting_gold = VALUES(starting_gold), main_stat = VALUES(main_stat),
@@ -56,7 +56,7 @@ VALUES
      1.4, 3.0, 10, 1.8, 20, 2100,
      95, 6, 14, 20, 14,
      8, 2.5, 1.5, 3, 1,
-     'Idle_02', 'Walking', 'Running', 'Attack', NULL, NULL)
+     'Running', 'Axe_Spin_Attack', 'Attack', 'Idle_02', NULL, NULL)
 ON DUPLICATE KEY UPDATE
     name = VALUES(name), model_path = VALUES(model_path), level = VALUES(level),
     max_health = VALUES(max_health), damage_min = VALUES(damage_min), damage_max = VALUES(damage_max),
@@ -247,7 +247,7 @@ ON DUPLICATE KEY UPDATE
 INSERT INTO rpg_npcs (id, name, title, model_path, pos_x, pos_z, rot_y, scale, idle_anim, dialog) VALUES
     (1, 'Borin', 'Blacksmith',
      'npc/Meshy_AI_A_robust_medieval_bla_biped_Meshy_AI_Meshy_Merged_Animations.glb',
-     7, 2, -1.85, 3.6, NULL,
+     7, 2, -1.85, 2.6, NULL,
      '{"start":"greet","nodes":{"greet":{"text":"Well met, traveler. The forge keeps me busy, but I always have time for a chat.","options":[{"label":"Who are you?","next":"about"},{"label":"Any advice for these lands?","next":"advice"},{"label":"Farewell.","next":null}]},"about":{"text":"Name''s Borin. I''ve been smithing for this village longer than you''ve been swinging swords.","options":[{"label":"Any advice for these lands?","next":"advice"},{"label":"Farewell.","next":null}]},"advice":{"text":"Watch out for goblins roaming the wilds. And keep a health potion handy - the brutes hit hard.","options":[{"label":"Who are you?","next":"about"},{"label":"Thanks. Farewell.","next":null}]}}}')
 ON DUPLICATE KEY UPDATE
     name = VALUES(name), title = VALUES(title), model_path = VALUES(model_path),

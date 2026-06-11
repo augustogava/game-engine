@@ -29,7 +29,7 @@ const mockClasses = [
         base_health: 120, base_mana: 40, base_strength: 12, base_dexterity: 8, base_intelligence: 5, base_vitality: 10,
         health_per_level: 12, mana_per_level: 4, health_regen: 0.8, mana_regen: 0.8, attribute_points_per_level: 3, skill_points_per_level: 1,
         walk_speed: 2.4, run_speed: 5.0,
-        anim_idle: 'Idle_02', anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
+        anim_idle: 'Run_03', anim_walk: 'Attack', anim_run: 'Walking', anim_attack: 'Idle_02', anim_hit: null, anim_death: null,
     },
     {
         id: 2, name: 'Wizard', description: 'A master of the arcane. Intelligence empowers every spell.',
@@ -38,7 +38,7 @@ const mockClasses = [
         base_health: 80, base_mana: 90, base_strength: 5, base_dexterity: 9, base_intelligence: 14, base_vitality: 7,
         health_per_level: 8, mana_per_level: 9, health_regen: 0.4, mana_regen: 1.6, attribute_points_per_level: 3, skill_points_per_level: 1,
         walk_speed: 2.4, run_speed: 4.8,
-        anim_idle: 'Idle_12', anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
+        anim_idle: 'Attack', anim_walk: 'Run_03', anim_run: 'Idle_12', anim_attack: 'Running', anim_hit: null, anim_death: null,
     },
 ];
 
@@ -77,7 +77,7 @@ const mockEnemies = [
         walk_speed: 1.4, run_speed: 3.0, aggro_range: 10, attack_range: 1.8, leash_range: 20,
         attack_cooldown_ms: 2100, experience_reward: 95, gold_min: 6, gold_max: 14,
         health_scale_pct: 20, damage_scale_pct: 14, ...ELITE_DEFAULTS,
-        anim_idle: 'Idle_02', anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
+        anim_idle: 'Running', anim_walk: 'Axe_Spin_Attack', anim_run: 'Attack', anim_attack: 'Idle_02', anim_hit: null, anim_death: null,
     },
 ];
 

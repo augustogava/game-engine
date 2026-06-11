@@ -79,7 +79,8 @@ export class NpcSystem {
             const entries = container.instantiateModelsToScene(name => `n${def.id}_${name}`, false);
             const modelRoot = entries.rootNodes[0] as BABYLON.TransformNode;
             modelRoot.parent = root;
-            const allMeshes = this.scene.renderSystem.collectModelMeshes(modelRoot);
+            const childMeshes = modelRoot.getChildMeshes(false);
+            const allMeshes = childMeshes.length ? childMeshes : this.scene.renderSystem.collectModelMeshes(modelRoot);
             if (allMeshes.length) {
                 this.scene.renderSystem.normalizeModelHeight(modelRoot, allMeshes, height);
                 for (const m of allMeshes) {

@@ -30,6 +30,8 @@ export class CombatSystem {
 
         this.lastSwingAt = now;
         this._startSwing(target, 100, null, 0, false);
+        // One basic attack per click: clear the target so combat does not auto-repeat.
+        this.scene.attackTarget = null;
     }
 
     private _startSwing(target: EnemyInstance, coeffPct: number, animOverride: string | null, staggerMs: number, isSkill = false): void {

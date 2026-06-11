@@ -4,7 +4,7 @@ import type { EnemyDef, EnemyInstance } from '../types/index.js';
 import { ENEMY_STATE } from '../types/index.js';
 import {
     ENEMY_COLLIDER_RADIUS, ENEMY_HEIGHT_UNITS, ENEMY_LUNGE_DISTANCE, ENEMY_LUNGE_DURATION_MS,
-    ENEMY_RESPAWN_MS, ENEMY_SPAWN_COUNT, ENEMY_SPAWN_MIN_DIST, ENEMY_WANDER_INTERVAL_MS,
+    ENEMY_NEAR_SPAWN_DIST, ENEMY_RESPAWN_MS, ENEMY_SPAWN_COUNT, ENEMY_SPAWN_MIN_DIST, ENEMY_WANDER_INTERVAL_MS,
     ENEMY_WANDER_RADIUS, MAP_HALF, MODELS_BASE_PATH,
 } from '../constants/index.js';
 import { FabulusPrefs } from '../FabulusPrefs.js';
@@ -17,6 +17,8 @@ const ENEMY_LEVEL_VARIANCE = 2;
 const RETURN_REGEN_PER_SEC_PCT = 10;
 const DEATH_FADE_SECONDS = 1.2;
 const ATTACK_DAMAGE_POINT_PCT = 0.5;
+const ENEMY_ATTACK_MIN_SPEED = 0.6;
+const ENEMY_ATTACK_MAX_SPEED = 2.5;
 const ELITE_SCALE_MULT = 1.25;
 const ELITE_TINT = { r: 1.0, g: 0.82, b: 0.45 };
 const ELITE_EMISSIVE = { r: 0.22, g: 0.15, b: 0.03 };
@@ -63,6 +65,10 @@ export class EnemySystem {
     private _spawnInitial(): void {
         const defs = this.scene.enemyDefs;
         if (!defs.length) return;
+        // Guarantee the newest enemy (highest id) spawns near the player start for easy discovery.
+        const newest = defs.reduce((a, b) => (b.id > a.id ? b : a), defs[0]);
+        const nearPos = this._findClearPosition(this.scene.player.pos_x + ENEMY_NEAR_SPAWN_DIST, this.scene.player.pos_z);
+        this.spawn(newest, nearPos.x, nearPos.z);
         for (let i = 0; i < ENEMY_SPAWN_COUNT; i++) {
             const def = defs[i % defs.length];
             const angle = (i / ENEMY_SPAWN_COUNT) * Math.PI * 2 + Math.random() * 0.5;
@@ -367,6 +373,19 @@ export class EnemySystem {
         }
     }
 
+    /** Plays the one-shot attack clip, time-scaled to roughly fit the attack cooldown. */
+    private _playEnemyAttack(instance: EnemyInstance): void {
+        const group = instance.anims.attack;
+        if (!group) return;
+        if (instance.currentAnim && instance.currentAnim !== group) instance.currentAnim.stop();
+        group.stop();
+        const fps = group.targetedAnimations[0]?.animation.framePerSecond ?? 60;
+        const durationMs = ((group.to - group.from) / fps) * 1000;
+        const speedRatio = Math.max(ENEMY_ATTACK_MIN_SPEED, Math.min(ENEMY_ATTACK_MAX_SPEED, durationMs / Math.max(1, instance.def.attack_cooldown_ms)));
+        group.start(false, speedRatio);
+        instance.currentAnim = group;
+    }
+
     kill(instance: EnemyInstance): void {
         instance.state = ENEMY_STATE.DEAD;
         instance.deathStartedAt = this.scene.now();
@@ -453,11 +472,18 @@ export class EnemySystem {
                         break;
                     }
                     this._face(e, dxp, dzp);
-                    this._stopEnemyAnim(e);
-                    this._updateLunge(e, now);
+                    const hasAttackAnim = !!e.anims.attack;
+                    if (!hasAttackAnim) {
+                        this._stopEnemyAnim(e);
+                        this._updateLunge(e, now);
+                    }
                     if (now - e.lastAttackAt >= e.def.attack_cooldown_ms) {
                         e.lastAttackAt = now;
-                        e.lungeStartedAt = now;
+                        if (hasAttackAnim) {
+                            this._playEnemyAttack(e);
+                        } else {
+                            e.lungeStartedAt = now;
+                        }
                         const dmgMin = e.damageMin;
                         const dmgMax = e.damageMax;
                         const level = e.level;

@@ -21,6 +21,7 @@ const FLARE_TEX_SIZE = 64;
 const TEX_SIZE = 64;
 
 const BLOOD_POOL_BASE_ALPHA = 0.82;
+const HIT_FLASH_COLOR = new BABYLON.Color3(0.28, 0.03, 0.03);
 
 const BLOOD_POOL_VERTEX_SHADER = `
 precision highp float;
@@ -691,7 +692,7 @@ export class VfxSystem {
             if (anyMat.__fabHitFlash) continue;
             anyMat.__fabHitFlash = true;
             flashed.push({ mesh: m, prev: anyMat.emissiveColor ? anyMat.emissiveColor.clone() : null });
-            anyMat.emissiveColor = new BABYLON.Color3(0.7, 0.1, 0.1);
+            anyMat.emissiveColor = HIT_FLASH_COLOR;
         }
         const handle = window.setTimeout(() => {
             this.pendingTimeouts.delete(handle);

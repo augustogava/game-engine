@@ -1287,6 +1287,8 @@ export class UiSystem {
         const manaPct = Math.max(0, Math.min(1, p.current_mana / Math.max(1, d.maxMana)));
         this._setStyle(this.$('hp-orb-fill'), 'hpFill', 'height', `${(hpPct * 100).toFixed(1)}%`);
         this._setStyle(this.$('mana-orb-fill'), 'manaFill', 'height', `${(manaPct * 100).toFixed(1)}%`);
+        const hpOrb = this.$('hp-orb');
+        if (hpOrb) hpOrb.classList.toggle('low-hp', hpPct > 0 && hpPct <= 0.3);
         this._setText(this.$('hp-orb-text'), 'hpText', `${Math.round(p.current_health)}`);
         this._setText(this.$('mana-orb-text'), 'manaText', `${Math.round(p.current_mana)}`);
 
