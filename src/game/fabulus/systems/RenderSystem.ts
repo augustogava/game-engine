@@ -15,6 +15,10 @@ const PP_EXPOSURE = 1.0;
 const PP_CONTRAST = 1.3;
 const VIGNETTE_WEIGHT = 1.6;
 const GLOBAL_SATURATION = -25;
+const CHROMATIC_ABERRATION_AMOUNT = 12;
+const CHROMATIC_RADIAL_INTENSITY = 0.7;
+const PP_CONTRAST_ULTRA = 1.42;
+const VIGNETTE_WEIGHT_ULTRA = 2.0;
 
 export class RenderSystem {
     private scene: FabulusScene;
@@ -65,6 +69,10 @@ export class RenderSystem {
         pipeline.grainEnabled = !isMobile;
         pipeline.grain.intensity = GRAIN_INTENSITY;
         pipeline.grain.animated = true;
+        // Cinematic extras (gated on the Ultra-only flags in applyGraphicsSettings).
+        pipeline.chromaticAberration.aberrationAmount = CHROMATIC_ABERRATION_AMOUNT;
+        pipeline.chromaticAberration.radialIntensity = CHROMATIC_RADIAL_INTENSITY;
+        pipeline.chromaticAberrationEnabled = false;
         this.pipeline = pipeline;
 
         if (!isMobile) {
@@ -106,9 +114,12 @@ export class RenderSystem {
         pipeline.sharpenEnabled = prefs.gfxSharpen;
         pipeline.imageProcessing.vignetteEnabled = prefs.gfxVignette;
 
+        // The Ultra-only feature flags also drive the stronger cinematic grade.
+        const cinematic = prefs.gfxVolumetrics || prefs.gfxWeather;
+
         if (prefs.gfxColorGrading) {
             pipeline.imageProcessing.toneMappingEnabled = true;
-            pipeline.imageProcessing.contrast = PP_CONTRAST;
+            pipeline.imageProcessing.contrast = cinematic ? PP_CONTRAST_ULTRA : PP_CONTRAST;
             pipeline.imageProcessing.exposure = PP_EXPOSURE;
             const curves = new BABYLON.ColorCurves();
             curves.globalSaturation = GLOBAL_SATURATION;
@@ -120,6 +131,11 @@ export class RenderSystem {
             pipeline.imageProcessing.exposure = 1.0;
             pipeline.imageProcessing.colorCurvesEnabled = false;
         }
+
+        if (prefs.gfxVignette) {
+            pipeline.imageProcessing.vignetteWeight = cinematic ? VIGNETTE_WEIGHT_ULTRA : VIGNETTE_WEIGHT;
+        }
+        pipeline.chromaticAberrationEnabled = !this._isMobile() && cinematic;
 
         const camera = s.activeCamera;
         if (this.ssao && camera) {
@@ -135,6 +151,14 @@ export class RenderSystem {
         }
 
         this.scene.lightingSystem.applyShadowQuality(prefs.gfxShadowQuality);
+
+        // Toggle the optional Ultra systems live (they may not exist yet during init).
+        this.scene.skySystem?.setEnabled(prefs.gfxSky);
+        this.scene.atmosphereSystem?.setEnabled(prefs.gfxVolumetrics);
+        this.scene.waterSystem?.setEnabled(prefs.gfxWater);
+        this.scene.weatherSystem?.setEnabled(prefs.gfxWeather);
+        this.scene.vfxSystem.setAdvancedEnabled(prefs.gfxAdvancedVfx);
+        this.scene.lightingSystem.setAdvancedFx(prefs.gfxAdvancedVfx);
     }
 
     getHighlightLayer(): BABYLON.HighlightLayer | null {

@@ -8,7 +8,7 @@ import {
     SKILLS_ICON_SVG, itemIconSvg, skillIconSvg,
 } from '../constants/uiIcons.js';
 import { FabulusApi } from '../api/FabulusApi.js';
-import { FabulusPrefs, type FabulusActionId, type FabulusPrefsData, type GfxPreset } from '../FabulusPrefs.js';
+import { FabulusPrefs, type FabulusActionId, type FabulusPrefsData, type GfxPreset, type WeatherMode } from '../FabulusPrefs.js';
 import { AudioCore } from '../../AudioCore.js';
 
 const SLOT_CAST_FLASH_MS = 220;
@@ -536,6 +536,29 @@ export class UiSystem {
         this._addCheckbox(body, 'Vignette', prefs.gfxVignette, v => FabulusPrefs.set({ gfxVignette: v }));
         this._addCheckbox(body, 'Color grading', prefs.gfxColorGrading, v => FabulusPrefs.set({ gfxColorGrading: v }));
         this._addCheckbox(body, 'Sharpen', prefs.gfxSharpen, v => FabulusPrefs.set({ gfxSharpen: v }));
+
+        this._addSection(body, 'Ultra (efeitos avancados)');
+        this._addCheckbox(body, 'Ceu procedural', prefs.gfxSky, v => FabulusPrefs.set({ gfxSky: v }));
+        this._addCheckbox(body, 'Atmosfera / god rays', prefs.gfxVolumetrics, v => FabulusPrefs.set({ gfxVolumetrics: v }));
+        this._addCheckbox(body, 'Chao ultra (requer reload)', prefs.gfxGroundUltra, v => {
+            FabulusPrefs.set({ gfxGroundUltra: v });
+            this.toast('Chao ultra aplicado no proximo reload');
+        });
+        this._addCheckbox(body, 'Agua / lava', prefs.gfxWater, v => FabulusPrefs.set({ gfxWater: v }));
+        this._addCheckbox(body, 'Clima', prefs.gfxWeather, v => FabulusPrefs.set({ gfxWeather: v }));
+        this._addCheckbox(body, 'VFX avancados', prefs.gfxAdvancedVfx, v => FabulusPrefs.set({ gfxAdvancedVfx: v }));
+        this._addSelect(body, 'Tipo de clima',
+            [
+                { value: 'ambient', label: 'Ambiente' },
+                { value: 'clear', label: 'Limpo' },
+                { value: 'rain', label: 'Chuva' },
+                { value: 'fog', label: 'Neblina' },
+                { value: 'ember', label: 'Brasas' },
+                { value: 'dust', label: 'Poeira' },
+            ], prefs.weatherMode, v => {
+                FabulusPrefs.set({ weatherMode: v as WeatherMode });
+                this.scene.weatherSystem.setMode(v as WeatherMode);
+            });
 
         this._addSection(body, 'Indicadores');
         this._addCheckbox(body, 'Mostrar FPS', prefs.showFps, v => FabulusPrefs.set({ showFps: v }));

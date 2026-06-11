@@ -1,5 +1,6 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FabulusScene } from '../FabulusScene.js';
+import { FabulusPrefs } from '../FabulusPrefs.js';
 
 const HEMI_INTENSITY = 0.1;
 const SUN_INTENSITY = 0.5;
@@ -30,6 +31,7 @@ interface FireLight {
     base: number;
     phase: number;
     particles: BABYLON.ParticleSystem;
+    embers: BABYLON.ParticleSystem | null;
 }
 
 export class LightingSystem {
@@ -165,7 +167,46 @@ export class LightingSystem {
             ps.updateSpeed = 0.012;
             ps.start();
 
-            this.fires.push({ light, base: FIRE_INTENSITY, phase: i * 1.7, particles: ps });
+            const advanced = FabulusPrefs.get().gfxAdvancedVfx;
+            const embers = this._buildEmbers(origin, flameTex, i);
+            if (advanced) embers.start();
+
+            this.fires.push({ light, base: FIRE_INTENSITY, phase: i * 1.7, particles: ps, embers });
+        }
+    }
+
+    /** Rising spark embers around a campfire; only emitting when advanced VFX is on. */
+    private _buildEmbers(origin: BABYLON.Vector3, tex: BABYLON.DynamicTexture, i: number): BABYLON.ParticleSystem {
+        const s = this.scene.bScene;
+        const ps = new BABYLON.ParticleSystem(`fab_fire_embers_${i}`, 90, s);
+        ps.particleTexture = tex;
+        ps.emitter = origin.clone();
+        ps.minEmitBox = new BABYLON.Vector3(-0.18, 0.1, -0.18);
+        ps.maxEmitBox = new BABYLON.Vector3(0.18, 0.4, 0.18);
+        ps.color1 = new BABYLON.Color4(1.0, 0.75, 0.3, 1.0);
+        ps.color2 = new BABYLON.Color4(1.0, 0.45, 0.12, 1.0);
+        ps.colorDead = new BABYLON.Color4(0.3, 0.08, 0.02, 0.0);
+        ps.minSize = 0.03;
+        ps.maxSize = 0.1;
+        ps.minLifeTime = 0.8;
+        ps.maxLifeTime = 1.8;
+        ps.emitRate = 26;
+        ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
+        ps.gravity = new BABYLON.Vector3(0, 1.6, 0);
+        ps.direction1 = new BABYLON.Vector3(-0.5, 1.2, -0.5);
+        ps.direction2 = new BABYLON.Vector3(0.5, 2.6, 0.5);
+        ps.minEmitPower = 0.4;
+        ps.maxEmitPower = 1.2;
+        ps.updateSpeed = 0.014;
+        return ps;
+    }
+
+    /** Starts/stops campfire embers when the advanced VFX setting changes at runtime. */
+    setAdvancedFx(enabled: boolean): void {
+        for (const fire of this.fires) {
+            if (!fire.embers) continue;
+            if (enabled && !fire.embers.isStarted()) fire.embers.start();
+            else if (!enabled && fire.embers.isStarted()) fire.embers.stop();
         }
     }
 
@@ -189,6 +230,14 @@ export class LightingSystem {
             : quality === 'medium'
                 ? BABYLON.ShadowGenerator.QUALITY_MEDIUM
                 : BABYLON.ShadowGenerator.QUALITY_LOW;
+    }
+
+    getSun(): BABYLON.DirectionalLight | null {
+        return this.sun;
+    }
+
+    getFirePositions(): ReadonlyArray<readonly [number, number]> {
+        return FIRE_POSITIONS;
     }
 
     addShadowCaster(mesh: BABYLON.AbstractMesh): void {
@@ -230,6 +279,7 @@ export class LightingSystem {
     dispose(): void {
         for (const fire of this.fires) {
             try { fire.particles.dispose(); } catch { /* already disposed */ }
+            try { if (fire.embers) fire.embers.dispose(); } catch { /* already disposed */ }
             try { fire.light.dispose(); } catch { /* already disposed */ }
         }
         this.fires = [];

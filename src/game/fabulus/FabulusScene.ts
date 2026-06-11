@@ -34,6 +34,10 @@ import { RenderSystem } from './systems/RenderSystem.js';
 import { MinimapSystem } from './systems/MinimapSystem.js';
 import { PropSystem } from './systems/PropSystem.js';
 import { NpcSystem } from './systems/NpcSystem.js';
+import { SkySystem } from './systems/SkySystem.js';
+import { AtmosphereSystem } from './systems/AtmosphereSystem.js';
+import { WaterSystem } from './systems/WaterSystem.js';
+import { WeatherSystem } from './systems/WeatherSystem.js';
 
 export class FabulusScene extends Scene3D {
     bScene!: BABYLON.Scene;
@@ -92,6 +96,10 @@ export class FabulusScene extends Scene3D {
     readonly minimapSystem = new MinimapSystem(this);
     readonly propSystem = new PropSystem(this);
     readonly npcSystem = new NpcSystem(this);
+    readonly skySystem = new SkySystem(this);
+    readonly atmosphereSystem = new AtmosphereSystem(this);
+    readonly waterSystem = new WaterSystem(this);
+    readonly weatherSystem = new WeatherSystem(this);
 
     private _lastStateSaveAt = 0;
 
@@ -167,6 +175,10 @@ export class FabulusScene extends Scene3D {
         this.mapSystem.init();
         await this.propSystem.init();
         this.vfxSystem.init();
+        await this.skySystem.init();
+        this.atmosphereSystem.init();
+        await this.waterSystem.init();
+        this.weatherSystem.init();
 
         this.uiSystem.setLoadingStatus('Invocando o heroi...');
         await this.playerSystem.init();
@@ -210,6 +222,10 @@ export class FabulusScene extends Scene3D {
         this.collisionSystem.update(dt);
         this.cameraSystem.update(dt);
         this.vfxSystem.update(dt);
+        this.skySystem.update(dt);
+        this.atmosphereSystem.update(dt);
+        this.waterSystem.update(dt);
+        this.weatherSystem.update(dt);
         this.uiSystem.update(dt);
         this.minimapSystem.update(dt);
         this._maybePersistState();
@@ -415,6 +431,10 @@ export class FabulusScene extends Scene3D {
         this.propSystem.dispose();
         this.minimapSystem.dispose();
         this.lootSystem.dispose();
+        this.skySystem.dispose();
+        this.atmosphereSystem.dispose();
+        this.waterSystem.dispose();
+        this.weatherSystem.dispose();
         this.lightingSystem.dispose();
         this.renderSystem.dispose();
     }

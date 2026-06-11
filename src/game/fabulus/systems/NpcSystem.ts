@@ -15,6 +15,7 @@ interface NpcInstance {
     meshes: BABYLON.AbstractMesh[];
     idleAnim: BABYLON.AnimationGroup | null;
     labelTexture: BABYLON.DynamicTexture | null;
+    labelPlane: BABYLON.Mesh | null;
 }
 
 export class NpcSystem {
@@ -24,6 +25,7 @@ export class NpcSystem {
     private interactTarget: NpcInstance | null = null;
     private interactLastDist = Number.POSITIVE_INFINITY;
     private interactStuckSince = 0;
+    private hoveredNpcId: number | null = null;
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
@@ -68,6 +70,7 @@ export class NpcSystem {
             meshes: [],
             idleAnim: null,
             labelTexture: null,
+            labelPlane: null,
         };
 
         const container = await this._getContainer(def.model_path);
@@ -89,7 +92,17 @@ export class NpcSystem {
 
             for (const g of entries.animationGroups) g.stop();
             instance.idleAnim = this._findIdleAnim(entries.animationGroups, def.idle_anim);
-            if (instance.idleAnim) instance.idleAnim.start(true, 1);
+            if (instance.idleAnim) {
+                instance.idleAnim.start(true, 1);
+            } else if (entries.animationGroups.length) {
+                // No idle clip available: freeze the first clip on its initial frame so the
+                // NPC stands still instead of looping a walk/locomotion animation in place.
+                const pose = entries.animationGroups[0];
+                pose.start(false, 1);
+                pose.goToFrame(pose.from);
+                pose.pause();
+                instance.idleAnim = pose;
+            }
         } else {
             const body = BABYLON.MeshBuilder.CreateCapsule(`fab_npc_body_${def.id}`, { height, radius: 0.32 }, s);
             body.parent = root;
@@ -113,7 +126,7 @@ export class NpcSystem {
             const named = groups.find(g => g.name.endsWith(idleName));
             if (named) return named;
         }
-        return groups.find(g => /idle/i.test(g.name)) ?? groups[0];
+        return groups.find(g => /idle|stand|breath|pose/i.test(g.name)) ?? null;
     }
 
     private _buildLabel(instance: NpcInstance, height: number): void {
@@ -124,6 +137,7 @@ export class NpcSystem {
         plane.position.y = height + NPC_LABEL_OFFSET_Y;
         plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
         plane.isPickable = false;
+        plane.setEnabled(false);
 
         const tex = new BABYLON.DynamicTexture(`fab_npc_label_tex_${def.id}`, { width: LABEL_TEX_W, height: LABEL_TEX_H }, s, false);
         tex.hasAlpha = true;
@@ -150,6 +164,22 @@ export class NpcSystem {
         mat.backFaceCulling = false;
         plane.material = mat;
         instance.labelTexture = tex;
+        instance.labelPlane = plane;
+    }
+
+    getDisplayName(npcId: number): string | null {
+        const instance = this.instances.get(npcId);
+        return instance ? instance.def.name : null;
+    }
+
+    /** Shows the floating name only for the hovered NPC and hides any previous one. */
+    setHovered(npcId: number | null): void {
+        if (this.hoveredNpcId === npcId) return;
+        const prev = this.hoveredNpcId != null ? this.instances.get(this.hoveredNpcId) : null;
+        if (prev?.labelPlane) prev.labelPlane.setEnabled(false);
+        this.hoveredNpcId = npcId;
+        const next = npcId != null ? this.instances.get(npcId) : null;
+        if (next?.labelPlane) next.labelPlane.setEnabled(true);
     }
 
     /** Player clicked the NPC: walk into range, then open the dialogue. */
@@ -236,5 +266,6 @@ export class NpcSystem {
         }
         this.containers.clear();
         this.interactTarget = null;
+        this.hoveredNpcId = null;
     }
 }

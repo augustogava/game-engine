@@ -3,6 +3,7 @@ import type { FabulusScene } from '../FabulusScene.js';
 import {
     MAP_BORDER_MARGIN, MAP_HALF, MAP_MODEL_FILE, MAP_SIZE, MODELS_BASE_PATH,
     OBSTACLE_COUNT, OBSTACLE_SEED,
+    GROUND_ULTRA_TEXTURE_SIZE, GROUND_ULTRA_NORMAL_SIZE, GROUND_ULTRA_CLEARCOAT,
 } from '../constants/index.js';
 import { FabulusPrefs } from '../FabulusPrefs.js';
 
@@ -47,6 +48,10 @@ export class MapSystem {
     }
 
     private _buildProceduralGround(): void {
+        if (FabulusPrefs.get().gfxGroundUltra) {
+            this._buildUltraGround();
+            return;
+        }
         const s = this.scene.bScene;
         const ground = BABYLON.MeshBuilder.CreateGround('fab_ground', { width: MAP_SIZE, height: MAP_SIZE, subdivisions: 4 }, s);
         ground.position.y = 0;
@@ -147,6 +152,93 @@ export class MapSystem {
                 img.data[idx] = Math.round((nx * 0.5 + 0.5) * 255);
                 img.data[idx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
                 img.data[idx + 2] = Math.round(((nz / len) * 0.5 + 0.5) * 255);
+                img.data[idx + 3] = 255;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        tex.update();
+        return tex;
+    }
+
+    // Ultra ground: higher-res FBM multi-biome albedo with radial distance darkening,
+    // stronger detail normals and a wetness clearcoat near the lit center. Still a PBR
+    // material so it keeps receiving cascaded shadows and scene fog.
+    private _buildUltraGround(): void {
+        const s = this.scene.bScene;
+        const ground = BABYLON.MeshBuilder.CreateGround('fab_ground', { width: MAP_SIZE, height: MAP_SIZE, subdivisions: 8 }, s);
+        ground.position.y = 0;
+        ground.isPickable = true;
+        ground.receiveShadows = true;
+
+        const tex = this._buildUltraAlbedo(s);
+        const mat = new BABYLON.PBRMaterial('fab_ground_mat', s);
+        mat.albedoTexture = tex;
+        tex.uScale = 4;
+        tex.vScale = 4;
+        mat.metallic = 0.0;
+        mat.roughness = 0.92;
+
+        const bump = this._buildGroundNormalMap(s);
+        bump.uScale = 16;
+        bump.vScale = 16;
+        mat.bumpTexture = bump;
+        mat.bumpTexture.level = 1.4;
+
+        mat.clearCoat.isEnabled = true;
+        mat.clearCoat.intensity = GROUND_ULTRA_CLEARCOAT;
+        mat.clearCoat.roughness = 0.45;
+
+        ground.material = mat;
+        this.scene.groundMesh = ground;
+        console.debug('[Fabulus] Ultra ground built');
+    }
+
+    private _buildUltraAlbedo(s: BABYLON.Scene): BABYLON.DynamicTexture {
+        const size = GROUND_ULTRA_TEXTURE_SIZE;
+        const tex = new BABYLON.DynamicTexture('fab_ground_tex', size, s, true);
+        const ctx = tex.getContext() as CanvasRenderingContext2D;
+        const rand = mulberry32(OBSTACLE_SEED + 11);
+
+        const fbm = (x: number, y: number): number => {
+            let amp = 0.5;
+            let freq = 1;
+            let sum = 0;
+            for (let o = 0; o < 5; o++) {
+                const sx = Math.sin((x * freq + o * 13.1) * 0.013 + rand() * 0.0001);
+                const sy = Math.cos((y * freq + o * 7.7) * 0.013);
+                sum += amp * (sx * sy);
+                amp *= 0.5;
+                freq *= 2.07;
+            }
+            return sum * 0.5 + 0.5;
+        };
+
+        const dirt: [number, number, number] = [78, 64, 44];
+        const rock: [number, number, number] = [86, 84, 80];
+        const moss: [number, number, number] = [54, 70, 42];
+        const center = size / 2;
+        const maxDist = Math.hypot(center, center);
+        const img = ctx.createImageData(size, size);
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const n = fbm(x, y);
+                const m = fbm(x * 0.5 + 512, y * 0.5 - 256);
+                let r: number, g: number, b: number;
+                if (m > 0.62) {
+                    [r, g, b] = rock;
+                } else if (n > 0.55) {
+                    [r, g, b] = moss;
+                } else {
+                    [r, g, b] = dirt;
+                }
+                const grain = 0.82 + n * 0.4;
+                // Radial darkening toward the map edges for a moody vignette.
+                const dist = Math.hypot(x - center, y - center) / maxDist;
+                const darken = 1 - dist * 0.55;
+                const idx = (y * size + x) * 4;
+                img.data[idx] = Math.min(255, r * grain * darken);
+                img.data[idx + 1] = Math.min(255, g * grain * darken);
+                img.data[idx + 2] = Math.min(255, b * grain * darken);
                 img.data[idx + 3] = 255;
             }
         }

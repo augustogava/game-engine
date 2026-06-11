@@ -20,6 +20,128 @@ interface TimedMesh {
 const FLARE_TEX_SIZE = 64;
 const TEX_SIZE = 64;
 
+const BLOOD_POOL_BASE_ALPHA = 0.82;
+
+const BLOOD_POOL_VERTEX_SHADER = `
+precision highp float;
+attribute vec3 position;
+uniform mat4 worldViewProjection;
+uniform mat4 world;
+varying vec3 vWorldPos;
+varying vec2 vLocal;
+void main(void) {
+    vLocal = position.xy;
+    vWorldPos = (world * vec4(position, 1.0)).xyz;
+    gl_Position = worldViewProjection * vec4(position, 1.0);
+}
+`;
+
+const BLOOD_POOL_FRAGMENT_SHADER = `
+#ifdef GL_ES
+precision highp float;
+#endif
+
+varying vec3 vWorldPos;
+varying vec2 vLocal;
+
+uniform vec3 cameraPosition;
+uniform float time;
+uniform float uAlpha;
+uniform float uRadius;
+
+const int   BLOOD_OCTAVES       = 3;
+const float BLOOD_FREQ          = 0.9;
+const float BLOOD_AMP           = 0.08;
+const float BLOOD_CHOPPY        = 3.0;
+const float BLOOD_FLOW_SPEED    = 0.18;
+const float BLOOD_NORMAL_EPS    = 0.12;
+const float BLOOD_SHININESS     = 90.0;
+const float BLOOD_SPEC_STRENGTH = 0.9;
+const float BLOOD_REFLECT       = 0.5;
+const float BLOOD_EDGE_START    = 0.62;
+const vec3  BLOOD_DEEP_COLOR    = vec3(0.16, 0.010, 0.008);
+const vec3  BLOOD_SUBSURFACE    = vec3(0.42, 0.025, 0.016);
+const vec3  BLOOD_SPEC_COLOR    = vec3(1.0, 0.85, 0.82);
+const vec3  BLOOD_REFLECT_COLOR = vec3(0.40, 0.42, 0.48);
+const vec3  BLOOD_LIGHT_DIR     = vec3(0.3, 1.0, 0.25);
+const mat2  BLOOD_OCTAVE_M      = mat2(1.6, 1.2, -1.2, 1.6);
+
+float bloodHash(vec2 p) {
+    float h = dot(p, vec2(127.1, 311.7));
+    return fract(sin(h) * 43758.5453123);
+}
+
+float bloodNoise(in vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return -1.0 + 2.0 * mix(mix(bloodHash(i + vec2(0.0, 0.0)), bloodHash(i + vec2(1.0, 0.0)), u.x),
+                            mix(bloodHash(i + vec2(0.0, 1.0)), bloodHash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+float bloodSeaOctave(vec2 uv, float choppy) {
+    uv += bloodNoise(uv);
+    vec2 wv = 1.0 - abs(sin(uv));
+    vec2 swv = abs(cos(uv));
+    wv = mix(wv, swv, wv);
+    return pow(1.0 - pow(wv.x * wv.y, 0.65), choppy);
+}
+
+float bloodHeight(vec2 p) {
+    float freq = BLOOD_FREQ;
+    float amp = BLOOD_AMP;
+    float choppy = BLOOD_CHOPPY;
+    float t = 1.0 + time * BLOOD_FLOW_SPEED;
+    float h = 0.0;
+    for (int i = 0; i < BLOOD_OCTAVES; i++) {
+        float d = bloodSeaOctave((p + t) * freq, choppy);
+        d += bloodSeaOctave((p - t) * freq, choppy);
+        h += d * amp;
+        p *= BLOOD_OCTAVE_M; freq *= 1.9; amp *= 0.22;
+        choppy = mix(choppy, 1.0, 0.2);
+    }
+    return h;
+}
+
+vec3 bloodNormal(vec2 p) {
+    float eps = BLOOD_NORMAL_EPS;
+    float h = bloodHeight(p);
+    float hx = bloodHeight(p + vec2(eps, 0.0));
+    float hz = bloodHeight(p + vec2(0.0, eps));
+    return normalize(vec3(h - hx, eps, h - hz));
+}
+
+void main(void) {
+    vec2 sp = vWorldPos.xz;
+    float r = length(vLocal) / max(uRadius, 1e-3);
+    r += bloodNoise(sp * 6.0) * 0.05;
+    if (r > 1.0) discard;
+
+    vec3 n = bloodNormal(sp);
+    vec3 v = normalize(cameraPosition - vWorldPos);
+    vec3 l = normalize(BLOOD_LIGHT_DIR);
+
+    float fres = clamp(1.0 - dot(n, v), 0.0, 1.0);
+    fres = pow(fres, 3.0) * BLOOD_REFLECT;
+
+    float ndl = max(dot(n, l), 0.0);
+    float thin = smoothstep(BLOOD_EDGE_START, 1.0, r);
+    vec3 deep = mix(BLOOD_DEEP_COLOR, BLOOD_SUBSURFACE, thin * 0.6);
+    deep *= 0.45 + 0.55 * ndl;
+
+    vec3 refl = reflect(-l, n);
+    float spec = pow(max(dot(refl, v), 0.0), BLOOD_SHININESS) * BLOOD_SPEC_STRENGTH;
+
+    vec3 color = mix(deep, BLOOD_REFLECT_COLOR, fres);
+    color += BLOOD_SPEC_COLOR * spec;
+
+    float edge = 1.0 - smoothstep(BLOOD_EDGE_START, 1.0, r);
+    float alpha = clamp(uAlpha, 0.0, 1.0) * edge;
+
+    gl_FragColor = vec4(color, alpha);
+}
+`;
+
 /** Particle quality multiplier applied to capacity/emit rate. */
 const QUALITY_MULT: Record<string, number> = { low: 0.35, medium: 0.65, high: 1 };
 
@@ -55,12 +177,20 @@ export class VfxSystem {
     private burstPools: Map<BurstKind, BABYLON.ParticleSystem[]> = new Map();
     private activeBursts: Set<BABYLON.ParticleSystem> = new Set();
     private pendingTimeouts: Set<number> = new Set();
+    private static _bloodPoolShaderReady = false;
+    private advancedFx = FabulusPrefs.get().gfxAdvancedVfx;
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
     }
 
+    /** Toggles the heavier element-impact embers/shockwaves (Ultra preset / gfxAdvancedVfx). */
+    setAdvancedEnabled(enabled: boolean): void {
+        this.advancedFx = enabled;
+    }
+
     init(): void {
+        this._registerBloodPoolShaders();
         this._buildFlareTexture();
         this.flameTexture = this._buildGradientTexture('fab_flame_tex', [
             { stop: 0, color: 'rgba(255,250,210,1)' },
@@ -153,6 +283,19 @@ export class VfxSystem {
         tex.update();
         tex.hasAlpha = true;
         return tex;
+    }
+
+    private _registerBloodPoolShaders(): void {
+        if (VfxSystem._bloodPoolShaderReady) return;
+        try {
+            const store = BABYLON.Effect.ShadersStore as Record<string, string>;
+            store['fabBloodPoolVertexShader'] = BLOOD_POOL_VERTEX_SHADER;
+            store['fabBloodPoolFragmentShader'] = BLOOD_POOL_FRAGMENT_SHADER;
+            VfxSystem._bloodPoolShaderReady = true;
+            console.debug('[Vfx] Blood pool shader registered');
+        } catch (err) {
+            console.warn('[Vfx] Failed to register blood pool shader:', err);
+        }
     }
 
     getFlareTexture(): BABYLON.DynamicTexture | null {
@@ -312,13 +455,39 @@ export class VfxSystem {
         disc.rotation.y = Math.random() * Math.PI * 2;
         disc.position.set(x + (Math.random() - 0.5) * 0.3, 0.025, z + (Math.random() - 0.5) * 0.3);
         disc.isPickable = false;
-        const mat = new BABYLON.StandardMaterial('fab_blood_pool_mat', s);
-        mat.diffuseColor = new BABYLON.Color3(0.22, 0.015, 0.01);
-        mat.specularColor = new BABYLON.Color3(0.25, 0.05, 0.04);
-        mat.emissiveColor = new BABYLON.Color3(0.05, 0.005, 0.004);
-        mat.alpha = 0.78;
-        disc.material = mat;
-        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: BLOOD_POOL_LIFETIME_MS, growTo: 1.25, poolKey: null, baseAlpha: 0.78 });
+        disc.material = this._buildBloodPoolMaterial(s, radius);
+        this.timedMeshes.push({ mesh: disc, bornAt: this.scene.now(), lifetimeMs: BLOOD_POOL_LIFETIME_MS, growTo: 1.25, poolKey: null, baseAlpha: BLOOD_POOL_BASE_ALPHA });
+    }
+
+    private _buildBloodPoolMaterial(s: BABYLON.Scene, radius: number): BABYLON.Material {
+        if (VfxSystem._bloodPoolShaderReady) {
+            try {
+                const mat = new BABYLON.ShaderMaterial(
+                    'fab_blood_pool_mat',
+                    s,
+                    { vertex: 'fabBloodPool', fragment: 'fabBloodPool' },
+                    {
+                        attributes: ['position'],
+                        uniforms: ['world', 'worldViewProjection', 'cameraPosition', 'time', 'uAlpha', 'uRadius'],
+                    },
+                );
+                mat.backFaceCulling = false;
+                mat.alpha = 0.99;
+                mat.alphaMode = BABYLON.Constants.ALPHA_COMBINE;
+                mat.setFloat('uRadius', Math.max(radius, 1e-3));
+                mat.setFloat('uAlpha', BLOOD_POOL_BASE_ALPHA);
+                mat.setFloat('time', this.scene.now() / 1000);
+                return mat;
+            } catch (err) {
+                console.warn('[Vfx] Blood pool shader material failed, using fallback:', err);
+            }
+        }
+        const fallback = new BABYLON.StandardMaterial('fab_blood_pool_mat', s);
+        fallback.diffuseColor = new BABYLON.Color3(0.22, 0.015, 0.01);
+        fallback.specularColor = new BABYLON.Color3(0.25, 0.05, 0.04);
+        fallback.emissiveColor = new BABYLON.Color3(0.05, 0.005, 0.004);
+        fallback.alpha = BLOOD_POOL_BASE_ALPHA;
+        return fallback;
     }
 
     // ── Element impacts (data-driven via rpg_skills.vfx_element) ─────────────
@@ -351,12 +520,24 @@ export class VfxSystem {
                 this._burst('dust', position.clone());
                 this._burst('spark', pos, new BABYLON.Color4(1.0, 0.85, 0.5, 0.9), new BABYLON.Color4(0.9, 0.6, 0.3, 0.5));
         }
+        if (this.advancedFx) {
+            this._burst('spark', pos, new BABYLON.Color4(1.0, 0.9, 0.7, 0.9), new BABYLON.Color4(0.9, 0.7, 0.4, 0.5));
+            const ringColor = element === 'fire' ? new BABYLON.Color3(1.0, 0.5, 0.2)
+                : element === 'ice' ? new BABYLON.Color3(0.6, 0.85, 1.0)
+                : element === 'arcane' ? new BABYLON.Color3(0.7, 0.45, 1.0)
+                : element === 'holy' ? new BABYLON.Color3(0.9, 1.0, 0.7)
+                : new BABYLON.Color3(1.0, 0.8, 0.5);
+            this._spawnRing(0.6, 0.06, ringColor, 0.85, position.x, 0.06, position.z, 320, 4.5);
+        }
     }
 
     meleeImpact(position: BABYLON.Vector3): void {
         this._burst('dust', position.clone());
         this._burst('spark', position.clone().add(new BABYLON.Vector3(0, 1.0, 0)),
             new BABYLON.Color4(1.0, 0.85, 0.5, 0.85), new BABYLON.Color4(0.85, 0.55, 0.25, 0.5));
+        if (this.advancedFx) {
+            this._spawnRing(0.5, 0.05, new BABYLON.Color3(1.0, 0.92, 0.7), 0.7, position.x, 0.06, position.z, 240, 3.2);
+        }
     }
 
     // ── Rings / markers (mesh based) ─────────────────────────────────────────
@@ -537,8 +718,14 @@ export class VfxSystem {
             }
             const scale = 1 + (tm.growTo - 1) * t;
             tm.mesh.scaling.set(scale, 1, scale);
-            const mat = tm.mesh.material as BABYLON.StandardMaterial | null;
-            if (mat) mat.alpha = Math.max(0, tm.baseAlpha * (1 - t));
+            const fade = Math.max(0, tm.baseAlpha * (1 - t));
+            const mat = tm.mesh.material as BABYLON.Material | null;
+            if (mat instanceof BABYLON.ShaderMaterial) {
+                mat.setFloat('time', now / 1000);
+                mat.setFloat('uAlpha', fade);
+            } else if (mat) {
+                (mat as BABYLON.StandardMaterial).alpha = fade;
+            }
         }
     }
 

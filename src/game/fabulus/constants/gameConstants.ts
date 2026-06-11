@@ -44,6 +44,7 @@ export const PROP_CATALOG: PropCatalogEntry[] = [
     { model_path: 'basket.glb', label: 'Basket', default_scale: 0.9, collidable: false },
     { model_path: 'chair.glb', label: 'Chair', default_scale: 1.4, collidable: true },
     { model_path: 'chest.glb', label: 'Chest', default_scale: 1.2, collidable: true },
+    { model_path: 'fountain.glb', label: 'Fountain', default_scale: 3, collidable: true },
     { model_path: 'house.glb', label: 'House', default_scale: 8, collidable: true },
     { model_path: 'house_2.glb', label: 'House 2', default_scale: 7, collidable: true },
     { model_path: 'stone_sentinel.glb', label: 'Stone Sentinel', default_scale: 3.5, collidable: true },

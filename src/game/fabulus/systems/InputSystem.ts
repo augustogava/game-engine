@@ -10,6 +10,8 @@ const CURSOR_TALK = 'pointer';
 
 const HOLD_REPICK_INTERVAL_MS = 90;
 const SKILL_ACTIONS: FabulusActionId[] = ['skill1', 'skill2', 'skill3', 'skill4'];
+const NPC_TOOLTIP_OFFSET_X = 16;
+const NPC_TOOLTIP_OFFSET_Y = 18;
 
 export class InputSystem {
     private scene: FabulusScene;
@@ -22,6 +24,7 @@ export class InputSystem {
     private _onPointerUp: ((e: PointerEvent) => void) | null = null;
     private _onPointerLeave: (() => void) | null = null;
     private _canvas: HTMLCanvasElement | null = null;
+    private _tooltipEl: HTMLDivElement | null = null;
 
     constructor(scene: FabulusScene) {
         this.scene = scene;
@@ -40,7 +43,7 @@ export class InputSystem {
             this.lastPointerX = e.offsetX;
             this.lastPointerY = e.offsetY;
             this.pointerHeld = true;
-            this._handleClick(e.offsetX, e.offsetY, e.shiftKey);
+            this._handleClick(e.offsetX, e.offsetY);
         };
         this._onPointerMove = (e: PointerEvent) => {
             this.lastPointerX = e.offsetX;
@@ -54,8 +57,11 @@ export class InputSystem {
         this._onPointerLeave = () => {
             if (this._canvas) this._canvas.style.cursor = 'default';
             this.scene.enemySystem.setHovered(null);
+            this.scene.npcSystem.setHovered(null);
+            this._hideNpcTooltip();
         };
 
+        this._createNpcTooltip();
         canvas.addEventListener('pointerdown', this._onPointerDown);
         canvas.addEventListener('pointermove', this._onPointerMove);
         window.addEventListener('pointerup', this._onPointerUp);
@@ -64,10 +70,45 @@ export class InputSystem {
         console.debug('[Fabulus] Input ready');
     }
 
+    private _createNpcTooltip(): void {
+        if (this._tooltipEl) return;
+        const el = document.createElement('div');
+        el.id = 'npc-tooltip';
+        el.style.cssText = [
+            'position:fixed', 'z-index:45', 'pointer-events:none', 'display:none',
+            'padding:5px 12px', 'font-family:Cinzel, Georgia, serif', 'font-size:13px',
+            'letter-spacing:1px', 'color:#f0d48a', 'background:rgba(10,7,5,0.95)',
+            'border:1px solid #7a6235', 'text-shadow:0 1px 2px #000', 'white-space:nowrap',
+            'box-shadow:0 4px 14px rgba(0,0,0,0.7)',
+        ].join(';');
+        document.body.appendChild(el);
+        this._tooltipEl = el;
+    }
+
+    private _showNpcTooltip(x: number, y: number, npcId: number): void {
+        if (!this._tooltipEl) return;
+        const name = this.scene.npcSystem.getDisplayName(npcId);
+        if (!name) {
+            this._hideNpcTooltip();
+            return;
+        }
+        this._tooltipEl.textContent = `Falar com ${name}`;
+        this._tooltipEl.style.left = `${x + NPC_TOOLTIP_OFFSET_X}px`;
+        this._tooltipEl.style.top = `${y + NPC_TOOLTIP_OFFSET_Y}px`;
+        this._tooltipEl.style.display = 'block';
+    }
+
+    private _hideNpcTooltip(): void {
+        if (this._tooltipEl) this._tooltipEl.style.display = 'none';
+    }
+
     private _updateCursor(x: number, y: number): void {
         if (!this._canvas) return;
         if (this.scene.playerDead) {
             this._canvas.style.cursor = 'default';
+            this.scene.enemySystem.setHovered(null);
+            this.scene.npcSystem.setHovered(null);
+            this._hideNpcTooltip();
             return;
         }
         const pick = this._pick(x, y);
@@ -75,6 +116,8 @@ export class InputSystem {
             const meta = pick.pickedMesh.metadata as { enemyInstanceId?: number; npcId?: number; lootDropId?: number } | null;
             if (meta?.npcId != null) {
                 this.scene.enemySystem.setHovered(null);
+                this.scene.npcSystem.setHovered(meta.npcId);
+                this._showNpcTooltip(x, y, meta.npcId);
                 this._canvas.style.cursor = CURSOR_TALK;
                 return;
             }
@@ -82,17 +125,23 @@ export class InputSystem {
                 const enemy = this.scene.enemySystem.findByInstanceId(meta.enemyInstanceId);
                 if (enemy && enemy.state !== ENEMY_STATE.DEAD) {
                     this.scene.enemySystem.setHovered(enemy);
+                    this.scene.npcSystem.setHovered(null);
+                    this._hideNpcTooltip();
                     this._canvas.style.cursor = CURSOR_ATTACK;
                     return;
                 }
             }
             if (meta?.lootDropId != null) {
                 this.scene.enemySystem.setHovered(null);
+                this.scene.npcSystem.setHovered(null);
+                this._hideNpcTooltip();
                 this._canvas.style.cursor = 'pointer';
                 return;
             }
         }
         this.scene.enemySystem.setHovered(null);
+        this.scene.npcSystem.setHovered(null);
+        this._hideNpcTooltip();
         this._canvas.style.cursor = CURSOR_KNIGHT;
     }
 
@@ -102,7 +151,7 @@ export class InputSystem {
         return pick && pick.hit ? pick : null;
     }
 
-    private _handleClick(x: number, y: number, forceMove = false): void {
+    private _handleClick(x: number, y: number): void {
         if (this.scene.playerDead) return;
         const pick = this._pick(x, y);
         if (!pick || !pick.pickedMesh) return;
@@ -114,16 +163,6 @@ export class InputSystem {
 
         const mesh = pick.pickedMesh;
         const meta = mesh.metadata as { enemyInstanceId?: number; lootDropId?: number; npcId?: number } | null;
-
-        // Force-move (hold Shift): walk to the clicked point, ignoring enemies/NPCs.
-        if (forceMove && pick.pickedPoint) {
-            this.scene.attackTarget = null;
-            this.scene.lootSystem.cancelPendingPickup();
-            this.scene.npcSystem.cancelInteract();
-            this.scene.moveTarget = new BABYLON.Vector3(pick.pickedPoint.x, 0, pick.pickedPoint.z);
-            this.scene.vfxSystem.moveMarker(pick.pickedPoint.x, pick.pickedPoint.z);
-            return;
-        }
 
         if (meta && meta.npcId != null) {
             this.scene.lootSystem.cancelPendingPickup();
@@ -241,5 +280,9 @@ export class InputSystem {
             if (this._onPointerLeave) this._canvas.removeEventListener('pointerleave', this._onPointerLeave);
         }
         if (this._onPointerUp) window.removeEventListener('pointerup', this._onPointerUp);
+        if (this._tooltipEl) {
+            this._tooltipEl.remove();
+            this._tooltipEl = null;
+        }
     }
 }

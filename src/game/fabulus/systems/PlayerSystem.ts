@@ -3,16 +3,11 @@ import type { FabulusScene } from '../FabulusScene.js';
 import { ENEMY_STATE } from '../types/index.js';
 import {
     ARRIVAL_THRESHOLD, ATTACK_STOP_RANGE_FACTOR, HP_REGEN_IN_COMBAT_MULT, HP_REGEN_OUT_OF_COMBAT_MULT, MODELS_BASE_PATH,
-    PLAYER_HEIGHT_UNITS, PLAYER_RESPAWN_MS, PLAYER_TURN_LERP, RUN_ANIM_REFERENCE_SPEED, WALK_ANIM_REFERENCE_SPEED,
+    PLAYER_HEIGHT_UNITS, PLAYER_RESPAWN_MS, PLAYER_TURN_LERP,
 } from '../constants/index.js';
 
 const PLAYER_MODEL_YAW_OFFSET = 0;
 const DEATH_FADE_SECONDS = 1.2;
-
-// Visual differentiation while classes share the same GLB (no dedicated Wizard asset yet).
-const CLASS_MODEL_TINTS: Record<number, { r: number; g: number; b: number }> = {
-    2: { r: 0.55, g: 0.6, b: 1.0 },
-};
 
 export class PlayerSystem {
     private scene: FabulusScene;
@@ -73,7 +68,6 @@ export class PlayerSystem {
         for (const m of meshes) m.isPickable = false;
         this.scene.renderSystem.normalizeModelHeight(modelRoot, meshes, PLAYER_HEIGHT_UNITS);
         this.scene.renderSystem.prepareMeshes(meshes);
-        this._applyClassTint(meshes);
         this.scene.playerMeshes = meshes;
 
         for (const g of animationGroups) g.stop();
@@ -89,23 +83,6 @@ export class PlayerSystem {
         };
         this.scene.playerAnims = this.anims;
         console.debug('[Fabulus] Player animations:', animationGroups.map(g => g.name).join(', '));
-    }
-
-    private _applyClassTint(meshes: BABYLON.AbstractMesh[]): void {
-        const tint = CLASS_MODEL_TINTS[this.scene.classDef.id];
-        if (!tint) return;
-        const color = new BABYLON.Color3(tint.r, tint.g, tint.b);
-        const seen = new Set<BABYLON.Material>();
-        for (const m of meshes) {
-            const mat = m.material;
-            if (!mat || seen.has(mat)) continue;
-            seen.add(mat);
-            if (mat instanceof BABYLON.PBRMaterial) {
-                mat.albedoColor = mat.albedoColor.multiply(color);
-            } else if (mat instanceof BABYLON.StandardMaterial) {
-                mat.diffuseColor = mat.diffuseColor.multiply(color);
-            }
-        }
     }
 
     private _buildFallbackMesh(root: BABYLON.TransformNode): void {
@@ -297,8 +274,9 @@ export class PlayerSystem {
 
         this._faceTowards(dx, dz, dt, false);
 
-        const refSpeed = running ? RUN_ANIM_REFERENCE_SPEED : WALK_ANIM_REFERENCE_SPEED;
-        this.playLogical(running ? 'run' : 'walk', Math.max(0.5, speed / refSpeed));
+        // Drive the clip at the model's native cadence for the active gait (ratio == moveSpeedMult),
+        // so the legs match the ground speed instead of an arbitrary reference and skate.
+        this.playLogical(running ? 'run' : 'walk', Math.max(0.5, speed / Math.max(0.1, baseSpeed)));
         if (!this.scene.attackTarget) this.scene.audioSystem.tickFootsteps(dt, running);
     }
 

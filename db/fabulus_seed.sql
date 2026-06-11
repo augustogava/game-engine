@@ -8,15 +8,15 @@ INSERT INTO rpg_classes
      walk_speed, run_speed, anim_idle, anim_walk, anim_run, anim_attack, anim_hit, anim_death)
 VALUES
     (1, 'Knight', 'A heavily armored melee fighter. Strength fuels his blade.',
-     'classes/armored_animation.glb', 'models/rpg/icons/classes/knight.png', 50, 100, 1,
+     'classes/Meshy_AI_Emerald_Knight_of_the_biped_Meshy_AI_Meshy_Merged_Animations.glb', 'models/rpg/icons/classes/knight.png', 50, 100, 1,
      120, 40, 12, 8, 5, 10,
      12, 4, 0.8, 0.8, 3, 1,
-     2.4, 5.0, NULL, 'Walking', 'Running', 'Attack', NULL, NULL),
+     2.4, 5.0, 'Idle_02', 'Walking', 'Running', 'Attack', NULL, NULL),
     (2, 'Wizard', 'A master of the arcane. Intelligence empowers every spell.',
-     'classes/armored_animation.glb', 'models/rpg/icons/classes/wizard.png', 50, 100, 3,
+     'classes/Meshy_AI_Frostbound_Sage_biped_Meshy_AI_Meshy_Merged_Animations.glb', 'models/rpg/icons/classes/wizard.png', 50, 100, 3,
      80, 90, 5, 9, 14, 7,
      8, 9, 0.4, 1.6, 3, 1,
-     2.4, 4.8, NULL, 'Walking', 'Running', 'Attack', NULL, NULL)
+     2.4, 4.8, 'Idle_12', 'Walking', 'Running', 'Attack', NULL, NULL)
 ON DUPLICATE KEY UPDATE
     name = VALUES(name), description = VALUES(description), model_path = VALUES(model_path), icon_path = VALUES(icon_path),
     max_level = VALUES(max_level), starting_gold = VALUES(starting_gold), main_stat = VALUES(main_stat),
@@ -51,7 +51,12 @@ VALUES
      1.5, 3.0, 11, 1.6, 20, 1900,
      48, 3, 9, 16, 12,
      8, 2.5, 1.5, 3, 1,
-     NULL, 'Walking', 'Running', NULL, NULL, NULL)
+     NULL, 'Walking', 'Running', NULL, NULL, NULL),
+    (4, 'Rotwalker', 'enemies/Meshy_AI_Rotwalker_biped_Meshy_AI_Meshy_Merged_Animations.glb', 4, 110, 8, 14, 12,
+     1.4, 3.0, 10, 1.8, 20, 2100,
+     95, 6, 14, 20, 14,
+     8, 2.5, 1.5, 3, 1,
+     'Idle_02', 'Walking', 'Running', 'Attack', NULL, NULL)
 ON DUPLICATE KEY UPDATE
     name = VALUES(name), model_path = VALUES(model_path), level = VALUES(level),
     max_health = VALUES(max_health), damage_min = VALUES(damage_min), damage_max = VALUES(damage_max),
@@ -185,7 +190,11 @@ INSERT INTO rpg_loot_tables (id, enemy_id, loot_type, drop_chance_pct, gold_min,
     (16, 3, 2, 10, NULL, NULL, 13),
     (17, 3, 2, 4, NULL, NULL, 7),
     (18, 3, 2, 2, NULL, NULL, 8),
-    (19, 2, 2, 2, NULL, NULL, 10)
+    (19, 2, 2, 2, NULL, NULL, 10),
+    (20, 4, 1, 90, 6, 14, NULL),
+    (21, 4, 2, 8, NULL, NULL, 12),
+    (22, 4, 2, 5, NULL, NULL, 6),
+    (23, 4, 2, 3, NULL, NULL, 10)
 ON DUPLICATE KEY UPDATE
     enemy_id = VALUES(enemy_id), loot_type = VALUES(loot_type), drop_chance_pct = VALUES(drop_chance_pct),
     gold_min = VALUES(gold_min), gold_max = VALUES(gold_max), item_id = VALUES(item_id);
@@ -228,7 +237,8 @@ INSERT INTO rpg_map_props (id, model_path, pos_x, pos_y, pos_z, rot_y, scale, co
     (5, 'stone_sentinel.glb', 12, 0, -6, -0.4, 3.5, 1),
     (6, 'tree_pin.glb', -10, 0, -8, 0.2, 9, 1),
     (7, 'tree_pin.glb', 10, 0, 8, -0.5, 8, 1),
-    (8, 'chair.glb', -12, 0, 14, 2.4, 1.4, 1)
+    (8, 'chair.glb', -12, 0, 14, 2.4, 1.4, 1),
+    (9, 'fountain.glb', 0, 0, 12, 0, 3, 1)
 ON DUPLICATE KEY UPDATE
     model_path = VALUES(model_path), pos_x = VALUES(pos_x), pos_y = VALUES(pos_y), pos_z = VALUES(pos_z),
     rot_y = VALUES(rot_y), scale = VALUES(scale), collidable = VALUES(collidable);

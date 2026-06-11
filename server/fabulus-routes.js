@@ -24,21 +24,21 @@ const MAX_LEVEL_ROWS = 50;
 const mockClasses = [
     {
         id: 1, name: 'Knight', description: 'A heavily armored melee fighter. Strength fuels his blade.',
-        model_path: 'classes/armored_animation.glb', icon_path: 'models/rpg/icons/classes/knight.png',
+        model_path: 'classes/Meshy_AI_Emerald_Knight_of_the_biped_Meshy_AI_Meshy_Merged_Animations.glb', icon_path: 'models/rpg/icons/classes/knight.png',
         max_level: 50, starting_gold: 100, main_stat: 1,
         base_health: 120, base_mana: 40, base_strength: 12, base_dexterity: 8, base_intelligence: 5, base_vitality: 10,
         health_per_level: 12, mana_per_level: 4, health_regen: 0.8, mana_regen: 0.8, attribute_points_per_level: 3, skill_points_per_level: 1,
         walk_speed: 2.4, run_speed: 5.0,
-        anim_idle: null, anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
+        anim_idle: 'Idle_02', anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
     },
     {
         id: 2, name: 'Wizard', description: 'A master of the arcane. Intelligence empowers every spell.',
-        model_path: 'classes/armored_animation.glb', icon_path: 'models/rpg/icons/classes/wizard.png',
+        model_path: 'classes/Meshy_AI_Frostbound_Sage_biped_Meshy_AI_Meshy_Merged_Animations.glb', icon_path: 'models/rpg/icons/classes/wizard.png',
         max_level: 50, starting_gold: 100, main_stat: 3,
         base_health: 80, base_mana: 90, base_strength: 5, base_dexterity: 9, base_intelligence: 14, base_vitality: 7,
         health_per_level: 8, mana_per_level: 9, health_regen: 0.4, mana_regen: 1.6, attribute_points_per_level: 3, skill_points_per_level: 1,
         walk_speed: 2.4, run_speed: 4.8,
-        anim_idle: null, anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
+        anim_idle: 'Idle_12', anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
     },
 ];
 
@@ -70,6 +70,14 @@ const mockEnemies = [
         attack_cooldown_ms: 1900, experience_reward: 48, gold_min: 3, gold_max: 9,
         health_scale_pct: 16, damage_scale_pct: 12, ...ELITE_DEFAULTS,
         anim_idle: null, anim_walk: 'Walking', anim_run: 'Running', anim_attack: null, anim_hit: null, anim_death: null,
+    },
+    {
+        id: 4, name: 'Rotwalker', model_path: 'enemies/Meshy_AI_Rotwalker_biped_Meshy_AI_Meshy_Merged_Animations.glb', level: 4,
+        max_health: 110, damage_min: 8, damage_max: 14, armor: 12,
+        walk_speed: 1.4, run_speed: 3.0, aggro_range: 10, attack_range: 1.8, leash_range: 20,
+        attack_cooldown_ms: 2100, experience_reward: 95, gold_min: 6, gold_max: 14,
+        health_scale_pct: 20, damage_scale_pct: 14, ...ELITE_DEFAULTS,
+        anim_idle: 'Idle_02', anim_walk: 'Walking', anim_run: 'Running', anim_attack: 'Attack', anim_hit: null, anim_death: null,
     },
 ];
 
@@ -304,6 +312,10 @@ const mockLootTables = [
     { id: 17, enemy_id: 3, loot_type: 2, drop_chance_pct: 4, gold_min: null, gold_max: null, item_id: 7 },
     { id: 18, enemy_id: 3, loot_type: 2, drop_chance_pct: 2, gold_min: null, gold_max: null, item_id: 8 },
     { id: 19, enemy_id: 2, loot_type: 2, drop_chance_pct: 2, gold_min: null, gold_max: null, item_id: 10 },
+    { id: 20, enemy_id: 4, loot_type: 1, drop_chance_pct: 90, gold_min: 6, gold_max: 14, item_id: null },
+    { id: 21, enemy_id: 4, loot_type: 2, drop_chance_pct: 8, gold_min: null, gold_max: null, item_id: 12 },
+    { id: 22, enemy_id: 4, loot_type: 2, drop_chance_pct: 5, gold_min: null, gold_max: null, item_id: 6 },
+    { id: 23, enemy_id: 4, loot_type: 2, drop_chance_pct: 3, gold_min: null, gold_max: null, item_id: 10 },
 ];
 
 const mockLevels = (() => {

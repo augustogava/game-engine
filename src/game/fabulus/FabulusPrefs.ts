@@ -10,6 +10,7 @@ export type GfxShadowQuality = 'off' | 'low' | 'medium' | 'high';
 export type GfxSsao = 'off' | 'low' | 'high';
 export type GfxLevel = 'low' | 'medium' | 'high';
 export type GfxPreset = 'low' | 'medium' | 'high' | 'ultra';
+export type WeatherMode = 'ambient' | 'clear' | 'rain' | 'fog' | 'ember' | 'dust';
 
 export interface FabulusPrefsData {
     masterVolume: number;
@@ -30,6 +31,13 @@ export interface FabulusPrefsData {
     gfxSharpen: boolean;
     gfxParticleQuality: GfxLevel;
     gfxDetailLevel: GfxLevel;
+    gfxSky: boolean;
+    gfxVolumetrics: boolean;
+    gfxGroundUltra: boolean;
+    gfxWater: boolean;
+    gfxWeather: boolean;
+    gfxAdvancedVfx: boolean;
+    weatherMode: WeatherMode;
 }
 
 const DEFAULT_PREFS: FabulusPrefsData = {
@@ -51,6 +59,13 @@ const DEFAULT_PREFS: FabulusPrefsData = {
     gfxSharpen: true,
     gfxParticleQuality: 'high',
     gfxDetailLevel: 'medium',
+    gfxSky: true,
+    gfxVolumetrics: false,
+    gfxGroundUltra: true,
+    gfxWater: false,
+    gfxWeather: false,
+    gfxAdvancedVfx: false,
+    weatherMode: 'ambient',
 };
 
 export const GFX_PRESETS: Record<GfxPreset, Partial<FabulusPrefsData>> = {
@@ -58,21 +73,29 @@ export const GFX_PRESETS: Record<GfxPreset, Partial<FabulusPrefsData>> = {
         gfxAntialiasing: 'off', gfxRenderScale: 0.75, gfxShadowQuality: 'off', gfxSsao: 'off',
         gfxBloom: false, gfxVignette: false, gfxColorGrading: false, gfxSharpen: false,
         gfxParticleQuality: 'low', gfxDetailLevel: 'low',
+        gfxSky: false, gfxVolumetrics: false, gfxGroundUltra: false, gfxWater: false,
+        gfxWeather: false, gfxAdvancedVfx: false,
     },
     medium: {
         gfxAntialiasing: 'fxaa', gfxRenderScale: 1.0, gfxShadowQuality: 'medium', gfxSsao: 'off',
         gfxBloom: true, gfxVignette: true, gfxColorGrading: true, gfxSharpen: false,
         gfxParticleQuality: 'medium', gfxDetailLevel: 'medium',
+        gfxSky: false, gfxVolumetrics: false, gfxGroundUltra: false, gfxWater: false,
+        gfxWeather: false, gfxAdvancedVfx: false,
     },
     high: {
         gfxAntialiasing: 'msaa4', gfxRenderScale: 1.0, gfxShadowQuality: 'high', gfxSsao: 'low',
         gfxBloom: true, gfxVignette: true, gfxColorGrading: true, gfxSharpen: true,
         gfxParticleQuality: 'high', gfxDetailLevel: 'high',
+        gfxSky: true, gfxVolumetrics: false, gfxGroundUltra: true, gfxWater: false,
+        gfxWeather: false, gfxAdvancedVfx: false,
     },
     ultra: {
         gfxAntialiasing: 'msaa4', gfxRenderScale: 1.25, gfxShadowQuality: 'high', gfxSsao: 'high',
         gfxBloom: true, gfxVignette: true, gfxColorGrading: true, gfxSharpen: true,
         gfxParticleQuality: 'high', gfxDetailLevel: 'high',
+        gfxSky: true, gfxVolumetrics: true, gfxGroundUltra: true, gfxWater: true,
+        gfxWeather: true, gfxAdvancedVfx: true,
     },
 };
 
@@ -127,6 +150,13 @@ function sanitize(partial: Partial<FabulusPrefsData>, base: FabulusPrefsData): F
         gfxSharpen: pickBool(partial.gfxSharpen, base.gfxSharpen),
         gfxParticleQuality: pickEnum(partial.gfxParticleQuality, ['low', 'medium', 'high'] as const, base.gfxParticleQuality),
         gfxDetailLevel: pickEnum(partial.gfxDetailLevel, ['low', 'medium', 'high'] as const, base.gfxDetailLevel),
+        gfxSky: pickBool(partial.gfxSky, base.gfxSky),
+        gfxVolumetrics: pickBool(partial.gfxVolumetrics, base.gfxVolumetrics),
+        gfxGroundUltra: pickBool(partial.gfxGroundUltra, base.gfxGroundUltra),
+        gfxWater: pickBool(partial.gfxWater, base.gfxWater),
+        gfxWeather: pickBool(partial.gfxWeather, base.gfxWeather),
+        gfxAdvancedVfx: pickBool(partial.gfxAdvancedVfx, base.gfxAdvancedVfx),
+        weatherMode: pickEnum(partial.weatherMode, ['ambient', 'clear', 'rain', 'fog', 'ember', 'dust'] as const, base.weatherMode),
     };
 }
 
