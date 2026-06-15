@@ -13,8 +13,7 @@ import {
     TILE_DEPTH, TILE_THICKNESS, TILE_WIDTH,
 } from '../constants/gameConstants.js';
 import {
-    HINT_HIGHLIGHT_COLOR, HOVER_HIGHLIGHT_COLOR, SELECT_HIGHLIGHT_COLOR,
-    TILE_BASE_COLOR, TILE_SIDE_COLOR,
+    HINT_HIGHLIGHT_COLOR, SELECT_HIGHLIGHT_COLOR, TILE_BASE_COLOR,
 } from '../constants/graphicsConstants.js';
 
 const REMOVE_ANIM_MS = 260;
@@ -25,8 +24,7 @@ export class BoardSystem {
     private bjs!: BABYLON.Scene;
     private root!: BABYLON.TransformNode;
     private highlight!: BABYLON.HighlightLayer;
-    private baseMat!: BABYLON.StandardMaterial;
-    private dimMat!: BABYLON.StandardMaterial;
+    private tileMat!: BABYLON.StandardMaterial;
     private symbolMats: Map<number, BABYLON.StandardMaterial> = new Map();
 
     tiles: Tile[] = [];
@@ -48,15 +46,12 @@ export class BoardSystem {
         this.highlight = new BABYLON.HighlightLayer('mahjong-hl', this.bjs, { blurHorizontalSize: 1.2, blurVerticalSize: 1.2 });
         this.highlight.innerGlow = false;
 
-        this.baseMat = new BABYLON.StandardMaterial('tile-base', this.bjs);
-        this.baseMat.diffuseColor = BABYLON.Color3.FromHexString(TILE_BASE_COLOR);
-        this.baseMat.specularColor = new BABYLON.Color3(0.18, 0.18, 0.16);
-        this.baseMat.emissiveColor = new BABYLON.Color3(0.06, 0.055, 0.045);
-
-        this.dimMat = new BABYLON.StandardMaterial('tile-dim', this.bjs);
-        this.dimMat.diffuseColor = BABYLON.Color3.FromHexString(TILE_SIDE_COLOR).scale(0.62);
-        this.dimMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-        this.dimMat.emissiveColor = new BABYLON.Color3(0.02, 0.02, 0.02);
+        // Single shared material for every tile so free/blocked tiles look identical
+        // (no glow hint). Only the selected tile glows, via the highlight layer.
+        this.tileMat = new BABYLON.StandardMaterial('tile-base', this.bjs);
+        this.tileMat.diffuseColor = BABYLON.Color3.FromHexString(TILE_BASE_COLOR).scale(0.78);
+        this.tileMat.specularColor = new BABYLON.Color3(0.12, 0.12, 0.1);
+        this.tileMat.emissiveColor = new BABYLON.Color3(0.03, 0.028, 0.022);
     }
 
     buildLevel(level: GeneratedLevel): void {
@@ -92,7 +87,7 @@ export class BoardSystem {
             }, this.bjs);
             box.parent = this.root;
             box.position.set(worldX, worldY, worldZ);
-            box.material = this.baseMat;
+            box.material = this.tileMat;
             box.isPickable = true;
 
             const symbol = BABYLON.MeshBuilder.CreatePlane(`sym-${i}`, {
@@ -215,16 +210,14 @@ export class BoardSystem {
         }
     }
 
-    /** Recomputes free tiles from live (non-removed) tiles and updates visuals. */
+    /** Recomputes which tiles are free (selectable). No visual change: free and
+     *  blocked tiles look identical so the board gives no glow hint. */
     recomputeFree(): void {
         const live = this.tiles.filter(t => !t.removed);
         const filled = buildFilledCells(live.map(t => t.pos));
         this.freeIds = new Set();
         for (const tile of live) {
-            const free = isSlotFree(tile.pos, filled);
-            if (free) this.freeIds.add(tile.id);
-            tile.mesh.material = free ? this.baseMat : this.dimMat;
-            tile.symbolMesh.visibility = free ? 1 : 0.5;
+            if (isSlotFree(tile.pos, filled)) this.freeIds.add(tile.id);
         }
     }
 
@@ -242,19 +235,6 @@ export class BoardSystem {
             return pick.pickedMesh.metadata.tileId as number;
         }
         return null;
-    }
-
-    setHover(tileId: number | null): void {
-        if (this.hoverId === tileId) return;
-        if (this.hoverId !== null && this.hoverId !== this.selectedId) {
-            const prev = this.getTile(this.hoverId);
-            if (prev) this.highlight.removeMesh(prev.mesh);
-        }
-        this.hoverId = tileId;
-        if (tileId !== null && tileId !== this.selectedId) {
-            const tile = this.getTile(tileId);
-            if (tile) this.highlight.addMesh(tile.mesh, BABYLON.Color3.FromHexString(HOVER_HIGHLIGHT_COLOR));
-        }
     }
 
     setSelected(tileId: number | null): void {
@@ -349,8 +329,7 @@ export class BoardSystem {
     dispose(): void {
         this.clear();
         this.highlight?.dispose();
-        this.baseMat?.dispose();
-        this.dimMat?.dispose();
+        this.tileMat?.dispose();
         for (const mat of this.symbolMats.values()) mat.dispose();
         this.symbolMats.clear();
         this.root?.dispose();

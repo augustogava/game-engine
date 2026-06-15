@@ -16,18 +16,10 @@ export class TileInputSystem {
         const bjs = this.game.bjs;
         this.observer = bjs.onPointerObservable.add((info: BABYLON.PointerInfo) => {
             if (this.game.state !== GAME_STATE.PLAYING) return;
-            if (info.type === BABYLON.PointerEventTypes.POINTERMOVE) {
-                this.onHover();
-            } else if (info.type === BABYLON.PointerEventTypes.POINTERTAP) {
+            if (info.type === BABYLON.PointerEventTypes.POINTERTAP) {
                 this.onTap();
             }
         });
-    }
-
-    private onHover(): void {
-        const board = this.game.board;
-        const id = board.pickTileId();
-        board.setHover(id !== null && board.isFree(id) ? id : null);
     }
 
     private onTap(): void {

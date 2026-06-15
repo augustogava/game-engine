@@ -1,9 +1,8 @@
-/** Post-processing: bloom + vignette for a polished look. */
+/** Post-processing: vignette + FXAA. Bloom is intentionally off so only the
+ *  selected tile glows (via the highlight layer). */
 import * as BABYLON from '@babylonjs/core';
 import type { MahjongScene } from '../MahjongScene.js';
-import {
-    BLOOM_KERNEL, BLOOM_THRESHOLD, BLOOM_WEIGHT, VIGNETTE_WEIGHT,
-} from '../constants/graphicsConstants.js';
+import { VIGNETTE_WEIGHT } from '../constants/graphicsConstants.js';
 
 export class RenderSystem {
     private game: MahjongScene;
@@ -21,11 +20,9 @@ export class RenderSystem {
             return;
         }
         this.pipeline = new BABYLON.DefaultRenderingPipeline('mahjong-pipeline', true, bjs, [camera]);
-        this.pipeline.bloomEnabled = true;
-        this.pipeline.bloomThreshold = BLOOM_THRESHOLD;
-        this.pipeline.bloomWeight = BLOOM_WEIGHT;
-        this.pipeline.bloomKernel = BLOOM_KERNEL;
-        this.pipeline.bloomScale = 0.5;
+        // Bloom disabled so plain tiles never glow; only the selected tile glows
+        // via the highlight layer (a separate pass, unaffected by this setting).
+        this.pipeline.bloomEnabled = false;
 
         this.pipeline.imageProcessingEnabled = true;
         this.pipeline.imageProcessing.vignetteEnabled = true;

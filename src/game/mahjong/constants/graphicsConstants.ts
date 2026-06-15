@@ -11,7 +11,7 @@ export const HINT_HIGHLIGHT_COLOR = '#67e0a3';
 export const GROUND_COLOR = '#16241b';
 export const GLOW_INTENSITY = 0.7;
 
-export const BLOOM_THRESHOLD = 0.82;
+export const BLOOM_THRESHOLD = 0.95;
 export const BLOOM_WEIGHT = 0.45;
 export const BLOOM_KERNEL = 48;
 export const VIGNETTE_WEIGHT = 2.4;
