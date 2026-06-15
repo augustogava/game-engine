@@ -9,7 +9,8 @@
     "build": "node scripts/build.js",
     "start": "node server.js",
     "type-check": "tsc --noEmit",
-    "gen:assets": "node scripts/gen-visual-assets.mjs"
+    "gen:assets": "node scripts/gen-visual-assets.mjs",
+    "seed:mahjong": "node scripts/seed-mahjong.js"
   },
   "engines": {
     "node": ">=18.0.0"

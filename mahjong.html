@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Mahjong Solitaire</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Noto+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+    --jade: #2f8f6b;
+    --jade-bright: #54c79a;
+    --gold: #e7c873;
+    --gold-bright: #ffe6a0;
+    --ink: #11201a;
+    --ink-2: #0a1611;
+    --panel: rgba(13, 28, 22, 0.96);
+    --panel-2: rgba(9, 20, 16, 0.97);
+    --parchment: #f0e9d6;
+    --parchment-dim: #a9b8ac;
+    --crimson: #c0392b;
+    --border: 1px solid rgba(231, 200, 115, 0.4);
+    --font-display: 'Cinzel', Georgia, serif;
+    --font-body: 'Noto Sans', 'Segoe UI', sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #05100c; }
+body { font-family: var(--font-body); color: var(--parchment); }
+.hidden { display: none !important; }
+
+#game-canvas { width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
+
+.panel {
+    background: linear-gradient(170deg, var(--panel), var(--panel-2));
+    border: var(--border);
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.5), 0 8px 32px rgba(0,0,0,0.7);
+    border-radius: 8px;
+}
+
+/* Loading */
+#mj-loading {
+    position: fixed; inset: 0; z-index: 100;
+    background: radial-gradient(ellipse at center, #123124 0%, #05100c 78%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+}
+#mj-loading h1 {
+    font-family: var(--font-display); font-size: 54px; letter-spacing: 10px; font-weight: 700;
+    color: var(--gold-bright); text-shadow: 0 0 40px rgba(231,200,115,0.35);
+}
+#mj-loading .subtitle { color: var(--parchment-dim); letter-spacing: 4px; font-size: 12px; text-transform: uppercase; font-family: var(--font-display); }
+#mj-loading-status { margin-top: 14px; color: var(--parchment-dim); font-size: 14px; min-height: 20px; }
+
+/* Top HUD */
+#mj-hud {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 30;
+    display: flex; gap: 10px; align-items: stretch; padding: 8px 12px;
+}
+.mj-stat { display: flex; flex-direction: column; align-items: center; min-width: 76px; padding: 2px 8px; }
+.mj-stat .lbl { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--parchment-dim); font-family: var(--font-display); }
+.mj-stat .val { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--gold-bright); }
+.mj-stat.name .val { color: var(--jade-bright); font-size: 17px; }
+.mj-stat + .mj-stat { border-left: 1px solid rgba(231,200,115,0.18); }
+
+/* Controls */
+#mj-controls {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30;
+    display: flex; gap: 8px; padding: 8px 10px;
+}
+#mj-controls button, .mj-action {
+    font-family: var(--font-display); letter-spacing: 1px; font-size: 12px;
+    background: linear-gradient(180deg, #1c3a2c, #0e2018); color: var(--parchment);
+    border: 1px solid rgba(231,200,115,0.4); padding: 9px 16px; cursor: pointer; border-radius: 5px;
+    transition: all 0.12s ease;
+}
+#mj-controls button:hover, .mj-action:hover { color: var(--gold-bright); border-color: var(--gold); transform: translateY(-2px); }
+#mj-controls button:disabled, #mj-controls button.mj-disabled { opacity: 0.4; cursor: default; color: var(--parchment-dim); transform: none; border-color: rgba(231,200,115,0.2); }
+
+/* Toast */
+#mj-toast {
+    position: fixed; bottom: 78px; left: 50%; transform: translateX(-50%); z-index: 35;
+    background: rgba(10,22,17,0.95); border: 1px solid rgba(231,200,115,0.45);
+    padding: 9px 22px; font-family: var(--font-display); font-size: 13px; letter-spacing: 1px;
+    color: var(--gold-bright); border-radius: 5px; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+#mj-toast.show { opacity: 1; }
+
+/* Email gate */
+#mj-email-gate {
+    position: fixed; inset: 0; z-index: 90;
+    background: radial-gradient(ellipse at center, rgba(18,49,36,0.9), rgba(5,16,12,0.97));
+    display: flex; align-items: center; justify-content: center;
+}
+#mj-email-box { width: min(440px, 92vw); padding: 34px 30px; text-align: center; }
+#mj-email-box h2 { font-family: var(--font-display); font-size: 26px; letter-spacing: 3px; color: var(--gold-bright); margin-bottom: 8px; }
+#mj-email-box p { color: var(--parchment-dim); font-size: 13px; line-height: 1.6; margin-bottom: 20px; }
+#mj-email-input {
+    width: 100%; padding: 12px 14px; font-size: 15px; font-family: var(--font-body);
+    background: #0a1611; border: 1px solid rgba(231,200,115,0.4); color: var(--parchment);
+    border-radius: 5px; margin-bottom: 12px; text-align: center;
+}
+#mj-email-input:focus { outline: none; border-color: var(--gold); }
+#mj-email-submit {
+    width: 100%; padding: 12px 0; font-family: var(--font-display); font-size: 14px; letter-spacing: 2px;
+    background: linear-gradient(180deg, var(--jade), #1c5740); color: #06120d; font-weight: 700;
+    border: 1px solid var(--gold); cursor: pointer; border-radius: 5px; text-transform: uppercase;
+}
+#mj-email-submit:hover:not(:disabled) { background: var(--jade-bright); }
+#mj-email-submit:disabled { opacity: 0.5; cursor: default; }
+#mj-email-error { color: var(--crimson); font-size: 12px; min-height: 18px; margin-top: 10px; }
+
+/* Win overlay */
+#mj-win {
+    position: fixed; inset: 0; z-index: 80;
+    background: radial-gradient(ellipse at center, rgba(18,49,36,0.85), rgba(5,16,12,0.96));
+    display: flex; align-items: center; justify-content: center;
+}
+#mj-win-box { width: min(560px, 94vw); max-height: 92vh; overflow-y: auto; padding: 30px 28px; text-align: center; }
+#mj-win-box h2 { font-family: var(--font-display); font-size: 40px; letter-spacing: 6px; color: var(--gold-bright); text-shadow: 0 0 30px rgba(231,200,115,0.4); }
+#mj-win-sub { color: var(--jade-bright); font-family: var(--font-display); letter-spacing: 3px; font-size: 13px; margin-top: 4px; text-transform: uppercase; }
+#mj-win-grid { display: flex; justify-content: center; gap: 12px; margin: 22px 0; flex-wrap: wrap; }
+.mj-win-card { min-width: 110px; padding: 14px 10px; border: 1px solid rgba(231,200,115,0.3); border-radius: 6px; background: rgba(8,20,15,0.6); }
+.mj-win-card .k { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--parchment-dim); font-family: var(--font-display); }
+.mj-win-card .v { font-family: var(--font-display); font-size: 26px; font-weight: 700; color: var(--gold-bright); margin-top: 4px; }
+.mj-lb-title { font-family: var(--font-display); letter-spacing: 4px; font-size: 14px; color: var(--gold); text-transform: uppercase; margin: 14px 0 8px; }
+#mj-lb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#mj-lb-table th { font-family: var(--font-display); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--parchment-dim); padding: 6px 8px; border-bottom: 1px solid rgba(231,200,115,0.3); }
+#mj-lb-table td { padding: 7px 8px; border-bottom: 1px solid rgba(231,200,115,0.1); }
+#mj-lb-table tr.mj-lb-self td { color: var(--gold-bright); background: rgba(231,200,115,0.1); }
+.mj-lb-empty { color: var(--parchment-dim); font-style: italic; padding: 14px; }
+#mj-win-actions { display: flex; gap: 10px; justify-content: center; margin-top: 22px; }
+#mj-btn-next { background: linear-gradient(180deg, var(--jade), #1c5740); color: #06120d; font-weight: 700; border-color: var(--gold); }
+#mj-btn-next:hover { background: var(--jade-bright); }
+</style>
+</head>
+<body>
+<div id="mj-loading">
+    <h1>MAHJONG</h1>
+    <div class="subtitle">Solitaire</div>
+    <div id="mj-loading-status">Carregando...</div>
+</div>
+
+<canvas id="game-canvas"></canvas>
+
+<div id="mj-hud" class="panel">
+    <div class="mj-stat name"><span class="lbl">Jogador</span><span class="val" id="mj-name">-</span></div>
+    <div class="mj-stat"><span class="lbl">Nível</span><span class="val" id="mj-level">1</span></div>
+    <div class="mj-stat"><span class="lbl">Tempo</span><span class="val" id="mj-time">00:00</span></div>
+    <div class="mj-stat"><span class="lbl">Pontos</span><span class="val" id="mj-points">0</span></div>
+    <div class="mj-stat"><span class="lbl">QI</span><span class="val" id="mj-iq">-</span></div>
+</div>
+
+<div id="mj-controls" class="panel">
+    <button id="mj-btn-hint" type="button">Dica (1)</button>
+    <button id="mj-btn-restart" type="button">Reiniciar</button>
+    <button id="mj-btn-sound" type="button">Som: ON</button>
+</div>
+
+<div id="mj-toast"></div>
+
+<div id="mj-email-gate" class="hidden">
+    <div id="mj-email-box" class="panel">
+        <h2>Bem-vindo</h2>
+        <p>Informe seu e-mail para salvar seu progresso e disputar o ranking global de pontos e QI.</p>
+        <input id="mj-email-input" type="email" placeholder="seu@email.com" autocomplete="email" />
+        <button id="mj-email-submit" type="button">Começar a jogar</button>
+        <div id="mj-email-error"></div>
+    </div>
+</div>
+
+<div id="mj-win" class="hidden">
+    <div id="mj-win-box" class="panel">
+        <h2>Nível concluído</h2>
+        <div id="mj-win-sub">Nível <span id="mj-win-level">1</span></div>
+        <div id="mj-win-grid">
+            <div class="mj-win-card"><div class="k">Pontos</div><div class="v" id="mj-win-points">+0</div></div>
+            <div class="mj-win-card"><div class="k">QI</div><div class="v" id="mj-win-iq">100</div></div>
+            <div class="mj-win-card"><div class="k">Tempo</div><div class="v" id="mj-win-time">00:00</div></div>
+        </div>
+        <div class="mj-lb-title">Ranking Global</div>
+        <table id="mj-lb-table">
+            <thead><tr><th>#</th><th>Jogador</th><th>Pontos</th><th>QI</th></tr></thead>
+            <tbody id="mj-leaderboard"></tbody>
+        </table>
+        <div id="mj-win-actions">
+            <button id="mj-btn-replay" class="mj-action" type="button">Repetir nível</button>
+            <button id="mj-btn-next" class="mj-action" type="button">Próximo nível</button>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="dist/mahjong-main.js?v=dev"></script>
+</body>
+</html>

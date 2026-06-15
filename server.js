@@ -6,6 +6,7 @@ const mysql = require('mysql2/promise');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const { handleFabulusRoutes, setDbPool: setFabulusDbPool } = require('./server/fabulus-routes');
+const { handleMahjongRoutes, setDbPool: setMahjongDbPool } = require('./server/mahjong-routes');
 
 const PORT = process.env.PORT || 3000;
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -130,6 +131,7 @@ async function initRpgDatabase() {
         });
         await rpgDbPool.query('SELECT 1');
         setFabulusDbPool(rpgDbPool);
+        setMahjongDbPool(rpgDbPool);
         console.log('[DB:RPG] Connected.');
     } catch (err) {
         console.error('[DB:RPG] Init failed:', err.message);
@@ -1153,6 +1155,7 @@ const server = http.createServer(async (req, res) => {
 
     // Fabulus RPG API
     if (await handleFabulusRoutes(req, res)) return;
+    if (await handleMahjongRoutes(req, res)) return;
 
     // API: online player count
     if (req.method === 'GET' && req.url.split('?')[0] === '/api/online-count') {

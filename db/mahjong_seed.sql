@@ -1,0 +1,5 @@
+-- Mahjong Solitaire seed data (mysql-rpg / DATABASE_RPG_URL)
+-- The tile catalog and level layouts are defined in code (src/game/mahjong).
+-- Users and scores are created at runtime, so there is no static row data to seed.
+-- This file exists to keep parity with the schema/seed pipeline and as a place
+-- for future reference rows.

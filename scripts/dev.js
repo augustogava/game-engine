@@ -7,6 +7,7 @@ const { WebSocketServer } = require('ws');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { handleFabulusRoutes, setDbPool: setFabulusDbPool } = require('../server/fabulus-routes');
+const { handleMahjongRoutes, setDbPool: setMahjongDbPool } = require('../server/mahjong-routes');
 
 const PORT = 3002;
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -78,6 +79,7 @@ async function initRpgDatabase() {
         });
         await rpgDbPool.query('SELECT 1');
         setFabulusDbPool(rpgDbPool);
+        setMahjongDbPool(rpgDbPool);
         console.log('[DB:RPG] Connected.');
     } catch (err) {
         console.error('[DB:RPG] Init failed:', err.message);
@@ -128,7 +130,7 @@ const ctx2D = esbuild.context({
 
 // ── 3D Flight Game build options ─────────────────────────────────────────────
 const flight3dOpts = {
-    entryPoints: ['src/flight-main.ts', 'src/fabulus-main.ts'],
+    entryPoints: ['src/flight-main.ts', 'src/fabulus-main.ts', 'src/mahjong-main.ts'],
     bundle: true,
     outdir: 'dist',
     sourcemap: true,
@@ -189,6 +191,7 @@ ctx2D.then(async (c2D) => {
         }
 
         if (await handleFabulusRoutes(req, res)) return;
+        if (await handleMahjongRoutes(req, res)) return;
 
         if (req.method === 'POST' && req.url.split('?')[0] === '/api/register') {
             try {
