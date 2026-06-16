@@ -1,4 +1,4 @@
-/** Pointer picking, selection, pair matching, hint and shuffle. */
+/** Pointer picking: a tapped free tile is sent to the top tray. */
 import * as BABYLON from '@babylonjs/core';
 import type { MahjongScene } from '../MahjongScene.js';
 import { facesMatch } from '../data/tileSet.js';
@@ -32,45 +32,10 @@ export class TileInputSystem {
             return;
         }
 
-        const selected = board.selected;
-        if (selected === null) {
-            board.setSelected(id);
-            this.game.audio.select();
-            return;
-        }
-        if (selected === id) {
-            board.setSelected(null);
-            return;
-        }
+        const faceId = board.takeTile(id);
+        if (faceId === null) return;
 
-        const a = board.getTile(selected);
-        const b = board.getTile(id);
-        if (!a || !b) {
-            board.setSelected(id);
-            return;
-        }
-
-        if (facesMatch(a.faceId, b.faceId)) {
-            board.removeTiles(a.id, b.id, (positions) => {
-                if (positions.length === 2) {
-                    const mid = BABYLON.Vector3.Center(positions[0], positions[1]);
-                    this.game.vfx.burst(mid);
-                }
-            });
-            board.setSelected(null);
-            this.game.audio.match();
-            this.game.onMatch();
-
-            if (board.remainingCount() === 0) {
-                this.game.onWin();
-            } else if (!this.hasAvailableMove()) {
-                this.game.notify('Sem jogadas disponíveis — reinicie o nível');
-            }
-        } else {
-            this.game.audio.error();
-            board.setSelected(id);
-            this.game.audio.select();
-        }
+        this.game.handleTrayAdd(faceId);
     }
 
     /** Finds a matchable pair among free tiles. */

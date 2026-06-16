@@ -1,14 +1,35 @@
-/** DOM HUD: email gate, top bar, controls, toast, win screen and leaderboard. */
+/** DOM HUD: email gate, top bar, tray, controls, toast, win/lose screens, menu leaderboard. */
 import type { MahjongScene } from '../MahjongScene.js';
 import type { LeaderboardEntry, MahjongUser, WinResult } from '../types/index.js';
 import { MahjongPrefs } from '../MahjongPrefs.js';
 
 const TOAST_DURATION_MS = 2200;
+const IQ_DELTA_EPSILON = 0.05;
+const MILESTONE_STEP = 10;
+
+interface ResultTier {
+    title: string;
+    phrase: string;
+}
 
 function el<T extends HTMLElement>(id: string): T {
     const node = document.getElementById(id);
     if (!node) throw new Error(`[UiSystem] Missing element #${id}`);
     return node as T;
+}
+
+function tierFor(iq: number): ResultTier {
+    if (iq >= 160) return { title: 'Gênio!', phrase: 'Sua mente é simplesmente brilhante!' };
+    if (iq >= 130) return { title: 'Brilhante!', phrase: 'Velocidade e estratégia em perfeita harmonia!' };
+    if (iq >= 100) return { title: 'Destemido!', phrase: 'Níveis difíceis são só um aquecimento para você!' };
+    if (iq >= 75) return { title: 'Afiado!', phrase: 'Bom raciocínio! Continue treinando.' };
+    return { title: 'Mandou bem!', phrase: 'Cada partida deixa você mais rápido.' };
+}
+
+function milestoneInfo(level: number): { milestone: number; progressPct: number } {
+    const milestone = (Math.floor(level / MILESTONE_STEP) + 1) * MILESTONE_STEP;
+    const progressPct = Math.round(((level % MILESTONE_STEP) / MILESTONE_STEP) * 100);
+    return { milestone, progressPct };
 }
 
 export class UiSystem {
@@ -25,12 +46,19 @@ export class UiSystem {
         el<HTMLButtonElement>('mj-btn-restart').addEventListener('click', () => this.game.restartLevel());
         el<HTMLButtonElement>('mj-btn-sound').addEventListener('click', () => this.toggleSound());
 
+        el<HTMLButtonElement>('mj-btn-menu').addEventListener('click', () => { void this.game.openLeaderboard(); });
+        el<HTMLButtonElement>('mj-btn-menu-close').addEventListener('click', () => this.hideLeaderboardPanel());
+
         el<HTMLButtonElement>('mj-btn-next').addEventListener('click', () => {
             this.hideWin();
             this.game.nextLevel();
         });
         el<HTMLButtonElement>('mj-btn-replay').addEventListener('click', () => {
             this.hideWin();
+            this.game.restartLevel();
+        });
+        el<HTMLButtonElement>('mj-btn-lose-retry').addEventListener('click', () => {
+            this.hideLose();
             this.game.restartLevel();
         });
 
@@ -50,8 +78,7 @@ export class UiSystem {
     }
 
     hideLoading(): void {
-        const loading = el('mj-loading');
-        loading.classList.add('hidden');
+        el('mj-loading').classList.add('hidden');
     }
 
     showEmailGate(): void {
@@ -83,7 +110,6 @@ export class UiSystem {
     setUser(user: MahjongUser): void {
         el('mj-name').textContent = user.name;
         el('mj-points').textContent = String(user.totalPoints);
-        el('mj-iq').textContent = String(user.bestIq || '-');
     }
 
     setLevel(level: number): void {
@@ -98,18 +124,19 @@ export class UiSystem {
         btn.classList.toggle('mj-disabled', remaining <= 0);
     }
 
+    setLiveIq(value: number): void {
+        el('mj-iq').textContent = value.toFixed(1);
+    }
+
     updateTimer(timeMs: number): void {
         const sec = Math.floor(timeMs / 1000);
         if (sec === this.lastTimeSec) return;
         this.lastTimeSec = sec;
-        const mm = String(Math.floor(sec / 60)).padStart(2, '0');
-        const ss = String(sec % 60).padStart(2, '0');
-        el('mj-time').textContent = `${mm}:${ss}`;
+        el('mj-time').textContent = this.formatMs(timeMs);
     }
 
-    updateTotals(totalPoints: number, bestIq: number): void {
+    updateTotals(totalPoints: number): void {
         el('mj-points').textContent = String(totalPoints);
-        el('mj-iq').textContent = String(bestIq || '-');
     }
 
     notify(message: string): void {
@@ -120,18 +147,61 @@ export class UiSystem {
         this.toastTimer = window.setTimeout(() => toast.classList.remove('show'), TOAST_DURATION_MS);
     }
 
-    showWin(result: WinResult, leaderboard: LeaderboardEntry[]): void {
-        el('mj-win-level').textContent = String(result.level);
-        el('mj-win-points').textContent = `+${result.points}`;
-        el('mj-win-iq').textContent = String(result.iq);
+    showWin(result: WinResult, iqDelta: number): void {
+        const tier = tierFor(result.iq);
+        el('mj-win-title').textContent = tier.title;
+        el('mj-win-phrase').textContent = tier.phrase;
         el('mj-win-time').textContent = this.formatMs(result.timeMs);
+        el('mj-win-iq').textContent = result.iq.toFixed(1);
+        el('mj-win-combo').textContent = String(result.combo);
 
+        const arrow = el('mj-win-iq-arrow');
+        arrow.className = 'mj-arrow';
+        if (iqDelta > IQ_DELTA_EPSILON) { arrow.classList.add('up'); arrow.textContent = '\u25B2'; }
+        else if (iqDelta < -IQ_DELTA_EPSILON) { arrow.classList.add('down'); arrow.textContent = '\u25BC'; }
+        else { arrow.textContent = ''; }
+
+        const { milestone, progressPct } = milestoneInfo(result.level);
+        el<HTMLDivElement>('mj-win-progress').style.width = `${progressPct}%`;
+        el('mj-win-milestone').textContent = `Alcançar Nível ${milestone}`;
+
+        el('mj-btn-next').textContent = `Nível ${result.level + 1}`;
+        el('mj-win').classList.remove('hidden');
+    }
+
+    hideWin(): void {
+        el('mj-win').classList.add('hidden');
+    }
+
+    showLose(result: WinResult): void {
+        el('mj-lose-level').textContent = String(result.level);
+        el('mj-lose-iq').textContent = result.iq.toFixed(1);
+        el('mj-lose-combo').textContent = String(result.combo);
+        el('mj-lose').classList.remove('hidden');
+    }
+
+    hideLose(): void {
+        el('mj-lose').classList.add('hidden');
+    }
+
+    showLeaderboardPanel(): void {
+        const tbody = el<HTMLTableSectionElement>('mj-leaderboard');
+        tbody.innerHTML = '<tr><td colspan="4" class="mj-lb-empty">Carregando...</td></tr>';
+        el('mj-menu').classList.remove('hidden');
+    }
+
+    hideLeaderboardPanel(): void {
+        el('mj-menu').classList.add('hidden');
+    }
+
+    renderLeaderboard(leaderboard: LeaderboardEntry[]): void {
         const tbody = el<HTMLTableSectionElement>('mj-leaderboard');
         tbody.innerHTML = '';
         if (leaderboard.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = '<td colspan="4" class="mj-lb-empty">Sem registros ainda</td>';
             tbody.appendChild(row);
+            return;
         }
         for (const entry of leaderboard) {
             const row = document.createElement('tr');
@@ -140,15 +210,9 @@ export class UiSystem {
                 `<td>${entry.rank}</td>` +
                 `<td>${this.escape(entry.name)}</td>` +
                 `<td>${entry.totalPoints}</td>` +
-                `<td>${entry.iq}</td>`;
+                `<td>${entry.iq.toFixed(1)}</td>`;
             tbody.appendChild(row);
         }
-
-        el('mj-win').classList.remove('hidden');
-    }
-
-    hideWin(): void {
-        el('mj-win').classList.add('hidden');
     }
 
     private toggleSound(): void {

@@ -28,7 +28,7 @@ export const MahjongApi = {
         return apiFetch<MahjongUser>(`/player?userId=${encodeURIComponent(userId)}`);
     },
 
-    async submitScore(userId: string, result: WinResult): Promise<{ totalPoints: number; bestIq: number; bestLevel: number }> {
+    async submitScore(userId: string, result: WinResult, won: boolean): Promise<{ totalPoints: number; bestIq: number; bestLevel: number }> {
         return apiFetch('/score', {
             method: 'POST',
             body: JSON.stringify({
@@ -38,6 +38,8 @@ export const MahjongApi = {
                 timeMs: result.timeMs,
                 points: result.points,
                 iq: result.iq,
+                combo: result.combo,
+                won: won ? 1 : 0,
             }),
         });
     },

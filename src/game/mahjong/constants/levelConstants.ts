@@ -1,23 +1,24 @@
 /**
- * Infinite difficulty scaling. Level 1 is small and easy; every level widens the
- * footprint and (periodically) adds a stacked layer, growing without bound.
+ * Difficulty scaling for the tray mechanic. Boards stay small and roughly
+ * constant in tile count (~36-72 tiles); difficulty comes from layout shape and
+ * stacked layers (vertical pressure) rather than an ever-growing footprint.
  */
 
 export const BASE_WIDTH = 6;
-export const BASE_HEIGHT = 5;
+export const BASE_HEIGHT = 6;
 export const BASE_LAYERS = 1;
 
-/** Footprint growth per level beyond level 1. */
-export const WIDTH_GROWTH_PER_LEVEL = 0.8;
-export const HEIGHT_GROWTH_PER_LEVEL = 0.6;
+/** Footprint growth per level beyond level 1 (slow, to keep boards screen-sized). */
+export const WIDTH_GROWTH_PER_LEVEL = 0.12;
+export const HEIGHT_GROWTH_PER_LEVEL = 0.06;
 
-/** A new stacked layer is added every N levels. */
-export const LEVELS_PER_NEW_LAYER = 3;
+/** A new stacked layer is added every N levels (raises difficulty without widening). */
+export const LEVELS_PER_NEW_LAYER = 4;
 
-/** Hard ceilings to keep a single level renderable/playable. */
-export const MAX_WIDTH = 40;
-export const MAX_HEIGHT = 30;
-export const MAX_LAYERS = 8;
+/** Hard ceilings to keep boards small and screen-friendly (~36-68 tiles). */
+export const MAX_WIDTH = 7;
+export const MAX_HEIGHT = 6;
+export const MAX_LAYERS = 3;
 
 export interface LevelLayout {
     width: number;

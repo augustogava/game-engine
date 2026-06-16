@@ -15,8 +15,9 @@ import { RenderSystem } from './systems/RenderSystem.js';
 import { VfxSystem } from './systems/VfxSystem.js';
 import { AudioSystem } from './systems/AudioSystem.js';
 import { TileInputSystem } from './systems/TileInputSystem.js';
+import { TraySystem } from './systems/TraySystem.js';
 import { UiSystem } from './systems/UiSystem.js';
-import { computeIq, computePoints } from './constants/scoreConstants.js';
+import { computeIqGain, computePoints, finalizeIq } from './constants/scoreConstants.js';
 import { HINTS_PER_LEVEL } from './constants/gameConstants.js';
 import { GAME_STATE, type GameState, type LeaderboardEntry, type MahjongUser, type WinResult } from './types/index.js';
 
@@ -39,12 +40,16 @@ export class MahjongScene extends Scene3D {
     vfx!: VfxSystem;
     audio!: AudioSystem;
     private tileInput!: TileInputSystem;
+    tray!: TraySystem;
     ui!: UiSystem;
 
     private levelTileCount = 0;
     private levelStartMs = 0;
     private elapsedMs = 0;
     private hintsRemaining = 0;
+    private liveIq = 0;
+    private combo = 0;
+    private lastMatchMs = 0;
 
     onCreate(scene: any, _input: InputManager): void {
         this.bjs = scene;
@@ -58,6 +63,7 @@ export class MahjongScene extends Scene3D {
         this.board = new BoardSystem(this);
         this.audio = new AudioSystem(this);
         this.tileInput = new TileInputSystem(this);
+        this.tray = new TraySystem(this);
         this.ui = new UiSystem(this);
 
         this.lighting.init();
@@ -67,6 +73,7 @@ export class MahjongScene extends Scene3D {
         this.board.init();
         this.audio.init();
         this.tileInput.init();
+        this.tray.init();
         this.ui.init();
 
         void this.bootstrap();
@@ -123,10 +130,15 @@ export class MahjongScene extends Scene3D {
         this.levelTileCount = generated.slots.length;
         this.board.buildLevel(generated);
         this.camera.frameBoard(this.board.boardRadius);
+        this.tray.clear();
         this.ui.setLevel(level);
         this.hintsRemaining = HINTS_PER_LEVEL;
         this.ui.setHints(this.hintsRemaining);
+        this.liveIq = 0;
+        this.combo = 0;
+        this.ui.setLiveIq(0);
         this.levelStartMs = performance.now();
+        this.lastMatchMs = this.levelStartMs;
         this.elapsedMs = 0;
         this.ui.updateTimer(0);
         this.state = GAME_STATE.PLAYING;
@@ -160,39 +172,95 @@ export class MahjongScene extends Scene3D {
         // Per-match hook (reserved for future combo feedback).
     }
 
+    /** Routes a tile tapped off the board into the tray and reacts to the result. */
+    handleTrayAdd(faceId: number): void {
+        if (this.state !== GAME_STATE.PLAYING) return;
+        const result = this.tray.add(faceId);
+
+        if (result === 'match') {
+            this.combo++;
+            const now = performance.now();
+            const sinceLastMatch = now - this.lastMatchMs;
+            this.lastMatchMs = now;
+            this.liveIq += computeIqGain(this.level, sinceLastMatch, this.combo);
+            this.ui.setLiveIq(this.liveIq);
+            this.audio.match();
+            this.onMatch();
+
+            if (this.board.remainingCount() === 0 && this.tray.isEmpty()) {
+                void this.onWin();
+            }
+            return;
+        }
+
+        if (result === 'overflow') {
+            this.audio.error();
+            void this.onLose();
+            return;
+        }
+
+        this.audio.select();
+    }
+
     async onWin(): Promise<void> {
         this.state = GAME_STATE.WON;
+        this.elapsedMs = performance.now() - this.levelStartMs;
+        const timeMs = Math.round(this.elapsedMs);
+        const previousBestIq = this.user?.bestIq ?? 0;
+        const result: WinResult = {
+            level: this.level,
+            tiles: this.levelTileCount,
+            timeMs,
+            points: computePoints(this.level, this.levelTileCount, timeMs),
+            iq: finalizeIq(this.liveIq),
+            combo: this.combo,
+        };
+        this.audio.win();
+        await this.submitResult(result, true);
+        this.ui.showWin(result, result.iq - previousBestIq);
+    }
+
+    async onLose(): Promise<void> {
+        this.state = GAME_STATE.LOST;
         this.elapsedMs = performance.now() - this.levelStartMs;
         const timeMs = Math.round(this.elapsedMs);
         const result: WinResult = {
             level: this.level,
             tiles: this.levelTileCount,
             timeMs,
-            points: computePoints(this.level, this.levelTileCount, timeMs),
-            iq: computeIq(this.level, this.levelTileCount, timeMs),
+            points: 0,
+            iq: finalizeIq(this.liveIq),
+            combo: this.combo,
         };
-        this.audio.win();
+        await this.submitResult(result, false);
+        this.ui.showLose(result);
+    }
 
-        if (this.user) {
-            try {
-                const totals = await MahjongApi.submitScore(this.user.userId, result);
-                this.user.totalPoints = totals.totalPoints;
-                this.user.bestIq = totals.bestIq;
-                this.user.bestLevel = totals.bestLevel;
-                this.ui.updateTotals(totals.totalPoints, totals.bestIq);
-            } catch (err) {
-                console.error('[MahjongScene] Failed to submit score:', err);
-                this.notify('Não foi possível salvar a pontuação');
-            }
-        }
-
-        let leaderboard: LeaderboardEntry[] = [];
+    /** Persists a finished game (win or loss) and refreshes the cached totals. */
+    private async submitResult(result: WinResult, won: boolean): Promise<void> {
+        if (!this.user) return;
         try {
-            leaderboard = await MahjongApi.getLeaderboard(this.user ? this.user.userId : null);
+            const totals = await MahjongApi.submitScore(this.user.userId, result, won);
+            this.user.totalPoints = totals.totalPoints;
+            this.user.bestIq = totals.bestIq;
+            this.user.bestLevel = totals.bestLevel;
+            this.ui.updateTotals(totals.totalPoints);
+        } catch (err) {
+            console.error('[MahjongScene] Failed to submit score:', err);
+            this.notify('Não foi possível salvar a pontuação');
+        }
+    }
+
+    /** Opens the leaderboard panel and loads the latest ranking. */
+    async openLeaderboard(): Promise<void> {
+        this.ui.showLeaderboardPanel();
+        try {
+            const leaderboard: LeaderboardEntry[] = await MahjongApi.getLeaderboard(this.user ? this.user.userId : null);
+            this.ui.renderLeaderboard(leaderboard);
         } catch (err) {
             console.error('[MahjongScene] Failed to load leaderboard:', err);
+            this.ui.renderLeaderboard([]);
         }
-        this.ui.showWin(result, leaderboard);
     }
 
     update(dt: number): void {
@@ -205,6 +273,7 @@ export class MahjongScene extends Scene3D {
 
     onDispose(): void {
         this.tileInput?.dispose();
+        this.tray?.dispose();
         this.audio?.dispose();
         this.vfx?.dispose();
         this.render?.dispose();

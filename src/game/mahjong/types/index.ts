@@ -19,6 +19,7 @@ export const GAME_STATE = {
     EMAIL_GATE: 2,
     PLAYING: 3,
     WON: 4,
+    LOST: 5,
 } as const;
 export type GameState = typeof GAME_STATE[keyof typeof GAME_STATE];
 
@@ -71,6 +72,7 @@ export interface WinResult {
     timeMs: number;
     points: number;
     iq: number;
+    combo: number;
 }
 
 export interface LeaderboardEntry {

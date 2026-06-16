@@ -34,7 +34,7 @@ async function ensureTables() {
             ip VARCHAR(45) NOT NULL DEFAULT 'unknown',
             location VARCHAR(255) NOT NULL DEFAULT 'unknown',
             total_points BIGINT NOT NULL DEFAULT 0,
-            best_iq INT NOT NULL DEFAULT 0,
+            best_iq DECIMAL(6,1) NOT NULL DEFAULT 0,
             best_level INT NOT NULL DEFAULT 0,
             games_won INT NOT NULL DEFAULT 0,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -53,14 +53,25 @@ async function ensureTables() {
             tiles INT NOT NULL,
             time_ms INT NOT NULL,
             points INT NOT NULL,
-            iq INT NOT NULL,
+            iq DECIMAL(6,1) NOT NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             KEY idx_mahjong_scores_user (user_id),
             KEY idx_mahjong_scores_created (created_at),
             CONSTRAINT fk_mahjong_scores_user FOREIGN KEY (user_id) REFERENCES mahjong_users (user_id) ON DELETE CASCADE
         )
     `);
+    // Idempotent migration: widen IQ columns to decimal for pre-existing tables.
+    await migrateIqColumns();
     tablesReady = true;
+}
+
+async function migrateIqColumns() {
+    try {
+        await dbPool.query('ALTER TABLE mahjong_users MODIFY best_iq DECIMAL(6,1) NOT NULL DEFAULT 0');
+        await dbPool.query('ALTER TABLE mahjong_scores MODIFY iq DECIMAL(6,1) NOT NULL');
+    } catch (err) {
+        console.warn('[Mahjong] IQ column migration skipped:', err.message);
+    }
 }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
@@ -132,6 +143,13 @@ function clampInt(value, min, max, fallback) {
     return Math.min(max, Math.max(min, Math.round(n)));
 }
 
+function clampFloat(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    const clamped = Math.min(max, Math.max(min, n));
+    return Math.round(clamped * 10) / 10;
+}
+
 function displayNameFromEmail(email) {
     const local = String(email || '').split('@')[0] || 'player';
     return local.slice(0, 32);
@@ -177,7 +195,7 @@ async function handleRegister(req, res) {
         email: user.email,
         name: displayNameFromEmail(user.email),
         totalPoints: Number(user.total_points),
-        bestIq: user.best_iq,
+        bestIq: Number(user.best_iq),
         bestLevel: user.best_level,
     });
 }
@@ -202,7 +220,7 @@ async function handlePlayer(req, res) {
         email: user.email,
         name: displayNameFromEmail(user.email),
         totalPoints: Number(user.total_points),
-        bestIq: user.best_iq,
+        bestIq: Number(user.best_iq),
         bestLevel: user.best_level,
         gamesWon: user.games_won,
     });
@@ -228,7 +246,8 @@ async function handleScore(req, res) {
     const tiles = clampInt(body.tiles, 0, MAX_TILES, 0);
     const timeMs = clampInt(body.timeMs, 0, MAX_TIME_MS, 0);
     const points = clampInt(body.points, 0, MAX_POINTS, 0);
-    const iq = clampInt(body.iq, IQ_MIN, IQ_MAX, IQ_MIN);
+    const iq = clampFloat(body.iq, IQ_MIN, IQ_MAX, IQ_MIN);
+    const won = body.won === 1 || body.won === true || body.won === '1';
 
     await dbPool.query(
         'INSERT INTO mahjong_scores (user_id, level, tiles, time_ms, points, iq) VALUES (?, ?, ?, ?, ?, ?)',
@@ -239,20 +258,20 @@ async function handleScore(req, res) {
          SET total_points = total_points + ?,
              best_iq = GREATEST(best_iq, ?),
              best_level = GREATEST(best_level, ?),
-             games_won = games_won + 1
+             games_won = games_won + ?
          WHERE user_id = ?`,
-        [points, iq, level, userId],
+        [points, iq, won ? level : 0, won ? 1 : 0, userId],
     );
 
     const [[updated]] = await dbPool.query(
         'SELECT total_points, best_iq, best_level FROM mahjong_users WHERE user_id = ? LIMIT 1',
         [userId],
     );
-    console.log(`[Mahjong] Score saved: ${userId} level=${level} points=${points} iq=${iq}`);
+    console.log(`[Mahjong] Score saved: ${userId} level=${level} points=${points} iq=${iq} won=${won ? 1 : 0}`);
     sendJson(res, 200, {
         ok: true,
         totalPoints: Number(updated.total_points),
-        bestIq: updated.best_iq,
+        bestIq: Number(updated.best_iq),
         bestLevel: updated.best_level,
     });
 }
@@ -272,7 +291,7 @@ async function handleLeaderboard(req, res) {
         rank: index + 1,
         name: displayNameFromEmail(row.email),
         totalPoints: Number(row.total_points),
-        iq: row.best_iq,
+        iq: Number(row.best_iq),
         level: row.best_level,
         isSelf: row.user_id === selfId,
     }));

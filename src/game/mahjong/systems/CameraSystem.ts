@@ -6,10 +6,15 @@ import {
     CAMERA_RADIUS_FACTOR, CAMERA_RADIUS_MAX, CAMERA_RADIUS_MIN,
 } from '../constants/cameraConstants.js';
 
+/** Extra distance margin so the board clears the top HUD/tray and controls. */
+const FRAME_MARGIN = 6;
+
 export class CameraSystem {
     private game: MahjongScene;
     private camera!: BABYLON.ArcRotateCamera;
     private targetRadius = 20;
+    private lastBoardRadius = 12;
+    private resizeHandler: (() => void) | null = null;
 
     constructor(game: MahjongScene) {
         this.game = game;
@@ -27,11 +32,30 @@ export class CameraSystem {
         this.camera.panningSensibility = 0;
         this.camera.attachControl(bjs.getEngine().getRenderingCanvas(), true);
         bjs.activeCamera = this.camera;
+
+        // Re-fit when the viewport changes (rotation / browser chrome / resize).
+        this.resizeHandler = () => this.applyFraming();
+        window.addEventListener('resize', this.resizeHandler);
+        window.addEventListener('orientationchange', this.resizeHandler);
     }
 
     /** Re-frames the camera to fit a board of the given radius. */
     frameBoard(boardRadius: number): void {
-        this.targetRadius = Math.min(CAMERA_RADIUS_MAX, Math.max(CAMERA_RADIUS_MIN, boardRadius * CAMERA_RADIUS_FACTOR + 6));
+        this.lastBoardRadius = boardRadius;
+        this.applyFraming();
+    }
+
+    /** Computes the target distance so the whole board fits the current viewport. */
+    private applyFraming(): void {
+        const engine = this.game.bjs?.getEngine?.();
+        const width = engine ? engine.getRenderWidth() : window.innerWidth;
+        const height = engine ? engine.getRenderHeight() : window.innerHeight;
+        const aspect = width / Math.max(1, height);
+        // On portrait screens the horizontal field of view is the limiting one,
+        // so pull the camera back proportionally to keep the board width visible.
+        const aspectComp = aspect < 1 ? 1 / aspect : 1;
+        const radius = this.lastBoardRadius * CAMERA_RADIUS_FACTOR * aspectComp + FRAME_MARGIN;
+        this.targetRadius = Math.min(CAMERA_RADIUS_MAX, Math.max(CAMERA_RADIUS_MIN, radius));
     }
 
     update(dt: number): void {
@@ -41,6 +65,11 @@ export class CameraSystem {
     }
 
     dispose(): void {
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+            window.removeEventListener('orientationchange', this.resizeHandler);
+            this.resizeHandler = null;
+        }
         this.camera?.dispose();
     }
 }

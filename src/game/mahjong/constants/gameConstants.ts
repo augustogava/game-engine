@@ -22,3 +22,6 @@ export const FACE_COUNT = 42;
 
 /** Free hints granted per level (extra hints will be purchasable later). */
 export const HINTS_PER_LEVEL = 1;
+
+/** Maximum tiles the top tray can hold; reaching this many distinct tiles ends the game. */
+export const TRAY_CAPACITY = 4;

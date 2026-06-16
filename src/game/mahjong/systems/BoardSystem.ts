@@ -6,8 +6,8 @@ import * as BABYLON from '@babylonjs/core';
 import type { MahjongScene } from '../MahjongScene.js';
 import type { GeneratedLevel } from './LayoutSystem.js';
 import { buildFilledCells, isSlotFree } from './LayoutSystem.js';
-import { TILE_FACES } from '../data/tileSet.js';
-import { TILE_GROUP, type Tile } from '../types/index.js';
+import { drawTileFace } from '../data/faceRenderer.js';
+import { type Tile } from '../types/index.js';
 import {
     HALF_CELL, LAYER_HEIGHT, SYMBOL_SCALE, SYMBOL_TEXTURE_SIZE,
     TILE_DEPTH, TILE_THICKNESS, TILE_WIDTH,
@@ -120,7 +120,9 @@ export class BoardSystem {
 
         const tex = new BABYLON.DynamicTexture(`sym-tex-${faceId}`, SYMBOL_TEXTURE_SIZE, this.bjs, true);
         tex.hasAlpha = false;
-        this.drawFace(tex, faceId);
+        const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
+        drawTileFace(ctx, faceId, SYMBOL_TEXTURE_SIZE);
+        tex.update(false);
 
         const mat = new BABYLON.StandardMaterial(`sym-mat-${faceId}`, this.bjs);
         mat.diffuseTexture = tex;
@@ -129,85 +131,6 @@ export class BoardSystem {
         mat.backFaceCulling = false;
         this.symbolMats.set(faceId, mat);
         return mat;
-    }
-
-    private drawFace(tex: BABYLON.DynamicTexture, faceId: number): void {
-        const face = TILE_FACES[faceId];
-        const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
-        const S = SYMBOL_TEXTURE_SIZE;
-
-        ctx.fillStyle = '#fbf6e7';
-        ctx.fillRect(0, 0, S, S);
-        ctx.strokeStyle = 'rgba(60,50,30,0.25)';
-        ctx.lineWidth = 6;
-        ctx.strokeRect(8, 8, S - 16, S - 16);
-
-        ctx.fillStyle = face.color;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        if (face.group === TILE_GROUP.SUIT_DOTS) {
-            this.drawPips(ctx, face.pips, face.color, S);
-        } else if (face.group === TILE_GROUP.SUIT_BAMBOO) {
-            this.drawBars(ctx, face.bars, face.color, S);
-        } else if (face.group === TILE_GROUP.SUIT_CHAR) {
-            ctx.font = `bold ${Math.round(S * 0.5)}px serif`;
-            ctx.fillText(face.glyph, S / 2, S * 0.4);
-            ctx.font = `bold ${Math.round(S * 0.28)}px serif`;
-            ctx.fillText('萬', S / 2, S * 0.78);
-        } else {
-            ctx.font = `bold ${Math.round(S * 0.62)}px serif`;
-            ctx.fillText(face.glyph, S / 2, S / 2 + S * 0.04);
-        }
-
-        tex.update(false);
-    }
-
-    private drawPips(ctx: CanvasRenderingContext2D, count: number, color: string, S: number): void {
-        const cols = count <= 3 ? 1 : (count <= 6 ? 2 : 3);
-        const rows = Math.ceil(count / cols);
-        const r = S * 0.07;
-        const marginX = S * 0.5 - ((cols - 1) * S * 0.16) / 2;
-        const marginY = S * 0.5 - ((rows - 1) * S * 0.16) / 2;
-        let drawn = 0;
-        for (let row = 0; row < rows; row++) {
-            const inThisRow = Math.min(cols, count - drawn);
-            const rowStartX = S * 0.5 - ((inThisRow - 1) * S * 0.16) / 2;
-            for (let c = 0; c < inThisRow; c++) {
-                const x = rowStartX + c * S * 0.16;
-                const y = marginY + row * S * 0.16;
-                ctx.beginPath();
-                ctx.arc(x, y, r, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.fill();
-                ctx.lineWidth = 3;
-                ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-                ctx.stroke();
-                drawn++;
-            }
-        }
-        void marginX;
-    }
-
-    private drawBars(ctx: CanvasRenderingContext2D, count: number, color: string, S: number): void {
-        const cols = count <= 3 ? count : (count <= 6 ? 3 : Math.ceil(count / 3));
-        const rows = Math.ceil(count / cols);
-        const barW = S * 0.05;
-        const barH = S * 0.18;
-        let drawn = 0;
-        for (let row = 0; row < rows; row++) {
-            const inThisRow = Math.min(cols, count - drawn);
-            const rowStartX = S * 0.5 - ((inThisRow - 1) * S * 0.14) / 2;
-            const y = S * 0.5 - ((rows - 1) * S * 0.22) / 2 + row * S * 0.22;
-            for (let c = 0; c < inThisRow; c++) {
-                const x = rowStartX + c * S * 0.14;
-                ctx.fillStyle = color;
-                ctx.fillRect(x - barW / 2, y - barH / 2, barW, barH);
-                ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                ctx.fillRect(x - barW / 2, y - barH / 2, barW, barH * 0.18);
-                drawn++;
-            }
-        }
     }
 
     /** Recomputes which tiles are free (selectable). No visual change: free and
@@ -265,6 +188,22 @@ export class BoardSystem {
                 if (!stillSelected) this.highlight.removeMesh(m);
             }
         }, HINT_DURATION_MS);
+    }
+
+    /**
+     * Removes a single tile from the board (it "flies" to the tray) and returns
+     * its faceId, or null when the tile is no longer present.
+     */
+    takeTile(tileId: number): number | null {
+        const tile = this.getTile(tileId);
+        if (!tile) return null;
+        tile.removed = true;
+        this.highlight.removeMesh(tile.mesh);
+        if (this.selectedId === tileId) this.selectedId = null;
+        if (this.hoverId === tileId) this.hoverId = null;
+        this.animateOut(tile);
+        this.recomputeFree();
+        return tile.faceId;
     }
 
     removeTiles(idA: number, idB: number, onMidpoint?: (positions: BABYLON.Vector3[]) => void): void {
