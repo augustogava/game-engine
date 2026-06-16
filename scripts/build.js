@@ -1,5 +1,6 @@
 // esbuild production build script
 const esbuild = require('esbuild');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -51,6 +52,34 @@ function copyDirRecursive(srcDir, destDir) {
     }
 }
 
+function fileContentHash(filePath) {
+    const buf = fs.readFileSync(filePath);
+    return crypto.createHash('sha256').update(buf).digest('hex').slice(0, 10);
+}
+
+function buildAssetVersions() {
+    const versions = {};
+    const bundles = ['flight-main.js', 'fabulus-main.js', 'mahjong-main.js'];
+    for (const name of bundles) {
+        const bundlePath = path.join(DIST_DIR, name);
+        if (fs.existsSync(bundlePath)) {
+            versions[name] = fileContentHash(bundlePath);
+        }
+    }
+    return versions;
+}
+
+function transformHtml(content, versions) {
+    let result = content.replace(/src="dist\//g, 'src="');
+    for (const [file, hash] of Object.entries(versions)) {
+        result = result.replace(
+            new RegExp(`(${file.replace(/\./g, '\\.')})\\?v=dev`, 'g'),
+            `$1?v=${hash}`,
+        );
+    }
+    return result;
+}
+
 async function build() {
     console.log('Building JavaScript bundles...');
     
@@ -83,15 +112,16 @@ async function build() {
     });
 
     console.log('\nCopying static files...');
-    
-    const transformHtml = (content) => {
-        return content.replace(/src="dist\//g, 'src="');
-    };
-    
+
+    const assetVersions = buildAssetVersions();
+    for (const [file, hash] of Object.entries(assetVersions)) {
+        console.log(`  Asset version: ${file} → ?v=${hash}`);
+    }
+
     const htmlFiles = ['index.html', 'rpg.html', 'shooter.html', 'galaxy.html', 'ocean.html', 'gta.html', 'flight.html', 'fabulus.html', 'mahjong.html'];
     for (const file of htmlFiles) {
         if (fs.existsSync(file)) {
-            copyFile(file, DIST_DIR, transformHtml);
+            copyFile(file, DIST_DIR, (content) => transformHtml(content, assetVersions));
         }
     }
 

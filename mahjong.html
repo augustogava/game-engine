@@ -244,6 +244,17 @@ body {
     #mj-tray { top: calc(80px + var(--safe-top)); }
     .mj-overlay-box { max-height: calc(100svh - 16px); }
 }
+
+@media (max-width: 520px) {
+    #mj-hud { gap: 2px; padding: 5px 6px; }
+    .mj-stat { min-width: 0; padding: 2px 4px; }
+    .mj-stat .lbl { font-size: 7px; letter-spacing: 1px; }
+    .mj-stat .val { font-size: 13px; }
+    .mj-stat.name .val {
+        font-size: 12px; max-width: 64px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+}
 </style>
 </head>
 <body>

@@ -215,8 +215,7 @@ export class BoardSystem {
         mat.diffuseColor = new BABYLON.Color3(1.0, 1.0, 1.0);
         mat.specularColor = new BABYLON.Color3(0, 0, 0);
         mat.useAlphaFromDiffuseTexture = true;
-        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATEST;
-        mat.alphaCutOff = 0.5;
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
         mat.backFaceCulling = false;
         this.symbolMats.set(faceId, mat);
         return mat;
