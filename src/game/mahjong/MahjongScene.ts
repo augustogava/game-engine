@@ -23,7 +23,6 @@ import { HINTS_PER_LEVEL } from './constants/gameConstants.js';
 import { GAME_STATE, type GameState, type LeaderboardEntry, type MahjongUser, type WinResult } from './types/index.js';
 
 const USER_ID_KEY = 'mahjong_user_id';
-const MAX_DEVICE_PIXEL_RATIO = 2;
 
 export class MahjongScene extends Scene3D {
     bjs!: any;
@@ -87,11 +86,11 @@ export class MahjongScene extends Scene3D {
         void this.bootstrap();
     }
 
-    /** Sharp rendering on Retina/mobile: render at device pixel ratio (clamped). */
+    /** Sharp rendering on Retina/mobile: render at full native device pixel ratio. */
     private applyDevicePixelRatio(): void {
         const engine = this.bjs?.getEngine?.();
         if (!engine) return;
-        const dpr = Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
+        const dpr = window.devicePixelRatio || 1;
         engine.setHardwareScalingLevel(1 / dpr);
         engine.resize();
     }
