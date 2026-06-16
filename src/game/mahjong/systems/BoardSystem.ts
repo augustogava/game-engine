@@ -9,15 +9,88 @@ import { buildFilledCells, isSlotFree } from './LayoutSystem.js';
 import { drawTileFace } from '../data/faceRenderer.js';
 import { type Tile } from '../types/index.js';
 import {
-    HALF_CELL, LAYER_HEIGHT, SYMBOL_SCALE, SYMBOL_TEXTURE_SIZE,
-    TILE_DEPTH, TILE_THICKNESS, TILE_WIDTH,
+    CELL_HALF_X, CELL_HALF_Z, LAYER_HEIGHT, SYMBOL_SCALE, SYMBOL_TEXTURE_HEIGHT, SYMBOL_TEXTURE_WIDTH,
+    TILE_CORNER_RADIUS, TILE_DEPTH, TILE_THICKNESS, TILE_WIDTH,
 } from '../constants/gameConstants.js';
 import {
-    HINT_HIGHLIGHT_COLOR, SELECT_HIGHLIGHT_COLOR, TILE_BASE_COLOR,
+    HINT_HIGHLIGHT_COLOR, SELECT_HIGHLIGHT_COLOR, TILE_BASE_COLOR, TILE_SPECULAR_POWER,
 } from '../constants/graphicsConstants.js';
 
 const REMOVE_ANIM_MS = 260;
 const HINT_DURATION_MS = 900;
+
+/** Number of segments used to round each of the 4 vertical tile corners. */
+const CORNER_SEGMENTS = 6;
+
+/** Builds the CCW outline (in the XZ plane) of a rounded rectangle centered at the origin. */
+function buildRoundedRectOutline(width: number, depth: number, radius: number): { x: number; z: number }[] {
+    const halfWidth = width / 2;
+    const halfDepth = depth / 2;
+    const r = Math.min(radius, halfWidth, halfDepth);
+    const corners = [
+        { cx: halfWidth - r, cz: halfDepth - r, a0: 0 },
+        { cx: -(halfWidth - r), cz: halfDepth - r, a0: Math.PI / 2 },
+        { cx: -(halfWidth - r), cz: -(halfDepth - r), a0: Math.PI },
+        { cx: halfWidth - r, cz: -(halfDepth - r), a0: (3 * Math.PI) / 2 },
+    ];
+    const pts: { x: number; z: number }[] = [];
+    for (const c of corners) {
+        for (let s = 0; s <= CORNER_SEGMENTS; s++) {
+            const a = c.a0 + (s / CORNER_SEGMENTS) * (Math.PI / 2);
+            pts.push({ x: c.cx + r * Math.cos(a), z: c.cz + r * Math.sin(a) });
+        }
+    }
+    return pts;
+}
+
+/** Creates a centered box mesh with rounded vertical corners (flat top/bottom caps). */
+function createRoundedTileMesh(name: string, width: number, depth: number, height: number, radius: number, scene: BABYLON.Scene): BABYLON.Mesh {
+    const outline = buildRoundedRectOutline(width, depth, radius);
+    const n = outline.length;
+    const hy = height / 2;
+    const positions: number[] = [];
+    const indices: number[] = [];
+
+    for (const p of outline) positions.push(p.x, hy, p.z);
+    for (const p of outline) positions.push(p.x, -hy, p.z);
+    for (let i = 0; i < n; i++) {
+        const next = (i + 1) % n;
+        const top0 = i;
+        const top1 = next;
+        const bot0 = n + i;
+        const bot1 = n + next;
+        indices.push(top0, bot0, top1);
+        indices.push(top1, bot0, bot1);
+    }
+
+    const topCenter = positions.length / 3;
+    positions.push(0, hy, 0);
+    const topRingStart = positions.length / 3;
+    for (const p of outline) positions.push(p.x, hy, p.z);
+    for (let i = 0; i < n; i++) {
+        const next = (i + 1) % n;
+        indices.push(topCenter, topRingStart + i, topRingStart + next);
+    }
+
+    const botCenter = positions.length / 3;
+    positions.push(0, -hy, 0);
+    const botRingStart = positions.length / 3;
+    for (const p of outline) positions.push(p.x, -hy, p.z);
+    for (let i = 0; i < n; i++) {
+        const next = (i + 1) % n;
+        indices.push(botCenter, botRingStart + next, botRingStart + i);
+    }
+
+    const normals: number[] = [];
+    BABYLON.VertexData.ComputeNormals(positions, indices, normals);
+    const vertexData = new BABYLON.VertexData();
+    vertexData.positions = positions;
+    vertexData.indices = indices;
+    vertexData.normals = normals;
+    const mesh = new BABYLON.Mesh(name, scene);
+    vertexData.applyToMesh(mesh);
+    return mesh;
+}
 
 export class BoardSystem {
     private game: MahjongScene;
@@ -30,6 +103,9 @@ export class BoardSystem {
     tiles: Tile[] = [];
     freeIds: Set<number> = new Set();
     boardRadius = 12;
+
+    /** World position of the most recently taken tile (for match VFX). */
+    lastTakenPos: BABYLON.Vector3 | null = null;
 
     private hoverId: number | null = null;
     private selectedId: number | null = null;
@@ -48,10 +124,19 @@ export class BoardSystem {
 
         // Single shared material for every tile so free/blocked tiles look identical
         // (no glow hint). Only the selected tile glows, via the highlight layer.
+        // Bright white body with a strong specular highlight + edge Fresnel rim for
+        // a glossy "glass" look.
         this.tileMat = new BABYLON.StandardMaterial('tile-base', this.bjs);
-        this.tileMat.diffuseColor = BABYLON.Color3.FromHexString(TILE_BASE_COLOR).scale(0.78);
-        this.tileMat.specularColor = new BABYLON.Color3(0.12, 0.12, 0.1);
-        this.tileMat.emissiveColor = new BABYLON.Color3(0.03, 0.028, 0.022);
+        this.tileMat.diffuseColor = BABYLON.Color3.FromHexString(TILE_BASE_COLOR);
+        this.tileMat.specularColor = new BABYLON.Color3(0.6, 0.64, 0.7);
+        this.tileMat.specularPower = TILE_SPECULAR_POWER;
+        this.tileMat.emissiveColor = new BABYLON.Color3(0.04, 0.045, 0.05);
+        const rim = new BABYLON.FresnelParameters();
+        rim.bias = 0.12;
+        rim.power = 2;
+        rim.leftColor = new BABYLON.Color3(0.75, 0.88, 1.0);
+        rim.rightColor = BABYLON.Color3.Black();
+        this.tileMat.emissiveFresnelParameters = rim;
     }
 
     buildLevel(level: GeneratedLevel): void {
@@ -65,33 +150,32 @@ export class BoardSystem {
         let maxZ = -Infinity;
         let minZ = Infinity;
         for (const slot of slots) {
-            const cx = (slot.gx + 1) * HALF_CELL;
-            const cz = (slot.gy + 1) * HALF_CELL;
+            const cx = (slot.gx + 1) * CELL_HALF_X;
+            const cz = (slot.gy + 1) * CELL_HALF_Z;
             sumX += cx; sumZ += cz;
             maxX = Math.max(maxX, cx); minX = Math.min(minX, cx);
             maxZ = Math.max(maxZ, cz); minZ = Math.min(minZ, cz);
         }
         const centerX = sumX / slots.length;
         const centerZ = sumZ / slots.length;
-        this.boardRadius = Math.max(maxX - minX, maxZ - minZ) + HALF_CELL * 4;
+        this.boardRadius = Math.max(maxX - minX, maxZ - minZ) + CELL_HALF_X * 4;
 
         for (let i = 0; i < slots.length; i++) {
             const slot = slots[i];
             const faceId = level.faceByIndex[i];
-            const worldX = (slot.gx + 1) * HALF_CELL - centerX;
-            const worldZ = (slot.gy + 1) * HALF_CELL - centerZ;
+            const worldX = (slot.gx + 1) * CELL_HALF_X - centerX;
+            const worldZ = (slot.gy + 1) * CELL_HALF_Z - centerZ;
             const worldY = slot.layer * LAYER_HEIGHT + TILE_THICKNESS / 2;
 
-            const box = BABYLON.MeshBuilder.CreateBox(`tile-${i}`, {
-                width: TILE_WIDTH, depth: TILE_DEPTH, height: TILE_THICKNESS,
-            }, this.bjs);
+            const box = createRoundedTileMesh(`tile-${i}`, TILE_WIDTH, TILE_DEPTH, TILE_THICKNESS, TILE_CORNER_RADIUS, this.bjs);
             box.parent = this.root;
             box.position.set(worldX, worldY, worldZ);
             box.material = this.tileMat;
             box.isPickable = true;
 
             const symbol = BABYLON.MeshBuilder.CreatePlane(`sym-${i}`, {
-                size: TILE_WIDTH * SYMBOL_SCALE,
+                width: TILE_WIDTH * SYMBOL_SCALE,
+                height: TILE_DEPTH * SYMBOL_SCALE,
             }, this.bjs);
             symbol.parent = this.root;
             symbol.rotation.x = -Math.PI / 2;
@@ -118,16 +202,21 @@ export class BoardSystem {
         const cached = this.symbolMats.get(faceId);
         if (cached) return cached;
 
-        const tex = new BABYLON.DynamicTexture(`sym-tex-${faceId}`, SYMBOL_TEXTURE_SIZE, this.bjs, true);
-        tex.hasAlpha = false;
+        const tex = new BABYLON.DynamicTexture(`sym-tex-${faceId}`, { width: SYMBOL_TEXTURE_WIDTH, height: SYMBOL_TEXTURE_HEIGHT }, this.bjs, true);
+        tex.hasAlpha = true;
         const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
-        drawTileFace(ctx, faceId, SYMBOL_TEXTURE_SIZE);
+        drawTileFace(ctx, faceId, SYMBOL_TEXTURE_WIDTH, SYMBOL_TEXTURE_HEIGHT);
         tex.update(false);
 
         const mat = new BABYLON.StandardMaterial(`sym-mat-${faceId}`, this.bjs);
         mat.diffuseTexture = tex;
-        mat.emissiveColor = new BABYLON.Color3(0.5, 0.5, 0.48);
+        mat.emissiveTexture = tex;
+        mat.emissiveColor = new BABYLON.Color3(0.85, 0.85, 0.85);
+        mat.diffuseColor = new BABYLON.Color3(1.0, 1.0, 1.0);
         mat.specularColor = new BABYLON.Color3(0, 0, 0);
+        mat.useAlphaFromDiffuseTexture = true;
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHATEST;
+        mat.alphaCutOff = 0.5;
         mat.backFaceCulling = false;
         this.symbolMats.set(faceId, mat);
         return mat;
@@ -198,6 +287,7 @@ export class BoardSystem {
         const tile = this.getTile(tileId);
         if (!tile) return null;
         tile.removed = true;
+        this.lastTakenPos = tile.mesh.getAbsolutePosition().clone();
         this.highlight.removeMesh(tile.mesh);
         if (this.selectedId === tileId) this.selectedId = null;
         if (this.hoverId === tileId) this.hoverId = null;
@@ -251,6 +341,33 @@ export class BoardSystem {
 
     remainingCount(): number {
         return this.tiles.reduce((n, t) => n + (t.removed ? 0 : 1), 0);
+    }
+
+    /**
+     * Center and framing radius of the tiles still on the board, so the camera can
+     * recenter/zoom closer as tiles are removed. Returns null when the board is empty.
+     */
+    getActiveBounds(): { center: BABYLON.Vector3; radius: number } | null {
+        let sumX = 0;
+        let sumZ = 0;
+        let count = 0;
+        let maxX = -Infinity;
+        let minX = Infinity;
+        let maxZ = -Infinity;
+        let minZ = Infinity;
+        for (const tile of this.tiles) {
+            if (tile.removed) continue;
+            const p = tile.mesh.position;
+            sumX += p.x; sumZ += p.z; count++;
+            if (p.x > maxX) maxX = p.x;
+            if (p.x < minX) minX = p.x;
+            if (p.z > maxZ) maxZ = p.z;
+            if (p.z < minZ) minZ = p.z;
+        }
+        if (count === 0) return null;
+        const center = new BABYLON.Vector3(sumX / count, 0, sumZ / count);
+        const radius = Math.max(maxX - minX, maxZ - minZ) + CELL_HALF_X * 4;
+        return { center, radius };
     }
 
     clear(): void {

@@ -119,7 +119,7 @@ export class UiSystem {
 
     setHints(remaining: number): void {
         const btn = el<HTMLButtonElement>('mj-btn-hint');
-        btn.textContent = `Dica (${remaining})`;
+        el('mj-hint-badge').textContent = String(remaining);
         btn.disabled = remaining <= 0;
         btn.classList.toggle('mj-disabled', remaining <= 0);
     }
@@ -167,6 +167,24 @@ export class UiSystem {
 
         el('mj-btn-next').textContent = `Nível ${result.level + 1}`;
         el('mj-win').classList.remove('hidden');
+        this.spawnConfetti();
+    }
+
+    private spawnConfetti(): void {
+        const host = el('mj-win');
+        const colors = ['#e7c873', '#54c79a', '#e21030', '#0d74ff', '#d81b76', '#ffe6a0'];
+        const COUNT = 48;
+        const LIFETIME_MS = 3200;
+        for (let i = 0; i < COUNT; i++) {
+            const piece = document.createElement('div');
+            piece.className = 'mj-confetti-piece';
+            piece.style.left = `${Math.random() * 100}%`;
+            piece.style.background = colors[i % colors.length];
+            piece.style.animationDelay = `${Math.random() * 0.6}s`;
+            piece.style.animationDuration = `${1.8 + Math.random() * 1.2}s`;
+            host.appendChild(piece);
+            window.setTimeout(() => { try { piece.remove(); } catch (_) { /* ignore */ } }, LIFETIME_MS);
+        }
     }
 
     hideWin(): void {
@@ -178,6 +196,10 @@ export class UiSystem {
         el('mj-lose-iq').textContent = result.iq.toFixed(1);
         el('mj-lose-combo').textContent = String(result.combo);
         el('mj-lose').classList.remove('hidden');
+        const box = el('mj-lose-box');
+        box.classList.remove('mj-shake');
+        void box.offsetWidth;
+        box.classList.add('mj-shake');
     }
 
     hideLose(): void {
@@ -221,7 +243,7 @@ export class UiSystem {
     }
 
     private updateSoundButton(): void {
-        el<HTMLButtonElement>('mj-btn-sound').textContent = MahjongPrefs.soundEnabled ? 'Som: ON' : 'Som: OFF';
+        el('mj-sound-icon').textContent = MahjongPrefs.soundEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07';
     }
 
     private formatMs(ms: number): string {

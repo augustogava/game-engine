@@ -6,9 +6,10 @@
 import type { MahjongScene } from '../MahjongScene.js';
 import { facesMatch } from '../data/tileSet.js';
 import { drawTileFace } from '../data/faceRenderer.js';
-import { TRAY_CAPACITY } from '../constants/gameConstants.js';
+import { TRAY_CAPACITY, TILE_ASPECT_DEPTH } from '../constants/gameConstants.js';
 
-const TILE_TEXTURE_SIZE = 128;
+const TILE_TEXTURE_WIDTH = 100;
+const TILE_TEXTURE_HEIGHT = Math.round(TILE_TEXTURE_WIDTH * TILE_ASPECT_DEPTH);
 const CLEAR_ANIM_MS = 240;
 
 export type TrayAddResult = 'match' | 'added' | 'overflow';
@@ -90,10 +91,10 @@ export class TraySystem {
         const slot = document.createElement('div');
         slot.className = 'mj-tray-tile mj-tray-pop';
         const canvas = document.createElement('canvas');
-        canvas.width = TILE_TEXTURE_SIZE;
-        canvas.height = TILE_TEXTURE_SIZE;
+        canvas.width = TILE_TEXTURE_WIDTH;
+        canvas.height = TILE_TEXTURE_HEIGHT;
         const ctx = canvas.getContext('2d');
-        if (ctx) drawTileFace(ctx, faceId, TILE_TEXTURE_SIZE);
+        if (ctx) drawTileFace(ctx, faceId, TILE_TEXTURE_WIDTH, TILE_TEXTURE_HEIGHT);
         slot.appendChild(canvas);
         return slot;
     }

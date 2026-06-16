@@ -1,16 +1,33 @@
 /**
  * Generates a guaranteed-solvable Mahjong deal for a level.
  *
- * Approach (reverse-removal): start with every slot filled, then repeatedly take
- * two currently-FREE slots, assign them a matching pair, and remove them. The
- * recorded removal order is itself a valid forward solution, so the resulting
- * full board is always solvable. Free-state logic here is reused at runtime.
+ * The game is tray-based: a tapped FREE tile is parked in a small tray (capacity
+ * TRAY_CAPACITY) and clears when its match is also parked. So a deal is solvable
+ * when there is a pick order that never needs to hold more than (capacity - 1)
+ * distinct unmatched tiles at once.
+ *
+ * Approach: compute a single-tile reverse "peel" order (each tile is free once the
+ * ones before it are gone — always possible for these stackings). Then walk that
+ * order assigning faces by opening a new distinct pair-face or closing an already
+ * open one, keeping the open (held) set bounded below the tray capacity. Playing
+ * the peel order then clears the board with the tray never overflowing, so the
+ * board is always solvable; matches are scattered in time and space (no
+ * side-by-side duplicates) and use as many distinct faces as possible.
  */
 import { getLevelLayout } from '../constants/levelConstants.js';
 import { buildPairFaceIds } from '../data/tileSet.js';
+import { TRAY_CAPACITY } from '../constants/gameConstants.js';
 import type { SlotPosition } from '../types/index.js';
 
 const MAX_GENERATION_ATTEMPTS = 40;
+
+/** Max distinct tiles the intended solution holds at once (one below capacity so
+ *  the planned path never overflows the tray). */
+const MAX_OPEN = Math.max(1, TRAY_CAPACITY - 1);
+
+/** Chance to close an open pair (vs open a new one) when both are allowed. Higher
+ *  = matches resolve sooner (easier); lower = more held tiles (harder). */
+const CLOSE_PROBABILITY = 0.5;
 
 export interface GeneratedLevel {
     slots: SlotPosition[];
@@ -89,11 +106,12 @@ function buildPyramidSlots(level: number): SlotPosition[] {
     return slots;
 }
 
-function attemptAssign(slots: SlotPosition[], rng: () => number): GeneratedLevel | null {
-    const faceByIndex = new Array<number>(slots.length).fill(-1);
-    const pairFaces = buildPairFaceIds(slots.length / 2, rng);
-    const solution: Array<[number, number]> = [];
-
+/**
+ * Single-tile reverse peel: returns a removal order where `order[k]` is free once
+ * `order[0..k-1]` are removed. Returns null only if a stall leaves blocked tiles
+ * (effectively never for these stackings, where the top is always free).
+ */
+function peelOrder(slots: SlotPosition[], rng: () => number): number[] | null {
     const remaining = new Set<number>();
     for (let i = 0; i < slots.length; i++) remaining.add(i);
     const filled = new Set<string>();
@@ -101,47 +119,79 @@ function attemptAssign(slots: SlotPosition[], rng: () => number): GeneratedLevel
         for (const c of footprintCells(slots[i])) filled.add(c);
     }
 
-    let pairPtr = 0;
+    const order: number[] = [];
     while (remaining.size > 0) {
         const freeList: number[] = [];
         for (const i of remaining) {
             if (isSlotFree(slots[i], filled)) freeList.push(i);
         }
-        if (freeList.length < 2) return null;
+        if (freeList.length === 0) return null;
+        const pick = freeList[Math.floor(rng() * freeList.length)];
+        order.push(pick);
+        remaining.delete(pick);
+        for (const c of footprintCells(slots[pick])) filled.delete(c);
+    }
+    return order;
+}
 
-        const ai = Math.floor(rng() * freeList.length);
-        const a = freeList[ai];
-        let bi = Math.floor(rng() * (freeList.length - 1));
-        if (bi >= ai) bi++;
-        const b = freeList[bi];
+/**
+ * Assigns matching-pair faces along the peel order, opening new distinct faces and
+ * closing held ones while keeping the held set within MAX_OPEN. The peel order is
+ * therefore a valid tray solution (tray never exceeds MAX_OPEN < capacity).
+ */
+function assignFaces(slots: SlotPosition[], order: number[], rng: () => number): GeneratedLevel {
+    const total = slots.length;
+    const pairFaces = buildPairFaceIds(total / 2, rng);
+    const faceByIndex = new Array<number>(total).fill(-1);
+    const openFaces: number[] = [];
+    const openSlots: number[] = [];
+    const solution: Array<[number, number]> = [];
+    let pairPtr = 0;
 
-        const face = pairFaces[pairPtr++];
-        faceByIndex[a] = face;
-        faceByIndex[b] = face;
-        solution.push([a, b]);
+    for (let step = 0; step < order.length; step++) {
+        const idx = order[step];
+        const remaining = total - step;
+        const open = openFaces.length;
+        const canOpen = remaining - open >= 2 && open < MAX_OPEN;
+        const mustClose = open === remaining;
 
-        for (const idx of [a, b]) {
-            remaining.delete(idx);
-            for (const c of footprintCells(slots[idx])) filled.delete(c);
+        let close: boolean;
+        if (open === 0) {
+            close = false;
+        } else if (mustClose || !canOpen) {
+            close = true;
+        } else {
+            close = rng() < CLOSE_PROBABILITY;
+        }
+
+        if (close) {
+            const pickAt = Math.floor(rng() * openFaces.length);
+            const face = openFaces.splice(pickAt, 1)[0];
+            const partner = openSlots.splice(pickAt, 1)[0];
+            faceByIndex[idx] = face;
+            solution.push([partner, idx]);
+        } else {
+            const face = pairFaces[pairPtr++];
+            faceByIndex[idx] = face;
+            openFaces.push(face);
+            openSlots.push(idx);
         }
     }
     return { slots, faceByIndex, solution };
 }
 
 export class LayoutSystem {
-    /** Generates a solvable level; retries with new randomization on rare stalls. */
+    /** Generates a solvable (tray-clearable) level. */
     generate(level: number): GeneratedLevel {
         const slots = buildPyramidSlots(level);
-        for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
-            const result = attemptAssign(slots, Math.random);
-            if (result) return result;
+        let order: number[] | null = null;
+        for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS && !order; attempt++) {
+            order = peelOrder(slots, Math.random);
         }
-        // Extremely unlikely fallback: assign sequential identical pairs.
-        const faceByIndex = buildPairFaceIds(slots.length / 2, Math.random)
-            .flatMap(f => [f, f]);
-        const solution: Array<[number, number]> = [];
-        for (let i = 0; i < slots.length; i += 2) solution.push([i, i + 1]);
-        console.warn('[LayoutSystem] Solvable generation fell back after retries.');
-        return { slots, faceByIndex, solution };
+        if (!order) {
+            console.warn('[LayoutSystem] Peel order generation fell back to sequential.');
+            order = slots.map((_, i) => i);
+        }
+        return assignFaces(slots, order, Math.random);
     }
 }

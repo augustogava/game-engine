@@ -26,8 +26,11 @@ export class VfxSystem {
         this.particleTexture.update();
     }
 
-    burst(position: BABYLON.Vector3): void {
-        const ps = new BABYLON.ParticleSystem(`match-burst-${Date.now()}`, MATCH_PARTICLE_COUNT, this.bjs);
+    /** Spark burst at a matched tile; intensity scales with the current combo. */
+    burst(position: BABYLON.Vector3, combo = 1): void {
+        const intensity = Math.min(1 + (combo - 1) * 0.18, 2.2);
+        const capacity = Math.round(MATCH_PARTICLE_COUNT * intensity);
+        const ps = new BABYLON.ParticleSystem(`match-burst-${Date.now()}`, capacity, this.bjs);
         ps.particleTexture = this.particleTexture;
         ps.emitter = position.clone();
         ps.minEmitBox = new BABYLON.Vector3(-0.1, 0, -0.1);
@@ -35,19 +38,46 @@ export class VfxSystem {
         ps.color1 = new BABYLON.Color4(1, 0.9, 0.5, 1);
         ps.color2 = new BABYLON.Color4(1, 0.7, 0.3, 1);
         ps.colorDead = new BABYLON.Color4(1, 0.5, 0.1, 0);
-        ps.minSize = 0.12;
-        ps.maxSize = 0.34;
+        ps.minSize = 0.12 * intensity;
+        ps.maxSize = 0.34 * intensity;
         ps.minLifeTime = MATCH_PARTICLE_LIFETIME * 0.5;
         ps.maxLifeTime = MATCH_PARTICLE_LIFETIME;
-        ps.emitRate = 800;
+        ps.emitRate = 800 * intensity;
         ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
         ps.gravity = new BABYLON.Vector3(0, -3.5, 0);
         ps.direction1 = new BABYLON.Vector3(-2, 3, -2);
         ps.direction2 = new BABYLON.Vector3(2, 5, 2);
-        ps.minEmitPower = 1.2;
-        ps.maxEmitPower = 3.2;
+        ps.minEmitPower = 1.2 * intensity;
+        ps.maxEmitPower = 3.2 * intensity;
         ps.updateSpeed = 0.02;
         ps.targetStopDuration = 0.12;
+        ps.disposeOnStop = true;
+        ps.start();
+    }
+
+    /** Golden confetti shower over the board on a level win. */
+    celebrate(): void {
+        const ps = new BABYLON.ParticleSystem(`win-shower-${Date.now()}`, 420, this.bjs);
+        ps.particleTexture = this.particleTexture;
+        ps.emitter = new BABYLON.Vector3(0, 14, 0);
+        ps.minEmitBox = new BABYLON.Vector3(-9, 0, -9);
+        ps.maxEmitBox = new BABYLON.Vector3(9, 0, 9);
+        ps.color1 = new BABYLON.Color4(1, 0.86, 0.36, 1);
+        ps.color2 = new BABYLON.Color4(1, 0.62, 0.22, 1);
+        ps.colorDead = new BABYLON.Color4(1, 0.5, 0.1, 0);
+        ps.minSize = 0.18;
+        ps.maxSize = 0.52;
+        ps.minLifeTime = 1.6;
+        ps.maxLifeTime = 2.8;
+        ps.emitRate = 320;
+        ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
+        ps.gravity = new BABYLON.Vector3(0, -9, 0);
+        ps.direction1 = new BABYLON.Vector3(-1.2, -2, -1.2);
+        ps.direction2 = new BABYLON.Vector3(1.2, -1, 1.2);
+        ps.minEmitPower = 1;
+        ps.maxEmitPower = 3;
+        ps.updateSpeed = 0.02;
+        ps.targetStopDuration = 1.3;
         ps.disposeOnStop = true;
         ps.start();
     }

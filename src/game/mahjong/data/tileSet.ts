@@ -6,15 +6,15 @@ import { TILE_GROUP, type TileFace } from '../types/index.js';
 
 const CN_NUMERALS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
 
-const COLOR_DOTS = '#1565c0';
-const COLOR_BAMBOO = '#2e7d32';
-const COLOR_CHAR = '#b00020';
-const COLOR_WIND = '#303f9f';
-const COLOR_DRAGON_RED = '#c62828';
-const COLOR_DRAGON_GREEN = '#2e7d32';
-const COLOR_DRAGON_WHITE = '#37474f';
-const COLOR_FLOWER = '#ad1457';
-const COLOR_SEASON = '#00838f';
+const COLOR_DOTS = '#0d74ff';
+const COLOR_BAMBOO = '#12863a';
+const COLOR_CHAR = '#e21030';
+const COLOR_WIND = '#2433c4';
+const COLOR_DRAGON_RED = '#e51b1b';
+const COLOR_DRAGON_GREEN = '#129b46';
+const COLOR_DRAGON_WHITE = '#2b6cb0';
+const COLOR_FLOWER = '#d81b76';
+const COLOR_SEASON = '#00a7b5';
 
 function buildFaces(): TileFace[] {
     const faces: TileFace[] = [];
@@ -70,27 +70,35 @@ function pairsPerFace(face: TileFace): number {
     return (face.group === TILE_GROUP.FLOWER || face.group === TILE_GROUP.SEASON) ? 1 : 2;
 }
 
+function shuffleInPlace(ids: number[], rng: () => number): number[] {
+    for (let i = ids.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    return ids;
+}
+
 /**
  * Builds a list of faceIds (one entry per pair) totalling `pairCount` pairs,
- * cycling through the canonical distribution and shuffling for variety.
+ * biased toward maximum distinctness: every distinct face is used once before
+ * any face repeats (a second pair, only for faces that allow it). Scarcer
+ * duplicate matches mean the small tray fills faster, raising difficulty.
  */
 export function buildPairFaceIds(pairCount: number, rng: () => number): number[] {
-    const base: number[] = [];
-    for (const face of TILE_FACES) {
-        const n = pairsPerFace(face);
-        for (let i = 0; i < n; i++) base.push(face.id);
-    }
+    const distinctRound = shuffleInPlace(TILE_FACES.map(f => f.id), rng);
+    const repeatRound = shuffleInPlace(
+        TILE_FACES.filter(f => pairsPerFace(f) >= 2).map(f => f.id), rng,
+    );
+    const ordered = [...distinctRound, ...repeatRound];
+
     const result: number[] = [];
+    let i = 0;
     while (result.length < pairCount) {
-        const shuffled = base.slice();
-        for (let i = shuffled.length - 1; i > 0; i--) {
-            const j = Math.floor(rng() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        if (i >= ordered.length) {
+            i = 0;
+            shuffleInPlace(ordered, rng);
         }
-        for (const id of shuffled) {
-            if (result.length >= pairCount) break;
-            result.push(id);
-        }
+        result.push(ordered[i++]);
     }
     return result;
 }

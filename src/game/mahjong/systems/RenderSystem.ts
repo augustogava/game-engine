@@ -28,8 +28,16 @@ export class RenderSystem {
         this.pipeline.imageProcessing.vignetteEnabled = true;
         this.pipeline.imageProcessing.vignetteWeight = VIGNETTE_WEIGHT;
         this.pipeline.imageProcessing.vignetteColor = new BABYLON.Color4(0, 0, 0, 0);
-        this.pipeline.imageProcessing.contrast = 1.08;
-        this.pipeline.imageProcessing.exposure = 1.05;
+        this.pipeline.imageProcessing.contrast = 1.12;
+        this.pipeline.imageProcessing.exposure = 0.95;
+
+        // Boost saturation for the vivid, colorful reference look.
+        this.pipeline.imageProcessing.colorCurvesEnabled = true;
+        const curves = new BABYLON.ColorCurves();
+        curves.globalSaturation = 42;
+        curves.highlightsSaturation = 24;
+        curves.midtonesSaturation = 30;
+        this.pipeline.imageProcessing.colorCurves = curves;
 
         this.pipeline.fxaaEnabled = true;
     }

@@ -31,7 +31,7 @@
     --safe-right: env(safe-area-inset-right, 0px);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #05100c; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: radial-gradient(ellipse at 50% 42%, #2f7d6a 0%, #08201b 72%); }
 body {
     font-family: var(--font-body); color: var(--parchment);
     width: 100vw; height: 100vh; height: 100svh;
@@ -69,9 +69,9 @@ body {
 }
 .mj-stat { display: flex; flex-direction: column; align-items: center; min-width: clamp(48px, 16vw, 76px); padding: 2px clamp(3px, 1.5vw, 8px); }
 .mj-stat .lbl { font-size: clamp(8px, 2.4vw, 9px); letter-spacing: 2px; text-transform: uppercase; color: var(--parchment-dim); font-family: var(--font-display); }
-.mj-stat .val { font-family: var(--font-display); font-size: clamp(15px, 5vw, 22px); font-weight: 700; color: var(--gold-bright); }
-.mj-stat.name .val { color: var(--jade-bright); font-size: clamp(12px, 4vw, 17px); }
-.mj-stat.iq .val { color: var(--jade-bright); }
+.mj-stat .val { font-family: var(--font-display); font-size: clamp(14px, 4.4vw, 19px); font-weight: 700; color: var(--gold-bright); line-height: 1.1; }
+.mj-stat.name .val { color: var(--jade-bright); font-size: clamp(12px, 4vw, 16px); }
+.mj-stat.iq .val { color: var(--jade-bright); text-shadow: 0 0 12px rgba(84,199,154,0.5); }
 .mj-stat + .mj-stat { border-left: 1px solid rgba(231,200,115,0.18); }
 
 /* Menu button (top-right) */
@@ -85,15 +85,16 @@ body {
 
 /* Top tray */
 #mj-tray {
-    position: fixed; top: calc(64px + var(--safe-top)); left: 50%; transform: translateX(-50%); z-index: 29;
+    position: fixed; top: calc(92px + var(--safe-top)); left: 50%; transform: translateX(-50%); z-index: 29;
     display: flex; gap: clamp(4px, 1.6vw, 8px); align-items: center; justify-content: center;
     padding: clamp(5px, 1.6vw, 8px); min-height: clamp(54px, 16vw, 78px);
-    width: min(86vw, 340px); border-radius: 10px;
-    background: rgba(8, 20, 15, 0.66); border: 1px solid rgba(231, 200, 115, 0.28);
-    box-shadow: inset 0 0 18px rgba(0,0,0,0.55);
+    width: min(86vw, 340px); border-radius: 12px;
+    background: linear-gradient(180deg, rgba(46,130,98,0.55), rgba(18,66,49,0.62));
+    border: 1px solid rgba(84, 199, 154, 0.5);
+    box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 24px rgba(84,199,154,0.38);
 }
 .mj-tray-tile {
-    width: clamp(40px, 12vw, 58px); aspect-ratio: 1 / 1; border-radius: 7px; overflow: hidden;
+    width: clamp(36px, 11vw, 52px); aspect-ratio: 10 / 13; border-radius: 7px; overflow: hidden;
     background: #fbf6e7; box-shadow: 0 3px 8px rgba(0,0,0,0.5), inset 0 -3px 0 rgba(0,0,0,0.18);
 }
 .mj-tray-tile canvas { width: 100%; height: 100%; display: block; }
@@ -104,17 +105,34 @@ body {
 
 /* Controls */
 #mj-controls {
-    position: fixed; bottom: calc(12px + var(--safe-bottom)); left: 50%; transform: translateX(-50%); z-index: 30;
-    display: flex; gap: clamp(6px, 2vw, 8px); padding: 8px 10px; max-width: calc(100vw - 16px);
+    position: fixed; bottom: calc(14px + var(--safe-bottom)); left: 50%; transform: translateX(-50%); z-index: 30;
+    display: flex; gap: clamp(12px, 4vw, 20px); padding: 6px 10px; max-width: calc(100vw - 16px);
+    background: none; border: none; box-shadow: none;
 }
-#mj-controls button, .mj-action {
+#mj-controls button {
+    position: relative; width: clamp(52px, 15vw, 62px); height: clamp(52px, 15vw, 62px);
+    border-radius: 50%; cursor: pointer; transition: all 0.12s ease;
+    background: radial-gradient(circle at 50% 32%, #2c5d43, #102a1d);
+    border: 1px solid rgba(231,200,115,0.45); color: var(--gold-bright);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+#mj-controls button:hover { border-color: var(--gold); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.55), 0 0 18px rgba(231,200,115,0.3); }
+#mj-controls button:disabled, #mj-controls button.mj-disabled { opacity: 0.4; cursor: default; transform: none; border-color: rgba(231,200,115,0.2); }
+#mj-controls .mj-icon { font-size: clamp(20px, 6vw, 26px); line-height: 1; }
+#mj-controls .mj-badge {
+    position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px;
+    border-radius: 10px; background: var(--crimson); color: #fff; font-family: var(--font-body);
+    font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+.mj-action {
     font-family: var(--font-display); letter-spacing: 1px; font-size: clamp(11px, 3.2vw, 12px);
     background: linear-gradient(180deg, #1c3a2c, #0e2018); color: var(--parchment);
     border: 1px solid rgba(231,200,115,0.4); padding: clamp(9px, 2.6vw, 11px) clamp(12px, 4vw, 18px);
     cursor: pointer; border-radius: 6px; transition: all 0.12s ease; min-height: 44px;
 }
-#mj-controls button:hover, .mj-action:hover { color: var(--gold-bright); border-color: var(--gold); transform: translateY(-2px); }
-#mj-controls button:disabled, #mj-controls button.mj-disabled { opacity: 0.4; cursor: default; color: var(--parchment-dim); transform: none; border-color: rgba(231,200,115,0.2); }
+.mj-action:hover { color: var(--gold-bright); border-color: var(--gold); transform: translateY(-2px); }
 
 /* Toast */
 #mj-toast {
@@ -133,7 +151,7 @@ body {
     display: flex; align-items: center; justify-content: center;
     padding: calc(16px + var(--safe-top)) 14px calc(16px + var(--safe-bottom));
 }
-.mj-overlay-box { width: min(440px, 94vw); max-height: calc(100svh - 24px); overflow-y: auto; padding: clamp(20px, 6vw, 32px) clamp(16px, 5vw, 28px); text-align: center; }
+.mj-overlay-box { position: relative; z-index: 1; width: min(440px, 94vw); max-height: calc(100svh - 24px); overflow-y: auto; padding: clamp(20px, 6vw, 32px) clamp(16px, 5vw, 28px); text-align: center; }
 
 /* Email gate */
 #mj-email-box h2 { font-family: var(--font-display); font-size: clamp(22px, 7vw, 26px); letter-spacing: 3px; color: var(--gold-bright); margin-bottom: 8px; }
@@ -160,10 +178,34 @@ body {
     font-size: clamp(44px, 14vw, 64px); line-height: 1;
     background: radial-gradient(circle at 50% 38%, rgba(255,230,160,0.95), rgba(231,200,115,0.18) 60%, rgba(231,200,115,0) 72%);
     text-shadow: 0 0 26px rgba(255,220,140,0.85); color: var(--gold-bright);
+    animation: mjEmblemPulse 1.8s ease-in-out infinite;
 }
 .mj-emblem.lose {
     background: radial-gradient(circle at 50% 38%, rgba(226,104,95,0.85), rgba(192,57,43,0.16) 60%, rgba(192,57,43,0) 72%);
     color: #ffb4ab; text-shadow: 0 0 24px rgba(226,104,95,0.7);
+    animation: none;
+}
+@keyframes mjEmblemPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+/* Win confetti */
+.mj-confetti-piece {
+    position: absolute; top: -18px; width: 10px; height: 14px; border-radius: 2px;
+    z-index: 0; pointer-events: none; opacity: 0.95;
+    animation-name: mjConfettiFall; animation-timing-function: linear; animation-fill-mode: forwards;
+}
+@keyframes mjConfettiFall {
+    0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(110vh) rotate(720deg); opacity: 0.15; }
+}
+
+/* Lose shake */
+.mj-shake { animation: mjShake 0.5s ease; }
+@keyframes mjShake {
+    0%,100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(7px); }
+    60% { transform: translateX(-5px); }
+    80% { transform: translateX(3px); }
 }
 .mj-result-title { font-family: var(--font-display); font-size: clamp(30px, 10vw, 42px); letter-spacing: 4px; color: var(--gold-bright); text-shadow: 0 0 30px rgba(231,200,115,0.4); }
 #mj-lose .mj-result-title { color: #ffb4ab; text-shadow: 0 0 26px rgba(226,104,95,0.5); }
@@ -199,7 +241,7 @@ body {
 #mj-btn-menu-close { margin-top: 16px; }
 
 @media (orientation: landscape) and (max-height: 520px) {
-    #mj-tray { top: calc(58px + var(--safe-top)); }
+    #mj-tray { top: calc(80px + var(--safe-top)); }
     .mj-overlay-box { max-height: calc(100svh - 16px); }
 }
 </style>
@@ -225,10 +267,17 @@ body {
 
 <div id="mj-tray"></div>
 
-<div id="mj-controls" class="panel">
-    <button id="mj-btn-hint" type="button">Dica (1)</button>
-    <button id="mj-btn-restart" type="button">Reiniciar</button>
-    <button id="mj-btn-sound" type="button">Som: ON</button>
+<div id="mj-controls">
+    <button id="mj-btn-hint" type="button" title="Dica" aria-label="Dica">
+        <span class="mj-icon">&#128161;</span>
+        <span class="mj-badge" id="mj-hint-badge">1</span>
+    </button>
+    <button id="mj-btn-restart" type="button" title="Reiniciar" aria-label="Reiniciar">
+        <span class="mj-icon">&#8635;</span>
+    </button>
+    <button id="mj-btn-sound" type="button" title="Som" aria-label="Som">
+        <span class="mj-icon" id="mj-sound-icon">&#128266;</span>
+    </button>
 </div>
 
 <div id="mj-toast"></div>

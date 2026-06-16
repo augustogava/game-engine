@@ -7,6 +7,7 @@ import { Scene3D } from '../../engine/3d/Scene3D.js';
 import type { InputManager } from '../../engine/input/InputManager.js';
 import { MahjongApi } from './api/MahjongApi.js';
 import { MahjongPrefs } from './MahjongPrefs.js';
+import { loadFaceArt } from './data/faceArt.js';
 import { LayoutSystem } from './systems/LayoutSystem.js';
 import { BoardSystem } from './systems/BoardSystem.js';
 import { CameraSystem } from './systems/CameraSystem.js';
@@ -81,6 +82,7 @@ export class MahjongScene extends Scene3D {
 
     private async bootstrap(): Promise<void> {
         this.ui.setLoading('Carregando...');
+        await loadFaceArt();
         const storedId = localStorage.getItem(USER_ID_KEY);
         if (storedId) {
             try {
@@ -114,7 +116,7 @@ export class MahjongScene extends Scene3D {
         localStorage.setItem(USER_ID_KEY, user.userId);
         this.ui.setUser(user);
         this.ui.hideEmailGate();
-        this.beginLevel(1);
+        this.beginLevel(this.resumeLevel());
     }
 
     /** Resume on the first level the player has not yet cleared. */
@@ -129,7 +131,7 @@ export class MahjongScene extends Scene3D {
         const generated = this.layout.generate(level);
         this.levelTileCount = generated.slots.length;
         this.board.buildLevel(generated);
-        this.camera.frameBoard(this.board.boardRadius);
+        this.reframeBoard();
         this.tray.clear();
         this.ui.setLevel(level);
         this.hintsRemaining = HINTS_PER_LEVEL;
@@ -172,9 +174,17 @@ export class MahjongScene extends Scene3D {
         // Per-match hook (reserved for future combo feedback).
     }
 
+    /** Recenters and zooms the camera to fit the tiles still on the board. */
+    private reframeBoard(): void {
+        const bounds = this.board.getActiveBounds();
+        if (!bounds) return;
+        this.camera.frameBoard(bounds.radius, bounds.center);
+    }
+
     /** Routes a tile tapped off the board into the tray and reacts to the result. */
     handleTrayAdd(faceId: number): void {
         if (this.state !== GAME_STATE.PLAYING) return;
+        this.reframeBoard();
         const result = this.tray.add(faceId);
 
         if (result === 'match') {
@@ -184,6 +194,7 @@ export class MahjongScene extends Scene3D {
             this.lastMatchMs = now;
             this.liveIq += computeIqGain(this.level, sinceLastMatch, this.combo);
             this.ui.setLiveIq(this.liveIq);
+            if (this.board.lastTakenPos) this.vfx.burst(this.board.lastTakenPos, this.combo);
             this.audio.match();
             this.onMatch();
 
@@ -216,6 +227,7 @@ export class MahjongScene extends Scene3D {
             combo: this.combo,
         };
         this.audio.win();
+        this.vfx.celebrate();
         await this.submitResult(result, true);
         this.ui.showWin(result, result.iq - previousBestIq);
     }
