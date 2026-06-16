@@ -66,6 +66,7 @@ body {
     position: fixed; top: calc(8px + var(--safe-top)); left: 50%; transform: translateX(-50%); z-index: 30;
     display: flex; gap: clamp(4px, 2vw, 10px); align-items: stretch; padding: 6px clamp(6px, 2vw, 12px);
     max-width: calc(100vw - 120px - var(--safe-left) - var(--safe-right));
+    pointer-events: none;
 }
 .mj-stat { display: flex; flex-direction: column; align-items: center; min-width: clamp(48px, 16vw, 76px); padding: 2px clamp(3px, 1.5vw, 8px); }
 .mj-stat .lbl { font-size: clamp(8px, 2.4vw, 9px); letter-spacing: 2px; text-transform: uppercase; color: var(--parchment-dim); font-family: var(--font-display); }
@@ -92,6 +93,7 @@ body {
     background: linear-gradient(180deg, rgba(46,130,98,0.55), rgba(18,66,49,0.62));
     border: 1px solid rgba(84, 199, 154, 0.5);
     box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 24px rgba(84,199,154,0.38);
+    pointer-events: none;
 }
 .mj-tray-tile {
     width: clamp(36px, 11vw, 52px); aspect-ratio: 10 / 13; border-radius: 7px; overflow: hidden;

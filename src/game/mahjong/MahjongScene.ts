@@ -23,6 +23,7 @@ import { HINTS_PER_LEVEL } from './constants/gameConstants.js';
 import { GAME_STATE, type GameState, type LeaderboardEntry, type MahjongUser, type WinResult } from './types/index.js';
 
 const USER_ID_KEY = 'mahjong_user_id';
+const MAX_DEVICE_PIXEL_RATIO = 2;
 
 export class MahjongScene extends Scene3D {
     bjs!: any;
@@ -51,9 +52,15 @@ export class MahjongScene extends Scene3D {
     private liveIq = 0;
     private combo = 0;
     private lastMatchMs = 0;
+    private scalingHandler: (() => void) | null = null;
 
     onCreate(scene: any, _input: InputManager): void {
         this.bjs = scene;
+
+        this.applyDevicePixelRatio();
+        this.scalingHandler = () => this.applyDevicePixelRatio();
+        window.addEventListener('resize', this.scalingHandler);
+        window.addEventListener('orientationchange', this.scalingHandler);
 
         MahjongPrefs.load();
 
@@ -78,6 +85,15 @@ export class MahjongScene extends Scene3D {
         this.ui.init();
 
         void this.bootstrap();
+    }
+
+    /** Sharp rendering on Retina/mobile: render at device pixel ratio (clamped). */
+    private applyDevicePixelRatio(): void {
+        const engine = this.bjs?.getEngine?.();
+        if (!engine) return;
+        const dpr = Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
+        engine.setHardwareScalingLevel(1 / dpr);
+        engine.resize();
     }
 
     private async bootstrap(): Promise<void> {
@@ -284,6 +300,11 @@ export class MahjongScene extends Scene3D {
     }
 
     onDispose(): void {
+        if (this.scalingHandler) {
+            window.removeEventListener('resize', this.scalingHandler);
+            window.removeEventListener('orientationchange', this.scalingHandler);
+            this.scalingHandler = null;
+        }
         this.tileInput?.dispose();
         this.tray?.dispose();
         this.audio?.dispose();

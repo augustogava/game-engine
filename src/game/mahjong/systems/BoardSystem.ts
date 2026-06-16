@@ -241,7 +241,18 @@ export class BoardSystem {
     }
 
     pickTileId(): number | null {
-        const pick = this.bjs.pick(this.bjs.pointerX, this.bjs.pointerY, (m) => !!(m.metadata && m.metadata.tileId));
+        return this.pickTileIdAt(this.bjs.pointerX, this.bjs.pointerY);
+    }
+
+    /** Picks a tile at client (screen) coordinates; reliable for touch taps. */
+    pickTileIdAt(clientX: number, clientY: number): number | null {
+        const canvas = this.bjs.getEngine().getRenderingCanvas();
+        if (!canvas) return null;
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        const pick = this.bjs.pick(x, y, (m) => !!(m.metadata && m.metadata.tileId));
         if (pick && pick.hit && pick.pickedMesh && pick.pickedMesh.metadata) {
             return pick.pickedMesh.metadata.tileId as number;
         }
