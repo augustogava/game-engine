@@ -71,17 +71,21 @@ function buildPyramidSlots(level: number): SlotPosition[] {
     const { width, height, layers } = getLevelLayout(level);
     const slots: SlotPosition[] = [];
     for (let layer = 0; layer < layers; layer++) {
-        const w = width - 2 * layer;
-        const h = height - 2 * layer;
+        // Each stacked layer is shifted by a half tile (1 half-cell) and shrinks
+        // by one tile per dimension, so upper tiles straddle the four tiles below
+        // (the classic half-offset turtle look).
+        const w = width - layer;
+        const h = height - layer;
         if (w < 1 || h < 1) break;
+        const offset = layer;
         for (let row = 0; row < h; row++) {
             for (let col = 0; col < w; col++) {
-                slots.push({ gx: (layer + col) * 2, gy: (layer + row) * 2, layer });
+                slots.push({ gx: offset + col * 2, gy: offset + row * 2, layer });
             }
         }
     }
-    // Tile count must be even; drop one peak tile if odd.
-    if (slots.length % 2 !== 0) slots.pop();
+    // Tile count must be even; drop a base corner (not the apex) to keep the tip.
+    if (slots.length % 2 !== 0) slots.shift();
     return slots;
 }
 
