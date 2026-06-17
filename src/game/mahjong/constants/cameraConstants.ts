@@ -9,7 +9,7 @@ export const CAMERA_ALPHA = -Math.PI / 2;
 export const CAMERA_BETA = Tools.ToRadians(18);
 
 /** Distance multiplier applied to the board's largest dimension to fit it in view. */
-export const CAMERA_RADIUS_FACTOR = 1.15;
+export const CAMERA_RADIUS_FACTOR = 0.92;
 
 /** Minimum / maximum camera distance (world units). */
 export const CAMERA_RADIUS_MIN = 8;

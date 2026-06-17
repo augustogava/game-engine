@@ -7,7 +7,7 @@ import {
 } from '../constants/cameraConstants.js';
 
 /** Extra distance margin so the board clears the top HUD/tray and controls. */
-const FRAME_MARGIN = 6;
+const FRAME_MARGIN = 3;
 
 /** On portrait, shift the board down (as a fraction of board radius) so the top HUD/tray
  *  does not clip the upper tiles. Negative moves the rendered board downward on screen. */
@@ -33,9 +33,8 @@ export class CameraSystem {
         this.camera.upperRadiusLimit = CAMERA_RADIUS_MAX;
         this.camera.lowerBetaLimit = BABYLON.Tools.ToRadians(2);
         this.camera.upperBetaLimit = BABYLON.Tools.ToRadians(55);
-        this.camera.wheelPrecision = 18;
-        this.camera.panningSensibility = 0;
-        this.camera.attachControl(bjs.getEngine().getRenderingCanvas(), true);
+        // Camera is fully locked: no attachControl, so the user cannot zoom, pan,
+        // rotate or pinch the view on desktop or mobile.
         bjs.activeCamera = this.camera;
 
         // Re-fit when the viewport changes (rotation / browser chrome / resize).
