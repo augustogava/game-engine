@@ -7,17 +7,23 @@ import {
 } from '../constants/cameraConstants.js';
 
 /** Extra distance margin so the board clears the top HUD/tray and controls. */
-const FRAME_MARGIN = 3;
+const FRAME_MARGIN = 1.5;
 
-/** On portrait, shift the board down (as a fraction of board radius) so the top HUD/tray
+/** Fraction of the viewport the board may occupy on each axis. The leftover
+ *  vertical space keeps the board clear of the top HUD/tray and bottom controls. */
+const VERTICAL_FILL = 0.74;
+const HORIZONTAL_FILL = 0.92;
+
+/** On portrait, shift the board down (as a fraction of board depth) so the top HUD/tray
  *  does not clip the upper tiles. Negative moves the rendered board downward on screen. */
-const PORTRAIT_DOWN_OFFSET = 0.22;
+const PORTRAIT_DOWN_OFFSET = 0.06;
 
 export class CameraSystem {
     private game: MahjongScene;
     private camera!: BABYLON.ArcRotateCamera;
     private targetRadius = 20;
-    private lastBoardRadius = 12;
+    private lastBoardWidth = 12;
+    private lastBoardDepth = 12;
     private targetCenter = BABYLON.Vector3.Zero();
     private resizeHandler: (() => void) | null = null;
 
@@ -43,27 +49,37 @@ export class CameraSystem {
         window.addEventListener('orientationchange', this.resizeHandler);
     }
 
-    /** Re-frames the camera to fit a board of the given radius, optionally recentering on `center`. */
-    frameBoard(boardRadius: number, center?: BABYLON.Vector3): void {
-        this.lastBoardRadius = boardRadius;
+    /** Re-frames the camera to fit a board of the given width/depth, optionally recentering on `center`. */
+    frameBoard(boardWidth: number, boardDepth: number, center?: BABYLON.Vector3): void {
+        this.lastBoardWidth = boardWidth;
+        this.lastBoardDepth = boardDepth;
         if (center) this.targetCenter.copyFrom(center);
         this.applyFraming();
     }
 
-    /** Computes the target distance so the whole board fits the current viewport. */
+    /** Computes the target distance so the whole board fits the current viewport,
+     *  reserving space for the top HUD/tray and bottom controls. */
     private applyFraming(): void {
         if (!this.camera) return;
         const engine = this.game.bjs?.getEngine?.();
         const width = engine ? engine.getRenderWidth() : window.innerWidth;
         const height = engine ? engine.getRenderHeight() : window.innerHeight;
         const aspect = width / Math.max(1, height);
-        // On portrait screens the horizontal field of view is the limiting one,
-        // so pull the camera back proportionally to keep the board width visible.
-        const aspectComp = aspect < 1 ? 1 / aspect : 1;
-        const radius = this.lastBoardRadius * CAMERA_RADIUS_FACTOR * aspectComp + FRAME_MARGIN;
+
+        // Babylon's default FOV mode is vertical-fixed: camera.fov is the vertical
+        // field of view; the horizontal one widens with the aspect ratio.
+        const vHalfFov = this.camera.fov / 2;
+        const hHalfFov = Math.atan(Math.tan(vHalfFov) * aspect);
+
+        // Distance needed so the board width fits horizontally and the board depth
+        // fits vertically, each only filling its allowed fraction of the viewport.
+        const fitH = (this.lastBoardWidth / HORIZONTAL_FILL) / 2 / Math.tan(hHalfFov);
+        const fitV = (this.lastBoardDepth / VERTICAL_FILL) / 2 / Math.tan(vHalfFov);
+        const radius = Math.max(fitH, fitV) * CAMERA_RADIUS_FACTOR + FRAME_MARGIN;
         this.targetRadius = Math.min(CAMERA_RADIUS_MAX, Math.max(CAMERA_RADIUS_MIN, radius));
-        // Bias the board lower on portrait so the top tiles clear the HUD/tray overlay.
-        this.camera.targetScreenOffset.y = aspect < 1 ? -this.lastBoardRadius * PORTRAIT_DOWN_OFFSET : 0;
+
+        // Bias the board slightly lower on portrait so the top tiles clear the HUD/tray overlay.
+        this.camera.targetScreenOffset.y = aspect < 1 ? -this.lastBoardDepth * PORTRAIT_DOWN_OFFSET : 0;
     }
 
     update(dt: number): void {
