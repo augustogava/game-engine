@@ -289,6 +289,8 @@ body {
     animation: mjEmblemPulse 1.8s ease-in-out infinite;
 }
 .mj-emblem.lose {
+    width: clamp(52px, 15vw, 68px); height: clamp(52px, 15vw, 68px);
+    font-size: clamp(28px, 8vw, 38px);
     background: radial-gradient(circle at 50% 38%, rgba(226,104,95,0.85), rgba(192,57,43,0.16) 60%, rgba(192,57,43,0) 72%);
     color: #ffb4ab; text-shadow: 0 0 24px rgba(226,104,95,0.7);
     animation: none;
@@ -316,7 +318,7 @@ body {
     80% { transform: translateX(3px); }
 }
 .mj-result-title { font-family: var(--font-display); font-size: clamp(30px, 10vw, 42px); letter-spacing: 4px; color: var(--gold-bright); text-shadow: 0 0 30px rgba(231,200,115,0.4); }
-#mj-lose .mj-result-title { color: #ffb4ab; text-shadow: 0 0 26px rgba(226,104,95,0.5); }
+#mj-lose .mj-result-title { color: #ffb4ab; text-shadow: 0 0 26px rgba(226,104,95,0.5); font-size: clamp(20px, 6vw, 28px); letter-spacing: 3px; }
 .mj-result-grid { display: flex; justify-content: center; gap: clamp(8px, 2.6vw, 12px); margin: clamp(16px, 5vw, 24px) 0 clamp(10px, 3vw, 14px); flex-wrap: nowrap; }
 .mj-result-card { flex: 1 1 0; min-width: 0; max-width: 130px; padding: clamp(10px, 3vw, 14px) clamp(6px, 2vw, 10px); border: 1px solid rgba(231,200,115,0.3); border-radius: 8px; background: rgba(8,20,15,0.6); }
 .mj-result-card .k { font-size: clamp(8px, 2.6vw, 9px); letter-spacing: 2px; text-transform: uppercase; color: var(--parchment-dim); font-family: var(--font-display); }
@@ -336,8 +338,26 @@ body {
     font-size: clamp(13px, 3.8vw, 15px); font-weight: 700; letter-spacing: 1px;
     border: 1px solid rgba(255,255,255,0.35); background: rgba(8,20,15,0.6);
 }
-.mj-rank-pos { color: var(--parchment); font-size: clamp(12px, 3.4vw, 14px); }
 .mj-rank-hint { color: var(--parchment-dim); font-size: clamp(10px, 3vw, 12px); }
+.mj-rank-list {
+    display: flex; flex-direction: column; gap: 2px;
+    width: min(300px, 100%); margin: 4px auto;
+}
+.mj-rank-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 10px; border-radius: 6px;
+    font-size: clamp(11px, 3.2vw, 13px); color: var(--parchment);
+    background: rgba(8,20,15,0.45);
+}
+.mj-rank-row.self {
+    color: var(--gold-bright); background: rgba(231,200,115,0.14);
+    border: 1px solid rgba(231,200,115,0.4);
+}
+.mj-rank-row .pos { width: 3.2ch; text-align: right; font-family: var(--font-display); font-weight: 700; flex: none; }
+.mj-rank-row .medal { width: 1.4em; text-align: center; flex: none; }
+.mj-rank-row .name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mj-rank-row .pts { flex: none; font-variant-numeric: tabular-nums; }
+.mj-rank-row .promo { flex: none; width: 1.2em; text-align: center; }
 .mj-milestone { margin: clamp(12px, 4vw, 18px) 0 clamp(6px, 2vw, 10px); }
 .mj-milestone-bar { height: 12px; border-radius: 8px; background: rgba(255,255,255,0.08); overflow: hidden; border: 1px solid rgba(231,200,115,0.25); }
 .mj-milestone-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--jade-bright), var(--gold)); transition: width 0.5s ease; }
@@ -458,7 +478,7 @@ body {
         <div id="mj-win-phrase">Níveis difíceis são só um aquecimento para você!</div>
         <div class="mj-rank-line" id="mj-win-rank">
             <span class="mj-rank-badge" id="mj-win-rank-badge"></span>
-            <span class="mj-rank-pos" id="mj-win-rank-pos"></span>
+            <div class="mj-rank-list" id="mj-win-rank-list"></div>
             <span class="mj-rank-hint" id="mj-win-rank-hint"></span>
         </div>
         <div class="mj-milestone">
@@ -484,7 +504,7 @@ body {
         <div id="mj-win-phrase">A bandeja encheu com quatro peças diferentes. Tente novamente!</div>
         <div class="mj-rank-line" id="mj-lose-rank">
             <span class="mj-rank-badge" id="mj-lose-rank-badge"></span>
-            <span class="mj-rank-pos" id="mj-lose-rank-pos"></span>
+            <div class="mj-rank-list" id="mj-lose-rank-list"></div>
             <span class="mj-rank-hint" id="mj-lose-rank-hint"></span>
         </div>
         <div class="mj-result-actions">

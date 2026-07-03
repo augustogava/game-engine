@@ -16,6 +16,11 @@ const MAX_POINTS = 100000000;
 const IQ_MIN = 40;
 const IQ_MAX = 250;
 
+/** Neighbors shown around the player on the result overlays (above and below). */
+const RANK_NEIGHBOR_SPAN = 2;
+/** Safety cap when ranking the cohort in memory. */
+const RANK_COHORT_LIMIT = 1000;
+
 // Rank system defaults (used when mahjong_settings has no row yet).
 const RANK_UP_DAYS_DEFAULT = 7;
 const RANK_UP_TOP_N_DEFAULT = 3;
@@ -303,27 +308,32 @@ async function getRankInfo(userId) {
         );
         const [[{ maxRank }]] = await dbPool.query('SELECT COALESCE(MAX(rank_order), 1) AS maxRank FROM mahjong_ranks');
 
-        const [[mine]] = await dbPool.query(
-            'SELECT COALESCE(SUM(points), 0) AS pts FROM mahjong_scores WHERE user_id = ? AND created_at >= FROM_UNIXTIME(?)',
-            [userId, periodStartSec],
+        // Full cohort ranking by current-period points (same ordering as the
+        // leaderboard panel), so the position and the neighbor window agree.
+        const [ranked] = await dbPool.query(
+            `SELECT u.user_id, u.email,
+                    COALESCE(SUM(CASE WHEN s.created_at >= FROM_UNIXTIME(?) THEN s.points ELSE 0 END), 0) AS period_points
+             FROM mahjong_users u
+             LEFT JOIN mahjong_scores s ON s.user_id = u.user_id
+             WHERE u.rank_order = ?
+             GROUP BY u.user_id, u.email, u.total_points, u.best_iq
+             ORDER BY period_points DESC, u.total_points DESC, u.best_iq DESC
+             LIMIT ?`,
+            [periodStartSec, rankOrder, RANK_COHORT_LIMIT],
         );
-        const myPoints = Number(mine.pts);
 
-        const [[ahead]] = await dbPool.query(
-            `SELECT COUNT(*) AS n FROM (
-                SELECT s.user_id
-                FROM mahjong_scores s
-                JOIN mahjong_users u ON u.user_id = s.user_id
-                WHERE u.rank_order = ? AND u.user_id <> ? AND s.created_at >= FROM_UNIXTIME(?)
-                GROUP BY s.user_id
-                HAVING SUM(s.points) > ?
-            ) t`,
-            [rankOrder, userId, periodStartSec, myPoints],
-        );
-        const [[cohort]] = await dbPool.query(
-            'SELECT COUNT(*) AS n FROM mahjong_users WHERE rank_order = ?',
-            [rankOrder],
-        );
+        const selfIndex = ranked.findIndex((row) => row.user_id === userId);
+        const position = selfIndex >= 0 ? selfIndex + 1 : ranked.length + 1;
+        const myPoints = selfIndex >= 0 ? Number(ranked[selfIndex].period_points) : 0;
+
+        const windowStart = Math.max(0, (selfIndex >= 0 ? selfIndex : 0) - RANK_NEIGHBOR_SPAN);
+        const windowEnd = Math.min(ranked.length, (selfIndex >= 0 ? selfIndex : 0) + RANK_NEIGHBOR_SPAN + 1);
+        const neighbors = ranked.slice(windowStart, windowEnd).map((row, i) => ({
+            position: windowStart + i + 1,
+            name: displayNameFromEmail(row.email),
+            periodPoints: Number(row.period_points),
+            isSelf: row.user_id === userId,
+        }));
 
         return {
             rankOrder,
@@ -331,9 +341,10 @@ async function getRankInfo(userId) {
             rankName: rankRow ? rankRow.name : `Rank ${rankOrder}`,
             color: rankRow ? rankRow.color : '#c8d0dc',
             icon: rankRow ? rankRow.icon : '',
-            position: Number(ahead.n) + 1,
-            cohortSize: Number(cohort.n),
+            position,
+            cohortSize: ranked.length,
             periodPoints: myPoints,
+            neighbors,
             rankUpTopN: settings.topN,
             rankUpDays: settings.days,
             periodEndsAt,

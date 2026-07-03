@@ -253,7 +253,7 @@ export class UiSystem {
         window.setTimeout(() => flash.classList.remove('show'), FLASH_DURATION_MS);
     }
 
-    /** Fills a rank line (badge + position + promotion hint) on a result overlay. */
+    /** Fills a rank line (badge + neighbor list + promotion hint) on a result overlay. */
     private renderRank(prefix: 'mj-win' | 'mj-lose', rank: RankInfo | null): void {
         const line = el(`${prefix}-rank`);
         if (!rank) {
@@ -265,12 +265,36 @@ export class UiSystem {
         badge.textContent = `${rank.icon ? `${rank.icon} ` : ''}${rank.rankName}`;
         badge.style.color = rank.color;
         badge.style.borderColor = rank.color;
-        el(`${prefix}-rank-pos`).textContent = `Posição #${rank.position} de ${rank.cohortSize} no seu rank`;
+
+        this.renderRankList(el(`${prefix}-rank-list`), rank);
+
         const hint = el(`${prefix}-rank-hint`);
         if (rank.rankOrder >= rank.maxRank) {
             hint.textContent = 'Você alcançou o rank máximo!';
         } else {
             hint.textContent = `Top ${rank.rankUpTopN} sobe de rank a cada ${rank.rankUpDays} dia${rank.rankUpDays === 1 ? '' : 's'}`;
+        }
+    }
+
+    /** Neighbor list: the player plus 2 above/below, medals on the podium and
+     *  a promotion arrow inside the rank-up zone. */
+    private renderRankList(host: HTMLElement, rank: RankInfo): void {
+        host.innerHTML = '';
+        const medals = ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49']; // gold, silver, bronze
+        const neighbors = rank.neighbors ?? [];
+        for (const neighbor of neighbors) {
+            const row = document.createElement('div');
+            row.className = 'mj-rank-row';
+            if (neighbor.isSelf) row.classList.add('self');
+            const medal = neighbor.position <= medals.length ? medals[neighbor.position - 1] : '';
+            const promoted = neighbor.position <= rank.rankUpTopN && neighbor.periodPoints > 0 && rank.rankOrder < rank.maxRank;
+            row.innerHTML =
+                `<span class="pos">#${neighbor.position}</span>` +
+                `<span class="medal">${medal}</span>` +
+                `<span class="name">${this.escape(neighbor.name)}</span>` +
+                `<span class="pts">${neighbor.periodPoints}</span>` +
+                `<span class="promo">${promoted ? '\u2B06\uFE0F' : ''}</span>`;
+            host.appendChild(row);
         }
     }
 

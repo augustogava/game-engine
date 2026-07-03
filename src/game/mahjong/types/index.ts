@@ -59,6 +59,14 @@ export interface Tile {
     symbolMesh: any;
 }
 
+/** A player near the user in the rank cohort ranking. */
+export interface RankNeighbor {
+    position: number;
+    name: string;
+    periodPoints: number;
+    isSelf: boolean;
+}
+
 /** Player rank (league) snapshot returned by the backend. */
 export interface RankInfo {
     rankOrder: number;
@@ -70,6 +78,8 @@ export interface RankInfo {
     position: number;
     cohortSize: number;
     periodPoints: number;
+    /** The user plus up to 2 players above and below in the cohort ranking. */
+    neighbors: RankNeighbor[];
     rankUpTopN: number;
     rankUpDays: number;
     /** Epoch ms when the current evaluation period closes. */
