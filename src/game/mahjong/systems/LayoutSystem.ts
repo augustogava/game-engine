@@ -15,7 +15,7 @@
  * free tile to play.
  */
 import {
-    BASE_MAX_COLS, BASE_MAX_ROWS, getCloseProbability, getLevelLayout, getLevelShape,
+    BASE_MAX_COLS, BASE_MAX_ROWS, getCloseProbability, getHiddenFraction, getLevelLayout, getLevelShape,
 } from '../constants/levelConstants.js';
 import { buildPairFaceIds } from '../data/tileSet.js';
 import { TRAY_CAPACITY } from '../constants/gameConstants.js';
@@ -48,6 +48,8 @@ const MAX_OPEN = Math.max(1, TRAY_CAPACITY - 1);
 export interface GeneratedLevel {
     slots: SlotPosition[];
     faceByIndex: number[];
+    /** Tiles dealt face-down (green back, flip on tap to reveal). */
+    hiddenByIndex: boolean[];
     /** Removal order as index pairs — a valid solution / hint source. */
     solution: Array<[number, number]>;
 }
@@ -362,7 +364,21 @@ function assignFaces(
             openSlots.push(idx);
         }
     }
-    return { slots, faceByIndex, solution };
+    return { slots, faceByIndex, hiddenByIndex: slots.map(() => false), solution };
+}
+
+/** Marks a level-scaled random fraction of tiles as face-down (flip tiles).
+ *  Faces and pairs are untouched, so solvability is unaffected. */
+function assignHiddenTiles(level: GeneratedLevel, hiddenFraction: number, rng: () => number): void {
+    const total = level.slots.length;
+    const count = Math.floor(total * hiddenFraction);
+    if (count <= 0) return;
+    const indices = level.slots.map((_, i) => i);
+    for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    for (let k = 0; k < count; k++) level.hiddenByIndex[indices[k]] = true;
 }
 
 export class LayoutSystem {
@@ -373,7 +389,11 @@ export class LayoutSystem {
             const slots = buildDynamicSlots(level, Math.random);
             if (slots.length < MIN_TILES) continue;
             const order = peelOrder(slots, Math.random);
-            if (order) return assignFaces(slots, order, Math.random, closeProbability);
+            if (order) {
+                const generated = assignFaces(slots, order, Math.random, closeProbability);
+                assignHiddenTiles(generated, getHiddenFraction(level), Math.random);
+                return generated;
+            }
         }
 
         console.warn('[LayoutSystem] Dynamic generation failed, falling back to pyramid.');
@@ -383,7 +403,9 @@ export class LayoutSystem {
             order = peelOrder(slots, Math.random);
         }
         if (!order) order = slots.map((_, i) => i);
-        return assignFaces(slots, order, Math.random, closeProbability);
+        const generated = assignFaces(slots, order, Math.random, closeProbability);
+        assignHiddenTiles(generated, getHiddenFraction(level), Math.random);
+        return generated;
     }
 
     /**

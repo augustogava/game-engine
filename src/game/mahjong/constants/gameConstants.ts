@@ -3,19 +3,21 @@
 /** Size of one half-cell in world units. A tile spans 2 half-cells. */
 export const HALF_CELL = 0.55;
 
-/** Portrait tile face depth/width ratio (reference ~1.25:1). */
-export const TILE_ASPECT_DEPTH = 1.25;
+/** Portrait tile face depth/width ratio (reference ~1.3:1). */
+export const TILE_ASPECT_DEPTH = 1.3;
 
 /** Visual tile footprint (slightly smaller than 2 half-cells for a gap). */
 export const TILE_WIDTH = HALF_CELL * 2 * 0.76;
 export const TILE_DEPTH = TILE_WIDTH * TILE_ASPECT_DEPTH;
-export const TILE_THICKNESS = 0.26;
 
-/** Vertical offset added per stacked layer. */
-export const LAYER_HEIGHT = TILE_THICKNESS * 0.92;
+/** Chunky body like the reference: thickness about one third of the width. */
+export const TILE_THICKNESS = TILE_WIDTH * 0.34;
+
+/** Vertical offset added per stacked layer (upper tiles rest exactly on top). */
+export const LAYER_HEIGHT = TILE_THICKNESS;
 
 /** Rounded tile corner radius as a fraction of TILE_WIDTH. */
-export const TILE_CORNER_RADIUS = TILE_WIDTH * 0.16;
+export const TILE_CORNER_RADIUS = TILE_WIDTH * 0.18;
 
 /** Gap fraction between neighbouring tiles. Near-zero so tiles pack flush like
  *  the reference game. */
@@ -30,7 +32,7 @@ export const SYMBOL_SCALE = 1.0;
 
 /** Tile face texture resolution (pixels), portrait to match TILE_ASPECT_DEPTH. */
 export const SYMBOL_TEXTURE_WIDTH = 256;
-export const SYMBOL_TEXTURE_HEIGHT = 320;
+export const SYMBOL_TEXTURE_HEIGHT = Math.round(SYMBOL_TEXTURE_WIDTH * TILE_ASPECT_DEPTH);
 
 /** Maximum distinct tile faces (see data/tileSet.ts). */
 export const FACE_COUNT = 42;

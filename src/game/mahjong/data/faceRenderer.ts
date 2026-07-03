@@ -13,7 +13,7 @@ const BAR_STEP_X = 0.24;
 const BAR_STEP_Y = 0.28;
 
 /** Fraction of the tile occupied by composited face art (near full-bleed like the reference). */
-const ART_FILL = 0.94;
+const ART_FILL = 0.97;
 /** Corner radius of the panel as a fraction of the shorter side (matches the tile mesh). */
 const PANEL_RADIUS = 0.16;
 /** Inset of the panel from the tile edge (0 = fills to the rounded border, no padding). */
@@ -44,20 +44,18 @@ const PANEL_WHITE: PanelPalette = { top: '#ffffff', mid: '#f6f8fb', bottom: '#e4
 const PANEL_GREEN: PanelPalette = { top: '#8ce464', mid: '#43c341', bottom: '#1f9a34', stroke: 'rgba(18,88,30,0.5)' };
 const PANEL_GOLD: PanelPalette = { top: '#ffe9a8', mid: '#f7cd54', bottom: '#dfa72c', stroke: 'rgba(142,96,12,0.45)' };
 
-function getPanelPalette(faceId: number, group: number): PanelPalette {
+function getPanelPalette(faceId: number): PanelPalette {
     if (faceId === GOLD_FACE_ID) return PANEL_GOLD;
-    if (group === TILE_GROUP.SEASON) return PANEL_GREEN;
     return PANEL_WHITE;
 }
 
 /** Draws the glossy tile body: rounded portrait panel, vertical sheen, edge. */
-function drawTileBackground(ctx: CanvasRenderingContext2D, W: number, H: number, faceId: number, group: number): void {
+function drawTilePanel(ctx: CanvasRenderingContext2D, W: number, H: number, palette: PanelPalette): void {
     const ref = Math.min(W, H);
     const r = ref * PANEL_RADIUS;
     const pad = ref * PANEL_PAD;
     const w = W - pad * 2;
     const h = H - pad * 2;
-    const palette = getPanelPalette(faceId, group);
 
     ctx.clearRect(0, 0, W, H);
 
@@ -86,7 +84,7 @@ function drawTileBackground(ctx: CanvasRenderingContext2D, W: number, H: number,
     ctx.stroke();
 }
 
-/** Inner bevel highlight for the blank solid-color block tiles (green blocks). */
+/** Inner bevel highlight for the face-down green back. */
 function drawBlockBevel(ctx: CanvasRenderingContext2D, W: number, H: number): void {
     const ref = Math.min(W, H);
     const inset = ref * 0.09;
@@ -95,6 +93,12 @@ function drawBlockBevel(ctx: CanvasRenderingContext2D, W: number, H: number): vo
     ctx.lineWidth = Math.max(2, ref * 0.03);
     ctx.strokeStyle = 'rgba(255,255,255,0.35)';
     ctx.stroke();
+}
+
+/** Draws the green face-down back (hidden tiles that flip to reveal their face). */
+export function drawTileBack(ctx: CanvasRenderingContext2D, W: number, H: number): void {
+    drawTilePanel(ctx, W, H, PANEL_GREEN);
+    drawBlockBevel(ctx, W, H);
 }
 
 /** Composites a preloaded face-art image centered and aspect-fit on the tile. */
@@ -164,13 +168,7 @@ export function drawTileFace(ctx: CanvasRenderingContext2D, faceId: number, W: n
     const face = TILE_FACES[faceId];
     if (!face) return;
 
-    drawTileBackground(ctx, W, H, faceId, face.group);
-
-    // Blank solid green blocks (season group) match by look alone, like the reference.
-    if (face.group === TILE_GROUP.SEASON) {
-        drawBlockBevel(ctx, W, H);
-        return;
-    }
+    drawTilePanel(ctx, W, H, getPanelPalette(faceId));
 
     const art = getFaceArt(faceId);
     if (art) {

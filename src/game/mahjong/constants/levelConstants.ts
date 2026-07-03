@@ -18,9 +18,9 @@ export const TILES_MAX = 144;
 export const LAYERS_MIN = 3;
 export const LAYERS_MAX = 6;
 
-/** Base blob bounds, in tiles (columns x rows). */
+/** Base blob bounds, in tiles (columns x rows). Wider than tall like the reference. */
 export const BASE_MAX_COLS = 8;
-export const BASE_MAX_ROWS = 9;
+export const BASE_MAX_ROWS = 7;
 
 /** Chance to close an open pair vs opening a new one while assigning faces.
  *  Lower = matches resolve later = harder. Scales down with level. */
@@ -54,6 +54,16 @@ export function getLevelShape(level: number): LevelShape {
 /** Pair-close probability for the level (lower on higher levels = harder). */
 export function getCloseProbability(level: number): number {
     return Math.max(CLOSE_PROBABILITY_MIN, CLOSE_PROBABILITY_BASE - Math.max(0, level - 1) * CLOSE_PROBABILITY_STEP);
+}
+
+/** Face-down (flip-to-reveal) tile fraction range. */
+export const HIDDEN_FRACTION_BASE = 0.08;
+export const HIDDEN_FRACTION_STEP = 0.02;
+export const HIDDEN_FRACTION_MAX = 0.3;
+
+/** Fraction of tiles dealt face-down for the level (flip on tap to reveal). */
+export function getHiddenFraction(level: number): number {
+    return Math.min(HIDDEN_FRACTION_MAX, HIDDEN_FRACTION_BASE + Math.max(0, level - 1) * HIDDEN_FRACTION_STEP);
 }
 
 /** Square base edge (in tiles) for the fallback pyramid. */

@@ -1,0 +1,9 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - heading "Página Não Encontrada" [level=1] [ref=e4]
+    - paragraph [ref=e5]: Desculpe, a página que você está procurando não existe.
+    - link "Voltar para a página inicial" [ref=e6] [cursor=pointer]:
+      - /url: /home
+  - button "Open Next.js Dev Tools" [ref=e12] [cursor=pointer]:
+    - img [ref=e13]
+  - alert [ref=e16]

@@ -9,14 +9,16 @@ import {
 /** Extra distance margin so the board clears the top HUD/tray and controls. */
 const FRAME_MARGIN = 1.5;
 
-/** Fraction of the viewport the board may occupy on each axis. The leftover
- *  vertical space keeps the board clear of the top HUD/tray and bottom controls. */
-const VERTICAL_FILL = 0.74;
+/** Fallback fractions when the DOM overlays cannot be measured. */
+const FALLBACK_VERTICAL_FILL = 0.6;
 const HORIZONTAL_FILL = 0.92;
 
-/** On portrait, shift the board down (as a fraction of board depth) so the top HUD/tray
- *  does not clip the upper tiles. Negative moves the rendered board downward on screen. */
-const PORTRAIT_DOWN_OFFSET = 0.06;
+/** Padding (CSS px) kept between the board and the tray above / controls below. */
+const BAND_PADDING_PX = 14;
+
+/** Clamp range for the DOM-derived vertical fill fraction. */
+const VERTICAL_FILL_MIN = 0.3;
+const VERTICAL_FILL_MAX = 0.85;
 
 export class CameraSystem {
     private game: MahjongScene;
@@ -57,6 +59,24 @@ export class CameraSystem {
         this.applyFraming();
     }
 
+    /** Measures the free vertical band between the tray (above) and the controls
+     *  (below) in CSS pixels; falls back to a fixed fraction if unavailable. */
+    private measureVerticalBand(viewportHeight: number): { fill: number; centerOffsetPx: number } {
+        const tray = document.getElementById('mj-tray');
+        const controls = document.getElementById('mj-controls');
+        if (!tray || !controls || viewportHeight <= 0) {
+            return { fill: FALLBACK_VERTICAL_FILL, centerOffsetPx: 0 };
+        }
+        const bandTop = tray.getBoundingClientRect().bottom + BAND_PADDING_PX;
+        const bandBottom = controls.getBoundingClientRect().top - BAND_PADDING_PX;
+        if (bandBottom - bandTop < viewportHeight * VERTICAL_FILL_MIN) {
+            return { fill: FALLBACK_VERTICAL_FILL, centerOffsetPx: 0 };
+        }
+        const fill = Math.min(VERTICAL_FILL_MAX, (bandBottom - bandTop) / viewportHeight);
+        const centerOffsetPx = (bandTop + bandBottom) / 2 - viewportHeight / 2;
+        return { fill, centerOffsetPx };
+    }
+
     /** Computes the target distance so the whole board fits the current viewport,
      *  reserving space for the top HUD/tray and bottom controls. */
     private applyFraming(): void {
@@ -71,15 +91,20 @@ export class CameraSystem {
         const vHalfFov = this.camera.fov / 2;
         const hHalfFov = Math.atan(Math.tan(vHalfFov) * aspect);
 
+        // The board must fit inside the band left free by the DOM overlays.
+        const cssHeight = window.innerHeight;
+        const band = this.measureVerticalBand(cssHeight);
+
         // Distance needed so the board width fits horizontally and the board depth
         // fits vertically, each only filling its allowed fraction of the viewport.
         const fitH = (this.lastBoardWidth / HORIZONTAL_FILL) / 2 / Math.tan(hHalfFov);
-        const fitV = (this.lastBoardDepth / VERTICAL_FILL) / 2 / Math.tan(vHalfFov);
+        const fitV = (this.lastBoardDepth / band.fill) / 2 / Math.tan(vHalfFov);
         const radius = Math.max(fitH, fitV) * CAMERA_RADIUS_FACTOR + FRAME_MARGIN;
         this.targetRadius = Math.min(CAMERA_RADIUS_MAX, Math.max(CAMERA_RADIUS_MIN, radius));
 
-        // Bias the board slightly lower on portrait so the top tiles clear the HUD/tray overlay.
-        this.camera.targetScreenOffset.y = aspect < 1 ? -this.lastBoardDepth * PORTRAIT_DOWN_OFFSET : 0;
+        // Shift the board so it centers inside the band (negative y renders lower).
+        const worldPerCssPx = (2 * this.targetRadius * Math.tan(vHalfFov)) / Math.max(1, cssHeight);
+        this.camera.targetScreenOffset.y = -band.centerOffsetPx * worldPerCssPx;
     }
 
     update(dt: number): void {

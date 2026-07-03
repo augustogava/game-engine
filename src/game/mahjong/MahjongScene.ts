@@ -248,6 +248,14 @@ export class MahjongScene extends Scene3D {
         // Per-match hook (reserved for future combo feedback).
     }
 
+    /** Haptic feedback on match; stronger pattern on high combos. */
+    private vibrate(combo: number): void {
+        if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+        try {
+            navigator.vibrate(combo >= 5 ? [30, 40, 30] : 20);
+        } catch (_) { /* ignore */ }
+    }
+
     /** Recenters and zooms the camera to fit the tiles still on the board. */
     private reframeBoard(): void {
         const bounds = this.board.getActiveBounds();
@@ -269,7 +277,8 @@ export class MahjongScene extends Scene3D {
             if (this.state !== GAME_STATE.PLAYING) return;
             if (settled === 'match') {
                 if (takenPos) this.vfx.burst(takenPos, fx.combo);
-                this.audio.match();
+                this.audio.match(fx.combo);
+                this.vibrate(fx.combo);
                 this.ui.showIqGain(fx.gain);
                 this.ui.showComboPraise(fx.combo);
                 this.onMatch();

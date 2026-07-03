@@ -20,11 +20,17 @@ export class TileInputSystem {
         this.pointerDownX = e.clientX;
         this.pointerDownY = e.clientY;
         this.pointerDownMs = performance.now();
+
+        if (this.game.state !== GAME_STATE.PLAYING) return;
+        const board = this.game.board;
+        const id = board.pickTileIdAt(e.clientX, e.clientY);
+        if (id !== null && board.isFree(id)) board.setPressed(id);
     };
 
     private onPointerUp = (e: PointerEvent): void => {
         if (this.activePointerId !== e.pointerId) return;
         this.activePointerId = null;
+        this.game.board.setPressed(null);
         if (this.game.state !== GAME_STATE.PLAYING) return;
 
         const dx = e.clientX - this.pointerDownX;
@@ -37,6 +43,7 @@ export class TileInputSystem {
 
     private onPointerCancel = (e: PointerEvent): void => {
         if (this.activePointerId === e.pointerId) this.activePointerId = null;
+        this.game.board.setPressed(null);
     };
 
     constructor(game: MahjongScene) {
@@ -62,6 +69,15 @@ export class TileInputSystem {
 
         if (!board.isFree(id)) {
             this.game.audio.error();
+            board.shakeTile(id);
+            return;
+        }
+
+        // Face-down tiles flip to reveal on the first tap; the next tap collects.
+        const tile = board.getTile(id);
+        if (tile && tile.hidden) {
+            board.revealTile(id);
+            this.game.audio.select();
             return;
         }
 
@@ -71,10 +87,12 @@ export class TileInputSystem {
         this.game.handleTrayAdd(faceId);
     }
 
-    /** Finds a matchable pair among free tiles. */
+    /** Finds a matchable pair among revealed free tiles. */
     findHint(): [number, number] | null {
         const board = this.game.board;
-        const freeTiles = [...board.freeIds].map(id => board.getTile(id)).filter(Boolean) as Array<{ id: number; faceId: number }>;
+        const freeTiles = [...board.freeIds]
+            .map(id => board.getTile(id))
+            .filter((t): t is NonNullable<typeof t> => !!t && !t.hidden);
         for (let i = 0; i < freeTiles.length; i++) {
             for (let j = i + 1; j < freeTiles.length; j++) {
                 if (facesMatch(freeTiles[i].faceId, freeTiles[j].faceId)) {

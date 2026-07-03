@@ -152,8 +152,14 @@ body {
     box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 24px rgba(84,199,154,0.38);
     pointer-events: none;
 }
+.mj-tray-slot {
+    width: clamp(36px, 11vw, 52px); aspect-ratio: 10 / 13; border-radius: 7px;
+    border: 1.5px dashed rgba(255,255,255,0.28); background: rgba(0,0,0,0.2);
+    position: relative; flex: none;
+}
 .mj-tray-tile {
-    width: clamp(36px, 11vw, 52px); aspect-ratio: 10 / 13; border-radius: 7px; overflow: hidden;
+    position: absolute; inset: -1.5px;
+    border-radius: 7px; overflow: hidden;
     background: #fbf6e7; box-shadow: 0 3px 8px rgba(0,0,0,0.5), inset 0 -3px 0 rgba(0,0,0,0.18);
 }
 .mj-tray-tile canvas { width: 100%; height: 100%; display: block; }
@@ -161,6 +167,14 @@ body {
 .mj-tray-clear { animation: mjTrayClear 0.24s ease-in forwards; }
 @keyframes mjTrayPop { from { transform: scale(0.3) translateY(-14px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
 @keyframes mjTrayClear { to { transform: scale(0.2) translateY(-10px); opacity: 0; } }
+#mj-tray.mj-tray-danger {
+    border-color: rgba(255, 96, 78, 0.85);
+    animation: mjTrayDanger 0.8s ease-in-out infinite;
+}
+@keyframes mjTrayDanger {
+    0%, 100% { box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 22px rgba(255,84,62,0.4); }
+    50% { box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 36px rgba(255,84,62,0.85); }
+}
 
 /* Controls */
 #mj-controls {

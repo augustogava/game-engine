@@ -6,7 +6,7 @@ import * as BABYLON from '@babylonjs/core';
 import type { MahjongScene } from '../MahjongScene.js';
 import type { GeneratedLevel } from './LayoutSystem.js';
 import { buildFilledCells, isSlotFree } from './LayoutSystem.js';
-import { drawTileFace } from '../data/faceRenderer.js';
+import { drawTileBack, drawTileFace } from '../data/faceRenderer.js';
 import { type SlotPosition, type Tile } from '../types/index.js';
 import {
     CELL_HALF_X, CELL_HALF_Z, LAYER_HEIGHT, SYMBOL_SCALE, SYMBOL_TEXTURE_HEIGHT, SYMBOL_TEXTURE_WIDTH,
@@ -18,6 +18,23 @@ import {
 
 const REMOVE_ANIM_MS = 150;
 const HINT_DURATION_MS = 900;
+const FLIP_ANIM_MS = 320;
+
+/** Soft contact shadow under each tile (cheap radial-gradient plane). */
+const SHADOW_SCALE = 1.3;
+const SHADOW_TEXTURE_SIZE = 128;
+const SHADOW_MAX_ALPHA = 0.32;
+/** Lift above the tile bottom so the shadow clears the symbol plane of the tile below. */
+const SHADOW_Y_OFFSET = 0.018;
+
+/** Scale applied to a free tile while the pointer is pressed on it. */
+const PRESS_SCALE = 0.94;
+
+/** Level intro: tiles drop in from above with a small stagger. */
+const INTRO_DROP_HEIGHT = 5;
+const INTRO_DROP_MS = 340;
+const INTRO_STAGGER_MS = 9;
+const INTRO_STAGGER_MAX_MS = 550;
 
 /** Screen-space info of a taken tile, for the DOM fly-to-tray animation. */
 export interface TakenTileScreenInfo {
@@ -107,6 +124,8 @@ export class BoardSystem {
     private highlight!: BABYLON.HighlightLayer;
     private tileMat!: BABYLON.StandardMaterial;
     private symbolMats: Map<number, BABYLON.StandardMaterial> = new Map();
+    private backMat: BABYLON.StandardMaterial | null = null;
+    private shadowMat: BABYLON.StandardMaterial | null = null;
 
     tiles: Tile[] = [];
     freeIds: Set<number> = new Set();
@@ -123,6 +142,7 @@ export class BoardSystem {
 
     private hoverId: number | null = null;
     private selectedId: number | null = null;
+    private pressedId: number | null = null;
     private hintTimer: number | null = null;
     private nextTileId = 1;
     private centerX = 0;
@@ -177,14 +197,44 @@ export class BoardSystem {
         this.boardRadius = Math.max(maxX - minX, maxZ - minZ) + CELL_HALF_X * 4;
 
         for (let i = 0; i < slots.length; i++) {
-            this.createTile(slots[i], level.faceByIndex[i]);
+            this.createTile(slots[i], level.faceByIndex[i], level.hiddenByIndex[i] === true);
         }
 
         this.recomputeFree();
+        this.playIntroDrop();
+    }
+
+    /** Staggered drop-in for a freshly built level. */
+    private playIntroDrop(): void {
+        const frames = 20;
+        const fps = frames / (INTRO_DROP_MS / 1000);
+        this.tiles.forEach((tile, i) => {
+            const drop = INTRO_DROP_HEIGHT + tile.pos.layer * 0.4;
+            const targets = [tile.mesh, tile.symbolMesh].map((mesh: BABYLON.Mesh) => {
+                const targetY = mesh.position.y;
+                mesh.position.y += drop;
+                return { mesh, targetY };
+            });
+            const delay = Math.min(i * INTRO_STAGGER_MS, INTRO_STAGGER_MAX_MS);
+            window.setTimeout(() => {
+                for (const { mesh, targetY } of targets) {
+                    if (tile.removed || mesh.isDisposed()) continue;
+                    const ease = new BABYLON.CubicEase();
+                    ease.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEOUT);
+                    const anim = new BABYLON.Animation('intro-drop', 'position.y', fps, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
+                    anim.setKeys([
+                        { frame: 0, value: mesh.position.y },
+                        { frame: frames, value: targetY },
+                    ]);
+                    anim.setEasingFunction(ease);
+                    this.bjs.beginDirectAnimation(mesh, [anim], 0, frames, false, 1);
+                }
+            }, delay);
+        });
     }
 
     /** Creates one tile (body + symbol) at its slot and registers it. */
-    private createTile(slot: SlotPosition, faceId: number): Tile {
+    private createTile(slot: SlotPosition, faceId: number, hidden = false): Tile {
         const worldX = (slot.gx + 1) * CELL_HALF_X - this.centerX;
         const worldZ = (slot.gy + 1) * CELL_HALF_Z - this.centerZ;
         const worldY = slot.layer * LAYER_HEIGHT + TILE_THICKNESS / 2;
@@ -203,13 +253,159 @@ export class BoardSystem {
         symbol.parent = this.root;
         symbol.rotation.x = -Math.PI / 2;
         symbol.position.set(worldX, worldY + TILE_THICKNESS / 2 + 0.012, worldZ);
-        symbol.material = this.getSymbolMaterial(faceId);
+        symbol.material = hidden ? this.getBackMaterial() : this.getSymbolMaterial(faceId);
         symbol.isPickable = false;
 
-        const tile: Tile = { id, faceId, pos: slot, removed: false, mesh: box, symbolMesh: symbol };
-        box.metadata = { tileId: tile.id };
+        // Soft contact shadow parented to the body so it follows every animation
+        // and is disposed together with the tile.
+        const shadow = BABYLON.MeshBuilder.CreatePlane(`shadow-${id}`, {
+            width: TILE_WIDTH * SHADOW_SCALE,
+            height: TILE_DEPTH * SHADOW_SCALE,
+        }, this.bjs);
+        shadow.parent = box;
+        shadow.rotation.x = -Math.PI / 2;
+        shadow.position.set(0, -TILE_THICKNESS / 2 + SHADOW_Y_OFFSET, 0);
+        shadow.material = this.getShadowMaterial();
+        shadow.isPickable = false;
+
+        const tile: Tile = { id, faceId, pos: slot, removed: false, hidden, mesh: box, symbolMesh: symbol };
+        box.metadata = { tileId: tile.id, baseX: worldX };
         this.tiles.push(tile);
         return tile;
+    }
+
+    /** Press feedback: scales the pressed free tile down slightly; null releases. */
+    setPressed(tileId: number | null): void {
+        if (this.pressedId === tileId) return;
+        if (this.pressedId !== null) {
+            const prev = this.getTile(this.pressedId);
+            if (prev) this.applyPressScale(prev, 1);
+        }
+        this.pressedId = tileId;
+        if (tileId !== null) {
+            const tile = this.getTile(tileId);
+            if (tile) this.applyPressScale(tile, PRESS_SCALE);
+        }
+    }
+
+    private applyPressScale(tile: Tile, scale: number): void {
+        tile.mesh.scaling.setAll(scale);
+        tile.symbolMesh.scaling.setAll(scale);
+    }
+
+    /** Quick horizontal shake for an invalid tap on a blocked tile. */
+    shakeTile(tileId: number): void {
+        const tile = this.getTile(tileId);
+        if (!tile) return;
+        const baseX = (tile.mesh.metadata && typeof tile.mesh.metadata.baseX === 'number')
+            ? tile.mesh.metadata.baseX
+            : tile.mesh.position.x;
+        const amp = TILE_WIDTH * 0.06;
+        const frames = 14;
+        const fps = 60;
+        for (const mesh of [tile.mesh, tile.symbolMesh]) {
+            const anim = new BABYLON.Animation('shake-x', 'position.x', fps, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
+            anim.setKeys([
+                { frame: 0, value: baseX },
+                { frame: 3, value: baseX - amp },
+                { frame: 7, value: baseX + amp },
+                { frame: 11, value: baseX - amp * 0.4 },
+                { frame: frames, value: baseX },
+            ]);
+            this.bjs.beginDirectAnimation(mesh, [anim], 0, frames, false, 1);
+        }
+    }
+
+    /** Shared radial-gradient material for the contact shadow planes. */
+    private getShadowMaterial(): BABYLON.StandardMaterial {
+        if (this.shadowMat) return this.shadowMat;
+        const size = SHADOW_TEXTURE_SIZE;
+        const tex = new BABYLON.DynamicTexture('tile-shadow-tex', size, this.bjs, false);
+        tex.hasAlpha = true;
+        const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
+        ctx.clearRect(0, 0, size, size);
+        const grad = ctx.createRadialGradient(size / 2, size / 2, size * 0.1, size / 2, size / 2, size / 2);
+        grad.addColorStop(0, `rgba(10, 20, 35, ${SHADOW_MAX_ALPHA})`);
+        grad.addColorStop(0.7, `rgba(10, 20, 35, ${SHADOW_MAX_ALPHA * 0.4})`);
+        grad.addColorStop(1, 'rgba(10, 20, 35, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+        tex.update(false);
+
+        const mat = new BABYLON.StandardMaterial('tile-shadow-mat', this.bjs);
+        mat.diffuseTexture = tex;
+        mat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+        mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        mat.specularColor = new BABYLON.Color3(0, 0, 0);
+        mat.useAlphaFromDiffuseTexture = true;
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        mat.disableLighting = true;
+        mat.backFaceCulling = false;
+        this.shadowMat = mat;
+        return mat;
+    }
+
+    /** Shared material for the green face-down back. */
+    private getBackMaterial(): BABYLON.StandardMaterial {
+        if (this.backMat) return this.backMat;
+        const tex = new BABYLON.DynamicTexture('sym-back-tex', { width: SYMBOL_TEXTURE_WIDTH, height: SYMBOL_TEXTURE_HEIGHT }, this.bjs, true);
+        tex.hasAlpha = true;
+        const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
+        drawTileBack(ctx, SYMBOL_TEXTURE_WIDTH, SYMBOL_TEXTURE_HEIGHT);
+        tex.update(false);
+
+        const mat = new BABYLON.StandardMaterial('sym-back-mat', this.bjs);
+        mat.diffuseTexture = tex;
+        mat.emissiveTexture = tex;
+        mat.emissiveColor = new BABYLON.Color3(0.85, 0.85, 0.85);
+        mat.diffuseColor = new BABYLON.Color3(1.0, 1.0, 1.0);
+        mat.specularColor = new BABYLON.Color3(0, 0, 0);
+        mat.useAlphaFromDiffuseTexture = true;
+        mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        mat.backFaceCulling = false;
+        this.backMat = mat;
+        return mat;
+    }
+
+    /** Flips a face-down tile to reveal its face (card-flip along the vertical axis). */
+    revealTile(tileId: number): void {
+        const tile = this.getTile(tileId);
+        if (!tile || !tile.hidden) return;
+        tile.hidden = false;
+
+        const half = FLIP_ANIM_MS / 2;
+        const frames = 10;
+        const fps = frames / (half / 1000);
+        const shrinkEase = new BABYLON.QuadraticEase();
+        shrinkEase.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEIN);
+        const growEase = new BABYLON.QuadraticEase();
+        growEase.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEOUT);
+
+        const meshes = [tile.mesh, tile.symbolMesh] as BABYLON.Mesh[];
+        let done = 0;
+        for (const mesh of meshes) {
+            const shrink = new BABYLON.Animation('flip-shrink', 'scaling.x', fps, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
+            shrink.setKeys([
+                { frame: 0, value: mesh.scaling.x },
+                { frame: frames, value: 0.02 },
+            ]);
+            shrink.setEasingFunction(shrinkEase);
+            this.bjs.beginDirectAnimation(mesh, [shrink], 0, frames, false, 1, () => {
+                done++;
+                if (done !== meshes.length) return;
+                if (tile.removed) return;
+                tile.symbolMesh.material = this.getSymbolMaterial(tile.faceId);
+                for (const m of meshes) {
+                    const grow = new BABYLON.Animation('flip-grow', 'scaling.x', fps, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
+                    grow.setKeys([
+                        { frame: 0, value: 0.02 },
+                        { frame: frames, value: 1 },
+                    ]);
+                    grow.setEasingFunction(growEase);
+                    this.bjs.beginDirectAnimation(m, [grow], 0, frames, false, 1);
+                }
+            });
+        }
     }
 
     /** Puts a previously taken tile back on its slot (undo). */
@@ -233,7 +429,7 @@ export class BoardSystem {
         for (let i = 0; i < live.length; i++) {
             const tile = live[i];
             tile.faceId = faceByLiveIndex[i];
-            tile.symbolMesh.material = this.getSymbolMaterial(tile.faceId);
+            if (!tile.hidden) tile.symbolMesh.material = this.getSymbolMaterial(tile.faceId);
         }
     }
 
@@ -465,6 +661,7 @@ export class BoardSystem {
         this.freeIds = new Set();
         this.hoverId = null;
         this.selectedId = null;
+        this.pressedId = null;
         this.lastTakenPos = null;
         this.lastTakenScreen = null;
         this.lastTakenSlot = null;
@@ -474,6 +671,10 @@ export class BoardSystem {
         this.clear();
         this.highlight?.dispose();
         this.tileMat?.dispose();
+        this.backMat?.dispose();
+        this.backMat = null;
+        this.shadowMat?.dispose();
+        this.shadowMat = null;
         for (const mat of this.symbolMats.values()) mat.dispose();
         this.symbolMats.clear();
         this.root?.dispose();

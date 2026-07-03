@@ -52,6 +52,8 @@ export interface Tile {
     faceId: number;
     pos: SlotPosition;
     removed: boolean;
+    /** Face-down tile: shows the green back until flipped to reveal its face. */
+    hidden: boolean;
     /** Babylon base mesh (any to avoid importing BABYLON types here). */
     mesh: any;
     symbolMesh: any;

@@ -2,6 +2,10 @@
 import type { MahjongScene } from '../MahjongScene.js';
 import { MahjongPrefs } from '../MahjongPrefs.js';
 
+/** Match pitch rises slightly per combo step, capped so it stays musical. */
+const MATCH_PITCH_STEP = 1.06;
+const MATCH_PITCH_MAX_STEPS = 8;
+
 export class AudioSystem {
     private game: MahjongScene;
     private ctx: AudioContext | null = null;
@@ -52,9 +56,11 @@ export class AudioSystem {
     select(): void { this.tone(520, 90, 'triangle', 0.18); }
     error(): void { this.tone(150, 160, 'sawtooth', 0.16); }
 
-    match(): void {
-        this.tone(660, 110, 'triangle', 0.2);
-        this.tone(880, 130, 'triangle', 0.16, 70);
+    match(combo = 1): void {
+        const steps = Math.min(Math.max(0, combo - 1), MATCH_PITCH_MAX_STEPS);
+        const pitch = Math.pow(MATCH_PITCH_STEP, steps);
+        this.tone(660 * pitch, 110, 'triangle', 0.2);
+        this.tone(880 * pitch, 130, 'triangle', 0.16, 70);
     }
 
     win(): void {

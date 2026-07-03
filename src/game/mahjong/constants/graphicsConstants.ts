@@ -28,3 +28,7 @@ export const MATCH_PARTICLE_LIFETIME = 0.65;
 
 /** Base URL for the generated decorative tile-face art (flowers / seasons). */
 export const MAHJONG_FACE_ART_BASE_URL = 'src/game/assets/textures/mahjong/';
+
+/** Cache-busting version for the face art PNGs (bump when the art changes;
+ *  the server marks images as immutable so stale files stick otherwise). */
+export const MAHJONG_FACE_ART_VERSION = 2;

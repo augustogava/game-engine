@@ -3,10 +3,10 @@
  * (gold tile 33, friendly animals 34-37) so faceRenderer can composite them
  * synchronously onto the glossy tile background.
  */
-import { MAHJONG_FACE_ART_BASE_URL } from '../constants/graphicsConstants.js';
+import { MAHJONG_FACE_ART_BASE_URL, MAHJONG_FACE_ART_VERSION } from '../constants/graphicsConstants.js';
 
 /** Face ids that have generated artwork (gold treasure + friendly animals). */
-export const ART_FACE_IDS: readonly number[] = [33, 34, 35, 36, 37];
+export const ART_FACE_IDS: readonly number[] = [33, 34, 35, 36, 37, 38, 39, 40, 41];
 
 const artCache = new Map<number, HTMLImageElement>();
 let loaded = false;
@@ -19,7 +19,7 @@ function loadOne(faceId: number): Promise<void> {
             console.warn(`[faceArt] Failed to load art for face ${faceId} at ${img.src}`);
             resolve();
         };
-        img.src = `${MAHJONG_FACE_ART_BASE_URL}face-${faceId}.png`;
+        img.src = `${MAHJONG_FACE_ART_BASE_URL}face-${faceId}.png?v=${MAHJONG_FACE_ART_VERSION}`;
     });
 }
 
