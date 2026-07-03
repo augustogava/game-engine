@@ -3,8 +3,8 @@
 /** Size of one half-cell in world units. A tile spans 2 half-cells. */
 export const HALF_CELL = 0.55;
 
-/** Portrait tile face depth/width ratio (reference ~1.3:1). */
-export const TILE_ASPECT_DEPTH = 1.3;
+/** Portrait tile face depth/width ratio (reference ~1.25:1). */
+export const TILE_ASPECT_DEPTH = 1.25;
 
 /** Visual tile footprint (slightly smaller than 2 half-cells for a gap). */
 export const TILE_WIDTH = HALF_CELL * 2 * 0.76;
@@ -17,9 +17,9 @@ export const LAYER_HEIGHT = TILE_THICKNESS * 0.92;
 /** Rounded tile corner radius as a fraction of TILE_WIDTH. */
 export const TILE_CORNER_RADIUS = TILE_WIDTH * 0.16;
 
-/** Gap fraction between neighbouring tiles. Small but enough to keep a thin tile's
- *  raised body from occluding the face of the tile behind it at the camera tilt. */
-export const TILE_GAP = 0.1;
+/** Gap fraction between neighbouring tiles. Near-zero so tiles pack flush like
+ *  the reference game. */
+export const TILE_GAP = 0.02;
 
 /** Per-axis half-cell world step so neighbouring tiles sit flush (a tile spans 2 half-cells). */
 export const CELL_HALF_X = (TILE_WIDTH * (1 + TILE_GAP)) / 2;
@@ -29,14 +29,20 @@ export const CELL_HALF_Z = (TILE_DEPTH * (1 + TILE_GAP)) / 2;
 export const SYMBOL_SCALE = 1.0;
 
 /** Tile face texture resolution (pixels), portrait to match TILE_ASPECT_DEPTH. */
-export const SYMBOL_TEXTURE_WIDTH = 224;
-export const SYMBOL_TEXTURE_HEIGHT = 291;
+export const SYMBOL_TEXTURE_WIDTH = 256;
+export const SYMBOL_TEXTURE_HEIGHT = 320;
 
 /** Maximum distinct tile faces (see data/tileSet.ts). */
 export const FACE_COUNT = 42;
 
 /** Free hints granted per level (extra hints will be purchasable later). */
 export const HINTS_PER_LEVEL = 1;
+
+/** Free shuffles granted per level (reassigns remaining faces, stays solvable). */
+export const SHUFFLES_PER_LEVEL = 2;
+
+/** Free undos granted per level (returns the last unmatched tray tile to the board). */
+export const UNDOS_PER_LEVEL = 3;
 
 /** Maximum tiles the top tray can hold; reaching this many distinct tiles ends the game. */
 export const TRAY_CAPACITY = 4;

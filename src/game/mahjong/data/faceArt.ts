@@ -1,12 +1,12 @@
 /**
  * Preloads and caches the generated PNG art for the decorative tile faces
- * (flowers 34-37, seasons 38-41) so faceRenderer can composite them
+ * (gold tile 33, friendly animals 34-37) so faceRenderer can composite them
  * synchronously onto the glossy tile background.
  */
 import { MAHJONG_FACE_ART_BASE_URL } from '../constants/graphicsConstants.js';
 
-/** Face ids that have generated artwork (flowers and seasons). */
-export const ART_FACE_IDS: readonly number[] = [34, 35, 36, 37, 38, 39, 40, 41];
+/** Face ids that have generated artwork (gold treasure + friendly animals). */
+export const ART_FACE_IDS: readonly number[] = [33, 34, 35, 36, 37];
 
 const artCache = new Map<number, HTMLImageElement>();
 let loaded = false;

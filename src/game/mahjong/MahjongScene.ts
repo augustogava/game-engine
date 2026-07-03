@@ -19,10 +19,15 @@ import { TileInputSystem } from './systems/TileInputSystem.js';
 import { TraySystem } from './systems/TraySystem.js';
 import { UiSystem } from './systems/UiSystem.js';
 import { computeIqGain, computePoints, finalizeIq } from './constants/scoreConstants.js';
-import { HINTS_PER_LEVEL } from './constants/gameConstants.js';
-import { GAME_STATE, type GameState, type LeaderboardEntry, type MahjongUser, type WinResult } from './types/index.js';
+import { HINTS_PER_LEVEL, SHUFFLES_PER_LEVEL, UNDOS_PER_LEVEL } from './constants/gameConstants.js';
+import { GAME_STATE, type GameState, type LeaderboardEntry, type MahjongUser, type SlotPosition, type WinResult } from './types/index.js';
 
 const USER_ID_KEY = 'mahjong_user_id';
+
+interface UndoState {
+    slot: SlotPosition;
+    faceId: number;
+}
 
 export class MahjongScene extends Scene3D {
     bjs!: any;
@@ -48,6 +53,9 @@ export class MahjongScene extends Scene3D {
     private levelStartMs = 0;
     private elapsedMs = 0;
     private hintsRemaining = 0;
+    private shufflesRemaining = 0;
+    private undosRemaining = 0;
+    private undoState: UndoState | null = null;
     private liveIq = 0;
     private combo = 0;
     private lastMatchMs = 0;
@@ -151,6 +159,11 @@ export class MahjongScene extends Scene3D {
         this.ui.setLevel(level);
         this.hintsRemaining = HINTS_PER_LEVEL;
         this.ui.setHints(this.hintsRemaining);
+        this.shufflesRemaining = SHUFFLES_PER_LEVEL;
+        this.ui.setShuffles(this.shufflesRemaining);
+        this.undosRemaining = UNDOS_PER_LEVEL;
+        this.ui.setUndos(this.undosRemaining);
+        this.undoState = null;
         this.liveIq = 0;
         this.combo = 0;
         this.ui.setLiveIq(0);
@@ -181,6 +194,52 @@ export class MahjongScene extends Scene3D {
         this.tileInput.hint();
     }
 
+    /** Reassigns the faces of the remaining tiles; the deal stays solvable. */
+    requestShuffle(): void {
+        if (this.state !== GAME_STATE.PLAYING) return;
+        if (this.shufflesRemaining <= 0) {
+            this.notify('Sem embaralhadas neste nível');
+            return;
+        }
+        const live = this.board.liveTiles();
+        if (live.length === 0) return;
+        const faces = this.layout.reshuffleFaces(live.map(t => t.pos), this.tray.faces(), this.level);
+        if (!faces) {
+            this.notify('Não foi possível embaralhar agora');
+            return;
+        }
+        this.board.applyFaces(faces);
+        this.shufflesRemaining--;
+        this.ui.setShuffles(this.shufflesRemaining);
+        this.undoState = null;
+        this.audio.select();
+        console.debug('[MahjongScene] Board reshuffled');
+    }
+
+    /** Returns the last unmatched tray tile back to its board slot. */
+    requestUndo(): void {
+        if (this.state !== GAME_STATE.PLAYING) return;
+        if (this.undosRemaining <= 0) {
+            this.notify('Sem desfazer neste nível');
+            return;
+        }
+        if (!this.undoState) {
+            this.notify('Nada para desfazer');
+            return;
+        }
+        const faceId = this.tray.removeLast();
+        if (faceId === null) {
+            this.undoState = null;
+            return;
+        }
+        this.board.restoreTile(this.undoState.slot, this.undoState.faceId);
+        this.undoState = null;
+        this.undosRemaining--;
+        this.ui.setUndos(this.undosRemaining);
+        this.reframeBoard();
+        this.audio.select();
+    }
+
     notify(message: string): void {
         this.ui.notify(message);
     }
@@ -196,36 +255,52 @@ export class MahjongScene extends Scene3D {
         this.camera.frameBoard(bounds.width, bounds.depth, bounds.center);
     }
 
-    /** Routes a tile tapped off the board into the tray and reacts to the result. */
+    /** Routes a tile tapped off the board into the tray and reacts to the result.
+     *  Sounds, VFX and win/lose overlays are deferred until the fly-to-tray
+     *  animation lands, so the presentation follows the visible tile. */
     handleTrayAdd(faceId: number): void {
         if (this.state !== GAME_STATE.PLAYING) return;
         this.reframeBoard();
-        const result = this.tray.add(faceId);
+        const origin = this.board.lastTakenScreen;
+        const takenPos = this.board.lastTakenPos ? this.board.lastTakenPos.clone() : null;
+        const fx = { combo: 0, gain: 0 };
+
+        const result = this.tray.add(faceId, origin, (settled) => {
+            if (this.state !== GAME_STATE.PLAYING) return;
+            if (settled === 'match') {
+                if (takenPos) this.vfx.burst(takenPos, fx.combo);
+                this.audio.match();
+                this.ui.showIqGain(fx.gain);
+                this.ui.showComboPraise(fx.combo);
+                this.onMatch();
+                if (this.board.remainingCount() === 0 && this.tray.isEmpty()) {
+                    void this.onWin();
+                }
+            } else if (settled === 'overflow') {
+                this.audio.error();
+                void this.onLose();
+            } else {
+                this.audio.select();
+            }
+        });
 
         if (result === 'match') {
             this.combo++;
             const now = performance.now();
             const sinceLastMatch = now - this.lastMatchMs;
             this.lastMatchMs = now;
-            this.liveIq += computeIqGain(this.level, sinceLastMatch, this.combo);
+            const gain = computeIqGain(this.level, sinceLastMatch, this.combo);
+            this.liveIq += gain;
             this.ui.setLiveIq(this.liveIq);
-            if (this.board.lastTakenPos) this.vfx.burst(this.board.lastTakenPos, this.combo);
-            this.audio.match();
-            this.onMatch();
-
-            if (this.board.remainingCount() === 0 && this.tray.isEmpty()) {
-                void this.onWin();
-            }
+            fx.combo = this.combo;
+            fx.gain = gain;
+            this.undoState = null;
             return;
         }
 
-        if (result === 'overflow') {
-            this.audio.error();
-            void this.onLose();
-            return;
+        if (result === 'added' && this.board.lastTakenSlot) {
+            this.undoState = { slot: this.board.lastTakenSlot, faceId };
         }
-
-        this.audio.select();
     }
 
     async onWin(): Promise<void> {

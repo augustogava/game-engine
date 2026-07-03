@@ -7,6 +7,21 @@ const TOAST_DURATION_MS = 2200;
 const IQ_DELTA_EPSILON = 0.05;
 const MILESTONE_STEP = 10;
 
+/** Live IQ value that fills the top progress bar completely. */
+const IQ_BAR_TARGET = 150;
+
+const IQ_FLOAT_DURATION_MS = 1300;
+const COMBO_POP_DURATION_MS = 1400;
+
+/** Minimum combo streak that triggers the praise popup. */
+const COMBO_PRAISE_MIN = 2;
+
+function praiseFor(combo: number): string {
+    if (combo >= 8) return 'Excelente!';
+    if (combo >= 5) return 'Ótimo!';
+    return 'Bom!';
+}
+
 interface ResultTier {
     title: string;
     phrase: string;
@@ -36,6 +51,7 @@ export class UiSystem {
     private game: MahjongScene;
     private lastTimeSec = -1;
     private toastTimer: number | null = null;
+    private comboTimer: number | null = null;
 
     constructor(game: MahjongScene) {
         this.game = game;
@@ -43,6 +59,8 @@ export class UiSystem {
 
     init(): void {
         el<HTMLButtonElement>('mj-btn-hint').addEventListener('click', () => this.game.requestHint());
+        el<HTMLButtonElement>('mj-btn-shuffle').addEventListener('click', () => this.game.requestShuffle());
+        el<HTMLButtonElement>('mj-btn-undo').addEventListener('click', () => this.game.requestUndo());
         el<HTMLButtonElement>('mj-btn-restart').addEventListener('click', () => this.game.restartLevel());
         el<HTMLButtonElement>('mj-btn-sound').addEventListener('click', () => this.toggleSound());
 
@@ -118,14 +136,52 @@ export class UiSystem {
     }
 
     setHints(remaining: number): void {
-        const btn = el<HTMLButtonElement>('mj-btn-hint');
-        el('mj-hint-badge').textContent = String(remaining);
+        this.setBadgeButton('mj-btn-hint', 'mj-hint-badge', remaining);
+    }
+
+    setShuffles(remaining: number): void {
+        this.setBadgeButton('mj-btn-shuffle', 'mj-shuffle-badge', remaining);
+    }
+
+    setUndos(remaining: number): void {
+        this.setBadgeButton('mj-btn-undo', 'mj-undo-badge', remaining);
+    }
+
+    private setBadgeButton(buttonId: string, badgeId: string, remaining: number): void {
+        const btn = el<HTMLButtonElement>(buttonId);
+        el(badgeId).textContent = String(remaining);
         btn.disabled = remaining <= 0;
         btn.classList.toggle('mj-disabled', remaining <= 0);
     }
 
     setLiveIq(value: number): void {
         el('mj-iq').textContent = value.toFixed(1);
+        const pct = Math.max(0, Math.min(100, (value / IQ_BAR_TARGET) * 100));
+        el<HTMLDivElement>('mj-iq-bar-fill').style.width = `${pct}%`;
+    }
+
+    /** Floating "+X.X" IQ gain next to the IQ bar on each match. */
+    showIqGain(gain: number): void {
+        if (gain <= 0) return;
+        const host = el('mj-iq-bar');
+        const float = document.createElement('div');
+        float.className = 'mj-iq-float';
+        float.textContent = `+${gain.toFixed(1)}`;
+        host.appendChild(float);
+        window.setTimeout(() => { try { float.remove(); } catch (_) { /* ignore */ } }, IQ_FLOAT_DURATION_MS);
+    }
+
+    /** Praise popup ("Bom!" / "Ótimo!" / "Excelente!" + Combo xN) under the tray. */
+    showComboPraise(combo: number): void {
+        if (combo < COMBO_PRAISE_MIN) return;
+        const pop = el('mj-combo-pop');
+        el('mj-combo-praise').textContent = praiseFor(combo);
+        el('mj-combo-count').textContent = `Combo x${combo}`;
+        pop.classList.remove('hidden', 'mj-combo-show');
+        void (pop as HTMLElement).offsetWidth;
+        pop.classList.add('mj-combo-show');
+        if (this.comboTimer) window.clearTimeout(this.comboTimer);
+        this.comboTimer = window.setTimeout(() => pop.classList.add('hidden'), COMBO_POP_DURATION_MS);
     }
 
     updateTimer(timeMs: number): void {
@@ -261,5 +317,6 @@ export class UiSystem {
 
     dispose(): void {
         if (this.toastTimer) window.clearTimeout(this.toastTimer);
+        if (this.comboTimer) window.clearTimeout(this.comboTimer);
     }
 }

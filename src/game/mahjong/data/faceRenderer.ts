@@ -7,17 +7,20 @@ import { TILE_FACES } from './tileSet.js';
 import { getFaceArt } from './faceArt.js';
 import { TILE_GROUP } from '../types/index.js';
 
-const PIP_STEP_X = 0.16;
-const PIP_STEP_Y = 0.14;
-const BAR_STEP_X = 0.14;
-const BAR_STEP_Y = 0.18;
+const PIP_STEP_X = 0.26;
+const PIP_STEP_Y = 0.22;
+const BAR_STEP_X = 0.24;
+const BAR_STEP_Y = 0.28;
 
-/** Fraction of the tile occupied by composited face art. */
-const ART_FILL = 0.84;
+/** Fraction of the tile occupied by composited face art (near full-bleed like the reference). */
+const ART_FILL = 0.94;
 /** Corner radius of the panel as a fraction of the shorter side (matches the tile mesh). */
 const PANEL_RADIUS = 0.16;
 /** Inset of the panel from the tile edge (0 = fills to the rounded border, no padding). */
 const PANEL_PAD = 0;
+
+/** White-dragon slot renders as the gold treasure tile (reference gold tiles). */
+const GOLD_FACE_ID = 33;
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
     ctx.beginPath();
@@ -29,44 +32,32 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
     ctx.closePath();
 }
 
-/** Subtle per-group panel palette so the board reads colorful, not all-white. */
+/** Panel palette: white glossy for regular tiles, solid green / gold for special ones. */
 interface PanelPalette {
-    base: string;
     top: string;
     mid: string;
     bottom: string;
     stroke: string;
 }
 
-function getPanelPalette(group: number): PanelPalette {
-    switch (group) {
-        case TILE_GROUP.SUIT_BAMBOO:
-            return { base: '#e7f6ea', top: '#e2f6e6', mid: '#c2ead0', bottom: '#a4dcb6', stroke: 'rgba(36,92,54,0.32)' };
-        case TILE_GROUP.SUIT_DOTS:
-            return { base: '#eaf2ff', top: '#f4f9ff', mid: '#dce9ff', bottom: '#c2d8f6', stroke: 'rgba(40,78,140,0.30)' };
-        case TILE_GROUP.SUIT_CHAR:
-            return { base: '#fff4ec', top: '#fffaf4', mid: '#ffe9d6', bottom: '#f7d6bd', stroke: 'rgba(150,90,60,0.30)' };
-        case TILE_GROUP.WIND:
-            return { base: '#f0eefb', top: '#f7f5ff', mid: '#e4def6', bottom: '#cfc6ec', stroke: 'rgba(70,60,140,0.30)' };
-        case TILE_GROUP.DRAGON:
-            return { base: '#fdeef0', top: '#fff6f7', mid: '#f7dde2', bottom: '#eec6cd', stroke: 'rgba(140,60,70,0.30)' };
-        case TILE_GROUP.FLOWER:
-            return { base: '#fdecf5', top: '#fff5fb', mid: '#f9d9ea', bottom: '#f0c0db', stroke: 'rgba(150,50,100,0.30)' };
-        case TILE_GROUP.SEASON:
-            return { base: '#e8f7f8', top: '#f3fcfd', mid: '#d4eef0', bottom: '#b9e2e5', stroke: 'rgba(40,120,128,0.30)' };
-        default:
-            return { base: '#ffffff', top: '#ffffff', mid: '#f3f6fb', bottom: '#dfe6ef', stroke: 'rgba(120,132,154,0.32)' };
-    }
+const PANEL_WHITE: PanelPalette = { top: '#ffffff', mid: '#f6f8fb', bottom: '#e4e9f1', stroke: 'rgba(120,132,154,0.28)' };
+const PANEL_GREEN: PanelPalette = { top: '#8ce464', mid: '#43c341', bottom: '#1f9a34', stroke: 'rgba(18,88,30,0.5)' };
+const PANEL_GOLD: PanelPalette = { top: '#ffe9a8', mid: '#f7cd54', bottom: '#dfa72c', stroke: 'rgba(142,96,12,0.45)' };
+
+function getPanelPalette(faceId: number, group: number): PanelPalette {
+    if (faceId === GOLD_FACE_ID) return PANEL_GOLD;
+    if (group === TILE_GROUP.SEASON) return PANEL_GREEN;
+    return PANEL_WHITE;
 }
 
-/** Draws the glossy "glass" tile body: rounded portrait panel, vertical sheen, edge. */
-function drawTileBackground(ctx: CanvasRenderingContext2D, W: number, H: number, group: number): void {
+/** Draws the glossy tile body: rounded portrait panel, vertical sheen, edge. */
+function drawTileBackground(ctx: CanvasRenderingContext2D, W: number, H: number, faceId: number, group: number): void {
     const ref = Math.min(W, H);
     const r = ref * PANEL_RADIUS;
     const pad = ref * PANEL_PAD;
     const w = W - pad * 2;
     const h = H - pad * 2;
-    const palette = getPanelPalette(group);
+    const palette = getPanelPalette(faceId, group);
 
     ctx.clearRect(0, 0, W, H);
 
@@ -95,6 +86,17 @@ function drawTileBackground(ctx: CanvasRenderingContext2D, W: number, H: number,
     ctx.stroke();
 }
 
+/** Inner bevel highlight for the blank solid-color block tiles (green blocks). */
+function drawBlockBevel(ctx: CanvasRenderingContext2D, W: number, H: number): void {
+    const ref = Math.min(W, H);
+    const inset = ref * 0.09;
+    const r = ref * (PANEL_RADIUS * 0.8);
+    roundRectPath(ctx, inset, inset, W - inset * 2, H - inset * 2, r);
+    ctx.lineWidth = Math.max(2, ref * 0.03);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.stroke();
+}
+
 /** Composites a preloaded face-art image centered and aspect-fit on the tile. */
 function drawArt(ctx: CanvasRenderingContext2D, img: HTMLImageElement, W: number, H: number): void {
     const iw = img.naturalWidth || img.width;
@@ -112,7 +114,7 @@ function drawPips(ctx: CanvasRenderingContext2D, count: number, color: string, W
     const cols = count <= 3 ? 1 : (count <= 6 ? 2 : 3);
     const rows = Math.ceil(count / cols);
     const ref = Math.min(W, H);
-    const r = ref * 0.07;
+    const r = count === 1 ? ref * 0.24 : ref * 0.105;
     const marginY = H * 0.5 - ((rows - 1) * H * PIP_STEP_Y) / 2;
     let drawn = 0;
     for (let row = 0; row < rows; row++) {
@@ -125,7 +127,7 @@ function drawPips(ctx: CanvasRenderingContext2D, count: number, color: string, W
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fillStyle = color;
             ctx.fill();
-            ctx.lineWidth = 3;
+            ctx.lineWidth = Math.max(2, ref * 0.016);
             ctx.strokeStyle = 'rgba(0,0,0,0.25)';
             ctx.stroke();
             drawn++;
@@ -137,8 +139,8 @@ function drawBars(ctx: CanvasRenderingContext2D, count: number, color: string, W
     const cols = count <= 3 ? count : (count <= 6 ? 3 : Math.ceil(count / 3));
     const rows = Math.ceil(count / cols);
     const ref = Math.min(W, H);
-    const barW = ref * 0.05;
-    const barH = ref * 0.18;
+    const barW = ref * 0.1;
+    const barH = ref * 0.26;
     let drawn = 0;
     for (let row = 0; row < rows; row++) {
         const inThisRow = Math.min(cols, count - drawn);
@@ -147,9 +149,11 @@ function drawBars(ctx: CanvasRenderingContext2D, count: number, color: string, W
         for (let c = 0; c < inThisRow; c++) {
             const x = rowStartX + c * W * BAR_STEP_X;
             ctx.fillStyle = color;
-            ctx.fillRect(x - barW / 2, y - barH / 2, barW, barH);
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.fillRect(x - barW / 2, y - barH / 2, barW, barH * 0.18);
+            ctx.beginPath();
+            roundRectPath(ctx, x - barW / 2, y - barH / 2, barW, barH, barW * 0.4);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(0,0,0,0.28)';
+            ctx.fillRect(x - barW / 2, y - barH * 0.08, barW, barH * 0.16);
             drawn++;
         }
     }
@@ -160,7 +164,13 @@ export function drawTileFace(ctx: CanvasRenderingContext2D, faceId: number, W: n
     const face = TILE_FACES[faceId];
     if (!face) return;
 
-    drawTileBackground(ctx, W, H, face.group);
+    drawTileBackground(ctx, W, H, faceId, face.group);
+
+    // Blank solid green blocks (season group) match by look alone, like the reference.
+    if (face.group === TILE_GROUP.SEASON) {
+        drawBlockBevel(ctx, W, H);
+        return;
+    }
 
     const art = getFaceArt(faceId);
     if (art) {
@@ -178,12 +188,12 @@ export function drawTileFace(ctx: CanvasRenderingContext2D, faceId: number, W: n
     } else if (face.group === TILE_GROUP.SUIT_BAMBOO) {
         drawBars(ctx, face.bars, face.color, W, H);
     } else if (face.group === TILE_GROUP.SUIT_CHAR) {
-        ctx.font = `bold ${Math.round(ref * 0.5)}px serif`;
-        ctx.fillText(face.glyph, W / 2, H * 0.38);
-        ctx.font = `bold ${Math.round(ref * 0.28)}px serif`;
-        ctx.fillText('萬', W / 2, H * 0.74);
+        ctx.font = `bold ${Math.round(ref * 0.62)}px serif`;
+        ctx.fillText(face.glyph, W / 2, H * 0.34);
+        ctx.font = `bold ${Math.round(ref * 0.34)}px serif`;
+        ctx.fillText('萬', W / 2, H * 0.76);
     } else {
-        ctx.font = `bold ${Math.round(ref * 0.58)}px serif`;
-        ctx.fillText(face.glyph, W / 2, H / 2 + ref * 0.02);
+        ctx.font = `bold ${Math.round(ref * 0.8)}px serif`;
+        ctx.fillText(face.glyph, W / 2, H / 2 + ref * 0.03);
     }
 }

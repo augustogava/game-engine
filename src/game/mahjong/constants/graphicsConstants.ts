@@ -1,7 +1,7 @@
 /** Rendering / effect tuning constants. */
 
-export const TILE_BASE_COLOR = '#e7edf4';
-export const TILE_SIDE_COLOR = '#dde4ec';
+export const TILE_BASE_COLOR = '#f3f6fa';
+export const TILE_SIDE_COLOR = '#e3e9f0';
 export const TILE_BLOCKED_TINT = 0.62;
 
 /** Glass/gloss tuning for the tile body material. */

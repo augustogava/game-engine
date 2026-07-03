@@ -7,7 +7,7 @@ import type { MahjongScene } from '../MahjongScene.js';
 import type { GeneratedLevel } from './LayoutSystem.js';
 import { buildFilledCells, isSlotFree } from './LayoutSystem.js';
 import { drawTileFace } from '../data/faceRenderer.js';
-import { type Tile } from '../types/index.js';
+import { type SlotPosition, type Tile } from '../types/index.js';
 import {
     CELL_HALF_X, CELL_HALF_Z, LAYER_HEIGHT, SYMBOL_SCALE, SYMBOL_TEXTURE_HEIGHT, SYMBOL_TEXTURE_WIDTH,
     TILE_CORNER_RADIUS, TILE_DEPTH, TILE_THICKNESS, TILE_WIDTH,
@@ -16,8 +16,16 @@ import {
     HINT_HIGHLIGHT_COLOR, SELECT_HIGHLIGHT_COLOR, TILE_BASE_COLOR, TILE_SPECULAR_POWER,
 } from '../constants/graphicsConstants.js';
 
-const REMOVE_ANIM_MS = 260;
+const REMOVE_ANIM_MS = 150;
 const HINT_DURATION_MS = 900;
+
+/** Screen-space info of a taken tile, for the DOM fly-to-tray animation. */
+export interface TakenTileScreenInfo {
+    x: number;
+    y: number;
+    widthPx: number;
+    heightPx: number;
+}
 
 /** Number of segments used to round each of the 4 vertical tile corners. */
 const CORNER_SEGMENTS = 6;
@@ -107,10 +115,18 @@ export class BoardSystem {
     /** World position of the most recently taken tile (for match VFX). */
     lastTakenPos: BABYLON.Vector3 | null = null;
 
+    /** Screen-space position of the most recently taken tile (for the fly-to-tray animation). */
+    lastTakenScreen: TakenTileScreenInfo | null = null;
+
+    /** Slot of the most recently taken tile (for undo). */
+    lastTakenSlot: SlotPosition | null = null;
+
     private hoverId: number | null = null;
     private selectedId: number | null = null;
     private hintTimer: number | null = null;
     private nextTileId = 1;
+    private centerX = 0;
+    private centerZ = 0;
 
     constructor(game: MahjongScene) {
         this.game = game;
@@ -156,46 +172,69 @@ export class BoardSystem {
             maxX = Math.max(maxX, cx); minX = Math.min(minX, cx);
             maxZ = Math.max(maxZ, cz); minZ = Math.min(minZ, cz);
         }
-        const centerX = sumX / slots.length;
-        const centerZ = sumZ / slots.length;
+        this.centerX = sumX / slots.length;
+        this.centerZ = sumZ / slots.length;
         this.boardRadius = Math.max(maxX - minX, maxZ - minZ) + CELL_HALF_X * 4;
 
         for (let i = 0; i < slots.length; i++) {
-            const slot = slots[i];
-            const faceId = level.faceByIndex[i];
-            const worldX = (slot.gx + 1) * CELL_HALF_X - centerX;
-            const worldZ = (slot.gy + 1) * CELL_HALF_Z - centerZ;
-            const worldY = slot.layer * LAYER_HEIGHT + TILE_THICKNESS / 2;
-
-            const box = createRoundedTileMesh(`tile-${i}`, TILE_WIDTH, TILE_DEPTH, TILE_THICKNESS, TILE_CORNER_RADIUS, this.bjs);
-            box.parent = this.root;
-            box.position.set(worldX, worldY, worldZ);
-            box.material = this.tileMat;
-            box.isPickable = true;
-
-            const symbol = BABYLON.MeshBuilder.CreatePlane(`sym-${i}`, {
-                width: TILE_WIDTH * SYMBOL_SCALE,
-                height: TILE_DEPTH * SYMBOL_SCALE,
-            }, this.bjs);
-            symbol.parent = this.root;
-            symbol.rotation.x = -Math.PI / 2;
-            symbol.position.set(worldX, worldY + TILE_THICKNESS / 2 + 0.012, worldZ);
-            symbol.material = this.getSymbolMaterial(faceId);
-            symbol.isPickable = false;
-
-            const tile: Tile = {
-                id: this.nextTileId++,
-                faceId,
-                pos: slot,
-                removed: false,
-                mesh: box,
-                symbolMesh: symbol,
-            };
-            box.metadata = { tileId: tile.id };
-            this.tiles.push(tile);
+            this.createTile(slots[i], level.faceByIndex[i]);
         }
 
         this.recomputeFree();
+    }
+
+    /** Creates one tile (body + symbol) at its slot and registers it. */
+    private createTile(slot: SlotPosition, faceId: number): Tile {
+        const worldX = (slot.gx + 1) * CELL_HALF_X - this.centerX;
+        const worldZ = (slot.gy + 1) * CELL_HALF_Z - this.centerZ;
+        const worldY = slot.layer * LAYER_HEIGHT + TILE_THICKNESS / 2;
+        const id = this.nextTileId++;
+
+        const box = createRoundedTileMesh(`tile-${id}`, TILE_WIDTH, TILE_DEPTH, TILE_THICKNESS, TILE_CORNER_RADIUS, this.bjs);
+        box.parent = this.root;
+        box.position.set(worldX, worldY, worldZ);
+        box.material = this.tileMat;
+        box.isPickable = true;
+
+        const symbol = BABYLON.MeshBuilder.CreatePlane(`sym-${id}`, {
+            width: TILE_WIDTH * SYMBOL_SCALE,
+            height: TILE_DEPTH * SYMBOL_SCALE,
+        }, this.bjs);
+        symbol.parent = this.root;
+        symbol.rotation.x = -Math.PI / 2;
+        symbol.position.set(worldX, worldY + TILE_THICKNESS / 2 + 0.012, worldZ);
+        symbol.material = this.getSymbolMaterial(faceId);
+        symbol.isPickable = false;
+
+        const tile: Tile = { id, faceId, pos: slot, removed: false, mesh: box, symbolMesh: symbol };
+        box.metadata = { tileId: tile.id };
+        this.tiles.push(tile);
+        return tile;
+    }
+
+    /** Puts a previously taken tile back on its slot (undo). */
+    restoreTile(slot: SlotPosition, faceId: number): void {
+        this.createTile(slot, faceId);
+        this.recomputeFree();
+    }
+
+    /** Live (non-removed) tiles in board order. */
+    liveTiles(): Tile[] {
+        return this.tiles.filter(t => !t.removed);
+    }
+
+    /** Swaps the faces of live tiles in place (shuffle). Order matches liveTiles(). */
+    applyFaces(faceByLiveIndex: number[]): void {
+        const live = this.liveTiles();
+        if (faceByLiveIndex.length !== live.length) {
+            console.warn('[BoardSystem] applyFaces length mismatch, skipping');
+            return;
+        }
+        for (let i = 0; i < live.length; i++) {
+            const tile = live[i];
+            tile.faceId = faceByLiveIndex[i];
+            tile.symbolMesh.material = this.getSymbolMaterial(tile.faceId);
+        }
     }
 
     private getSymbolMaterial(faceId: number): BABYLON.StandardMaterial {
@@ -298,12 +337,43 @@ export class BoardSystem {
         if (!tile) return null;
         tile.removed = true;
         this.lastTakenPos = tile.mesh.getAbsolutePosition().clone();
+        this.lastTakenScreen = this.projectTileToScreen(tile);
+        this.lastTakenSlot = tile.pos;
         this.highlight.removeMesh(tile.mesh);
         if (this.selectedId === tileId) this.selectedId = null;
         if (this.hoverId === tileId) this.hoverId = null;
         this.animateOut(tile);
         this.recomputeFree();
         return tile.faceId;
+    }
+
+    /** Projects a tile's center to client (CSS pixel) coordinates for DOM animations. */
+    private projectTileToScreen(tile: Tile): TakenTileScreenInfo | null {
+        const engine = this.bjs.getEngine();
+        const canvas = engine.getRenderingCanvas();
+        const camera = this.bjs.activeCamera;
+        if (!canvas || !camera) return null;
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        const renderW = engine.getRenderWidth();
+        const renderH = engine.getRenderHeight();
+
+        const world = tile.mesh.getAbsolutePosition();
+        const project = (p: BABYLON.Vector3) => BABYLON.Vector3.Project(
+            p,
+            BABYLON.Matrix.Identity(),
+            this.bjs.getTransformMatrix(),
+            camera.viewport.toGlobal(renderW, renderH),
+        );
+        const center = project(world);
+        const edge = project(world.add(new BABYLON.Vector3(TILE_WIDTH / 2, 0, 0)));
+        const widthPx = Math.abs(edge.x - center.x) * 2 / renderW * rect.width;
+        return {
+            x: rect.left + (center.x / renderW) * rect.width,
+            y: rect.top + (center.y / renderH) * rect.height,
+            widthPx: Math.max(12, widthPx),
+            heightPx: Math.max(12, widthPx * (TILE_DEPTH / TILE_WIDTH)),
+        };
     }
 
     removeTiles(idA: number, idB: number, onMidpoint?: (positions: BABYLON.Vector3[]) => void): void {
@@ -321,8 +391,9 @@ export class BoardSystem {
         this.recomputeFree();
     }
 
+    /** Quick pickup pop: the DOM clone flying to the tray takes over visually. */
     private animateOut(tile: Tile): void {
-        const frames = 30;
+        const frames = 12;
         const fps = frames / (REMOVE_ANIM_MS / 1000);
         const ease = new BABYLON.QuadraticEase();
         ease.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEIN);
@@ -331,13 +402,14 @@ export class BoardSystem {
             const scaleAnim = new BABYLON.Animation('rm-scale', 'scaling', fps, BABYLON.Animation.ANIMATIONTYPE_VECTOR3, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
             scaleAnim.setKeys([
                 { frame: 0, value: mesh.scaling.clone() },
+                { frame: frames * 0.35, value: mesh.scaling.scale(1.08) },
                 { frame: frames, value: new BABYLON.Vector3(0.01, 0.01, 0.01) },
             ]);
             scaleAnim.setEasingFunction(ease);
             const posAnim = new BABYLON.Animation('rm-pos', 'position.y', fps, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
             posAnim.setKeys([
                 { frame: 0, value: mesh.position.y },
-                { frame: frames, value: mesh.position.y + 1.2 },
+                { frame: frames, value: mesh.position.y + 0.5 },
             ]);
             const isBase = mesh === tile.mesh;
             this.bjs.beginDirectAnimation(mesh, [scaleAnim, posAnim], 0, frames, false, 1, () => {
@@ -393,6 +465,9 @@ export class BoardSystem {
         this.freeIds = new Set();
         this.hoverId = null;
         this.selectedId = null;
+        this.lastTakenPos = null;
+        this.lastTakenScreen = null;
+        this.lastTakenSlot = null;
     }
 
     dispose(): void {

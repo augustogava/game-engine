@@ -84,9 +84,66 @@ body {
 }
 #mj-btn-menu:hover { color: var(--gold); border-color: var(--gold); }
 
+/* IQ progress bar (below HUD) */
+#mj-iq-bar {
+    position: fixed; top: calc(64px + var(--safe-top)); left: 50%; transform: translateX(-50%); z-index: 30;
+    width: min(60vw, 260px); height: 10px; border-radius: 6px;
+    background: rgba(10, 22, 17, 0.85); border: 1px solid rgba(168, 108, 230, 0.55);
+    box-shadow: inset 0 0 8px rgba(0,0,0,0.6), 0 0 14px rgba(168,108,230,0.25);
+    pointer-events: none;
+}
+#mj-iq-bar-fill {
+    height: 100%; width: 0%; border-radius: 6px;
+    background: linear-gradient(90deg, #7b3fe4, #b76dff);
+    box-shadow: 0 0 10px rgba(168,108,230,0.8);
+    transition: width 0.35s ease;
+}
+.mj-iq-float {
+    position: absolute; right: -8px; top: -6px; transform: translateY(0);
+    color: #d9b3ff; font-family: var(--font-display); font-weight: 700;
+    font-size: clamp(14px, 4vw, 18px); text-shadow: 0 0 12px rgba(168,108,230,0.9);
+    pointer-events: none; animation: mjIqFloat 1.25s ease-out forwards;
+}
+@keyframes mjIqFloat {
+    0% { transform: translateY(6px); opacity: 0; }
+    18% { opacity: 1; }
+    100% { transform: translateY(-34px); opacity: 0; }
+}
+
+/* Combo praise popup (below tray) */
+#mj-combo-pop {
+    position: fixed; top: calc(178px + var(--safe-top)); left: 50%; transform: translateX(-50%); z-index: 32;
+    text-align: center; pointer-events: none;
+}
+#mj-combo-praise {
+    font-family: var(--font-display); font-weight: 700; font-size: clamp(22px, 7vw, 30px); letter-spacing: 2px;
+    color: #e3c2ff; text-shadow: 0 0 18px rgba(168,108,230,1), 0 0 40px rgba(123,63,228,0.7);
+}
+#mj-combo-count {
+    margin-top: 2px; font-family: var(--font-display); font-size: clamp(13px, 4vw, 16px); letter-spacing: 1px;
+    color: var(--gold-bright); text-shadow: 0 0 12px rgba(231,200,115,0.8);
+}
+.mj-combo-show { animation: mjComboPop 1.4s ease-out forwards; }
+@keyframes mjComboPop {
+    0% { transform: translateX(-50%) scale(0.4); opacity: 0; }
+    16% { transform: translateX(-50%) scale(1.12); opacity: 1; }
+    28% { transform: translateX(-50%) scale(1); opacity: 1; }
+    78% { transform: translateX(-50%) scale(1); opacity: 1; }
+    100% { transform: translateX(-50%) scale(0.96) translateY(-10px); opacity: 0; }
+}
+
+/* Tile flying from the board to the tray */
+.mj-tray-fly {
+    position: fixed; z-index: 40; pointer-events: none;
+    border-radius: 7px; overflow: hidden; background: #fbf6e7;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.55);
+    will-change: transform; transform-origin: center;
+}
+.mj-tray-fly canvas { width: 100%; height: 100%; display: block; }
+
 /* Top tray */
 #mj-tray {
-    position: fixed; top: calc(92px + var(--safe-top)); left: 50%; transform: translateX(-50%); z-index: 29;
+    position: fixed; top: calc(100px + var(--safe-top)); left: 50%; transform: translateX(-50%); z-index: 29;
     display: flex; gap: clamp(4px, 1.6vw, 8px); align-items: center; justify-content: center;
     padding: clamp(5px, 1.6vw, 8px); min-height: clamp(54px, 16vw, 78px);
     width: min(86vw, 340px); border-radius: 12px;
@@ -108,11 +165,11 @@ body {
 /* Controls */
 #mj-controls {
     position: fixed; bottom: calc(14px + var(--safe-bottom)); left: 50%; transform: translateX(-50%); z-index: 30;
-    display: flex; gap: clamp(12px, 4vw, 20px); padding: 6px 10px; max-width: calc(100vw - 16px);
+    display: flex; gap: clamp(8px, 2.6vw, 16px); padding: 6px 10px; max-width: calc(100vw - 16px);
     background: none; border: none; box-shadow: none;
 }
 #mj-controls button {
-    position: relative; width: clamp(52px, 15vw, 62px); height: clamp(52px, 15vw, 62px);
+    position: relative; width: clamp(48px, 13vw, 62px); height: clamp(48px, 13vw, 62px);
     border-radius: 50%; cursor: pointer; transition: all 0.12s ease;
     background: radial-gradient(circle at 50% 32%, #2c5d43, #102a1d);
     border: 1px solid rgba(231,200,115,0.45); color: var(--gold-bright);
@@ -243,7 +300,9 @@ body {
 #mj-btn-menu-close { margin-top: 16px; }
 
 @media (orientation: landscape) and (max-height: 520px) {
-    #mj-tray { top: calc(80px + var(--safe-top)); }
+    #mj-iq-bar { top: calc(56px + var(--safe-top)); }
+    #mj-tray { top: calc(84px + var(--safe-top)); }
+    #mj-combo-pop { top: calc(150px + var(--safe-top)); }
     .mj-overlay-box { max-height: calc(100svh - 16px); }
 }
 
@@ -276,14 +335,29 @@ body {
     <div class="mj-stat iq"><span class="lbl">QI</span><span class="val" id="mj-iq">0.0</span></div>
 </div>
 
+<div id="mj-iq-bar"><div id="mj-iq-bar-fill"></div></div>
+
 <button id="mj-btn-menu" type="button" aria-label="Ranking">&#9776;</button>
 
 <div id="mj-tray"></div>
 
+<div id="mj-combo-pop" class="hidden">
+    <div id="mj-combo-praise"></div>
+    <div id="mj-combo-count"></div>
+</div>
+
 <div id="mj-controls">
+    <button id="mj-btn-shuffle" type="button" title="Embaralhar" aria-label="Embaralhar">
+        <span class="mj-icon">&#128256;</span>
+        <span class="mj-badge" id="mj-shuffle-badge">2</span>
+    </button>
     <button id="mj-btn-hint" type="button" title="Dica" aria-label="Dica">
         <span class="mj-icon">&#128161;</span>
         <span class="mj-badge" id="mj-hint-badge">1</span>
+    </button>
+    <button id="mj-btn-undo" type="button" title="Desfazer" aria-label="Desfazer">
+        <span class="mj-icon">&#8617;</span>
+        <span class="mj-badge" id="mj-undo-badge">3</span>
     </button>
     <button id="mj-btn-restart" type="button" title="Reiniciar" aria-label="Reiniciar">
         <span class="mj-icon">&#8635;</span>
