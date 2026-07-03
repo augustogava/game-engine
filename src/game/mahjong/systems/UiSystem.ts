@@ -1,6 +1,6 @@
 /** DOM HUD: email gate, top bar, tray, controls, toast, win/lose screens, menu leaderboard. */
 import type { MahjongScene } from '../MahjongScene.js';
-import type { LeaderboardEntry, MahjongUser, WinResult } from '../types/index.js';
+import type { LeaderboardEntry, MahjongUser, RankInfo, WinResult } from '../types/index.js';
 import { MahjongPrefs } from '../MahjongPrefs.js';
 
 const TOAST_DURATION_MS = 2200;
@@ -15,6 +15,13 @@ const COMBO_POP_DURATION_MS = 1400;
 
 /** Minimum combo streak that triggers the praise popup. */
 const COMBO_PRAISE_MIN = 2;
+
+/** Combo thresholds for escalating match effects. */
+const COMBO_CONFETTI_MIN = 3;
+const COMBO_FLASH_MIN = 5;
+const COMBO_CONFETTI_COUNT = 14;
+const COMBO_CONFETTI_LIFE_MS = 900;
+const FLASH_DURATION_MS = 160;
 
 function praiseFor(combo: number): string {
     if (combo >= 8) return 'Excelente!';
@@ -203,7 +210,71 @@ export class UiSystem {
         this.toastTimer = window.setTimeout(() => toast.classList.remove('show'), TOAST_DURATION_MS);
     }
 
-    showWin(result: WinResult, iqDelta: number): void {
+    /** Escalating combo effects: confetti spray from the tray, then a screen flash. */
+    comboCelebrate(combo: number): void {
+        if (combo >= COMBO_CONFETTI_MIN) this.trayConfetti();
+        if (combo >= COMBO_FLASH_MIN) this.screenFlash();
+    }
+
+    /** Short confetti spray falling from the tray. */
+    private trayConfetti(): void {
+        const tray = document.getElementById('mj-tray');
+        if (!tray) return;
+        const rect = tray.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const colors = ['#e7c873', '#54c79a', '#7fd4f0', '#e2685f', '#f2b632'];
+        for (let i = 0; i < COMBO_CONFETTI_COUNT; i++) {
+            const piece = document.createElement('div');
+            piece.style.cssText = 'position:fixed;z-index:45;pointer-events:none;width:6px;height:10px;border-radius:2px;';
+            piece.style.background = colors[i % colors.length];
+            piece.style.left = `${rect.left + Math.random() * rect.width}px`;
+            piece.style.top = `${rect.bottom}px`;
+            document.body.appendChild(piece);
+            const dx = (Math.random() - 0.5) * 90;
+            const dy = 60 + Math.random() * 90;
+            const rot = (Math.random() - 0.5) * 540;
+            try {
+                piece.animate([
+                    { transform: 'translate(0px, 0px) rotate(0deg)', opacity: 1 },
+                    { transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)`, opacity: 0 },
+                ], { duration: COMBO_CONFETTI_LIFE_MS, easing: 'cubic-bezier(0.2, 0.6, 0.6, 1)', fill: 'forwards' });
+            } catch (_) { /* ignore */ }
+            window.setTimeout(() => { try { piece.remove(); } catch (_) { /* ignore */ } }, COMBO_CONFETTI_LIFE_MS);
+        }
+    }
+
+    /** Subtle full-screen flash for high combos. */
+    private screenFlash(): void {
+        const flash = document.getElementById('mj-flash');
+        if (!flash) return;
+        flash.classList.remove('show');
+        void flash.offsetWidth;
+        flash.classList.add('show');
+        window.setTimeout(() => flash.classList.remove('show'), FLASH_DURATION_MS);
+    }
+
+    /** Fills a rank line (badge + position + promotion hint) on a result overlay. */
+    private renderRank(prefix: 'mj-win' | 'mj-lose', rank: RankInfo | null): void {
+        const line = el(`${prefix}-rank`);
+        if (!rank) {
+            line.classList.add('hidden');
+            return;
+        }
+        line.classList.remove('hidden');
+        const badge = el(`${prefix}-rank-badge`);
+        badge.textContent = `${rank.icon ? `${rank.icon} ` : ''}${rank.rankName}`;
+        badge.style.color = rank.color;
+        badge.style.borderColor = rank.color;
+        el(`${prefix}-rank-pos`).textContent = `Posição #${rank.position} de ${rank.cohortSize} no seu rank`;
+        const hint = el(`${prefix}-rank-hint`);
+        if (rank.rankOrder >= rank.maxRank) {
+            hint.textContent = 'Você alcançou o rank máximo!';
+        } else {
+            hint.textContent = `Top ${rank.rankUpTopN} sobe de rank a cada ${rank.rankUpDays} dia${rank.rankUpDays === 1 ? '' : 's'}`;
+        }
+    }
+
+    showWin(result: WinResult, iqDelta: number, rank: RankInfo | null = null): void {
         const tier = tierFor(result.iq);
         el('mj-win-title').textContent = tier.title;
         el('mj-win-phrase').textContent = tier.phrase;
@@ -216,6 +287,8 @@ export class UiSystem {
         if (iqDelta > IQ_DELTA_EPSILON) { arrow.classList.add('up'); arrow.textContent = '\u25B2'; }
         else if (iqDelta < -IQ_DELTA_EPSILON) { arrow.classList.add('down'); arrow.textContent = '\u25BC'; }
         else { arrow.textContent = ''; }
+
+        this.renderRank('mj-win', rank);
 
         const { milestone, progressPct } = milestoneInfo(result.level);
         el<HTMLDivElement>('mj-win-progress').style.width = `${progressPct}%`;
@@ -247,10 +320,11 @@ export class UiSystem {
         el('mj-win').classList.add('hidden');
     }
 
-    showLose(result: WinResult): void {
+    showLose(result: WinResult, rank: RankInfo | null = null): void {
         el('mj-lose-level').textContent = String(result.level);
         el('mj-lose-iq').textContent = result.iq.toFixed(1);
         el('mj-lose-combo').textContent = String(result.combo);
+        this.renderRank('mj-lose', rank);
         el('mj-lose').classList.remove('hidden');
         const box = el('mj-lose-box');
         box.classList.remove('mj-shake');

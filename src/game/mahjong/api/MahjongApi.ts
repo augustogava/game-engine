@@ -1,5 +1,5 @@
 /** REST client for the Mahjong backend (/api/mahjong/*). */
-import type { LeaderboardEntry, MahjongUser, WinResult } from '../types/index.js';
+import type { LeaderboardEntry, MahjongUser, RankInfo, WinResult } from '../types/index.js';
 
 const API_BASE = '/api/mahjong';
 
@@ -28,7 +28,7 @@ export const MahjongApi = {
         return apiFetch<MahjongUser>(`/player?userId=${encodeURIComponent(userId)}`);
     },
 
-    async submitScore(userId: string, result: WinResult, won: boolean): Promise<{ totalPoints: number; bestIq: number; bestLevel: number }> {
+    async submitScore(userId: string, result: WinResult, won: boolean): Promise<{ totalPoints: number; bestIq: number; bestLevel: number; rank: RankInfo | null }> {
         return apiFetch('/score', {
             method: 'POST',
             body: JSON.stringify({

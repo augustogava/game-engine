@@ -460,17 +460,25 @@ for (let level = 1; level <= 20; level++) {
       if (seen.has(key)) fail(`L${level} duplicate slot ${key}`);
       seen.add(key);
     }
-    const removed = /* @__PURE__ */ new Set();
-    for (const [a, b] of gen2.solution) {
-      for (const idx of [a, b]) {
-        const live = gen2.slots.filter((_, i) => !removed.has(i));
-        const filled = buildFilledCells(live);
-        if (!isSlotFree(gen2.slots[idx], filled)) fail(`L${level} solution tile ${idx} not free`);
-        removed.add(idx);
+    const remaining = new Set(gen2.slots.map((_, i) => i));
+    while (remaining.size > 0) {
+      const live = [...remaining].map((i) => gen2.slots[i]);
+      const filled = buildFilledCells(live);
+      const free = [...remaining].filter((i) => isSlotFree(gen2.slots[i], filled));
+      if (free.length === 0) {
+        fail(`L${level} board deadlocks with ${remaining.size} tiles left`);
+        break;
       }
+      for (const i of free) remaining.delete(i);
+    }
+    const covered = /* @__PURE__ */ new Set();
+    for (const [a, b] of gen2.solution) {
+      if (covered.has(a) || covered.has(b)) fail(`L${level} solution reuses a tile`);
+      covered.add(a);
+      covered.add(b);
       if (!facesMatch(gen2.faceByIndex[a], gen2.faceByIndex[b])) fail(`L${level} solution pair mismatch`);
     }
-    if (removed.size !== n) fail(`L${level} solution incomplete: ${removed.size}/${n}`);
+    if (covered.size !== n) fail(`L${level} solution incomplete: ${covered.size}/${n}`);
     const hiddenCount = gen2.hiddenByIndex.filter(Boolean).length;
     const expected = Math.floor(n * getHiddenFraction(level));
     if (hiddenCount !== expected) fail(`L${level} hidden ${hiddenCount} != expected ${expected}`);

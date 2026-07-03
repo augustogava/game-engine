@@ -13,8 +13,16 @@ import { TRAY_CAPACITY, TILE_ASPECT_DEPTH } from '../constants/gameConstants.js'
 const TILE_TEXTURE_WIDTH = 100;
 const TILE_TEXTURE_HEIGHT = Math.round(TILE_TEXTURE_WIDTH * TILE_ASPECT_DEPTH);
 const CLEAR_ANIM_MS = 240;
+const MATCH_CLEAR_ANIM_MS = 340;
 const FLY_ANIM_MS = 330;
 const FLY_EASING = 'cubic-bezier(0.3, 0.7, 0.3, 1)';
+
+/* Match burst effect */
+const MATCH_SPARK_COUNT = 10;
+const MATCH_SPARK_LIFE_MS = 550;
+const MATCH_SPARK_DISTANCE_PX = 46;
+const MATCH_RING_LIFE_MS = 520;
+const TRAY_GLOW_MS = 470;
 
 export type TrayAddResult = 'match' | 'added' | 'overflow';
 
@@ -202,12 +210,54 @@ export class TraySystem {
         }
     }
 
-    /** Plays the clear animation on a matched pair already removed from `entries`. */
+    /** Matched pair collides toward its midpoint, then a sparkle burst + ring
+     *  plays there and the tray border pulses gold. */
     private playClear(a: TrayEntry, b: TrayEntry): void {
-        for (const entry of [a, b]) {
+        const rectA = a.el.getBoundingClientRect();
+        const rectB = b.el.getBoundingClientRect();
+        const midX = (rectA.left + rectA.width / 2 + rectB.left + rectB.width / 2) / 2;
+        const midY = (rectA.top + rectA.height / 2 + rectB.top + rectB.height / 2) / 2;
+
+        for (const [entry, rect] of [[a, rectA], [b, rectB]] as Array<[TrayEntry, DOMRect]>) {
             entry.el.style.visibility = '';
-            entry.el.classList.add('mj-tray-clear');
-            window.setTimeout(() => { try { entry.el.remove(); } catch (_) { /* ignore */ } }, CLEAR_ANIM_MS);
+            entry.el.style.setProperty('--mj-clear-dx', `${midX - (rect.left + rect.width / 2)}px`);
+            entry.el.classList.add('mj-tray-match-clear');
+            window.setTimeout(() => { try { entry.el.remove(); } catch (_) { /* ignore */ } }, MATCH_CLEAR_ANIM_MS);
+        }
+
+        if (rectA.width > 0 || rectB.width > 0) this.spawnMatchBurst(midX, midY);
+        if (this.container) {
+            this.container.classList.remove('mj-tray-glow');
+            void this.container.offsetWidth;
+            this.container.classList.add('mj-tray-glow');
+            window.setTimeout(() => this.container?.classList.remove('mj-tray-glow'), TRAY_GLOW_MS);
+        }
+    }
+
+    /** Expanding golden ring + radial sparkles at a screen point. */
+    private spawnMatchBurst(x: number, y: number): void {
+        const ring = document.createElement('div');
+        ring.className = 'mj-match-ring';
+        ring.style.left = `${x}px`;
+        ring.style.top = `${y}px`;
+        document.body.appendChild(ring);
+        window.setTimeout(() => { try { ring.remove(); } catch (_) { /* ignore */ } }, MATCH_RING_LIFE_MS);
+
+        for (let i = 0; i < MATCH_SPARK_COUNT; i++) {
+            const spark = document.createElement('div');
+            spark.className = 'mj-match-spark';
+            spark.style.left = `${x}px`;
+            spark.style.top = `${y}px`;
+            document.body.appendChild(spark);
+            const angle = (i / MATCH_SPARK_COUNT) * Math.PI * 2 + Math.random() * 0.6;
+            const dist = MATCH_SPARK_DISTANCE_PX * (0.6 + Math.random() * 0.7);
+            try {
+                spark.animate([
+                    { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+                    { transform: `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px) scale(0.2)`, opacity: 0 },
+                ], { duration: MATCH_SPARK_LIFE_MS, easing: 'cubic-bezier(0.2, 0.7, 0.4, 1)', fill: 'forwards' });
+            } catch (_) { /* ignore */ }
+            window.setTimeout(() => { try { spark.remove(); } catch (_) { /* ignore */ } }, MATCH_SPARK_LIFE_MS);
         }
     }
 

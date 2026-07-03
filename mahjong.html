@@ -176,6 +176,41 @@ body {
     50% { box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 36px rgba(255,84,62,0.85); }
 }
 
+/* Tray match effects */
+#mj-tray.mj-tray-glow { animation: mjTrayGlow 0.45s ease-out; }
+@keyframes mjTrayGlow {
+    0% { box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 24px rgba(84,199,154,0.38); }
+    35% { box-shadow: inset 0 0 18px rgba(0,0,0,0.3), 0 0 44px rgba(231,200,115,0.95); border-color: rgba(231,200,115,0.9); }
+    100% { box-shadow: inset 0 0 18px rgba(0,0,0,0.4), 0 0 24px rgba(84,199,154,0.38); }
+}
+.mj-tray-match-clear { animation: mjTrayMatchClear 0.34s ease-in forwards; z-index: 2; }
+@keyframes mjTrayMatchClear {
+    0% { transform: translateX(0) scale(1); opacity: 1; }
+    45% { transform: translateX(calc(var(--mj-clear-dx, 0px) * 0.9)) scale(1.18); opacity: 1; }
+    100% { transform: translateX(var(--mj-clear-dx, 0px)) scale(0.2); opacity: 0; }
+}
+.mj-match-ring {
+    position: fixed; z-index: 45; pointer-events: none;
+    width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
+    border: 3px solid rgba(231,200,115,0.95);
+    animation: mjMatchRing 0.5s ease-out forwards;
+}
+@keyframes mjMatchRing {
+    from { transform: scale(0.4); opacity: 1; }
+    to { transform: scale(4.2); opacity: 0; }
+}
+.mj-match-spark {
+    position: fixed; z-index: 45; pointer-events: none;
+    width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%;
+    background: radial-gradient(circle, #fff7d6 0%, #e7c873 60%, rgba(231,200,115,0) 100%);
+}
+#mj-flash {
+    position: fixed; inset: 0; z-index: 90; pointer-events: none;
+    background: rgba(255, 248, 220, 0.55); opacity: 0;
+}
+#mj-flash.show { animation: mjFlash 0.14s ease-out; }
+@keyframes mjFlash { 0% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0; } }
+
 /* Controls */
 #mj-controls {
     position: fixed; bottom: calc(14px + var(--safe-bottom)); left: 50%; transform: translateX(-50%); z-index: 30;
@@ -290,6 +325,19 @@ body {
 .mj-arrow.up { color: var(--up); }
 .mj-arrow.down { color: var(--down); }
 #mj-win-phrase { color: var(--parchment); font-size: clamp(13px, 3.8vw, 15px); line-height: 1.5; margin: clamp(8px, 2.5vw, 12px) auto; max-width: 30ch; }
+.mj-rank-line {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    margin: clamp(8px, 2.5vw, 12px) auto 0;
+}
+.mj-rank-line.hidden { display: none; }
+.mj-rank-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 14px; border-radius: 20px; font-family: var(--font-display);
+    font-size: clamp(13px, 3.8vw, 15px); font-weight: 700; letter-spacing: 1px;
+    border: 1px solid rgba(255,255,255,0.35); background: rgba(8,20,15,0.6);
+}
+.mj-rank-pos { color: var(--parchment); font-size: clamp(12px, 3.4vw, 14px); }
+.mj-rank-hint { color: var(--parchment-dim); font-size: clamp(10px, 3vw, 12px); }
 .mj-milestone { margin: clamp(12px, 4vw, 18px) 0 clamp(6px, 2vw, 10px); }
 .mj-milestone-bar { height: 12px; border-radius: 8px; background: rgba(255,255,255,0.08); overflow: hidden; border: 1px solid rgba(231,200,115,0.25); }
 .mj-milestone-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--jade-bright), var(--gold)); transition: width 0.5s ease; }
@@ -360,6 +408,8 @@ body {
     <div id="mj-combo-count"></div>
 </div>
 
+<div id="mj-flash"></div>
+
 <div id="mj-controls">
     <button id="mj-btn-shuffle" type="button" title="Embaralhar" aria-label="Embaralhar">
         <span class="mj-icon">&#128256;</span>
@@ -403,6 +453,11 @@ body {
             <div class="mj-result-card"><div class="k">Combo</div><div class="v" id="mj-win-combo">0</div></div>
         </div>
         <div id="mj-win-phrase">Níveis difíceis são só um aquecimento para você!</div>
+        <div class="mj-rank-line" id="mj-win-rank">
+            <span class="mj-rank-badge" id="mj-win-rank-badge"></span>
+            <span class="mj-rank-pos" id="mj-win-rank-pos"></span>
+            <span class="mj-rank-hint" id="mj-win-rank-hint"></span>
+        </div>
         <div class="mj-milestone">
             <div class="mj-milestone-bar"><div class="mj-milestone-fill" id="mj-win-progress"></div></div>
             <div class="mj-milestone-label" id="mj-win-milestone">Alcançar Nível 10</div>
@@ -424,6 +479,11 @@ body {
             <div class="mj-result-card"><div class="k">Combo</div><div class="v" id="mj-lose-combo">0</div></div>
         </div>
         <div id="mj-win-phrase">A bandeja encheu com quatro peças diferentes. Tente novamente!</div>
+        <div class="mj-rank-line" id="mj-lose-rank">
+            <span class="mj-rank-badge" id="mj-lose-rank-badge"></span>
+            <span class="mj-rank-pos" id="mj-lose-rank-pos"></span>
+            <span class="mj-rank-hint" id="mj-lose-rank-hint"></span>
+        </div>
         <div class="mj-result-actions">
             <button id="mj-btn-lose-retry" class="mj-btn-primary" type="button">Tentar novamente</button>
         </div>

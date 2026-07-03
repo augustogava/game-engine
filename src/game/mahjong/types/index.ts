@@ -59,6 +59,23 @@ export interface Tile {
     symbolMesh: any;
 }
 
+/** Player rank (league) snapshot returned by the backend. */
+export interface RankInfo {
+    rankOrder: number;
+    maxRank: number;
+    rankName: string;
+    color: string;
+    icon: string;
+    /** Position inside the same-rank cohort by points earned this period. */
+    position: number;
+    cohortSize: number;
+    periodPoints: number;
+    rankUpTopN: number;
+    rankUpDays: number;
+    /** Epoch ms when the current evaluation period closes. */
+    periodEndsAt: number;
+}
+
 export interface MahjongUser {
     userId: string;
     name: string;
@@ -66,6 +83,7 @@ export interface MahjongUser {
     totalPoints: number;
     bestIq: number;
     bestLevel: number;
+    rank?: RankInfo | null;
 }
 
 export interface WinResult {

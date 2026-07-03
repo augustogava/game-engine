@@ -281,6 +281,7 @@ export class MahjongScene extends Scene3D {
                 this.vibrate(fx.combo);
                 this.ui.showIqGain(fx.gain);
                 this.ui.showComboPraise(fx.combo);
+                this.ui.comboCelebrate(fx.combo);
                 this.onMatch();
                 if (this.board.remainingCount() === 0 && this.tray.isEmpty()) {
                     void this.onWin();
@@ -328,7 +329,7 @@ export class MahjongScene extends Scene3D {
         this.audio.win();
         this.vfx.celebrate();
         await this.submitResult(result, true);
-        this.ui.showWin(result, result.iq - previousBestIq);
+        this.ui.showWin(result, result.iq - previousBestIq, this.user?.rank ?? null);
     }
 
     async onLose(): Promise<void> {
@@ -344,7 +345,7 @@ export class MahjongScene extends Scene3D {
             combo: this.combo,
         };
         await this.submitResult(result, false);
-        this.ui.showLose(result);
+        this.ui.showLose(result, this.user?.rank ?? null);
     }
 
     /** Persists a finished game (win or loss) and refreshes the cached totals. */
@@ -355,6 +356,7 @@ export class MahjongScene extends Scene3D {
             this.user.totalPoints = totals.totalPoints;
             this.user.bestIq = totals.bestIq;
             this.user.bestLevel = totals.bestLevel;
+            this.user.rank = totals.rank;
             this.ui.updateTotals(totals.totalPoints);
         } catch (err) {
             console.error('[MahjongScene] Failed to submit score:', err);
