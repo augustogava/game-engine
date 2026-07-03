@@ -1,5 +1,5 @@
 /** REST client for the Mahjong backend (/api/mahjong/*). */
-import type { LeaderboardEntry, MahjongUser, RankInfo, WinResult } from '../types/index.js';
+import type { LeaderboardResponse, MahjongUser, RankInfo, WinResult } from '../types/index.js';
 
 const API_BASE = '/api/mahjong';
 
@@ -44,8 +44,8 @@ export const MahjongApi = {
         });
     },
 
-    async getLeaderboard(userId: string | null): Promise<LeaderboardEntry[]> {
+    async getLeaderboard(userId: string | null): Promise<LeaderboardResponse> {
         const q = userId ? `?userId=${encodeURIComponent(userId)}` : '';
-        return apiFetch<LeaderboardEntry[]>(`/leaderboard${q}`);
+        return apiFetch<LeaderboardResponse>(`/leaderboard${q}`);
     },
 };

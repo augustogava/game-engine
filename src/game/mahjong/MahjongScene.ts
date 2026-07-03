@@ -20,7 +20,7 @@ import { TraySystem } from './systems/TraySystem.js';
 import { UiSystem } from './systems/UiSystem.js';
 import { computeIqGain, computePoints, finalizeIq } from './constants/scoreConstants.js';
 import { HINTS_PER_LEVEL, SHUFFLES_PER_LEVEL, UNDOS_PER_LEVEL } from './constants/gameConstants.js';
-import { GAME_STATE, type GameState, type LeaderboardEntry, type MahjongUser, type SlotPosition, type WinResult } from './types/index.js';
+import { GAME_STATE, type GameState, type MahjongUser, type SlotPosition, type WinResult } from './types/index.js';
 
 const USER_ID_KEY = 'mahjong_user_id';
 
@@ -364,15 +364,15 @@ export class MahjongScene extends Scene3D {
         }
     }
 
-    /** Opens the leaderboard panel and loads the latest ranking. */
+    /** Opens the ranking panel and loads the player's rank cohort ranking. */
     async openLeaderboard(): Promise<void> {
         this.ui.showLeaderboardPanel();
         try {
-            const leaderboard: LeaderboardEntry[] = await MahjongApi.getLeaderboard(this.user ? this.user.userId : null);
+            const leaderboard = await MahjongApi.getLeaderboard(this.user ? this.user.userId : null);
             this.ui.renderLeaderboard(leaderboard);
         } catch (err) {
             console.error('[MahjongScene] Failed to load leaderboard:', err);
-            this.ui.renderLeaderboard([]);
+            this.ui.renderLeaderboard({ rank: null, entries: [] });
         }
     }
 

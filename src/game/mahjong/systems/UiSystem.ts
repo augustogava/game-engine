@@ -1,6 +1,6 @@
 /** DOM HUD: email gate, top bar, tray, controls, toast, win/lose screens, menu leaderboard. */
 import type { MahjongScene } from '../MahjongScene.js';
-import type { LeaderboardEntry, MahjongUser, RankInfo, WinResult } from '../types/index.js';
+import type { LeaderboardResponse, MahjongUser, RankInfo, WinResult } from '../types/index.js';
 import { MahjongPrefs } from '../MahjongPrefs.js';
 
 const TOAST_DURATION_MS = 2200;
@@ -346,22 +346,38 @@ export class UiSystem {
         el('mj-menu').classList.add('hidden');
     }
 
-    renderLeaderboard(leaderboard: LeaderboardEntry[]): void {
+    renderLeaderboard(leaderboard: LeaderboardResponse): void {
+        const title = el('mj-lb-title');
+        const subtitle = el('mj-lb-subtitle');
+        if (leaderboard.rank) {
+            const meta = leaderboard.rank;
+            title.textContent = `Ranking ${meta.icon ? `${meta.icon} ` : ''}${meta.rankName}`;
+            title.style.color = meta.color;
+            subtitle.textContent = `Top ${meta.rankUpTopN} sobe de rank a cada ${meta.rankUpDays} dia${meta.rankUpDays === 1 ? '' : 's'}`;
+            subtitle.classList.remove('hidden');
+        } else {
+            title.textContent = 'Ranking Global';
+            title.style.color = '';
+            subtitle.classList.add('hidden');
+        }
+
         const tbody = el<HTMLTableSectionElement>('mj-leaderboard');
         tbody.innerHTML = '';
-        if (leaderboard.length === 0) {
+        if (leaderboard.entries.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = '<td colspan="4" class="mj-lb-empty">Sem registros ainda</td>';
             tbody.appendChild(row);
             return;
         }
-        for (const entry of leaderboard) {
+        const topN = leaderboard.rank ? leaderboard.rank.rankUpTopN : 0;
+        for (const entry of leaderboard.entries) {
             const row = document.createElement('tr');
             if (entry.isSelf) row.classList.add('mj-lb-self');
+            if (topN > 0 && entry.rank <= topN && entry.periodPoints > 0) row.classList.add('mj-lb-promo');
             row.innerHTML =
                 `<td>${entry.rank}</td>` +
                 `<td>${this.escape(entry.name)}</td>` +
-                `<td>${entry.totalPoints}</td>` +
+                `<td>${entry.periodPoints}</td>` +
                 `<td>${entry.iq.toFixed(1)}</td>`;
             tbody.appendChild(row);
         }

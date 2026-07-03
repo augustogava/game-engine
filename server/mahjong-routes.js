@@ -469,26 +469,87 @@ async function handleScore(req, res) {
     });
 }
 
+/**
+ * Ranking scoped to the player's current rank cohort, ordered by points earned
+ * in the open period (the promotion criterion). Falls back to the global
+ * ranking when no user is given or the user is unknown.
+ */
 async function handleLeaderboard(req, res) {
     const query = new URL(req.url, 'http://localhost').searchParams;
     const selfId = query.get('userId') || '';
-    const [rows] = await dbPool.query(
-        `SELECT user_id, email, total_points, best_iq, best_level
-         FROM mahjong_users
-         WHERE total_points > 0
-         ORDER BY total_points DESC, best_iq DESC
-         LIMIT ?`,
-        [LEADERBOARD_LIMIT],
-    );
-    const entries = rows.map((row, index) => ({
-        rank: index + 1,
-        name: displayNameFromEmail(row.email),
-        totalPoints: Number(row.total_points),
-        iq: Number(row.best_iq),
-        level: row.best_level,
-        isSelf: row.user_id === selfId,
-    }));
-    sendJson(res, 200, entries);
+
+    let rankMeta = null;
+    let entries = null;
+
+    if (selfId) {
+        const [[user]] = await dbPool.query(
+            'SELECT rank_order FROM mahjong_users WHERE user_id = ? LIMIT 1',
+            [selfId],
+        );
+        if (user) {
+            const settings = await getRankSettings();
+            const periodMs = settings.days * DAY_MS;
+            const currentPeriod = Math.floor((Date.now() - RANK_EPOCH_MS) / periodMs);
+            const periodStartSec = (RANK_EPOCH_MS + currentPeriod * periodMs) / 1000;
+            const rankOrder = user.rank_order || RANK_MIN_ORDER;
+
+            const [[rankRow]] = await dbPool.query(
+                'SELECT name, color, icon FROM mahjong_ranks WHERE rank_order = ? LIMIT 1',
+                [rankOrder],
+            );
+            rankMeta = {
+                rankOrder,
+                rankName: rankRow ? rankRow.name : `Rank ${rankOrder}`,
+                color: rankRow ? rankRow.color : '#c8d0dc',
+                icon: rankRow ? rankRow.icon : '',
+                rankUpTopN: settings.topN,
+                rankUpDays: settings.days,
+            };
+
+            const [rows] = await dbPool.query(
+                `SELECT u.user_id, u.email, u.total_points, u.best_iq, u.best_level,
+                        COALESCE(SUM(CASE WHEN s.created_at >= FROM_UNIXTIME(?) THEN s.points ELSE 0 END), 0) AS period_points
+                 FROM mahjong_users u
+                 LEFT JOIN mahjong_scores s ON s.user_id = u.user_id
+                 WHERE u.rank_order = ?
+                 GROUP BY u.user_id, u.email, u.total_points, u.best_iq, u.best_level
+                 ORDER BY period_points DESC, u.total_points DESC, u.best_iq DESC
+                 LIMIT ?`,
+                [periodStartSec, rankOrder, LEADERBOARD_LIMIT],
+            );
+            entries = rows.map((row, index) => ({
+                rank: index + 1,
+                name: displayNameFromEmail(row.email),
+                totalPoints: Number(row.total_points),
+                periodPoints: Number(row.period_points),
+                iq: Number(row.best_iq),
+                level: row.best_level,
+                isSelf: row.user_id === selfId,
+            }));
+        }
+    }
+
+    if (!entries) {
+        const [rows] = await dbPool.query(
+            `SELECT user_id, email, total_points, best_iq, best_level
+             FROM mahjong_users
+             WHERE total_points > 0
+             ORDER BY total_points DESC, best_iq DESC
+             LIMIT ?`,
+            [LEADERBOARD_LIMIT],
+        );
+        entries = rows.map((row, index) => ({
+            rank: index + 1,
+            name: displayNameFromEmail(row.email),
+            totalPoints: Number(row.total_points),
+            periodPoints: Number(row.total_points),
+            iq: Number(row.best_iq),
+            level: row.best_level,
+            isSelf: row.user_id === selfId,
+        }));
+    }
+
+    sendJson(res, 200, { rank: rankMeta, entries });
 }
 
 // ── Dispatcher ───────────────────────────────────────────────────────────────

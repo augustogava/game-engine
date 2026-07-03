@@ -99,7 +99,24 @@ export interface LeaderboardEntry {
     rank: number;
     name: string;
     totalPoints: number;
+    /** Points earned in the current rank evaluation period. */
+    periodPoints: number;
     iq: number;
     level: number;
     isSelf: boolean;
+}
+
+/** Rank cohort metadata for the leaderboard panel (null = global fallback). */
+export interface LeaderboardRankMeta {
+    rankOrder: number;
+    rankName: string;
+    color: string;
+    icon: string;
+    rankUpTopN: number;
+    rankUpDays: number;
+}
+
+export interface LeaderboardResponse {
+    rank: LeaderboardRankMeta | null;
+    entries: LeaderboardEntry[];
 }
