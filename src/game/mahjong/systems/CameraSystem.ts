@@ -26,6 +26,7 @@ export class CameraSystem {
     private targetRadius = 20;
     private lastBoardWidth = 12;
     private lastBoardDepth = 12;
+    private lastBoardHeight = 1;
     private targetCenter = BABYLON.Vector3.Zero();
     private resizeHandler: (() => void) | null = null;
 
@@ -51,10 +52,11 @@ export class CameraSystem {
         window.addEventListener('orientationchange', this.resizeHandler);
     }
 
-    /** Re-frames the camera to fit a board of the given width/depth, optionally recentering on `center`. */
-    frameBoard(boardWidth: number, boardDepth: number, center?: BABYLON.Vector3): void {
+    /** Re-frames the camera to fit a board of the given size, optionally recentering on `center`. */
+    frameBoard(boardWidth: number, boardDepth: number, boardHeight: number, center?: BABYLON.Vector3): void {
         this.lastBoardWidth = boardWidth;
         this.lastBoardDepth = boardDepth;
+        this.lastBoardHeight = boardHeight;
         if (center) this.targetCenter.copyFrom(center);
         this.applyFraming();
     }
@@ -95,10 +97,23 @@ export class CameraSystem {
         const cssHeight = window.innerHeight;
         const band = this.measureVerticalBand(cssHeight);
 
-        // Distance needed so the board width fits horizontally and the board depth
-        // fits vertically, each only filling its allowed fraction of the viewport.
+        // Vertical extent as actually projected with the tilted camera: the depth
+        // foreshortens with the tilt while the tile stack height starts to show.
+        const beta = this.camera.beta;
+        const projectedVertical = this.lastBoardDepth * Math.cos(beta) + this.lastBoardHeight * Math.sin(beta);
+
+        // Distance needed so the board width fits horizontally and the projected
+        // vertical extent fits the band fraction of the viewport.
         const fitH = (this.lastBoardWidth / HORIZONTAL_FILL) / 2 / Math.tan(hHalfFov);
-        const fitV = (this.lastBoardDepth / band.fill) / 2 / Math.tan(vHalfFov);
+        let fitV = (projectedVertical / band.fill) / 2 / Math.tan(vHalfFov);
+
+        // Perspective correction: the near (bottom) edge of the tilted board is
+        // closer to the camera and projects larger than the slab estimate. Scale
+        // by the near-edge magnification at the estimated distance.
+        const nearOffset = (this.lastBoardDepth / 2) * Math.sin(beta) + this.lastBoardHeight * Math.cos(beta);
+        const magnification = fitV / Math.max(1, fitV - nearOffset);
+        fitV *= magnification;
+
         const radius = Math.max(fitH, fitV) * CAMERA_RADIUS_FACTOR + FRAME_MARGIN;
         this.targetRadius = Math.min(CAMERA_RADIUS_MAX, Math.max(CAMERA_RADIUS_MIN, radius));
 

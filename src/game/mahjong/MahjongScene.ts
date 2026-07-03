@@ -260,7 +260,7 @@ export class MahjongScene extends Scene3D {
     private reframeBoard(): void {
         const bounds = this.board.getActiveBounds();
         if (!bounds) return;
-        this.camera.frameBoard(bounds.width, bounds.depth, bounds.center);
+        this.camera.frameBoard(bounds.width, bounds.depth, bounds.height, bounds.center);
     }
 
     /** Routes a tile tapped off the board into the tray and reacts to the result.

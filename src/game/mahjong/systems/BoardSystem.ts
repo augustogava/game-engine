@@ -625,7 +625,7 @@ export class BoardSystem {
      * Center and framing radius of the tiles still on the board, so the camera can
      * recenter/zoom closer as tiles are removed. Returns null when the board is empty.
      */
-    getActiveBounds(): { center: BABYLON.Vector3; width: number; depth: number } | null {
+    getActiveBounds(): { center: BABYLON.Vector3; width: number; depth: number; height: number } | null {
         let sumX = 0;
         let sumZ = 0;
         let count = 0;
@@ -633,6 +633,7 @@ export class BoardSystem {
         let minX = Infinity;
         let maxZ = -Infinity;
         let minZ = Infinity;
+        let maxLayer = 0;
         for (const tile of this.tiles) {
             if (tile.removed) continue;
             const p = tile.mesh.position;
@@ -641,6 +642,7 @@ export class BoardSystem {
             if (p.x < minX) minX = p.x;
             if (p.z > maxZ) maxZ = p.z;
             if (p.z < minZ) minZ = p.z;
+            if (tile.pos.layer > maxLayer) maxLayer = tile.pos.layer;
         }
         if (count === 0) return null;
         const center = new BABYLON.Vector3(sumX / count, 0, sumZ / count);
@@ -648,7 +650,8 @@ export class BoardSystem {
         // outermost tile centers).
         const width = (maxX - minX) + TILE_WIDTH;
         const depth = (maxZ - minZ) + TILE_DEPTH;
-        return { center, width, depth };
+        const height = (maxLayer + 1) * LAYER_HEIGHT;
+        return { center, width, depth, height };
     }
 
     clear(): void {
