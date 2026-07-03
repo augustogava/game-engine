@@ -376,11 +376,7 @@ body {
 .mj-lb-title { font-family: var(--font-display); letter-spacing: 4px; font-size: 16px; color: var(--gold); text-transform: uppercase; margin-bottom: 4px; }
 .mj-lb-subtitle { color: var(--parchment-dim); font-size: clamp(10px, 3vw, 12px); margin-bottom: 12px; }
 .mj-lb-subtitle.hidden { display: none; }
-#mj-lb-table tr.mj-lb-promo td:first-child { color: var(--gold-bright); font-weight: 700; }
-#mj-lb-table { width: 100%; border-collapse: collapse; font-size: clamp(12px, 3.4vw, 13px); }
-#mj-lb-table th { font-family: var(--font-display); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--parchment-dim); padding: 6px 6px; border-bottom: 1px solid rgba(231,200,115,0.3); }
-#mj-lb-table td { padding: 7px 6px; border-bottom: 1px solid rgba(231,200,115,0.1); }
-#mj-lb-table tr.mj-lb-self td { color: var(--gold-bright); background: rgba(231,200,115,0.1); }
+#mj-leaderboard { width: min(320px, 100%); }
 .mj-lb-empty { color: var(--parchment-dim); font-style: italic; padding: 14px; }
 #mj-btn-menu-close { margin-top: 16px; }
 
@@ -517,10 +513,7 @@ body {
     <div id="mj-menu-box" class="mj-overlay-box panel">
         <div class="mj-lb-title" id="mj-lb-title">Ranking Global</div>
         <div class="mj-lb-subtitle hidden" id="mj-lb-subtitle"></div>
-        <table id="mj-lb-table">
-            <thead><tr><th>#</th><th>Jogador</th><th>Pontos</th><th>QI</th></tr></thead>
-            <tbody id="mj-leaderboard"></tbody>
-        </table>
+        <div class="mj-rank-list" id="mj-leaderboard"></div>
         <button id="mj-btn-menu-close" class="mj-action" type="button">Fechar</button>
     </div>
 </div>

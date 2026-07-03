@@ -280,22 +280,26 @@ export class UiSystem {
      *  a promotion arrow inside the rank-up zone. */
     private renderRankList(host: HTMLElement, rank: RankInfo): void {
         host.innerHTML = '';
-        const medals = ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49']; // gold, silver, bronze
-        const neighbors = rank.neighbors ?? [];
-        for (const neighbor of neighbors) {
-            const row = document.createElement('div');
-            row.className = 'mj-rank-row';
-            if (neighbor.isSelf) row.classList.add('self');
-            const medal = neighbor.position <= medals.length ? medals[neighbor.position - 1] : '';
+        for (const neighbor of rank.neighbors ?? []) {
             const promoted = neighbor.position <= rank.rankUpTopN && neighbor.periodPoints > 0 && rank.rankOrder < rank.maxRank;
-            row.innerHTML =
-                `<span class="pos">#${neighbor.position}</span>` +
-                `<span class="medal">${medal}</span>` +
-                `<span class="name">${this.escape(neighbor.name)}</span>` +
-                `<span class="pts">${neighbor.periodPoints}</span>` +
-                `<span class="promo">${promoted ? '\u2B06\uFE0F' : ''}</span>`;
-            host.appendChild(row);
+            host.appendChild(this.buildRankRow(neighbor.position, neighbor.name, neighbor.periodPoints, neighbor.isSelf, promoted));
         }
+    }
+
+    /** A single ranking row: #position, podium medal, name, points, promotion arrow. */
+    private buildRankRow(position: number, name: string, points: number, isSelf: boolean, promoted: boolean): HTMLElement {
+        const medals = ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49']; // gold, silver, bronze
+        const row = document.createElement('div');
+        row.className = 'mj-rank-row';
+        if (isSelf) row.classList.add('self');
+        const medal = position <= medals.length ? medals[position - 1] : '';
+        row.innerHTML =
+            `<span class="pos">#${position}</span>` +
+            `<span class="medal">${medal}</span>` +
+            `<span class="name">${this.escape(name)}</span>` +
+            `<span class="pts">${points}</span>` +
+            `<span class="promo">${promoted ? '\u2B06\uFE0F' : ''}</span>`;
+        return row;
     }
 
     showWin(result: WinResult, iqDelta: number, rank: RankInfo | null = null): void {
@@ -385,25 +389,19 @@ export class UiSystem {
             subtitle.classList.add('hidden');
         }
 
-        const tbody = el<HTMLTableSectionElement>('mj-leaderboard');
-        tbody.innerHTML = '';
+        const list = el('mj-leaderboard');
+        list.innerHTML = '';
         if (leaderboard.entries.length === 0) {
-            const row = document.createElement('tr');
-            row.innerHTML = '<td colspan="4" class="mj-lb-empty">Sem registros ainda</td>';
-            tbody.appendChild(row);
+            const empty = document.createElement('div');
+            empty.className = 'mj-lb-empty';
+            empty.textContent = 'Sem registros ainda';
+            list.appendChild(empty);
             return;
         }
         const topN = leaderboard.rank ? leaderboard.rank.rankUpTopN : 0;
         for (const entry of leaderboard.entries) {
-            const row = document.createElement('tr');
-            if (entry.isSelf) row.classList.add('mj-lb-self');
-            if (topN > 0 && entry.rank <= topN && entry.periodPoints > 0) row.classList.add('mj-lb-promo');
-            row.innerHTML =
-                `<td>${entry.rank}</td>` +
-                `<td>${this.escape(entry.name)}</td>` +
-                `<td>${entry.periodPoints}</td>` +
-                `<td>${entry.iq.toFixed(1)}</td>`;
-            tbody.appendChild(row);
+            const promoted = topN > 0 && entry.rank <= topN && entry.periodPoints > 0;
+            list.appendChild(this.buildRankRow(entry.rank, entry.name, entry.periodPoints, entry.isSelf, promoted));
         }
     }
 
