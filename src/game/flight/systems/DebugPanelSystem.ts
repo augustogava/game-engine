@@ -3,6 +3,7 @@ import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { BUILD_VERSION, ENGINE_TYPE_PISTON, GROUND_Y } from '../constants/index.js';
 
 const PANEL_STATE_STORAGE_KEY = 'flight_panels_v1';
+const SETTINGS_TOGGLE_KEY_CODE = 'KeyS';
 
 export class DebugPanelSystem {
     private readonly scene: any;
@@ -387,6 +388,10 @@ export class DebugPanelSystem {
                 if (this.scene._disposed) return;
                 if (e.shiftKey && e.code === 'KeyD') {
                     panel.classList.toggle('hidden');
+                } else if (e.shiftKey && e.code === SETTINGS_TOGGLE_KEY_CODE) {
+                    const settingsUi = document.getElementById('debug-ui');
+                    if (settingsUi) settingsUi.classList.toggle('minimized');
+                    else console.warn('[Debug] #debug-ui not found for settings toggle');
                 }
             };
             window.addEventListener('keydown', this.scene._dbgKeydownHandler);
@@ -451,6 +456,9 @@ export class DebugPanelSystem {
 
     updateDebugReadouts(): void {
         if (!this.scene.dbgPlanePos) return;
+        // The telemetry panel is hidden most of the time; skip the ~20 DOM writes per frame while it is not visible.
+        const panel = this.scene.dbgPanel as HTMLElement | undefined;
+        if (panel && panel.classList.contains('hidden')) return;
 
         const pos = this.scene.planeRoot.position;
         this.scene.dbgPlanePos.textContent = `${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}`;
@@ -467,7 +475,8 @@ export class DebugPanelSystem {
 
             const fwdFlat = fwd.subtract(surfaceUp.scale(BABYLON.Vector3.Dot(fwd, surfaceUp)));
             if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
-            const north = new BABYLON.Vector3(0, 0, 1);
+            // Same north convention as the HUD heading (-Z = north) so both readouts agree.
+            const north = new BABYLON.Vector3(0, 0, -1);
             const east  = new BABYLON.Vector3(1, 0, 0);
             const headingRad = Math.atan2(BABYLON.Vector3.Dot(fwdFlat, east), BABYLON.Vector3.Dot(fwdFlat, north));
             const hDeg = ((headingRad * 180 / Math.PI) + 360) % 360;

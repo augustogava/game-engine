@@ -76,9 +76,16 @@ export interface LiveTrafficMinimapEntry {
     altFt: number;
 }
 
+function wrapLongitudeDeg(lon: number): number {
+    let wrapped = ((lon + 180) % 360 + 360) % 360 - 180;
+    if (wrapped === -180 && lon > 0) wrapped = 180;
+    return wrapped;
+}
+
 export class LiveTrafficSystem {
     private readonly scene: any;
     private readonly entities = new Map<string, LiveTrafficEntity>();
+    private readonly _axisUp = BABYLON.Vector3.Up();
     private _lastFetchMs = 0;
     private _firstFetchDone = false;
     private _fetchInFlight = false;
@@ -176,11 +183,12 @@ export class LiveTrafficSystem {
         }
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
 
+        // Longitudes wrap instead of clamping so a box near the antimeridian keeps its full width (west > east is valid).
         const bounds: LiveTrafficBounds = {
             north: Math.min(90, lat + LIVE_TRAFFIC_RANGE_DEG),
             south: Math.max(-90, lat - LIVE_TRAFFIC_RANGE_DEG),
-            west:  Math.max(-180, lon - LIVE_TRAFFIC_RANGE_DEG),
-            east:  Math.min(180, lon + LIVE_TRAFFIC_RANGE_DEG),
+            west:  wrapLongitudeDeg(lon - LIVE_TRAFFIC_RANGE_DEG),
+            east:  wrapLongitudeDeg(lon + LIVE_TRAFFIC_RANGE_DEG),
         };
 
         this._fetchInFlight = true;
@@ -617,12 +625,11 @@ export class LiveTrafficSystem {
         }
         entity.root.position.copyFrom(localPos);
 
-        const yawRad = (180 - entity.trackDeg) * Math.PI / 180;
-        const yawQ = BABYLON.Quaternion.RotationAxis(BABYLON.Vector3.Up(), yawRad);
+        const yawRad = (180 - (Number.isFinite(entity.trackDeg) ? entity.trackDeg : 0)) * Math.PI / 180;
         if (!entity.root.rotationQuaternion) {
             entity.root.rotationQuaternion = BABYLON.Quaternion.Identity();
         }
-        entity.root.rotationQuaternion.copyFrom(yawQ);
+        BABYLON.Quaternion.RotationAxisToRef(this._axisUp, yawRad, entity.root.rotationQuaternion);
 
         this._applyEntityLod(entity);
     }

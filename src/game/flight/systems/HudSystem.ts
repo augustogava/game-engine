@@ -5,7 +5,23 @@ import { InputBindings, DEFAULT_KEY_BINDINGS, ACTION_LABELS, type ActionId, type
 import { UiPreferences } from '../../UiPreferences.js';
 import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
+import { detectGpuTier, type GpuTier } from './GpuTierDetector.js';
 
+const HPA_TO_INHG = 0.02952998;
+const CHECKLIST_VR_STALL_FACTOR = 1.15;
+const TAPE_MARK_OFFSET_QUANT = 4;
+const STD_PRESSURE_INHG = 29.92;
+const GP_LIVE_HIDDEN_POLL_MS = 500;
+const LANDING_GRADE_BUTTER_FPM = -150;
+const LANDING_GRADE_GOOD_FPM = -300;
+const LANDING_GRADE_FIRM_FPM = -600;
+const LANDING_GRADE_CENTERLINE_GOOD_M = 5;
+const LANDING_GRADE_SPEED_TOLERANCE_KT = 10;
+const LANDING_GRADE_SCORE_BUTTER = 4;
+const LANDING_GRADE_SCORE_GOOD = 2;
+const LANDING_GRADE_TOAST_MS = 6000;
+const RUNWAY_CROSSWIND_WARN_KT = 15;
+const RUNWAY_TAILWIND_WARN_KT = 5;
 const PFD_ATTITUDE_CENTER_Y_FRAC = 0.5;
 const PFD_ATTITUDE_FILL_ALPHA = 0;
 const HSI_CANVAS_CENTER_Y_PX = 108;
@@ -152,6 +168,11 @@ export class HudSystem {
             try { window.removeEventListener('resize', this._resizeHandler); } catch (_) { /* ignore */ }
             this._resizeHandler = null;
         }
+        this._stopGpLiveUpdate();
+        if (this._keymapUnsubscribe) {
+            try { this._keymapUnsubscribe(); } catch (_) { /* ignore */ }
+            this._keymapUnsubscribe = null;
+        }
     }
 
     updateEngineColumnsVisibility(): void {
@@ -272,8 +293,27 @@ export class HudSystem {
         });
         this.scene._gLimiterEnabled = prefs.gLimiterEnabled === true;
 
-        // const replayBtn = document.getElementById('ux-replay-btn');
-        // if (replayBtn) replayBtn.addEventListener('click', () => this.scene._toggleReplay());
+        const replayBtn = document.getElementById('ux-replay-btn');
+        if (replayBtn) replayBtn.addEventListener('click', () => this.scene._toggleReplay());
+        const saveFlightBtn = document.getElementById('ux-save-flight-btn');
+        if (saveFlightBtn) {
+            saveFlightBtn.textContent = I18n.t('settings.saveFlight');
+            saveFlightBtn.addEventListener('click', () => {
+                const ok = this.scene._saveFreeFlight('manual');
+                this.scene._showToast(I18n.t(ok ? 'savedFlight.saved' : 'savedFlight.saveFailed'));
+            });
+        }
+        const resumeFlightBtn = document.getElementById('ux-resume-flight-btn');
+        if (resumeFlightBtn) {
+            resumeFlightBtn.textContent = I18n.t('settings.resumeFlight');
+            resumeFlightBtn.addEventListener('click', () => {
+                if (!this.scene.hasSavedFreeFlight()) {
+                    this.scene._showToast(I18n.t('savedFlight.none'));
+                    return;
+                }
+                this.scene._launchResumeSavedFlight();
+            });
+        }
         const towerBtn = document.getElementById('ux-tower-btn');
         if (towerBtn) towerBtn.addEventListener('click', () => {
             this.scene._setCameraMode(CAMERA_MODE_TOWER);
@@ -281,6 +321,15 @@ export class HudSystem {
         });
         const screenshotBtn = document.getElementById('ux-screenshot-btn');
         if (screenshotBtn) screenshotBtn.addEventListener('click', () => this.scene._takeScreenshot());
+        const tutorialBtn = document.getElementById('ux-tutorial-btn');
+        if (tutorialBtn) {
+            tutorialBtn.textContent = I18n.t('settings.tutorial');
+            tutorialBtn.addEventListener('click', () => {
+                const dbgUi = document.getElementById('debug-ui');
+                if (dbgUi) dbgUi.classList.add('minimized');
+                this.scene._startTutorial();
+            });
+        }
         const resetKeysBtn = document.getElementById('ux-keys-reset');
         if (resetKeysBtn) resetKeysBtn.addEventListener('click', () => InputBindings.reset());
 
@@ -311,6 +360,8 @@ export class HudSystem {
     }
 
     private _gpLiveRafId = 0;
+    private _gpLiveTimeoutId = 0;
+    private _keymapUnsubscribe: (() => void) | null = null;
 
     private static readonly GP_PRESETS_KEY = 'flight_gp_presets_v1';
 
@@ -499,9 +550,36 @@ export class HudSystem {
                     }
                 }
             } catch { /* ignore */ }
-            this._gpLiveRafId = requestAnimationFrame(updateLiveBar);
+            this._scheduleGpLiveUpdate(updateLiveBar);
         };
         updateLiveBar();
+    }
+
+    private _gpPanelVisible(): boolean {
+        const dbgUi = document.getElementById('debug-ui');
+        if (!dbgUi || dbgUi.classList.contains('minimized')) return false;
+        const ctrlBody = document.getElementById('controls-settings');
+        return !ctrlBody || ctrlBody.style.display !== 'none';
+    }
+
+    private _scheduleGpLiveUpdate(tick: () => void): void {
+        if (this.scene._disposed) return;
+        if (this._gpPanelVisible()) {
+            this._gpLiveRafId = requestAnimationFrame(tick);
+        } else {
+            this._gpLiveTimeoutId = window.setTimeout(tick, GP_LIVE_HIDDEN_POLL_MS);
+        }
+    }
+
+    private _stopGpLiveUpdate(): void {
+        if (this._gpLiveRafId) {
+            try { cancelAnimationFrame(this._gpLiveRafId); } catch (_) { /* ignore */ }
+            this._gpLiveRafId = 0;
+        }
+        if (this._gpLiveTimeoutId) {
+            try { window.clearTimeout(this._gpLiveTimeoutId); } catch (_) { /* ignore */ }
+            this._gpLiveTimeoutId = 0;
+        }
     }
 
     buildKeymapList(): void {
@@ -540,7 +618,11 @@ export class HudSystem {
             row.appendChild(btn);
             container.appendChild(row);
         }
-        InputBindings.onChange((b) => {
+        if (this._keymapUnsubscribe) {
+            try { this._keymapUnsubscribe(); } catch (_) { /* ignore */ }
+            this._keymapUnsubscribe = null;
+        }
+        this._keymapUnsubscribe = InputBindings.onChange((b) => {
             const buttons = container.querySelectorAll('button');
             const actionsList = Object.keys(DEFAULT_KEY_BINDINGS) as ActionId[];
             buttons.forEach((btn, idx) => {
@@ -587,6 +669,42 @@ export class HudSystem {
         } catch (err) {
             console.warn('[Toast] failed:', err);
         }
+    }
+
+    /** Landing report toast: sink rate (server value preferred), centerline offset and touchdown speed with a grade. */
+    showLandingGradeToast(msg: any): void {
+        const td = this.scene._lastTouchdown as { fpm: number; speedKts: number; centerlineM: number | null; timeMs: number } | null;
+        const serverFpm = Number(msg?.landingRateFpm);
+        const fpmRaw = Number.isFinite(serverFpm) && serverFpm !== 0 ? serverFpm : (td ? td.fpm : Number.NaN);
+        if (!Number.isFinite(fpmRaw)) return;
+        const fpm = -Math.abs(fpmRaw);
+
+        let score = 0;
+        if (fpm > LANDING_GRADE_BUTTER_FPM) score += 3;
+        else if (fpm > LANDING_GRADE_GOOD_FPM) score += 2;
+        else if (fpm > LANDING_GRADE_FIRM_FPM) score += 1;
+
+        const parts: string[] = [`${I18n.t('landing.rate')}: ${Math.round(fpm)} fpm`];
+        if (td && Number.isFinite(td.centerlineM as number) && td.centerlineM != null) {
+            const off = Math.abs(td.centerlineM);
+            parts.push(`${I18n.t('landing.centerline')}: ${off.toFixed(0)} m`);
+            if (off < LANDING_GRADE_CENTERLINE_GOOD_M) score += 1;
+        }
+        if (td && Number.isFinite(td.speedKts)) {
+            parts.push(`${I18n.t('landing.speed')}: ${Math.round(td.speedKts)} kt`);
+            const stall = Number(this.scene.aircraftConfig?.stall_speed_kts);
+            const vApp = Number.isFinite(stall) && stall > 0 ? stall * CONST.TUTORIAL_APPROACH_SPEED_FACTOR : 0;
+            if (vApp > 0 && Math.abs(td.speedKts - vApp) < LANDING_GRADE_SPEED_TOLERANCE_KT) score += 1;
+        }
+
+        let gradeKey: string;
+        if (fpm <= LANDING_GRADE_FIRM_FPM) gradeKey = 'landing.grade.hard';
+        else if (score >= LANDING_GRADE_SCORE_BUTTER) gradeKey = 'landing.grade.butter';
+        else if (score >= LANDING_GRADE_SCORE_GOOD) gradeKey = 'landing.grade.good';
+        else gradeKey = 'landing.grade.firm';
+
+        this.showToast(`${I18n.t(gradeKey)} \u2014 ${parts.join(' \u00B7 ')}`, LANDING_GRADE_TOAST_MS);
+        this.scene._lastTouchdown = null;
     }
 
     buildChecklistOverlay(): void {
@@ -692,7 +810,7 @@ export class HudSystem {
             ['Easy', [b.easyModeToggle]],
             ['Yoke', [b.mouseYokeToggle]],
             ['AT', [b.autothrottleToggle]],
-            // ['Replay', [b.replayToggle]],
+            ['Replay', [b.replayToggle]],
             ['Screenshot', [b.screenshot]],
             ['Respawn', [b.respawn]],
             ['AP Master', ['KeyZ']],
@@ -703,6 +821,9 @@ export class HudSystem {
             ['AP APR', ['KeyI']],
             ['Kill Eng', ['Digit1', 'Digit2', 'Digit3', 'Digit4']],
             ['Helper', ['KeyH', 'Slash']],
+            ['Settings', ['Shift+S']],
+            ['Telemetry', ['Shift+D']],
+            ['Tutorial', ['F1']],
         ];
         const friendly = (code: string): string => {
             if (code.startsWith('Key')) return code.slice(3);
@@ -750,7 +871,7 @@ export class HudSystem {
             phaseKey = 'checklist.takeoff';
             items = [
                 [I18n.t('checklist.takeoff.throttle'), this.scene.thrust >= 0.85],
-                [I18n.t('checklist.takeoff.rotate'), false],
+                [I18n.t('checklist.takeoff.rotate'), speedKts >= Math.max(1, Number(this.scene.aircraftConfig?.stall_speed_kts) || 0) * CHECKLIST_VR_STALL_FACTOR],
             ];
         } else if (vsFpm > 200 && aglFt < 5000) {
             phaseKey = 'checklist.climb';
@@ -826,7 +947,7 @@ export class HudSystem {
         if (UiPreferences.get().easyMode) parts.push('EASY');
         if (this.scene._mouseYokeActive) parts.push('YOKE');
         if (this.scene._autopilotAtHold) parts.push(`AT ${Math.round(this.scene._autopilotAtTargetKts)}kt`);
-        // if (this.scene._replayActive) parts.push(I18n.t('replay.playing'));
+        if (this.scene._replayActive) parts.push(I18n.t('replay.playing'));
         el.textContent = parts.join('  |  ');
         el.style.display = '';
     }
@@ -1212,9 +1333,21 @@ export class HudSystem {
                 saveSettings();
             });
         }
-        if (isMobile && Object.keys(cfg).length === 0) {
-            console.info('[GFX] Mobile detected, first visit — applying "low" preset with quality overrides (render scale, shadows, FXAA)');
-            applyPreset('low');
+        const isFirstVisit = Object.keys(cfg).length === 0;
+        const gpuTier: GpuTier = isFirstVisit
+            ? detectGpuTier(this.scene.scene?.getEngine?.() ?? null, isMobile)
+            : 'high';
+        if (isFirstVisit) console.info(`[GFX] First visit — detected hardware tier "${gpuTier}" (mobile=${isMobile})`);
+
+        if (!isMobile && isFirstVisit && presets[gpuTier]) {
+            applyPreset(gpuTier);
+            const presetElDesktop = document.getElementById('gfx-preset') as HTMLSelectElement | null;
+            if (presetElDesktop) presetElDesktop.value = gpuTier;
+        }
+
+        if (isMobile && isFirstVisit) {
+            console.info(`[GFX] Mobile detected, first visit — applying "${gpuTier}" preset with quality overrides (render scale, shadows, FXAA)`);
+            applyPreset(gpuTier);
             const setCheckMobile = (id: string, val: boolean) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.checked = val; };
             const setValMobile = (id: string, val: any) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(val); };
             setValMobile('gfx-render-scale', MOBILE_QUALITY_RENDER_SCALE);
@@ -1224,7 +1357,7 @@ export class HudSystem {
             this.scene._premium.fxaaFallback = true;
             applySettings();
             const presetEl2 = document.getElementById('gfx-preset') as HTMLSelectElement | null;
-            if (presetEl2) presetEl2.value = 'low';
+            if (presetEl2) presetEl2.value = gpuTier;
         }
 
         if (Object.keys(cfg).length > 0) {
@@ -1372,9 +1505,12 @@ export class HudSystem {
             for (let i = 0; i < 7; i++) {
                 const idx = 3 - i;
                 const val = Math.max(0, spdCenter + idx * spdStep);
-                const offset = ((speedKts - val) / spdRange) * 50;
+                const offset = Math.round(((speedKts - val) / spdRange) * 50 * TAPE_MARK_OFFSET_QUANT) / TAPE_MARK_OFFSET_QUANT;
                 const mark = this.scene.spdMarkEls[i];
-                mark.el.style.transform = `translateY(${offset}px)`;
+                if (mark.lastOffsetPx !== offset) {
+                    mark.lastOffsetPx = offset;
+                    mark.el.style.transform = `translateY(${offset}px)`;
+                }
                 if (centerChanged) mark.valEl.textContent = String(val);
                 const naturalY = (i - 3) * MARK_SPACING_PX;
                 const visualY = naturalY + offset;
@@ -1386,7 +1522,7 @@ export class HudSystem {
             
             if (this.scene.hudSpdTape) {
                 const fillPct = 50 + ((speedKts % spdStep) / spdStep - 0.5) * 15;
-                this.scene.hudSpdTape.style.height = `${Math.max(5, Math.min(95, fillPct))}%`;
+                this._setStyle(this.scene.hudSpdTape, 'height', `${Math.max(5, Math.min(95, fillPct)).toFixed(1)}%`);
             }
         }
         
@@ -1406,9 +1542,12 @@ export class HudSystem {
             for (let i = 0; i < 7; i++) {
                 const idx = 3 - i;
                 const val = Math.max(0, altCenter + idx * altStep);
-                const offset = ((altitudeFt - val) / altRange) * 50;
+                const offset = Math.round(((altitudeFt - val) / altRange) * 50 * TAPE_MARK_OFFSET_QUANT) / TAPE_MARK_OFFSET_QUANT;
                 const mark = this.scene.altMarkEls[i];
-                mark.el.style.transform = `translateY(${offset}px)`;
+                if (mark.lastOffsetPx !== offset) {
+                    mark.lastOffsetPx = offset;
+                    mark.el.style.transform = `translateY(${offset}px)`;
+                }
                 if (centerChanged) mark.valEl.textContent = String(val);
                 const naturalY = (i - 3) * MARK_SPACING_PX;
                 const visualY = naturalY + offset;
@@ -1420,7 +1559,7 @@ export class HudSystem {
             
             if (this.scene.hudAltTape) {
                 const fillPct = Math.min(100, Math.max(5, (altitudeFt % 1000) / 1000 * 100));
-                this.scene.hudAltTape.style.height = `${fillPct}%`;
+                this._setStyle(this.scene.hudAltTape, 'height', `${fillPct.toFixed(1)}%`);
             }
         }
     }
@@ -1559,6 +1698,10 @@ export class HudSystem {
 #flight-plans-btn{top:98px!important;right:10px!important}
 #logbook-btn{top:136px!important;right:10px!important}
 #efb-btn{top:174px!important;right:10px!important}
+#achievements-btn{top:212px!important;right:10px!important}
+#leaderboard-btn{top:250px!important;right:10px!important}
+#achievements-panel{top:206px!important;right:50px!important;width:280px!important;max-height:50vh!important}
+#leaderboard-panel{top:244px!important;right:50px!important;width:280px!important;max-height:50vh!important}
 #missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
@@ -1597,6 +1740,10 @@ export class HudSystem {
 #logbook-panel{top:106px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
 #efb-btn{top:142px!important;right:6px!important;width:28px!important;height:28px!important}
 #efb-panel{top:140px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#achievements-btn{top:176px!important;right:6px!important;width:28px!important;height:28px!important}
+#achievements-panel{top:174px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#leaderboard-btn{top:210px!important;right:6px!important;width:28px!important;height:28px!important}
+#leaderboard-panel{top:208px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
 #nav-info{top:150px!important;left:auto!important;right:2px!important;width:110px!important;font-size:8px!important}
 #ap-panel{top:auto!important;bottom:58px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
 #ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
@@ -2020,6 +2167,7 @@ export class HudSystem {
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">BRG</span><span id="nav-brg" style="color:#40ffaa">\u2014\u00B0</span></div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">TOTAL</span><span id="nav-total-dist" style="color:#40ffaa">\u2014</span></div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">WIND</span><span id="nav-wind" style="color:#40ffaa">\u2014</span></div>
+  <div id="nav-rwy-wind-row" style="display:none;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">RWY</span><span id="nav-rwy-wind" style="color:#40ffaa">\u2014</span></div>
   <div style="display:flex;justify-content:space-between"><span style="color:rgba(255,255,255,.4)">GS</span><span id="nav-gs" style="color:#40ffaa">\u2014 kt</span></div>
 </div>`;
         document.body.appendChild(hud);
@@ -2416,32 +2564,54 @@ export class HudSystem {
         if (el) (el.style as unknown as Record<string, string>)[prop] = value;
     }
 
+    /** Head/tail and crosswind components on the destination runway from the surface wind. */
+    private _updateRunwayWind(nav: { arr_rwy_heading?: number | null; arr_elevation_ft?: number | null; arr_rwy_ident?: string } | null): void {
+        const rowEl = document.getElementById('nav-rwy-wind-row');
+        if (!rowEl) return;
+        const rwyHdg = Number(nav?.arr_rwy_heading);
+        if (!nav || !Number.isFinite(rwyHdg)) {
+            this._setStyle(rowEl, 'display', 'none');
+            return;
+        }
+        this._setStyle(rowEl, 'display', 'flex');
+        const elevFt = Number.isFinite(Number(nav.arr_elevation_ft)) ? Number(nav.arr_elevation_ft) : 0;
+        const wind = this.scene._getWindAtAltitude(elevFt);
+        const angleRad = (wind.dirDeg - rwyHdg) * Math.PI / 180;
+        const headComp = wind.speedKt * Math.cos(angleRad);
+        const crossComp = wind.speedKt * Math.sin(angleRad);
+        const headLabel = headComp >= 0 ? I18n.t('wind.headwind') : I18n.t('wind.tailwind');
+        const crossSide = crossComp >= 0 ? 'R' : 'L';
+        const ident = nav.arr_rwy_ident ? `${nav.arr_rwy_ident} ` : '';
+        this.scene._setText('nav-rwy-wind', `${ident}${headLabel} ${Math.abs(headComp).toFixed(0)} ${I18n.t('wind.crosswind')} ${Math.abs(crossComp).toFixed(0)}${crossSide}`);
+        this.scene._setStyle('nav-rwy-wind', 'color', Math.abs(crossComp) >= RUNWAY_CROSSWIND_WARN_KT || headComp < -RUNWAY_TAILWIND_WARN_KT ? '#ffcc00' : '#40ffaa');
+    }
+
     updateNavInfo(lat: number, lon: number): void {
         if (!this.scene._navInfoEl) return;
 
         const nav = this.scene._activeFlightPlanNav ?? this.scene._missionDestForNav();
         if (!nav) {
-            this.scene._navInfoEl.style.display = 'none';
+            this._setStyle(this.scene._navInfoEl, 'display', 'none');
             return;
         }
 
-        this.scene._navInfoEl.style.display = 'block';
+        this._setStyle(this.scene._navInfoEl, 'display', 'block');
 
         const totalDistNm = this.scene._haversineNm(lat, lon, nav.arrival_lat, nav.arrival_lon);
         const totalBrgDeg = this.scene._initialBearingDeg(lat, lon, nav.arrival_lat, nav.arrival_lon);
         const magVarHere = this.scene._magneticVariationDeg(lat, lon);
         const totalBrgMag = ((totalBrgDeg - magVarHere) + 360) % 360;
-        if (this.scene._navDestEl) this.scene._navDestEl.textContent = nav.arrival_icao || '\u2014';
+        this._setText(this.scene._navDestEl, nav.arrival_icao || '\u2014');
         if (this.scene._navDistEl) {
             const distUnits = UiPreferences.get().unitSystem;
-            this.scene._navDistEl.textContent = distUnits === _C.UNIT_SYSTEM_METRIC
+            this._setText(this.scene._navDistEl, distUnits === _C.UNIT_SYSTEM_METRIC
                 ? `${Math.round(totalDistNm * 1.852)} km`
-                : `${Math.round(totalDistNm)} nm`;
+                : `${Math.round(totalDistNm)} nm`);
         }
-        if (this.scene._navBrgEl) this.scene._navBrgEl.textContent = `${Math.round(totalBrgMag)}\u00B0M`;
+        this._setText(this.scene._navBrgEl, `${Math.round(totalBrgMag)}\u00B0M`);
         this.scene._setText('nav-total-dist', `${totalDistNm.toFixed(1)} nm`);
 
-        const gsKt = this.scene.groundSpeed * 1.944;
+        const gsKt = this.scene.groundSpeed * MS_TO_KT;
         this.scene._setText('nav-gs', `${Math.round(gsKt)} kt`);
 
         const altMslFt = this.scene.planeRoot ? Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y) * 3.28084) : 0;
@@ -2456,6 +2626,7 @@ export class HudSystem {
         const headSign = headComp >= 0 ? 'H+' : 'H-';
         const crossSign = crossComp >= 0 ? 'X+' : 'X-';
         this.scene._setText('nav-wind', `${String(Math.round(wind.dirDeg)).padStart(3, '0')}/${Math.round(wind.speedKt).toString().padStart(2, '0')} ${headSign}${Math.abs(headComp).toFixed(0)} ${crossSign}${Math.abs(crossComp).toFixed(0)}`);
+        this._updateRunwayWind(nav);
 
         const wpts = this.scene._missionWaypoints;
         const idx = this.scene._missionCurrentWpIndex;
@@ -2559,8 +2730,6 @@ export class HudSystem {
         const speedKtsGs  = Math.max(0, Math.round(gsMs  * MS_TO_KT));
         const speedKts = speedKtsIas;
         const pos = this.scene.planeRoot.position;
-        const altitudeM = Math.round(Math.max(0, pos.y));
-        const altitudeFt = Math.round(altitudeM * 3.28084);
         const abMax = this.scene.aircraftConfig?.afterburner_thrust_mult ?? 1;
         const thrustNorm = abMax > 0 ? this.scene.thrust / abMax : this.scene.thrust;
         const pct = Math.round(Math.min(100, Math.max(0, thrustNorm * 100)));
@@ -2589,16 +2758,14 @@ export class HudSystem {
         if (this.scene.hudEng2Pct) this._setText(this.scene.hudEng2Pct, `${_eng2Alive ? pct : 0}%`);
         if (this.scene.hudEng3Pct) this._setText(this.scene.hudEng3Pct, `${_eng3Alive ? pct : 0}%`);
         if (this.scene.hudEng4Pct) this._setText(this.scene.hudEng4Pct, `${_eng4Alive ? pct : 0}%`);
-        if (this.scene.hudAbTag) {
-            this.scene.hudAbTag.style.display = this.scene.thrust > 1.0 ? '' : 'none';
-        }
+        this._setStyle(this.scene.hudAbTag, 'display', this.scene.thrust > 1.0 ? '' : 'none');
 
         const spdAbs = Math.max(0, Number.isFinite(speedKts) ? speedKts : 0);
         const spdHund = Math.floor(spdAbs / 100) % 10;
         const spdTen  = Math.floor(spdAbs / 10) % 10;
         const spdOne  = spdAbs % 10;
-        if (this.scene.hudSpdH) this.scene.hudSpdH.textContent = spdAbs >= 100 ? String(spdHund) : '';
-        if (this.scene.hudSpdT) this.scene.hudSpdT.textContent = spdAbs >= 10  ? String(spdTen)  : '0';
+        this._setText(this.scene.hudSpdH, spdAbs >= 100 ? String(spdHund) : '');
+        this._setText(this.scene.hudSpdT, spdAbs >= 10  ? String(spdTen)  : '0');
         if (this.scene.hudSpdUInner) {
             const nextOne = (spdOne + 1) % 10;
             const inner = this.scene.hudSpdUInner;
@@ -2614,10 +2781,10 @@ export class HudSystem {
         const altDU    = Math.floor(altAbs / 100)   % 10;
         const altDTens = Math.floor(altAbs / 10)    % 10;
         const altDOne  = altAbs % 10;
-        if (this.scene.hudAltH) this.scene.hudAltH.textContent = altAbs >= 10000 ? String(altDH) : '';
-        if (this.scene.hudAltT) this.scene.hudAltT.textContent = altAbs >= 1000  ? String(altDT) : '';
-        if (this.scene.hudAltU) this.scene.hudAltU.textContent = String(altDU);
-        if (this.scene.hudAltTens) this.scene.hudAltTens.textContent = String(altDTens);
+        this._setText(this.scene.hudAltH, altAbs >= 10000 ? String(altDH) : '');
+        this._setText(this.scene.hudAltT, altAbs >= 1000  ? String(altDT) : '');
+        this._setText(this.scene.hudAltU, String(altDU));
+        this._setText(this.scene.hudAltTens, String(altDTens));
         if (this.scene.hudAltUnitsInner) {
             const nextOne = (altDOne + 1) % 10;
             const inner = this.scene.hudAltUnitsInner;
@@ -2628,9 +2795,13 @@ export class HudSystem {
         }
 
         if (this.scene.hudAltSel) {
-            const presetFt = this.scene._pendingMissionAltM != null && Number.isFinite(this.scene._pendingMissionAltM)
-                ? Math.max(0, Math.round((this.scene._pendingMissionAltM as number) * 3.28084 / 100) * 100)
-                : 5000;
+            const apTargetAltFt = Number(this.scene._autopilotTargetAltFt);
+            const apAltActive = this.scene._autopilotMaster === true && this.scene._autopilotAltHold === true && Number.isFinite(apTargetAltFt) && apTargetAltFt > 0;
+            const presetFt = apAltActive
+                ? Math.max(0, Math.round(apTargetAltFt / 100) * 100)
+                : this.scene._pendingMissionAltM != null && Number.isFinite(this.scene._pendingMissionAltM)
+                    ? Math.max(0, Math.round((this.scene._pendingMissionAltM as number) * 3.28084 / 100) * 100)
+                    : 5000;
             const presetText = String(presetFt);
             if (this.scene.hudAltSel.textContent !== presetText) this.scene.hudAltSel.textContent = presetText;
         }
@@ -2730,10 +2901,10 @@ export class HudSystem {
             this.scene._updateGPWS(aglFtForGpws, vsFpmForGpws);
         }
         const anyWarn = stallActive || this.scene._overspeedActive;
-        this.scene.hudWarning.style.display = anyWarn ? 'block' : 'none';
+        this._setStyle(this.scene.hudWarning, 'display', anyWarn ? 'block' : 'none');
         if (anyWarn && this.scene.hudWarning) {
             const label = this.scene._overspeedActive ? 'OVERSPEED' : 'STALL';
-            this.scene.hudWarning.innerHTML = `\u26A0 ${label} \u26A0`;
+            this._setText(this.scene.hudWarning, `\u26A0 ${label} \u26A0`);
         }
         if (stallActive && !this.scene._lastStallState) {
             this.scene._doHaptic([100, 50, 100]);
@@ -2882,7 +3053,11 @@ export class HudSystem {
         }
 
         if (this.scene.hudTrimVal) this._setText(this.scene.hudTrimVal, String(Math.round(this.scene.trimPitch * 1000)));
-        if (this.scene.hudBaroVal) this._setText(this.scene.hudBaroVal, '29.92');
+        if (this.scene.hudBaroVal) {
+            const qnhHpa = Number(this.scene._metarQnhHpa);
+            const baroInHg = Number.isFinite(qnhHpa) && qnhHpa > 0 ? qnhHpa * HPA_TO_INHG : STD_PRESSURE_INHG;
+            this._setText(this.scene.hudBaroVal, baroInHg.toFixed(2));
+        }
 
         if (this.scene.hudHdgVal) {
             const fwdFlat = this.scene._tmpFwd.subtract(this.scene._tmpUp.scale(BABYLON.Vector3.Dot(this.scene._tmpFwd, this.scene._tmpUp)));
@@ -2898,7 +3073,7 @@ export class HudSystem {
             this._setText(this.scene.hudHdgVal, `${hdgMagDeg}\u00B0M`);
         }
 
-        this.scene._updateTapeMarks(speedKts, altitudeFt);
+        this.scene._updateTapeMarks(speedKts, altitudeMslFt);
 
         const nowPerfMs = performance.now();
         if (nowPerfMs - this._lastHudCanvasDrawMs >= HudSystem.HUD_CANVAS_DRAW_INTERVAL_MS) {
@@ -3005,8 +3180,8 @@ export class HudSystem {
             setActive(visible);
         };
         if (this.scene.isMobile === true) {
-            panel.style.display = 'none';
-            console.debug('[AP Panel] Mobile detected — autopilot panel hidden by default');
+            panel.style.display = 'flex';
+            console.debug('[AP Panel] Mobile detected — autopilot panel visible by default (docked at bottom)');
         }
         applyVisible(panel.style.display !== 'none');
 
@@ -3055,7 +3230,8 @@ export class HudSystem {
         );
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
-        const speed    = this.scene.velocity.length() * 3.6 * 0.539957;
+        const iasMs = Number.isFinite(this.scene._lastIasMs) ? this.scene._lastIasMs : this.scene.velocity.length();
+        const speed    = Math.max(0, iasMs * MS_TO_KT);
         const pPos = this.scene.planeRoot.position;
         const altitude = Math.max(0, this.scene.refAlt + pPos.y) * 3.28084;
 
@@ -3709,7 +3885,8 @@ export class HudSystem {
         );
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
-        const speed    = this.scene.velocity.length() * 3.6 * 0.539957;
+        const iasMsFull = Number.isFinite(this.scene._lastIasMs) ? this.scene._lastIasMs : this.scene.velocity.length();
+        const speed    = Math.max(0, iasMsFull * MS_TO_KT);
         const pPos     = this.scene.planeRoot.position;
         const altitude = Math.max(0, this.scene.refAlt + pPos.y) * 3.28084;
         const vsFpm    = this.scene.velocity.y * PFD_MS_TO_FPM;

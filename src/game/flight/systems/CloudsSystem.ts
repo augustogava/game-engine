@@ -40,6 +40,10 @@ import {
 
 const CLOUD_TINT_EPSILON = 0.005;
 const CLOUD_MAX_TOTAL_INSTANCES = 2500;
+const CLOUD_MAX_TOTAL_INSTANCES_MOBILE = 700;
+const CLOUD_MOBILE_DENSITY_MULT = 0.5;
+const CLOUD_ADAPTIVE_REDUCTION_PER_STEP = 0.2;
+const CLOUD_ADAPTIVE_MIN_RATIO = 0.2;
 
 export class CloudsSystem {
     private readonly scene: any;
@@ -60,6 +64,10 @@ export class CloudsSystem {
 
         let baseCloudTex: BABYLON.Texture | null = null;
         let totalInstances = 0;
+        const isMobile = this.scene.isMobile === true;
+        const maxTotalInstances = isMobile ? CLOUD_MAX_TOTAL_INSTANCES_MOBILE : CLOUD_MAX_TOTAL_INSTANCES;
+        const densityMult = (Number.isFinite(this.scene._cloudDensityMult) ? this.scene._cloudDensityMult : 1)
+            * (isMobile ? CLOUD_MOBILE_DENSITY_MULT : 1);
         for (const layer of layers) {
             const variantTemplates: BABYLON.Mesh[] = [];
             for (let v = 0; v < CLOUD_VARIANT_COUNT; v++) {
@@ -86,6 +94,8 @@ export class CloudsSystem {
                 mat.disableLighting            = true;
                 mat.disableDepthWrite          = true;
                 mat.alphaMode                  = BABYLON.Engine.ALPHA_COMBINE;
+                // Frozen: only emissiveColor (a uniform) changes at runtime via applyCloudTint.
+                mat.freeze();
                 this.scene._cloudMats.push(mat);
 
                 const tpl = BABYLON.MeshBuilder.CreatePlane(`cloudTpl_${layer.yMin}_v${v}`, { size: layer.sizeBase }, scene);
@@ -97,14 +107,14 @@ export class CloudsSystem {
                 variantTemplates.push(tpl);
             }
 
-            const effectiveCount = Math.max(1, Math.round(layer.count * this.scene._cloudDensityMult));
+            const effectiveCount = Math.max(1, Math.round(layer.count * densityMult));
             const puffPerCluster = this.scene._cloudVolumetric ? CLOUD_VOLUMETRIC_PUFFS_PER_CLUSTER : 1;
-            for (let i = 0; i < effectiveCount && totalInstances < CLOUD_MAX_TOTAL_INSTANCES; i++) {
+            for (let i = 0; i < effectiveCount && totalInstances < maxTotalInstances; i++) {
                 const ox = (Math.random() - 0.5) * layer.spread;
                 const oz = (Math.random() - 0.5) * layer.spread;
                 const oy = layer.yMin + Math.random() * layer.yRange;
                 const clusterScale = 0.5 + Math.random() * 2.0;
-                for (let j = 0; j < puffPerCluster && totalInstances < CLOUD_MAX_TOTAL_INSTANCES; j++) {
+                for (let j = 0; j < puffPerCluster && totalInstances < maxTotalInstances; j++) {
                     const variant = (Math.random() * CLOUD_VARIANT_COUNT) | 0;
                     const tpl = variantTemplates[variant];
                     const ci = tpl.createInstance(`c_${layer.yMin}_${i}_${j}_v${variant}`);
@@ -243,7 +253,9 @@ export class CloudsSystem {
             mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
             mat.disableDepthWrite = true;
             mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
+            mat.freeze();
             deck.material = mat;
+            deck.freezeWorldMatrix();
 
             this.scene._overcastMesh = deck;
             this.scene._overcastMat = mat;
@@ -255,6 +267,7 @@ export class CloudsSystem {
     }
 
     setMilkyWay(scene: BABYLON.Scene, enabled: boolean): void {
+        this.scene._milkyWayEnabled = enabled;
         if (enabled) {
             if (this.scene._milkyWayRoot) {
                 this.scene._milkyWayRoot.setEnabled(true);
@@ -337,7 +350,16 @@ export class CloudsSystem {
         }
         const doScale = (Number(this.scene._frameTick) & 1) === 0;
 
-        for (const c of this.scene.cloudInstances) {
+        const adaptiveStep = Math.max(0, Number(this.scene._adaptiveQualityStep) || 0);
+        const instances = this.scene.cloudInstances;
+        const adaptiveLimit = Math.floor(instances.length * Math.max(CLOUD_ADAPTIVE_MIN_RATIO, 1 - adaptiveStep * CLOUD_ADAPTIVE_REDUCTION_PER_STEP));
+
+        for (let idx = 0; idx < instances.length; idx++) {
+            const c = instances[idx];
+            if (idx >= adaptiveLimit) {
+                if (c.mesh.isEnabled()) c.mesh.setEnabled(false);
+                continue;
+            }
             c.mesh.position.x += baseVx * c.windMult * dtClamp;
             c.mesh.position.z += baseVz * c.windMult * dtClamp;
 
@@ -385,6 +407,7 @@ export class CloudsSystem {
                 const shouldEnable = fade > 0.01;
                 if (c.mesh.isEnabled() !== shouldEnable) c.mesh.setEnabled(shouldEnable);
             } else {
+                if (!c.mesh.isEnabled()) c.mesh.setEnabled(true);
                 c.mesh.visibility = fade;
             }
         }

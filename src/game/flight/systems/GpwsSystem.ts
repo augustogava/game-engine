@@ -28,6 +28,9 @@ import {
     GPWS_TERRAIN_CLOSURE_MAX_AGL_FT,
     GPWS_TERRAIN_CLOSURE_REPEAT_MS,
     GPWS_TOO_LOW_REPEAT_MS,
+    GPWS_APPROACH_DESCENT_FPM,
+    GEAR_STATE_DOWN,
+    GEAR_STATE_EXTENDING,
 } from '../constants/index.js';
 
 export class GpwsSystem {
@@ -137,8 +140,10 @@ export class GpwsSystem {
         if (speedKts > GPWS_TOO_LOW_MIN_SPEED_KTS && aglFt > GPWS_TOO_LOW_MIN_AGL_FT) {
             const gearRetractable = this.scene.aircraftConfig?.gear_retractable === true;
             const gearDownState = this.scene.gearState;
-            const gearIsDown = gearDownState != null && gearDownState === 0;
-            if (gearRetractable && !gearIsDown && aglFt < GPWS_TOO_LOW_GEAR_AGL_FT
+            // Gear already in transit toward down should not trigger the alert.
+            const gearIsDown = gearDownState != null && (gearDownState === GEAR_STATE_DOWN || gearDownState === GEAR_STATE_EXTENDING);
+            const inApproachDescent = vsFpm < GPWS_APPROACH_DESCENT_FPM;
+            if (gearRetractable && !gearIsDown && inApproachDescent && aglFt < GPWS_TOO_LOW_GEAR_AGL_FT
                 && (nowMs - this._lastTooLowGearMs) > GPWS_TOO_LOW_REPEAT_MS) {
                 this._lastTooLowGearMs = nowMs;
                 this.scene._gpwsActiveAlert = GPWS_ALERT_TYPE_TOO_LOW_GEAR;
@@ -148,7 +153,7 @@ export class GpwsSystem {
                 console.debug(`[GPWS] Too low gear: agl=${aglFt.toFixed(0)}ft`);
             }
             const flapDeg = this.scene.FLAP_STEPS?.[this.scene.flapIndex ?? 0] ?? 0;
-            if (flapDeg <= 0 && aglFt < GPWS_TOO_LOW_FLAPS_AGL_FT
+            if (flapDeg <= 0 && inApproachDescent && aglFt < GPWS_TOO_LOW_FLAPS_AGL_FT
                 && (nowMs - this._lastTooLowFlapsMs) > GPWS_TOO_LOW_REPEAT_MS) {
                 this._lastTooLowFlapsMs = nowMs;
                 this.scene._gpwsActiveAlert = GPWS_ALERT_TYPE_TOO_LOW_FLAPS;

@@ -663,16 +663,19 @@
         <div class="kh-group"><span class="kh-label">Speed</span><kbd>[</kbd><kbd>]</kbd></div>
         <div class="kh-group"><span class="kh-label">Easy</span><kbd>M</kbd></div>
         <div class="kh-group"><span class="kh-label">Yoke</span><kbd>Y</kbd></div>
-        <!-- <div class="kh-group"><span class="kh-label">Replay</span><kbd>V</kbd></div> -->
+        <div class="kh-group"><span class="kh-label">Replay</span><kbd>V</kbd></div>
 
         <div class="kh-group"><span class="kh-label">Screenshot</span><kbd>F12</kbd></div>
         <div class="kh-group"><span class="kh-label">Respawn</span><kbd>R</kbd></div>
+        <div class="kh-group"><span class="kh-label">Settings</span><kbd>Shift+S</kbd></div>
+        <div class="kh-group"><span class="kh-label">Telemetry</span><kbd>Shift+D</kbd></div>
+        <div class="kh-group"><span class="kh-label">Tutorial</span><kbd>F1</kbd></div>
     </div>
 
-    <!-- Settings toggle button (also Shift+D) -->
-    <div id="debug-toggle" title="Settings (Shift+D)">&#9881;</div>
+    <!-- Settings toggle button (also Shift+S; Shift+D opens telemetry) -->
+    <div id="debug-toggle" title="Settings (Shift+S)">&#9881;</div>
 
-    <!-- Debug UI Panel (toggle with Shift+D or the gear button) -->
+    <!-- Debug UI Panel (toggle with Shift+S or the gear button) -->
     <div id="debug-ui" class="minimized">
         <header>
             <h3>LOCATION</h3>
@@ -1017,9 +1020,12 @@
                 </div>
 
                 <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15);display:flex;flex-wrap:wrap;gap:6px">
-                    <!-- <button id="ux-replay-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">REPLAY 60s</button> -->
+                    <button id="ux-replay-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">REPLAY 60s</button>
+                    <button id="ux-save-flight-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">SALVAR VOO</button>
+                    <button id="ux-resume-flight-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">RETOMAR VOO</button>
                     <button id="ux-tower-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">CAM TORRE</button>
                     <button id="ux-screenshot-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">SCREENSHOT</button>
+                    <button id="ux-tutorial-btn" class="debug-btn" style="flex:1;min-width:80px;font-size:10px">TUTORIAL</button>
                 </div>
 
                 <div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(64,255,170,.15)">

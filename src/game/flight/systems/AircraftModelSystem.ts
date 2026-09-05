@@ -20,9 +20,12 @@ import {
 
 const AIRCRAFT_TEXTURE_ANISOTROPY = 8;
 const GLB_LOAD_TIMEOUT_MS = 12000;
+const SPOILER_ANIM_NAME_RE = /spoiler|speed[_\s-]?brake/i;
+const SPOILER_ANIM_FRAME_EPSILON = 0.002;
 
 export class AircraftModelSystem {
     private readonly scene: any;
+    private _spoilerAnimLastFrame = Number.NaN;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -145,8 +148,19 @@ export class AircraftModelSystem {
                 this.scene._propellerAnimGroup = null;
                 this.scene._gearUpAnimGroups = [];
                 this.scene._gearDownAnimGroups = [];
+                this.scene._spoilerAnimGroups = [];
+                this._spoilerAnimLastFrame = Number.NaN;
                 if (this.scene._loadedAnimGroups.length) {
                     this.scene._loadedAnimGroups.forEach((g: BABYLON.AnimationGroup) => g.stop());
+                    this.scene._spoilerAnimGroups = this.scene._loadedAnimGroups.filter((g: BABYLON.AnimationGroup) => SPOILER_ANIM_NAME_RE.test(g.name));
+                    for (const g of this.scene._spoilerAnimGroups) {
+                        g.loopAnimation = false;
+                        g.start(false, 1.0, g.from, g.from);
+                        g.pause();
+                    }
+                    if (this.scene._spoilerAnimGroups.length > 0) {
+                        console.log(`[FlightSimple] Spoiler animations found: [${this.scene._spoilerAnimGroups.map((g: BABYLON.AnimationGroup) => g.name).join(', ')}]`);
+                    }
                     const hasProp = cfg.engine_type === ENGINE_TYPE_PISTON || cfg.engine_type === ENGINE_TYPE_TURBOPROP;
                     if (hasProp) {
                         const propGroup = this.scene._loadedAnimGroups.find((g: BABYLON.AnimationGroup) =>
@@ -216,6 +230,8 @@ export class AircraftModelSystem {
                 if (shadow) {
                     meshes.forEach((m: BABYLON.AbstractMesh) => {
                         shadow.addShadowCaster(m, true);
+                        // Self-shadowing: wings/tail shadow the fuselage (bias tuned on the generator).
+                        m.receiveShadows = true;
                     });
                 }
 
@@ -384,6 +400,8 @@ export class AircraftModelSystem {
         this.scene._propellerAnimGroup = null;
         this.scene._gearUpAnimGroups = [];
         this.scene._gearDownAnimGroups = [];
+        this.scene._spoilerAnimGroups = [];
+        this._spoilerAnimLastFrame = Number.NaN;
         try {
             const pivot = this.scene.planeRoot?.getChildTransformNodes(true).find((n: BABYLON.TransformNode) => n.name === 'modelPivot');
             if (pivot) pivot.dispose();
@@ -515,6 +533,24 @@ export class AircraftModelSystem {
         if (this.scene._surfaceFlapNodes.length) {
             const flapRad = (this.scene.currentFlapDeg || 0) * Math.PI / 180;
             this.setNodeRotationX(this.scene._surfaceFlapNodes, flapRad);
+        }
+    }
+
+    updateSpoilerAnim(): void {
+        const groups: BABYLON.AnimationGroup[] = this.scene._spoilerAnimGroups;
+        if (!groups || groups.length === 0) return;
+        const deflection = Math.max(0, Math.min(1, Number.isFinite(this.scene._spoilerDeflection) ? this.scene._spoilerDeflection : 0));
+        if (Math.abs(deflection - this._spoilerAnimLastFrame) < SPOILER_ANIM_FRAME_EPSILON) return;
+        this._spoilerAnimLastFrame = deflection;
+        for (const g of groups) {
+            try {
+                const frame = g.from + (g.to - g.from) * deflection;
+                if (!g.isStarted) g.start(false, 1.0, g.from, g.to);
+                g.pause();
+                g.goToFrame(frame);
+            } catch (err) {
+                console.warn(`[FlightSimple] Spoiler animation "${g.name}" update failed:`, err);
+            }
         }
     }
 

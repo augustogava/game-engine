@@ -21,6 +21,12 @@ const REMOTE_AIRSPEED_KMH_TO_MS = 1 / 3.6;
 const REMOTE_CONTRAIL_FALLBACK_HALF_SPAN = 8;
 const REMOTE_RIBBON_FAR_DIST_M = 8000;
 const REMOTE_RIBBON_FAR_UPDATE_INTERVAL_S = 0.2;
+const REMOTE_STATE_INTERVAL_DEFAULT_MS = 50;
+const REMOTE_STATE_INTERVAL_MIN_MS = 16;
+const REMOTE_STATE_INTERVAL_MAX_MS = 2000;
+const REMOTE_STATE_INTERVAL_SMOOTHING = 0.2;
+const REMOTE_EXTRAPOLATION_MAX_T = 1.5;
+const REMOTE_STALE_TIMEOUT_MS = 15000;
 
 export class MultiplayerSystem {
     private readonly scene: any;
@@ -71,6 +77,12 @@ export class MultiplayerSystem {
                     remote.aircraftCode = remoteModelFile;
                     this.loadRemoteModel(p.userId, remote.root, remote, remoteModelFile);
                 }
+                if (remote.lastUpdateTime > 0) {
+                    const measured = now - remote.lastUpdateTime;
+                    if (measured > 0 && measured < REMOTE_STATE_INTERVAL_MAX_MS) {
+                        remote.updateIntervalMs += (measured - remote.updateIntervalMs) * REMOTE_STATE_INTERVAL_SMOOTHING;
+                    }
+                }
                 remote.prevState = remote.nextState;
                 remote.nextState = p;
                 remote.lastUpdateTime = now;
@@ -102,16 +114,10 @@ export class MultiplayerSystem {
                 this.scene.dbgMpStatus.style.color = connected ? '#40ffaa' : '#ff5555';
             }
             this._setConnectionIndicator(connected);
+            // Remote players are kept across short disconnects so a reconnect reuses loaded GLBs;
+            // stale entries are pruned by updateRemotePlayers() after REMOTE_STALE_TIMEOUT_MS.
             if (!connected) {
-                try {
-                    for (const [id, remote] of this.scene.remotePlayers) {
-                        try { this.disposeRemotePlayer(remote); } catch (_) { /* ignore */ }
-                        this.scene.remotePlayers.delete(id);
-                    }
-                    console.debug('[MP] Cleared remote players on disconnect');
-                } catch (err) {
-                    console.warn('[MP] Disconnect cleanup failed:', err);
-                }
+                console.debug('[MP] Disconnected; keeping remote players until stale timeout');
             }
         });
 
@@ -119,6 +125,13 @@ export class MultiplayerSystem {
         if (onNoFlightHours) this.scene.mpClient.onNoFlightHours(onNoFlightHours);
 
         this.scene.mpClient.onFlightLogEnded((msg: any) => {
+            if (msg && msg.status === 'landed') {
+                try {
+                    this.scene._hudSystem?.showLandingGradeToast(msg);
+                } catch (err) {
+                    console.warn('[Landing] Grade toast failed:', err);
+                }
+            }
             if (!this.scene._activeFlightPlanId) return;
             if (msg.status === 'landed') {
                 const arrivedAtDest = this.scene._activeFlightPlanArrivalAirportId != null
@@ -188,6 +201,7 @@ export class MultiplayerSystem {
         const aircraftCode = modelFile || null;
         const remote: RemotePlayer = {
             root, meshes: [], animationGroups: [], skeletons: [], prevState: null, nextState: null, lastUpdateTime: 0,
+            updateIntervalMs: REMOTE_STATE_INTERVAL_DEFAULT_MS,
             aircraftCode, labelPlane: null, labelTexture: null,
             currentUsername: null, currentAvatarUrl: null,
             engineSound: null, engineTypeResolved: false,
@@ -632,15 +646,23 @@ export class MultiplayerSystem {
             }
         } catch (_) { /* ignore */ }
 
-        for (const [, remote] of this.scene.remotePlayers) {
+        for (const [id, remote] of this.scene.remotePlayers) {
             if (!remote.nextState) continue;
+
+            if (remote.lastUpdateTime > 0 && now - remote.lastUpdateTime > REMOTE_STALE_TIMEOUT_MS) {
+                try { this.disposeRemotePlayer(remote); } catch (err) { console.warn('[MP] Stale remote dispose failed:', err); }
+                this.scene.remotePlayers.delete(id);
+                continue;
+            }
 
             const ns = remote.nextState;
             const targetPos = this.scene._latLonToLocal(ns.lat, ns.lon, ns.alt);
 
             if (remote.prevState) {
                 const elapsed = now - remote.lastUpdateTime;
-                const t = Math.min(1, elapsed / 60);
+                const interval = Math.max(REMOTE_STATE_INTERVAL_MIN_MS, remote.updateIntervalMs);
+                // t > 1 extrapolates along the last measured motion so remotes keep moving between packets.
+                const t = Math.min(REMOTE_EXTRAPOLATION_MAX_T, elapsed / interval);
                 const ps = remote.prevState;
                 const prevPos = this.scene._latLonToLocal(ps.lat, ps.lon, ps.alt);
                 BABYLON.Vector3.LerpToRef(prevPos, targetPos, t, remote.root.position);

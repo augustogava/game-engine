@@ -20,6 +20,17 @@ const TILES_LRU_MIN_SIZE_MOBILE = 300;
 const TILES_LRU_MAX_SIZE_DESKTOP = 2000;
 const TILES_LRU_MIN_SIZE_DESKTOP = 800;
 const TILE_TEXTURE_ANISOTROPY = 8;
+const TILES_DOWNLOAD_CONCURRENCY_MOBILE = 6;
+const TILES_DOWNLOAD_CONCURRENCY_DESKTOP = 12;
+const TILES_PARSE_CONCURRENCY_MOBILE = 2;
+const TILES_PARSE_CONCURRENCY_DESKTOP = 4;
+const WATER_REFLECTION_RENDERLIST_MAX = 400;
+const CITY_LIGHTS_ELEV_START_DEG = -2;
+const CITY_LIGHTS_ELEV_FULL_DEG = -10;
+const CITY_LIGHTS_MAX_INTENSITY = 0.55;
+const CITY_LIGHTS_TINT_G = 0.9;
+const CITY_LIGHTS_TINT_B = 0.7;
+const CITY_LIGHTS_FACTOR_EPSILON = 0.02;
 
 const ADAPT_EVAL_INTERVAL_MS = 3000;
 const ADAPT_WARMUP_MS = 8000;
@@ -46,9 +57,76 @@ export class TerrainTilesSystem {
     private _highFpsStreak = 0;
     private _tileShadowsAdaptiveOff = false;
     private readonly _tileShadowReceivers = new Set<any>();
+    private _tilesWithHandlers: any = null;
+    private _onTileLoadModel: ((event: any) => void) | null = null;
+    private _onTileDisposeModel: ((event: any) => void) | null = null;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    dispose(): void {
+        this.detachTilesVisualHandlers();
+        this._tileShadowReceivers.clear();
+        this._cityLightMats.clear();
+    }
+
+    private readonly _cityLightMats = new Set<BABYLON.PBRMaterial>();
+    private _cityLightFactor = 0;
+
+    private static cityLightFactorFor(sunElevationDeg: number): number {
+        if (!Number.isFinite(sunElevationDeg)) return 0;
+        return Math.max(0, Math.min(1, (CITY_LIGHTS_ELEV_START_DEG - sunElevationDeg) / (CITY_LIGHTS_ELEV_START_DEG - CITY_LIGHTS_ELEV_FULL_DEG)));
+    }
+
+    /**
+     * Night "city lights": the tile albedo is reused as emissive so bright urban imagery glows while dark
+     * terrain stays dark. The texture is only bound once the sun is low enough, to avoid daytime shader recompiles.
+     */
+    private _applyCityLightToMaterial(pbr: BABYLON.PBRMaterial, factor: number): void {
+        try {
+            if (factor <= 0) {
+                if (pbr.emissiveIntensity !== 0) pbr.emissiveIntensity = 0;
+                return;
+            }
+            if (pbr.emissiveTexture !== pbr.albedoTexture && pbr.albedoTexture) {
+                pbr.emissiveTexture = pbr.albedoTexture;
+                pbr.emissiveColor.set(1, CITY_LIGHTS_TINT_G, CITY_LIGHTS_TINT_B);
+            }
+            pbr.emissiveIntensity = factor * CITY_LIGHTS_MAX_INTENSITY;
+        } catch (err) {
+            console.warn('[3DTiles] City light material apply failed:', err);
+        }
+    }
+
+    private _registerCityLightMaterial(pbr: BABYLON.PBRMaterial): void {
+        if (this.scene.isMobile === true) return;
+        this._cityLightMats.add(pbr);
+        if (this._cityLightFactor > 0) this._applyCityLightToMaterial(pbr, this._cityLightFactor);
+    }
+
+    updateCityLights(sunElevationDeg: number): void {
+        if (this.scene.isMobile === true) return;
+        const factor = TerrainTilesSystem.cityLightFactorFor(sunElevationDeg);
+        if (Math.abs(factor - this._cityLightFactor) < CITY_LIGHTS_FACTOR_EPSILON) return;
+        this._cityLightFactor = factor;
+        for (const pbr of this._cityLightMats) {
+            this._applyCityLightToMaterial(pbr, factor);
+        }
+    }
+
+    private detachTilesVisualHandlers(): void {
+        const tiles = this._tilesWithHandlers;
+        if (!tiles) return;
+        try {
+            if (this._onTileLoadModel) tiles.removeEventListener('load-model', this._onTileLoadModel);
+            if (this._onTileDisposeModel) tiles.removeEventListener('dispose-model', this._onTileDisposeModel);
+        } catch (err) {
+            console.warn('[3DTiles] Failed to detach visual handlers:', err);
+        }
+        this._tilesWithHandlers = null;
+        this._onTileLoadModel = null;
+        this._onTileDisposeModel = null;
     }
 
     init3DTiles(scene: BABYLON.Scene): void {
@@ -95,6 +173,13 @@ export class TerrainTilesSystem {
         (this.scene.tiles as any).errorThreshold = 60;
         this.scene.tiles.lruCache.maxSize = isMobile ? TILES_LRU_MAX_SIZE_MOBILE : TILES_LRU_MAX_SIZE_DESKTOP;
         this.scene.tiles.lruCache.minSize = isMobile ? TILES_LRU_MIN_SIZE_MOBILE : TILES_LRU_MIN_SIZE_DESKTOP;
+        try {
+            const tilesAny = this.scene.tiles as any;
+            if (tilesAny.downloadQueue) tilesAny.downloadQueue.maxJobs = isMobile ? TILES_DOWNLOAD_CONCURRENCY_MOBILE : TILES_DOWNLOAD_CONCURRENCY_DESKTOP;
+            if (tilesAny.parseQueue) tilesAny.parseQueue.maxJobs = isMobile ? TILES_PARSE_CONCURRENCY_MOBILE : TILES_PARSE_CONCURRENCY_DESKTOP;
+        } catch (err) {
+            console.warn('[3DTiles] Failed to set queue concurrency:', err);
+        }
         this._adaptErrorTargetBase = this.scene.tiles.errorTarget;
         this._adaptLruMaxBase = this.scene.tiles.lruCache.maxSize;
         this._adaptLruMinBase = this.scene.tiles.lruCache.minSize;
@@ -149,8 +234,10 @@ export class TerrainTilesSystem {
     attachTilesVisualHandlers(): void {
         if (!this.scene.tiles) return;
         const tiles: any = this.scene.tiles;
+        if (this._tilesWithHandlers === tiles) return;
+        this.detachTilesVisualHandlers();
         try {
-            tiles.addEventListener('load-model', (event: any) => {
+            this._onTileLoadModel = (event: any) => {
                 try {
                     const tileScene: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
                     if (!tileScene) return;
@@ -195,6 +282,7 @@ export class TerrainTilesSystem {
                                 if (pbr.roughness !== null && pbr.roughness !== undefined && pbr.roughness < TILE_PBR_ROUGHNESS_FLOOR) {
                                     pbr.roughness = TILE_PBR_ROUGHNESS_FLOOR;
                                 }
+                                this._registerCityLightMaterial(pbr);
                             }
                             try {
                                 const texs = (mat as any).getActiveTextures ? (mat as any).getActiveTextures() : [];
@@ -227,6 +315,7 @@ export class TerrainTilesSystem {
                             const wm: any = this.scene._waterMaterial;
                             const list: any[] = wm.renderList || (wm.renderList = []);
                             for (const mesh of meshes) {
+                                if (list.length >= WATER_REFLECTION_RENDERLIST_MAX) break;
                                 if (mesh && list.indexOf(mesh) < 0) {
                                     list.push(mesh);
                                 }
@@ -238,11 +327,22 @@ export class TerrainTilesSystem {
                 } catch (err) {
                     console.warn('[3DTiles] load-model handler failed:', err);
                 }
-            });
-            tiles.addEventListener('dispose-model', (event: any) => {
+            };
+            this._onTileDisposeModel = (event: any) => {
                 try {
                     const key = event && event.tile && event.tile.__h ? String(event.tile.__h) : null;
                     if (key) this.scene._tileFadeEntries.delete(key);
+                    try {
+                        const tileSceneForLights: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
+                        const lightMeshes: any[] = tileSceneForLights && (tileSceneForLights as any).getChildMeshes
+                            ? (tileSceneForLights as any).getChildMeshes(false)
+                            : [];
+                        for (const mesh of lightMeshes) {
+                            if (mesh && mesh.material) this._cityLightMats.delete(mesh.material);
+                        }
+                    } catch (lightsErr) {
+                        console.warn('[3DTiles] City light material cleanup failed:', lightsErr);
+                    }
                     if (this._tileShadowReceivers.size > 0) {
                         try {
                             const tileSceneForShadows: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
@@ -273,7 +373,10 @@ export class TerrainTilesSystem {
                 } catch (err) {
                     console.warn('[3DTiles] dispose-model handler failed:', err);
                 }
-            });
+            };
+            tiles.addEventListener('load-model', this._onTileLoadModel);
+            tiles.addEventListener('dispose-model', this._onTileDisposeModel);
+            this._tilesWithHandlers = tiles;
             console.debug('[3DTiles] Visual handlers attached (shadow receivers + PBR polish + fade hook)');
         } catch (err) {
             console.warn('[3DTiles] Failed to attach visual handlers:', err);
@@ -346,6 +449,8 @@ export class TerrainTilesSystem {
         const tiles = this.scene.tiles;
         if (!tiles) return;
         const step = this._adaptStep;
+        // Shared with CloudsSystem/VegetationSystem so they scale their instance budgets with the same step.
+        this.scene._adaptiveQualityStep = step;
         try {
             tiles.errorTarget = this._adaptErrorTargetBase * (1 + step * ADAPT_ERROR_TARGET_MULT_PER_STEP);
             const lruMult = Math.max(0.3, 1 - step * (1 - ADAPT_LRU_MULT_PER_STEP));

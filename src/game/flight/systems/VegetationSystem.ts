@@ -11,14 +11,35 @@ import {
     VEGETATION_FADE_RANGE_M,
     VEGETATION_RESEED_DIST_M,
     GROUND_Y,
+    TERRAIN_UNKNOWN_Y,
     AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS,
 } from '../constants/index.js';
 
+const VEGETATION_PROBE_HEIGHT_M = 400;
+const VEGETATION_PROBE_LENGTH_M = 1200;
+const VEGETATION_ADAPTIVE_REDUCTION_PER_STEP = 0.2;
+const VEGETATION_ADAPTIVE_MIN_RATIO = 0.2;
+
 export class VegetationSystem {
     private readonly scene: any;
+    private readonly _probeRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), VEGETATION_PROBE_LENGTH_M);
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    /** Terrain height under (x, z); falls back to the last known terrain level, then GROUND_Y, when tiles are not loaded. */
+    private groundYAt(x: number, z: number, fallbackY: number): number {
+        if (typeof this.scene._pickTerrainPreferRunway !== 'function' || !this.scene.tiles) return fallbackY;
+        try {
+            this._probeRay.origin.set(x, fallbackY + VEGETATION_PROBE_HEIGHT_M, z);
+            this._probeRay.length = VEGETATION_PROBE_LENGTH_M;
+            const hit = this.scene._pickTerrainPreferRunway(this._probeRay);
+            if (hit?.hit && hit.pickedPoint && Number.isFinite(hit.pickedPoint.y)) return hit.pickedPoint.y;
+        } catch (err) {
+            console.warn('[Vegetation] terrain probe failed:', err);
+        }
+        return fallbackY;
     }
 
     setVegetation(scene: BABYLON.Scene, enabled: boolean): void {
@@ -90,7 +111,9 @@ export class VegetationSystem {
 
         const cx = this.scene.planeRoot.position.x;
         const cz = this.scene.planeRoot.position.z;
-        this.scene._vegetationGridCenter.set(cx, GROUND_Y, cz);
+        const knownTerrainY = Number(this.scene.terrainY);
+        const baseGroundY = Number.isFinite(knownTerrainY) && knownTerrainY !== TERRAIN_UNKNOWN_Y ? knownTerrainY : GROUND_Y;
+        this.scene._vegetationGridCenter.set(cx, baseGroundY, cz);
 
         const half = VEGETATION_GRID_HALF_M;
         const cellM = VEGETATION_CELL_M;
@@ -118,7 +141,7 @@ export class VegetationSystem {
 
                 try {
                     const inst = tpl.createInstance(`veg_${ix}_${iz}`);
-                    const wy = GROUND_Y + VEGETATION_TREE_HEIGHT_M * 0.5 * scale;
+                    const wy = this.groundYAt(wx, wz, baseGroundY) + VEGETATION_TREE_HEIGHT_M * 0.5 * scale;
                     inst.position.set(wx, wy, wz);
                     inst.scaling.setAll(scale);
                     inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
@@ -133,6 +156,7 @@ export class VegetationSystem {
         }
         this.scene._vegetationSeeded = true;
         this.scene._vegetationVisibility = 1;
+        this._lastAdaptiveStep = -1;
         for (const inst of this.scene._vegetationInstances) inst.visibility = 1;
         console.debug(`[Vegetation] Seeded ${total} instances at (${cx.toFixed(0)},${cz.toFixed(0)})`);
     }
@@ -148,7 +172,8 @@ export class VegetationSystem {
             this.seedVegetation();
             return;
         }
-        const aglM = Math.max(0, py - GROUND_Y);
+        this.applyAdaptiveBudget();
+        const aglM = Math.max(0, py - this.scene._vegetationGridCenter.y);
         const fadeStart = VEGETATION_FADE_BAND_M;
         const fadeEnd   = VEGETATION_FADE_BAND_M + VEGETATION_FADE_RANGE_M;
         let vis = 1;
@@ -157,5 +182,21 @@ export class VegetationSystem {
         if (Math.abs(vis - this.scene._vegetationVisibility) < 0.01) return;
         this.scene._vegetationVisibility = vis;
         for (const inst of this.scene._vegetationInstances) inst.visibility = vis;
+    }
+
+    private _lastAdaptiveStep = -1;
+
+    /** Mirrors TerrainTilesSystem adaptive steps: each step hides a slice of the instance budget. */
+    private applyAdaptiveBudget(): void {
+        const step = Math.max(0, Number(this.scene._adaptiveQualityStep) || 0);
+        if (step === this._lastAdaptiveStep) return;
+        this._lastAdaptiveStep = step;
+        const instances: BABYLON.InstancedMesh[] = this.scene._vegetationInstances;
+        const keepRatio = Math.max(VEGETATION_ADAPTIVE_MIN_RATIO, 1 - step * VEGETATION_ADAPTIVE_REDUCTION_PER_STEP);
+        const limit = Math.floor(instances.length * keepRatio);
+        for (let i = 0; i < instances.length; i++) {
+            const shouldEnable = i < limit;
+            if (instances[i].isEnabled() !== shouldEnable) instances[i].setEnabled(shouldEnable);
+        }
     }
 }

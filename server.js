@@ -271,6 +271,42 @@ const MISSION_JOINS = `
     LEFT JOIN airport_runways ar ON m.arrival_runway_id = ar.id
     LEFT JOIN aircrafts req_ac ON m.required_aircraft_id = req_ac.id`;
 
+const MISSION_IMAGE_CACHE_MAX_AGE_S = 86400;
+const MISSION_IMAGE_DATA_URL_RE = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/is;
+const DATA_URL_PREFIX = 'data:';
+
+function missionImageUrl(missionId) {
+    return `/api/missions/${encodeURIComponent(String(missionId))}/image`;
+}
+
+function isDataUrl(value) {
+    return typeof value === 'string' && value.startsWith(DATA_URL_PREFIX);
+}
+
+// Replaces heavy inline images (image_base64 and data-URI image_url, which the Main API
+// duplicates per item) with a lazily-fetched image_url served by GET /api/missions/:id/image.
+function replaceMissionImageWithUrl(obj, missionId) {
+    if (!obj || typeof obj !== 'object') return;
+    const hasInlineImage = !!obj.image_base64 || isDataUrl(obj.image_url);
+    if (obj.image_base64 !== undefined) delete obj.image_base64;
+    if (isDataUrl(obj.image_url)) delete obj.image_url;
+    if (hasInlineImage && !obj.image_url && missionId != null) {
+        obj.image_url = missionImageUrl(missionId);
+    }
+}
+
+function stripMissionImagesFromList(items) {
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        const missionId = item.mission_id != null ? item.mission_id : item.id;
+        replaceMissionImageWithUrl(item, missionId);
+        if (item.mission && typeof item.mission === 'object') {
+            replaceMissionImageWithUrl(item.mission, item.mission.id != null ? item.mission.id : missionId);
+        }
+    }
+}
+
 function buildMissionNested(row) {
     return {
         title: row.mission_title_full || row.title,
@@ -395,7 +431,7 @@ function serveLiveTrafficStale(res, apiPath, cacheOpts, contextLabel) {
     return true;
 }
 
-async function proxyToMainApi(apiPath, req, res, body, cacheOpts) {
+async function proxyToMainApi(apiPath, req, res, body, cacheOpts, transform) {
     if (!MAIN_API_URL) {
         return jsonResponse(res, 503, { error: 'Main API not configured' });
     }
@@ -421,6 +457,13 @@ async function proxyToMainApi(apiPath, req, res, body, cacheOpts) {
         }
         if (resp.ok && parsed) {
             if (cacheOpts && cacheOpts.key) setLiveTrafficCache(cacheOpts.key, resp.status, data);
+            if (typeof transform === 'function') {
+                try {
+                    transform(data);
+                } catch (transformErr) {
+                    console.warn(`[Proxy] ${req.method} ${apiPath} response transform failed:`, transformErr && transformErr.message);
+                }
+            }
             return jsonResponse(res, resp.status, data);
         }
         console.warn(`[Proxy] ${req.method} ${apiPath} upstream status=${resp.status} parsed=${parsed} body="${rawText.slice(0, 120)}"`);
@@ -1263,6 +1306,7 @@ const server = http.createServer(async (req, res) => {
             const missionIds = rows.map(r => r.id);
             const wps = await loadWaypointsForMissionIds(missionIds);
             for (const r of rows) r.waypoints = wps.get(r.id) || [];
+            stripMissionImagesFromList(rows);
             return jsonResponse(res, 200, { data: rows, total, page, limit });
         } catch (err) {
             console.error('[API] GET /api/missions error:', err.message);
@@ -1277,6 +1321,7 @@ const server = http.createServer(async (req, res) => {
         try {
             const mission = await getDailyMission();
             if (!mission) return jsonResponse(res, 200, { data: null });
+            replaceMissionImageWithUrl(mission, mission.id);
             const streak = await computeFlightDayStreak(user.id);
             const [[dailyLog]] = await dbPool.execute(
                 `SELECT id FROM user_points_log
@@ -1300,6 +1345,32 @@ const server = http.createServer(async (req, res) => {
     }
 
     let routeParams;
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/missions/:id/image'))) {
+        if (!dbPool) return jsonResponse(res, 404, { error: 'Mission image not found' });
+        const missionId = parseInt(routeParams.id, 10);
+        if (!Number.isFinite(missionId) || missionId <= 0) return jsonResponse(res, 400, { error: 'Invalid mission id' });
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT image_base64 FROM missions WHERE id = ? AND is_active = 1 LIMIT 1`, [missionId]);
+            const dataUrl = rows.length ? rows[0].image_base64 : null;
+            const match = typeof dataUrl === 'string' ? dataUrl.match(MISSION_IMAGE_DATA_URL_RE) : null;
+            if (!match) return jsonResponse(res, 404, { error: 'Mission image not found' });
+            const bytes = Buffer.from(match[2], 'base64');
+            if (!bytes.length) return jsonResponse(res, 404, { error: 'Mission image not found' });
+            res.writeHead(200, {
+                'Content-Type': match[1].toLowerCase(),
+                'Content-Length': bytes.length,
+                'Cache-Control': `public, max-age=${MISSION_IMAGE_CACHE_MAX_AGE_S}`,
+                'Access-Control-Allow-Origin': resolveCorsOrigin(req.headers.origin),
+                'Vary': 'Origin',
+            });
+            return res.end(bytes);
+        } catch (err) {
+            console.error('[API] GET /api/missions/:id/image error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
     if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/missions/:id'))) {
         if (!dbPool) return jsonResponse(res, 404, { error: 'Mission not found' });
         const user = tryAuthenticate(req);
@@ -1359,7 +1430,8 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && urlPath === '/api/user-missions/active') {
         if (MAIN_API_URL) {
-            return proxyToMainApi('/api/user-missions/active', req, res);
+            return proxyToMainApi('/api/user-missions/active', req, res, undefined, undefined,
+                (data) => stripMissionImagesFromList(data && data.data));
         }
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
@@ -1371,7 +1443,9 @@ const server = http.createServer(async (req, res) => {
                  ORDER BY um.started_at DESC`, [user.id]);
             const missionIds = rows.map(r => r.mission_id);
             const wps = await loadWaypointsForMissionIds(missionIds);
-            return jsonResponse(res, 200, { data: rows.map(r => enrichUserMissionRow(r, wps.get(r.mission_id) || [])) });
+            const enriched = rows.map(r => enrichUserMissionRow(r, wps.get(r.mission_id) || []));
+            stripMissionImagesFromList(enriched);
+            return jsonResponse(res, 200, { data: enriched });
         } catch (err) {
             console.error('[API] GET /api/user-missions/active error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
@@ -1380,7 +1454,8 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && urlPath === '/api/user-missions') {
         const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-        return proxyToMainApi(`/api/user-missions${qs}`, req, res);
+        return proxyToMainApi(`/api/user-missions${qs}`, req, res, undefined, undefined,
+            (data) => stripMissionImagesFromList(data && data.data));
     }
 
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/complete'))) {
@@ -2629,26 +2704,27 @@ setInterval(async () => {
             console.error(`[DB] Stats persist error for user ${userId}:`, err.message);
         }
 
-        try {
-            const [[flightBalance]] = await dbPool.execute(
-                `SELECT purchased_flight_hours, total_flight_hours FROM user_flight_stats WHERE user_id = ?`,
-                [userId]
-            );
-            if (flightBalance) {
-                const purchased = parseFloat(flightBalance.purchased_flight_hours) || 1.00;
-                const flown = parseFloat(flightBalance.total_flight_hours) || 0;
-                if (purchased - flown <= 0) {
-                    console.log(`[WS] No flight hours remaining for user ${userId}, disconnecting`);
-                    try {
-                        entry.ws.send(JSON.stringify({ type: 'noFlightHours' }));
-                        entry.ws.close(4002, 'No flight hours remaining');
-                    } catch (_) {}
-                    continue;
-                }
-            }
-        } catch (err) {
-            console.error(`[DB] Flight balance check error for user ${userId}:`, err.message);
-        }
+        // Disabled: remaining flight-hours check (kick 4002 + redirect) — buggy, see plan Fase 0.
+        // try {
+        //     const [[flightBalance]] = await dbPool.execute(
+        //         `SELECT purchased_flight_hours, total_flight_hours FROM user_flight_stats WHERE user_id = ?`,
+        //         [userId]
+        //     );
+        //     if (flightBalance) {
+        //         const purchased = parseFloat(flightBalance.purchased_flight_hours) || 1.00;
+        //         const flown = parseFloat(flightBalance.total_flight_hours) || 0;
+        //         if (purchased - flown <= 0) {
+        //             console.log(`[WS] No flight hours remaining for user ${userId}, disconnecting`);
+        //             try {
+        //                 entry.ws.send(JSON.stringify({ type: 'noFlightHours' }));
+        //                 entry.ws.close(4002, 'No flight hours remaining');
+        //             } catch (_) {}
+        //             continue;
+        //         }
+        //     }
+        // } catch (err) {
+        //     console.error(`[DB] Flight balance check error for user ${userId}:`, err.message);
+        // }
 
         entry.distanceNm = 0;
         entry.lastPersist = now;

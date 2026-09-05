@@ -8,6 +8,8 @@ const MAP_REQUEST_SIZE_PX = 256;
 const MAP_REQUEST_SCALE = 2;
 const MAP_REFETCH_DRIFT_RATIO = 0.25;
 const MAP_REFETCH_INTERVAL_MS = 5000;
+const MAP_REFETCH_MIN_DRIFT_RATIO = 0.05;
+const MAP_CENTER_QUANT_RATIO = 0.1;
 const MAP_IMG_UPSCALE = 2.0;
 const MINIMAP_TRAFFIC_TRIANGLE_SIZE = 3.5;
 const MINIMAP_TRAFFIC_COLOR = 'rgba(255, 215, 0, 0.9)';
@@ -24,9 +26,27 @@ const MINIMAP_LABEL_FONT = '7px Inter, sans-serif';
 export class MiniMapSystem {
     private readonly scene: any;
     private _gpsCoordsEl: HTMLElement | null = null;
+    private _mapImgLastUrl = '';
+    private _mapImgLastTransform = '';
+    private _mapImgZoom = -1;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    /**
+     * Snaps the request center to a grid that is a fraction of the visible tile so nearby positions
+     * reuse the same URL (browser HTTP cache) instead of issuing a new paid Static Maps request.
+     */
+    private quantizeMapCenter(lat: number, lon: number, zoom: number): { lat: number; lon: number } {
+        const tileSpanDeg = 360 / Math.pow(2, Math.max(0, zoom));
+        const stepLon = tileSpanDeg * MAP_CENTER_QUANT_RATIO;
+        const cosLat = Math.max(0.2, Math.cos(lat * Math.PI / 180));
+        const stepLat = stepLon * cosLat;
+        return {
+            lat: Math.round(lat / stepLat) * stepLat,
+            lon: Math.round(lon / stepLon) * stepLon,
+        };
     }
 
     persistGpsState(gps: HTMLElement): void {
@@ -267,27 +287,42 @@ export class MiniMapSystem {
             driftPx = Math.hypot(drift.x, drift.y);
         }
         const driftLimitPx = cv.width * MAP_REFETCH_DRIFT_RATIO;
+        const minDriftPx = cv.width * MAP_REFETCH_MIN_DRIFT_RATIO;
         const timeSinceFetch = now - this.scene.mapLastUpdate;
+        const zoomChanged = this._mapImgZoom !== this.scene._mapZoom;
+        // Static Maps is a paid request: only refetch when the view actually moved (or zoom changed), never on a timer alone.
         const needFetch = !this.scene._mapImgValid
+            || zoomChanged
             || driftPx > driftLimitPx
-            || timeSinceFetch > MAP_REFETCH_INTERVAL_MS;
+            || (timeSinceFetch > MAP_REFETCH_INTERVAL_MS && driftPx > minDriftPx);
 
         if (this.scene.mapApiKey && needFetch && !this.scene._mapImgPending) {
+            const center = this.quantizeMapCenter(lat, lon, this.scene._mapZoom);
+            const url = `https://maps.googleapis.com/maps/api/staticmap?center=${center.lat.toFixed(5)},${center.lon.toFixed(5)}&zoom=${this.scene._mapZoom}&size=${MAP_REQUEST_SIZE_PX}x${MAP_REQUEST_SIZE_PX}&scale=${MAP_REQUEST_SCALE}&maptype=satellite&key=${this.scene.mapApiKey}`;
             this.scene.mapLastUpdate = now;
-            this.scene._mapImgPending = true;
-            this.scene._mapImgPendingLat = lat;
-            this.scene._mapImgPendingLon = lon;
-            this.scene.mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat.toFixed(5)},${lon.toFixed(5)}&zoom=${this.scene._mapZoom}&size=${MAP_REQUEST_SIZE_PX}x${MAP_REQUEST_SIZE_PX}&scale=${MAP_REQUEST_SCALE}&maptype=satellite&key=${this.scene.mapApiKey}`;
+            if (url !== this._mapImgLastUrl || zoomChanged) {
+                this._mapImgLastUrl = url;
+                this._mapImgZoom = this.scene._mapZoom;
+                this.scene._mapImgPending = true;
+                this.scene._mapImgPendingLat = center.lat;
+                this.scene._mapImgPendingLon = center.lon;
+                this.scene.mapImg.src = url;
+            }
         }
 
         if (this.scene._mapImgValid) {
             const drift = this.latLonToMapPx(lat, lon, this.scene._mapImgLat, this.scene._mapImgLon, cv.width);
+            let transform: string;
             if (headingUp) {
                 const rDx = cosH * drift.x + sinH * drift.y;
                 const rDy = -sinH * drift.x + cosH * drift.y;
-                this.scene.mapImg.style.transform = `translate(${(-rDx).toFixed(2)}px, ${(-rDy).toFixed(2)}px) rotate(${(-hdg).toFixed(2)}deg)`;
+                transform = `translate(${(-rDx).toFixed(1)}px, ${(-rDy).toFixed(1)}px) rotate(${(-hdg).toFixed(1)}deg)`;
             } else {
-                this.scene.mapImg.style.transform = `translate(${(-drift.x).toFixed(2)}px, ${(-drift.y).toFixed(2)}px)`;
+                transform = `translate(${(-drift.x).toFixed(1)}px, ${(-drift.y).toFixed(1)}px)`;
+            }
+            if (transform !== this._mapImgLastTransform) {
+                this._mapImgLastTransform = transform;
+                this.scene.mapImg.style.transform = transform;
             }
         }
 

@@ -7,6 +7,7 @@ import {
     WATER_NORMAL_RES,
     WATER_BUMP_URL,
     WATER_WIND_FORCE,
+    WATER_WIND_KT_TO_FORCE,
     WATER_WAVE_HEIGHT_M,
     WATER_BUMP_HEIGHT,
     WATER_WAVE_LENGTH_M,
@@ -30,7 +31,7 @@ export class WaterSystem {
             const water = BABYLON.MeshBuilder.CreateGround('waterPlane', { width: waterSize, height: waterSize, subdivisions: 16 }, scene);
             water.position.y = WATER_PLANE_Y_OFFSET_M - this.scene.refAlt;
             water.isPickable = false;
-            water.alwaysSelectAsActiveMesh = true;
+            water.freezeWorldMatrix();
             const wm = new WaterMaterial('waterMat', scene, new BABYLON.Vector2(WATER_NORMAL_RES, WATER_NORMAL_RES));
             wm.backFaceCulling = true;
             wm.bumpTexture = new BABYLON.Texture(WATER_BUMP_URL, scene);
@@ -103,7 +104,10 @@ export class WaterSystem {
             this.scene._waterWindDir.set(Math.sin(dirRad), Math.cos(dirRad));
             const wm = this.scene._waterMaterial as any;
             wm.windDirection = this.scene._waterWindDir;
-            wm.windForce = Math.max(WATER_WIND_FORCE, wind.speedKt * 0.5);
+            // Keep the sign convention of WATER_WIND_FORCE (negative = default wave travel direction) and only scale magnitude.
+            const forceSign = WATER_WIND_FORCE < 0 ? -1 : 1;
+            const speedKt = Number.isFinite(wind.speedKt) ? Math.max(0, wind.speedKt) : 0;
+            wm.windForce = forceSign * Math.max(Math.abs(WATER_WIND_FORCE), speedKt * WATER_WIND_KT_TO_FORCE);
         } catch (_) { /* ignore */ }
     }
 }

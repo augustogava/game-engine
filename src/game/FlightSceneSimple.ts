@@ -389,10 +389,12 @@ import { InputSystem } from './flight/systems/InputSystem.js';
 import { HudSystem } from './flight/systems/HudSystem.js';
 import { AtcSystem } from './flight/systems/AtcSystem.js';
 import { WeatherService } from './flight/systems/WeatherService.js';
+import { TutorialSystem } from './flight/systems/TutorialSystem.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 const PAUSED_UI_UPDATE_INTERVAL_FRAMES = 6;
 const MOBILE_RENDER_DPR_CAP = 2;
+const MOBILE_VIEWPORT_MAX_PX = 1024;
 
 export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _waterSystem = new WaterSystem(this);
@@ -425,6 +427,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _hudSystem = new HudSystem(this);
     /** @internal */ private readonly _weatherService = new WeatherService(this);
     /** @internal */ private readonly _atcSystem = new AtcSystem(this);
+    /** @internal */ private readonly _tutorialSystem = new TutorialSystem(this);
     private planeRoot!: BABYLON.TransformNode;
     private velocity        = BABYLON.Vector3.Zero();
     private angularVelocity = BABYLON.Vector3.Zero();
@@ -502,6 +505,7 @@ export class FlightSceneSimple extends Scene3D {
     private isMobile = false;
     private touchPitchInput = 0;
     private touchRollInput = 0;
+    private touchYawInput = 0;
     private touchThrust = 0.0;
     private joystickTouchId: number | null = null;
     private joystickOrigin = { x: 0, y: 0 };
@@ -542,6 +546,7 @@ export class FlightSceneSimple extends Scene3D {
     private magnetoKeyLockN = false;
     private _gearUpAnimGroups: BABYLON.AnimationGroup[] = [];
     private _gearDownAnimGroups: BABYLON.AnimationGroup[] = [];
+    private _spoilerAnimGroups: BABYLON.AnimationGroup[] = [];
     private gearState: number = GEAR_STATE_DOWN;
     private gearKeyLockG = false;
     private _gearTransitionStartMs = 0;
@@ -677,8 +682,8 @@ export class FlightSceneSimple extends Scene3D {
     private hudEng2Pct:    HTMLElement | null = null;
     private hudEng3Pct:    HTMLElement | null = null;
     private hudEng4Pct:    HTMLElement | null = null;
-    private spdMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
-    private altMarkEls: { el: HTMLElement; valEl: HTMLElement }[] = [];
+    private spdMarkEls: { el: HTMLElement; valEl: HTMLElement; lastOffsetPx?: number }[] = [];
+    private altMarkEls: { el: HTMLElement; valEl: HTMLElement; lastOffsetPx?: number }[] = [];
     private lastSpdCenter = -1;
     private lastAltCenter = -1;
 
@@ -718,11 +723,14 @@ export class FlightSceneSimple extends Scene3D {
     };
     /** @internal */ public _precipitationType: number = 0;
     /** @internal */ public _precipitationIntensity: number = 0;
+    /** @internal */ public _baseExposure: number = Number.NaN;
+    /** @internal */ public _lastTouchdown: { fpm: number; speedKts: number; centerlineM: number | null; timeMs: number } | null = null;
     /** @internal */ public _currentCloudCoverage: number = 0;
     /** @internal */ public _metarSurfaceWind: { speedKt: number; dirDeg: number; gustKt?: number } | null = null;
     /** @internal */ public _metarSurfaceElevFt: number = 0;
     /** @internal */ public _metarCloudBaseFt: number = 0;
     /** @internal */ public _metarApplied: boolean = false;
+    /** @internal */ public _metarQnhHpa: number | null = null;
     private _autopilotTargetAltFt: number = 0;
     private _autopilotTargetVsFpm:  number = 0;
     private _autopilotLastPitchRad: number = Number.NaN;
@@ -771,7 +779,7 @@ export class FlightSceneSimple extends Scene3D {
     private _activeFlightPlanArrivalAirportId: number | null = null;
     private _simTimeOffsetMs = 0;
     /** @internal */ _disableDynamicLighting = false;
-    private _activeFlightPlanNav: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; name: string } | null = null;
+    private _activeFlightPlanNav: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; name: string; dep_rwy_ident?: string; arr_rwy_ident?: string; dep_rwy_heading?: number | null; arr_rwy_heading?: number | null; dep_elevation_ft?: number | null; arr_elevation_ft?: number | null } | null = null;
     private _navInfoEl: HTMLElement | null = null;
     private _navDestEl: HTMLElement | null = null;
     private _navDistEl: HTMLElement | null = null;
@@ -779,7 +787,7 @@ export class FlightSceneSimple extends Scene3D {
     private _crashed = false;
     private _crashOverlayEl: HTMLElement | null = null;
     private _safetyFloorSnapActive = false;
-    private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string } | null = null;
+    private _activeMission: { departure_lat: number; departure_lon: number; arrival_lat: number; arrival_lon: number; departure_icao: string; arrival_icao: string; mission_title: string; arr_rwy_heading?: number | null; arr_elevation_ft?: number | null; arr_rwy_ident?: string } | null = null;
     private _activeMissionId: number | null = null;
     private _activeUserMissionId: number | null = null;
     private _pendingMissionLat: number | null = null;
@@ -856,7 +864,9 @@ export class FlightSceneSimple extends Scene3D {
     private _rainEmitter: BABYLON.TransformNode | null = null;
     private _rainTexture: BABYLON.DynamicTexture | null = null;
     private _milkyWayRoot: BABYLON.TransformNode | null = null;
+    private _milkyWayEnabled = false;
     private _cloudDensityMult = CLOUD_DENSITY_MULT_MEDIUM;
+    private _adaptiveQualityStep = 0;
     private _cloudVolumetric = false;
     private _lensFlareSystem: BABYLON.LensFlareSystem | null = null;
     private _sunUpdateTimer = 0;
@@ -911,7 +921,7 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     onCreate(scene: any, _input: InputManager): void {
-        this.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        this.isMobile = FlightSceneSimple._detectMobile();
         scene.useRightHandedSystem = true;
         scene.clearColor = new BABYLON.Color4(0.0, 0.0, 0.02, 1);
         scene.autoClear = true;
@@ -1014,6 +1024,7 @@ export class FlightSceneSimple extends Scene3D {
                 this._propellerAnimGroup = null;
                 this._gearUpAnimGroups = [];
                 this._gearDownAnimGroups = [];
+                this._spoilerAnimGroups = [];
                 const pivot = this.planeRoot.getChildTransformNodes(true).find((n) => n.name === 'modelPivot');
                 if (pivot) pivot.dispose();
                 this._loadAircraftModel(scene);
@@ -1085,18 +1096,20 @@ export class FlightSceneSimple extends Scene3D {
 
         this._handleInput(dt);
 
-        // const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
-        // if (replayFrame && this.planeRoot && this.planeRoot.rotationQuaternion) {
-        //     this.planeRoot.position.set(replayFrame.px, replayFrame.py, replayFrame.pz);
-        //     this.planeRoot.rotationQuaternion.set(replayFrame.qx, replayFrame.qy, replayFrame.qz, replayFrame.qw);
-        //     this.thrust = replayFrame.throttle;
-        //     if (!this._replayBuffer.isPlaying()) {
-        //         this._replayActive = false;
-        //         console.log('[Replay] Finished');
-        //     }
-        // }
+        const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
+        if (replayFrame && this.planeRoot && this.planeRoot.rotationQuaternion) {
+            this.planeRoot.position.set(replayFrame.px, replayFrame.py, replayFrame.pz);
+            this.planeRoot.rotationQuaternion.set(replayFrame.qx, replayFrame.qy, replayFrame.qz, replayFrame.qw);
+            this.thrust = replayFrame.throttle;
+        }
+        if (this._replayActive && !this._replayBuffer.isPlaying()) {
+            this._replayActive = false;
+            this._restoreReplaySnapshot();
+            console.log('[Replay] Finished');
+        }
 
-        const physicsActive = !this._paused;
+        // Physics is frozen while the black-box replay drives the pose.
+        const physicsActive = !this._paused && !this._replayActive;
         const TIME_SCALE_MIN = 0.05;
         const TIME_SCALE_MAX = 8;
         const effectiveTimeScale = physicsActive
@@ -1120,15 +1133,15 @@ export class FlightSceneSimple extends Scene3D {
             this._simTimeOffsetMs += (scaledDt - dt) * 1000;
         }
 
-        // if (physicsActive && this.planeRoot && this.planeRoot.rotationQuaternion) {
-        //     const q = this.planeRoot.rotationQuaternion;
-        //     const p = this.planeRoot.position;
-        //     this._replayBuffer.record({
-        //         px: p.x, py: p.y, pz: p.z,
-        //         qx: q.x, qy: q.y, qz: q.z, qw: q.w,
-        //         throttle: this.thrust,
-        //     });
-        // }
+        if (physicsActive && this.planeRoot && this.planeRoot.rotationQuaternion) {
+            const q = this.planeRoot.rotationQuaternion;
+            const p = this.planeRoot.position;
+            this._replayBuffer.record({
+                px: p.x, py: p.y, pz: p.z,
+                qx: q.x, qy: q.y, qz: q.z, qw: q.w,
+                throttle: this.thrust,
+            });
+        }
         
                 if (!this.isMobile && !this._disableDynamicLighting) {
                     this._sunUpdateTimer += dt;
@@ -1149,9 +1162,11 @@ export class FlightSceneSimple extends Scene3D {
         if (!this._disableDynamicLighting) this._updateNavLights(dt);
         this._updateClouds(dt);
         this._updatePrecipitation(dt);
+        this._vfxSystem.updateLightning(dt);
         this._updateHighClouds(dt);
         this._updateSeascapeSky(dt);
         this._updatePropellerAnim();
+        this._aircraftModelSystem.updateSpoilerAnim();
         this._updateControlSurfaceAnim();
         this._updateGearState();
         this._updateContrails(dt);
@@ -1174,6 +1189,57 @@ export class FlightSceneSimple extends Scene3D {
             console.warn('[LiveTraffic] update failed:', err);
         }
         this._atcSystem.update(dt);
+        try {
+            this._tutorialSystem.update(dt);
+        } catch (err) {
+            console.warn('[Tutorial] update failed:', err);
+        }
+    }
+
+    /** @internal */
+    _startTutorial(): void {
+        this._tutorialSystem.start();
+    }
+
+    hasSavedFreeFlight(): boolean {
+        return SpawnSystem.hasSavedFreeFlight();
+    }
+
+    isResumeSavedFlightRequested(): boolean {
+        return SpawnSystem.isResumeRequested();
+    }
+
+    applySavedFreeFlightSpawn(): boolean {
+        return this._spawnSystem.applySavedFreeFlightSpawn();
+    }
+
+    _saveFreeFlight(reason: string): boolean {
+        return this._spawnSystem.saveFreeFlight(reason);
+    }
+
+    _launchResumeSavedFlight(): void {
+        this._spawnSystem.launchResume();
+    }
+
+    /**
+     * Touch-capable laptops expose `ontouchstart`/`maxTouchPoints` too, so the primary signal is a coarse
+     * pointer without a hover-capable one; the UA/viewport check is the fallback for browsers lacking matchMedia.
+     */
+    private static _detectMobile(): boolean {
+        try {
+            if (typeof window.matchMedia === 'function') {
+                const coarse = window.matchMedia('(pointer: coarse)').matches;
+                const canHover = window.matchMedia('(hover: hover)').matches;
+                const anyFine = window.matchMedia('(any-pointer: fine)').matches;
+                if (coarse && !canHover && !anyFine) return true;
+                if (anyFine || canHover) return false;
+            }
+        } catch (err) {
+            console.warn('[FlightSimple] matchMedia mobile detection failed:', err);
+        }
+        const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const mobileUa = /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(navigator.userAgent);
+        return hasTouch && (mobileUa || window.innerWidth <= MOBILE_VIEWPORT_MAX_PX);
     }
 
     private _updatePropellerAnim(): void {
@@ -1221,7 +1287,31 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _toggleReplay(): void {
-        // this._inputSystem.toggleReplay();
+        this._inputSystem.toggleReplay();
+    }
+
+    /** @internal */ public _replaySnapshot: { pos: BABYLON.Vector3; rot: BABYLON.Quaternion; vel: BABYLON.Vector3; angVel: BABYLON.Vector3; thrust: number } | null = null;
+
+    /** @internal */ public _captureReplaySnapshot(): void {
+        if (!this.planeRoot || !this.planeRoot.rotationQuaternion) return;
+        this._replaySnapshot = {
+            pos: this.planeRoot.position.clone(),
+            rot: this.planeRoot.rotationQuaternion.clone(),
+            vel: this.velocity.clone(),
+            angVel: this.angularVelocity.clone(),
+            thrust: this.thrust,
+        };
+    }
+
+    /** @internal */ public _restoreReplaySnapshot(): void {
+        const snap = this._replaySnapshot;
+        this._replaySnapshot = null;
+        if (!snap || !this.planeRoot || !this.planeRoot.rotationQuaternion) return;
+        this.planeRoot.position.copyFrom(snap.pos);
+        this.planeRoot.rotationQuaternion.copyFrom(snap.rot);
+        this.velocity.copyFrom(snap.vel);
+        this.angularVelocity.copyFrom(snap.angVel);
+        this.thrust = snap.thrust;
     }
 
     private _toggleAutothrottle(): void {
@@ -1430,6 +1520,9 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('aircraft-panel')?.remove();
         try { this._airportOverlaysSystem.dispose(); } catch (err) { console.warn('[FlightSimple] AirportOverlays dispose failed:', err); }
         try { this._debugPanelSystem.dispose(); } catch (err) { console.warn('[FlightSimple] DebugPanelSystem dispose failed:', err); }
+        try { this._tutorialSystem.dispose(); } catch (err) { console.warn('[FlightSimple] TutorialSystem dispose failed:', err); }
+        try { this._spawnSystem.dispose(); } catch (err) { console.warn('[FlightSimple] SpawnSystem dispose failed:', err); }
+        try { this._terrainTilesSystem.dispose(); } catch (err) { console.warn('[FlightSimple] TerrainTilesSystem dispose failed:', err); }
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         try { this._liveTrafficSystem.dispose(); } catch (err) { console.warn('[FlightSimple] LiveTrafficSystem dispose failed:', err); }
         try { this._highCloudsSystem.dispose(); } catch (err) { console.warn('[FlightSimple] HighCloudsSystem dispose failed:', err); }
@@ -1471,6 +1564,7 @@ export class FlightSceneSimple extends Scene3D {
         this._disposeContrails();
         this._disposeVaporCone();
         this._disposeHeatHaze();
+        try { this._vfxSystem.disposeSharedResources(); } catch (err) { console.warn('[FlightSimple] VfxSystem shared resources dispose failed:', err); }
         this._disposeWater();
         this._ensureMotionBlur(false);
         if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
@@ -1677,6 +1771,7 @@ export class FlightSceneSimple extends Scene3D {
 
     private _applyDayNightCycle(scene: BABYLON.Scene): void {
         this._lightingSystem.applyDayNightCycle(scene);
+        try { this._terrainTilesSystem.updateCityLights(this._sunElevation); } catch (err) { console.warn('[FlightSimple] City lights update failed:', err); }
     }
 
     private _buildSkybox(scene: BABYLON.Scene): void {
@@ -2474,7 +2569,14 @@ export class FlightSceneSimple extends Scene3D {
     private _missionDestForNav(): typeof this._activeFlightPlanNav | null {
         const m = this._activeMission;
         if (m && m.arrival_lat != null && m.arrival_lon != null) {
-            return { departure_lat: m.departure_lat, departure_lon: m.departure_lon, arrival_lat: m.arrival_lat, arrival_lon: m.arrival_lon, departure_icao: m.departure_icao, arrival_icao: m.arrival_icao, name: m.mission_title };
+            return {
+                departure_lat: m.departure_lat, departure_lon: m.departure_lon,
+                arrival_lat: m.arrival_lat, arrival_lon: m.arrival_lon,
+                departure_icao: m.departure_icao, arrival_icao: m.arrival_icao, name: m.mission_title,
+                arr_rwy_heading: m.arr_rwy_heading ?? null,
+                arr_elevation_ft: m.arr_elevation_ft ?? null,
+                arr_rwy_ident: m.arr_rwy_ident ?? '',
+            };
         }
 
         const wpts = this._missionWaypoints;

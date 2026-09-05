@@ -28,6 +28,19 @@ const {
 } = CONST as any;
 
 const CONTROL_SETTINGS_STORAGE_KEY = 'flight_controls_v1';
+const LEGACY_YAW_LEFT_CODE = 'KeyA';
+const LEGACY_YAW_RIGHT_CODE = 'KeyD';
+const TOUCH_RUDDER_INPUT = 1;
+const TOUCH_WIDGET_SELECTOR = [
+    '#preflight', '#touch-throttle', '#touch-flap-btns', '#touch-rudder', '#ap-panel',
+    '#missions-btn', '#aircraft-btn', '#flight-plans-btn', '#logbook-btn', '#efb-btn',
+    '#achievements-btn', '#leaderboard-btn',
+    '#missions-panel', '#aircraft-panel', '#flight-plans-panel', '#logbook-panel', '#efb-panel',
+    '#achievements-panel', '#leaderboard-panel',
+    '#touch-controls-btn', '#touch-controls-panel', '#gps-zoom-controls',
+    '#instrument-dock', '#pfd-btn', '#pfd-panel', '#nav-info', '#debug-ui', '#dbg-panel',
+    '#tutorial-overlay .tut-card',
+].join(',');
 
 export class InputSystem {
     private readonly scene: any;
@@ -154,19 +167,28 @@ export class InputSystem {
     }
 
     toggleReplay(): void {
-        // if (this.scene._replayActive) {
-        //     this.scene._replayActive = false;
-        //     this.scene._replayBuffer.stopPlayback();
-        //     console.log('[Replay] Stopped by user');
-        // } else {
-        //     const ok = this.scene._replayBuffer.startPlayback(1.0);
-        //     if (ok) {
-        //         this.scene._replayActive = true;
-        //         console.log('[Replay] Started');
-        //     } else {
-        //         console.warn('[Replay] No data to play');
-        //     }
-        // }
+        if (this.scene._crashed) return;
+        if (this.scene._replayActive) {
+            this.scene._replayActive = false;
+            this.scene._replayBuffer.stopPlayback();
+            this.scene._restoreReplaySnapshot();
+            console.log('[Replay] Stopped by user');
+            return;
+        }
+        if (!this.scene._replayBuffer.hasReplay()) {
+            console.warn('[Replay] No data to play');
+            this.scene._showToast(I18n.t('replay.empty'));
+            return;
+        }
+        this.scene._captureReplaySnapshot();
+        const ok = this.scene._replayBuffer.startPlayback(1.0);
+        if (ok) {
+            this.scene._replayActive = true;
+            this.scene._showToast(I18n.t('replay.playing'));
+            console.log('[Replay] Started');
+        } else {
+            this.scene._replaySnapshot = null;
+        }
     }
 
     initF12Screenshot(): void {
@@ -228,7 +250,8 @@ export class InputSystem {
         if (this.scene.isMobile) {
             targetPitch = this.scene.touchPitchInput * 0.7;
             targetRoll = this.scene.touchRollInput * 0.18;
-            targetYaw = 0;
+            const touchYaw = Number(this.scene.touchYawInput) || 0;
+            targetYaw = Math.max(-1, Math.min(1, touchYaw)) * KEY_YAW_MAGNITUDE;
             this.scene.thrust = this.scene.touchThrust;
         } else {
             const p = (code: string) => this.scene.input.isKeyDown(code);
@@ -246,7 +269,10 @@ export class InputSystem {
             };
             const keyPitchRaw = (p(bind('pitchUp')) ? -1 : p(bind('pitchDown')) ? 1 : 0);
             const keyRollRaw  = (p(bind('rollRight')) ? -1 : p(bind('rollLeft')) ? 1 : 0);
-            const keyYawRaw   = ((p(bind('yawLeft')) || p('KeyA')) ? 1 : (p(bind('yawRight')) || p('KeyD')) ? -1 : 0);
+            const boundCodes = Object.values(InputBindings.get());
+            const altYawLeft = !boundCodes.includes(LEGACY_YAW_LEFT_CODE) && p(LEGACY_YAW_LEFT_CODE);
+            const altYawRight = !boundCodes.includes(LEGACY_YAW_RIGHT_CODE) && p(LEGACY_YAW_RIGHT_CODE);
+            const keyYawRaw   = ((p(bind('yawLeft')) || altYawLeft) ? 1 : (p(bind('yawRight')) || altYawRight) ? -1 : 0);
             targetPitch = applyAxisShape(keyPitchRaw) * KEY_PITCH_MAGNITUDE;
             targetRoll  = applyAxisShape(keyRollRaw)  * KEY_ROLL_MAGNITUDE;
             targetYaw   = applyAxisShape(keyYawRaw)   * KEY_YAW_MAGNITUDE;
@@ -456,12 +482,12 @@ export class InputSystem {
             }
             if (!p(towerCode)) this.scene._towerCamKeyLock = false;
 
-            // const replayCode = bind('replayToggle');
-            // if (p(replayCode) && !this.scene._replayKeyLock) {
-            //     this.scene._replayKeyLock = true;
-            //     this.scene._toggleReplay();
-            // }
-            // if (!p(replayCode)) this.scene._replayKeyLock = false;
+            const replayCode = bind('replayToggle');
+            if (p(replayCode) && !this.scene._replayKeyLock) {
+                this.scene._replayKeyLock = true;
+                this.scene._toggleReplay();
+            }
+            if (!p(replayCode)) this.scene._replayKeyLock = false;
 
             const atCode = bind('autothrottleToggle');
             if (p(atCode) && !this.scene._autothrottleKeyLock) {
@@ -612,18 +638,28 @@ export class InputSystem {
 #touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
 #touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
 #touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
-#touch-controls-btn{position:absolute;top:264px;right:14px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
-#touch-controls-panel{display:none;position:absolute;top:300px;right:14px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#touch-rudder{position:absolute;bottom:150px;right:12px;display:flex;gap:6px;pointer-events:auto}
+#touch-rudder button{width:56px;height:44px;padding:0;border-radius:8px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:11px;letter-spacing:.04em;cursor:pointer;touch-action:none;backdrop-filter:blur(2px);transition:transform .1s,background .1s,border-color .1s}
+#touch-rudder button.active{transform:scale(.94);background:rgba(0,60,35,.6);border-color:rgba(80,255,160,.55);color:#80ffa0}
+#touch-controls-btn{position:absolute;top:336px;right:14px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+#touch-controls-panel{display:none;position:absolute;top:372px;right:14px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
 #touch-controls-panel label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 #touch-controls-panel input[type=range]{width:120px}
+@media(max-width:768px){
+#touch-controls-btn{top:288px!important;right:10px!important}
+#touch-controls-panel{top:324px!important;right:10px!important}
+}
 @media(max-width:480px){
-#touch-controls-btn{top:176px!important;right:6px!important;width:28px!important;height:28px!important}
-#touch-controls-panel{top:210px!important;right:6px!important;width:200px!important}
+#touch-controls-btn{top:244px!important;right:6px!important;width:28px!important;height:28px!important}
+#touch-controls-panel{top:278px!important;right:6px!important;width:200px!important}
+#touch-rudder{bottom:140px!important;right:8px!important}
+#touch-rudder button{width:48px!important;height:38px!important}
 }
 </style>
 <div id="touch-joy"><div id="touch-joy-deadzone"></div><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
 <div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button><button id="touch-spl" title="Spoilers (toque longo: arma)">SPL</button><button id="touch-lgt" title="Luzes de pouso">LGT</button><button id="touch-cam" title="Trocar c\u00E2mera">CAM</button></div>
+<div id="touch-rudder"><button id="touch-rud-l" title="Leme esquerda">\u25C0 RUD</button><button id="touch-rud-r" title="Leme direita">RUD \u25B6</button></div>
 <button id="touch-controls-btn" title="Controles">\u2699</button>
 <div id="touch-controls-panel">
   <div style="font-family:'Orbitron',monospace;font-size:10px;color:#40ffaa;letter-spacing:.12em;margin-bottom:8px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:4px">CONTROLES</div>
@@ -632,6 +668,7 @@ export class InputSystem {
   <label>Curva (expo)<input id="ctl-expo" type="range" min="${JOYSTICK_MIN_EXPO}" max="${JOYSTICK_MAX_EXPO}" step="0.1"><span id="ctl-expo-v">\u2014</span></label>
   <label>Inverter pitch<input id="ctl-invert" type="checkbox"></label>
   <button id="ctl-open-settings" style="margin-top:8px;width:100%;background:rgba(64,255,170,.16);border:1px solid rgba(80,255,160,.4);color:#7df9c8;padding:8px;border-radius:6px;font-family:'Orbitron',monospace;font-size:10px;letter-spacing:.08em;cursor:pointer;touch-action:manipulation">CONFIGURA\u00C7\u00D5ES \u2699</button>
+  <button id="ctl-open-tutorial" style="margin-top:6px;width:100%;background:rgba(0,20,15,.5);border:1px solid rgba(80,255,160,.3);color:#7df9c8;padding:8px;border-radius:6px;font-family:'Orbitron',monospace;font-size:10px;letter-spacing:.08em;cursor:pointer;touch-action:manipulation">${I18n.t('settings.tutorial').toUpperCase()}</button>
 </div>`;
         document.body.appendChild(overlay);
 
@@ -692,6 +729,14 @@ export class InputSystem {
                 if (ctlPanel) ctlPanel.style.display = 'none';
             });
         }
+        const ctlOpenTutorial = document.getElementById('ctl-open-tutorial');
+        if (ctlOpenTutorial) {
+            ctlOpenTutorial.addEventListener('click', () => {
+                if (ctlPanel) ctlPanel.style.display = 'none';
+                if (typeof this.scene._startTutorial === 'function') this.scene._startTutorial();
+                else console.warn('[InputSystem] Tutorial system unavailable');
+            });
+        }
         const onCtlChange = () => {
             if (ctlRadius) this.scene._controlSettings.radius = Math.max(JOYSTICK_MIN_RADIUS_PX, Math.min(JOYSTICK_MAX_RADIUS_PX, Number(ctlRadius.value)));
             if (ctlDz) this.scene._controlSettings.deadzone = Math.max(0, Math.min(JOYSTICK_MAX_DEADZONE_NORM, Number(ctlDz.value)));
@@ -721,7 +766,7 @@ export class InputSystem {
         const isOnWidget = (t: Touch): boolean => {
             const el = document.elementFromPoint(t.clientX, t.clientY);
             if (!el) return false;
-            return !!el.closest('#preflight,#touch-throttle,#touch-flap-btns,#ap-panel,#missions-btn,#aircraft-btn,#flight-plans-btn,#logbook-btn,#efb-btn,#missions-panel,#aircraft-panel,#flight-plans-panel,#logbook-panel,#efb-panel,#touch-controls-btn,#touch-controls-panel,#gps-zoom-controls');
+            return !!el.closest(TOUCH_WIDGET_SELECTOR);
         };
 
         const canvas = this.scene.scene?.getEngine()?.getRenderingCanvas();
@@ -994,6 +1039,25 @@ export class InputSystem {
         } else {
             console.warn('[Touch] #touch-cam element not found');
         }
+        const bindRudder = (id: string, value: number) => {
+            const btn = document.getElementById(id);
+            if (!btn) { console.warn(`[Touch] #${id} element not found`); return; }
+            const press = (ev: TouchEvent) => {
+                ev.preventDefault();
+                this.scene.touchYawInput = value;
+                btn.classList.add('active');
+            };
+            const release = (ev: TouchEvent) => {
+                ev.preventDefault();
+                if (this.scene.touchYawInput === value) this.scene.touchYawInput = 0;
+                btn.classList.remove('active');
+            };
+            btn.addEventListener('touchstart', press, { passive: false });
+            btn.addEventListener('touchend', release, { passive: false });
+            btn.addEventListener('touchcancel', release, { passive: false });
+        };
+        bindRudder('touch-rud-l', TOUCH_RUDDER_INPUT);
+        bindRudder('touch-rud-r', -TOUCH_RUDDER_INPUT);
     }
 
     loadControlSettings(): void {

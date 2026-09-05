@@ -24,6 +24,18 @@ import {
     MOTION_BLUR_MAX_STRENGTH,
     MOTION_BLUR_SAMPLES,
     MOTION_BLUR_TRIGGER_G,
+    DOF_COCKPIT_FOCUS_DISTANCE_MM,
+    DOF_COCKPIT_FSTOP,
+    DOF_COCKPIT_FOCAL_LENGTH_MM,
+    PRECIP_TYPE_RAIN,
+    LIGHTNING_MIN_RAIN_INTENSITY,
+    LIGHTNING_MIN_INTERVAL_S,
+    LIGHTNING_MAX_INTERVAL_S,
+    LIGHTNING_FLASH_DURATION_S,
+    LIGHTNING_EXPOSURE_BOOST,
+    LIGHTNING_DOUBLE_FLASH_GAP_START,
+    LIGHTNING_DOUBLE_FLASH_GAP_END,
+    CAMERA_MODE_COCKPIT,
     ISA_TROPOPAUSE_M,
     ISA_TROPOPAUSE_TEMP_K,
     ISA_SEA_LEVEL_TEMP_K,
@@ -75,8 +87,32 @@ export class VfxSystem {
     private _ribbonSystem: ContrailRibbonSystem | null = null;
     private _contrailMode: string = CONTRAIL_MODE_DEFAULT;
 
+    private readonly _flareSunWorld = new BABYLON.Vector3();
+    private readonly _flareToSun = new BABYLON.Vector3();
+    private readonly _flareRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), BABYLON.Vector3.Up(), 1);
+    private _sharedParticleTexture: BABYLON.Texture | null = null;
+
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    /** One texture shared by every particle system (contrails, vapor cone, heat haze) instead of one upload per system. */
+    private _getSharedParticleTexture(scene: BABYLON.Scene): BABYLON.Texture | null {
+        if (this._sharedParticleTexture) return this._sharedParticleTexture;
+        try {
+            this._sharedParticleTexture = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene);
+        } catch (err) {
+            console.warn('[VFX] Shared particle texture load failed:', err);
+            this._sharedParticleTexture = null;
+        }
+        return this._sharedParticleTexture;
+    }
+
+    disposeSharedResources(): void {
+        if (this._sharedParticleTexture) {
+            try { this._sharedParticleTexture.dispose(); } catch (_) { /* ignore */ }
+            this._sharedParticleTexture = null;
+        }
     }
 
     getContrailMode(): string {
@@ -129,7 +165,7 @@ export class VfxSystem {
 
         const buildPs = (name: string, emitter: BABYLON.TransformNode): BABYLON.ParticleSystem => {
             const ps = new BABYLON.ParticleSystem(name, CONTRAIL_PARTICLE_CAPACITY, scene);
-            try { ps.particleTexture = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { /* ignore */ }
+            ps.particleTexture = this._getSharedParticleTexture(scene);
             ps.emitter = emitter as unknown as BABYLON.AbstractMesh;
             ps.minEmitBox = new BABYLON.Vector3(-0.3, -0.2, -0.2);
             ps.maxEmitBox = new BABYLON.Vector3( 0.3,  0.2,  0.2);
@@ -214,8 +250,8 @@ export class VfxSystem {
     }
 
     disposeContrails(): void {
-        if (this.scene._contrailPSLeft)  { try { this.scene._contrailPSLeft.dispose(true);  } catch (_) { /* ignore */ } }
-        if (this.scene._contrailPSRight) { try { this.scene._contrailPSRight.dispose(true); } catch (_) { /* ignore */ } }
+        if (this.scene._contrailPSLeft)  { try { this.scene._contrailPSLeft.dispose(false);  } catch (_) { /* ignore */ } }
+        if (this.scene._contrailPSRight) { try { this.scene._contrailPSRight.dispose(false); } catch (_) { /* ignore */ } }
         if (this._ribbonSystem) {
             try { this._ribbonSystem.disposePair(this.scene._contrailRibbonLeft);  } catch (_) { /* ignore */ }
             try { this._ribbonSystem.disposePair(this.scene._contrailRibbonRight); } catch (_) { /* ignore */ }
@@ -242,7 +278,7 @@ export class VfxSystem {
             em.position.set(0, 0, -1.5);
             this.scene._vaporConeEmitter = em;
             const ps = new BABYLON.ParticleSystem('vaporCone', 600, scene);
-            try { ps.particleTexture = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { /* ignore */ }
+            ps.particleTexture = this._getSharedParticleTexture(scene);
             ps.emitter = em as unknown as BABYLON.AbstractMesh;
             const r = Math.max(2, this.scene._contrailHalfSpan * 0.35);
             ps.createCylinderEmitter(r, 0.6, 1, 0);
@@ -267,7 +303,7 @@ export class VfxSystem {
     }
 
     disposeVaporCone(): void {
-        if (this.scene._vaporConePS)     { try { this.scene._vaporConePS.dispose(true);     } catch (_) { /* ignore */ } this.scene._vaporConePS = null; }
+        if (this.scene._vaporConePS)     { try { this.scene._vaporConePS.dispose(false);     } catch (_) { /* ignore */ } this.scene._vaporConePS = null; }
         if (this.scene._vaporConeEmitter){ try { this.scene._vaporConeEmitter.dispose();} catch (_) { /* ignore */ } this.scene._vaporConeEmitter = null; }
     }
 
@@ -296,7 +332,7 @@ export class VfxSystem {
             em.position.set(0, 0, -this.scene._contrailHalfSpan * 0.6);
             this.scene._heatHazeEmitter = em;
             const ps = new BABYLON.ParticleSystem('heatHaze', 200, scene);
-            try { ps.particleTexture = new BABYLON.Texture(CLOUD_TEXTURE_URL, scene); } catch (_) { /* ignore */ }
+            ps.particleTexture = this._getSharedParticleTexture(scene);
             ps.emitter = em as unknown as BABYLON.AbstractMesh;
             ps.minEmitBox = new BABYLON.Vector3(-0.5, -0.3, -0.2);
             ps.maxEmitBox = new BABYLON.Vector3( 0.5,  0.3,  0.2);
@@ -323,7 +359,7 @@ export class VfxSystem {
     }
 
     disposeHeatHaze(): void {
-        if (this.scene._heatHazePS)     { try { this.scene._heatHazePS.dispose(true);     } catch (_) { /* ignore */ } this.scene._heatHazePS = null; }
+        if (this.scene._heatHazePS)     { try { this.scene._heatHazePS.dispose(false);     } catch (_) { /* ignore */ } this.scene._heatHazePS = null; }
         if (this.scene._heatHazeEmitter){ try { this.scene._heatHazeEmitter.dispose();} catch (_) { /* ignore */ } this.scene._heatHazeEmitter = null; }
     }
 
@@ -337,27 +373,68 @@ export class VfxSystem {
         this.scene._heatHazePS.emitRate = cur + (target - cur) * 0.1;
     }
 
+    private _lightningFlash = 0;
+    private _lightningTimerS = 0;
+    private _lightningBaseExposure = Number.NaN;
+
+    /** Heavy rain (METAR TS/+RA or slider) triggers random exposure flashes; restores the base exposure afterwards. */
+    updateLightning(dt: number): void {
+        const ip = this.scene._pipeline?.imageProcessing;
+        if (!ip) return;
+        const intensity = Number.isFinite(this.scene._precipitationIntensity) ? this.scene._precipitationIntensity : 0;
+        const heavyRain = this.scene._precipitationType === PRECIP_TYPE_RAIN && intensity >= LIGHTNING_MIN_RAIN_INTENSITY;
+        if (!heavyRain && this._lightningFlash <= 0) {
+            this._lightningTimerS = 0;
+            return;
+        }
+        const dtClamp = Math.max(0, Math.min(0.25, Number.isFinite(dt) ? dt : 0));
+
+        if (heavyRain) {
+            this._lightningTimerS -= dtClamp;
+            if (this._lightningTimerS <= 0) {
+                this._lightningTimerS = LIGHTNING_MIN_INTERVAL_S + Math.random() * (LIGHTNING_MAX_INTERVAL_S - LIGHTNING_MIN_INTERVAL_S);
+                if (this._lightningFlash <= 0) {
+                    this._lightningBaseExposure = Number.isFinite(this.scene._baseExposure) ? this.scene._baseExposure : ip.exposure;
+                }
+                this._lightningFlash = 1;
+            }
+        }
+
+        if (this._lightningFlash > 0) {
+            const base = Number.isFinite(this._lightningBaseExposure) ? this._lightningBaseExposure : ip.exposure;
+            this._lightningFlash = Math.max(0, this._lightningFlash - dtClamp / LIGHTNING_FLASH_DURATION_S);
+            const flicker = this._lightningFlash > LIGHTNING_DOUBLE_FLASH_GAP_START && this._lightningFlash < LIGHTNING_DOUBLE_FLASH_GAP_END ? 0 : this._lightningFlash;
+            ip.exposure = this._lightningFlash > 0 ? base * (1 + flicker * LIGHTNING_EXPOSURE_BOOST) : base;
+            if (this._lightningFlash <= 0) this._lightningBaseExposure = Number.NaN;
+        }
+    }
+
     updateLensFlareOcclusion(dtMs: number): void {
         if (!this.scene._lensFlareSystem || !this.scene.scene || !this.scene.camera) return;
         this.scene._flareCheckTimerMs += dtMs;
         if (this.scene._flareCheckTimerMs < FLARE_OCCLUSION_CHECK_INTERVAL_MS) return;
         this.scene._flareCheckTimerMs = 0;
-        const sunMesh = this.scene.scene.getMeshByName('sunMesh');
-        const sunLight = this.scene.scene.getLightByName('sun') as BABYLON.DirectionalLight | null;
-        let sunWorld: BABYLON.Vector3 | null = null;
-        if (sunMesh) sunWorld = sunMesh.getAbsolutePosition();
-        else if (sunLight) {
-            const dir = sunLight.direction;
-            const dirN = dir.normalizeToNew().scaleInPlace(-FLARE_OCCLUSION_SUN_DISTANCE_M);
-            sunWorld = this.scene.camera.position.add(dirN);
-        }
-        if (!sunWorld) return;
+        // Sun references are cached on the scene by LightingSystem; avoid getMeshByName scans every check.
+        const sunMesh: BABYLON.AbstractMesh | null = this.scene._sunMesh || null;
+        const sunLight = (this.scene._sunLight || null) as BABYLON.DirectionalLight | null;
         const camPos = this.scene.camera.position;
-        const toSun = sunWorld.subtract(camPos);
+        const sunWorld = this._flareSunWorld;
+        if (sunMesh) sunWorld.copyFrom(sunMesh.getAbsolutePosition());
+        else if (sunLight) {
+            sunLight.direction.normalizeToRef(sunWorld);
+            sunWorld.scaleInPlace(-FLARE_OCCLUSION_SUN_DISTANCE_M).addInPlace(camPos);
+        } else {
+            return;
+        }
+        const toSun = this._flareToSun;
+        sunWorld.subtractToRef(camPos, toSun);
         const distToSun = toSun.length();
         if (distToSun < 1) return;
-        const dir = toSun.scale(1 / distToSun);
-        const ray = new BABYLON.Ray(camPos, dir, distToSun);
+        toSun.scaleInPlace(1 / distToSun);
+        const ray = this._flareRay;
+        ray.origin.copyFrom(camPos);
+        ray.direction.copyFrom(toSun);
+        ray.length = distToSun;
         const planeRoot = this.scene.planeRoot;
         const tilesGroup = this.scene.tiles ? this.scene.tiles.group : null;
         const pick = this.scene.scene.pickWithRay(ray, (m: BABYLON.AbstractMesh) => {
@@ -411,9 +488,11 @@ export class VfxSystem {
             ip.contrast = newContrast;
             this._lastContrast = newContrast;
         }
-        if (this._lastColorGradingEnabled !== false) {
-            ip.colorGradingEnabled = false;
-            this._lastColorGradingEnabled = false;
+        // Color grading (LUT) is owned by setColorLut; only keep it in sync with whether a LUT texture is loaded.
+        const wantColorGrading = !!this.scene._colorLutTexture;
+        if (this._lastColorGradingEnabled !== wantColorGrading) {
+            ip.colorGradingEnabled = wantColorGrading;
+            this._lastColorGradingEnabled = wantColorGrading;
         }
     }
 
@@ -450,13 +529,24 @@ export class VfxSystem {
         const gAbs = Math.abs(Number.isFinite(this.scene._gForce) ? this.scene._gForce : 1);
         const wantMb = gAbs > MOTION_BLUR_TRIGGER_G;
         this.ensureMotionBlur(wantMb);
-        if (this.scene._pipeline && this.scene._dofEnabledInCockpit) {
-            try {
-                this.scene._pipeline.depthOfFieldEnabled = false;
-            } catch (err) {
-                console.warn('[DOF] disable failed:', err);
+        if (!this.scene._pipeline) return;
+        const wantDof = this.scene._cameraMode === CAMERA_MODE_COCKPIT;
+        if (wantDof === this.scene._dofEnabledInCockpit) return;
+        try {
+            const pipeline = this.scene._pipeline;
+            if (wantDof) {
+                pipeline.depthOfFieldBlurLevel = BABYLON.DepthOfFieldEffectBlurLevel.Low;
+                pipeline.depthOfFieldEnabled = true;
+                pipeline.depthOfField.focusDistance = DOF_COCKPIT_FOCUS_DISTANCE_MM;
+                pipeline.depthOfField.fStop = DOF_COCKPIT_FSTOP;
+                pipeline.depthOfField.focalLength = DOF_COCKPIT_FOCAL_LENGTH_MM;
+            } else {
+                pipeline.depthOfFieldEnabled = false;
             }
-            this.scene._dofEnabledInCockpit = false;
+            this.scene._dofEnabledInCockpit = wantDof;
+            console.debug(`[DOF] cockpit depth of field ${wantDof ? 'enabled' : 'disabled'}`);
+        } catch (err) {
+            console.warn('[DOF] toggle failed:', err);
         }
     }
 

@@ -39,8 +39,9 @@ export function computeXteNm(prevLat: number, prevLon: number, nextLat: number, 
     if (d13 < 1e-9) return 0;
     const theta13 = initialBearingDeg(prevLat, prevLon, curLat, curLon) * toRad;
     const theta12 = initialBearingDeg(prevLat, prevLon, nextLat, nextLon) * toRad;
-    const xte = Math.asin(Math.sin(d13) * Math.sin(theta13 - theta12)) * R_NM;
-    return xte;
+    const sinArg = Math.max(-1, Math.min(1, Math.sin(d13) * Math.sin(theta13 - theta12)));
+    const xte = Math.asin(sinArg) * R_NM;
+    return Number.isFinite(xte) ? xte : 0;
 }
 
 export function formatEteMin(eteMin: number): string {

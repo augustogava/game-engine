@@ -69,7 +69,7 @@ export class AutopilotSystem {
      */
     private _aprFinalSegment(): { thrLat: number; thrLon: number; recip: number } | null {
         if (!this.scene._autopilotAprHold) return null;
-        const nav = this.scene._activeFlightPlanNav;
+        const nav = this.scene._activeFlightPlanNav ?? this.scene._missionDestForNav();
         if (!nav) return null;
         const hdg = Number(nav.arr_rwy_heading);
         const thrLat = Number(nav.arrival_lat);
@@ -214,7 +214,11 @@ export class AutopilotSystem {
             if (target && here) {
                 const distNm = NavMath.haversineNm(here.lat, here.lon, target.lat, target.lon);
                 const distFt = distNm * 6076.12;
-                const glideAltFt = Math.max(AP_APR_MIN_ALT_FT, distFt * Math.tan(AP_APR_GLIDESLOPE_DEG * Math.PI / 180));
+                // Glide path is referenced to the threshold elevation, not sea level, so it lands at the runway.
+                const nav = this.scene._activeFlightPlanNav ?? this.scene._missionDestForNav();
+                const thrElevRaw = Number(nav?.arr_elevation_ft);
+                const thrElevFt = Number.isFinite(thrElevRaw) ? thrElevRaw : 0;
+                const glideAltFt = thrElevFt + Math.max(AP_APR_MIN_ALT_FT, distFt * Math.tan(AP_APR_GLIDESLOPE_DEG * Math.PI / 180));
                 const altMslFt = Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y)) * 3.28084;
                 const errFt = glideAltFt - altMslFt;
                 targetVsFpm = Math.max(-AP_ALT_MAX_VS_FPM, Math.min(AP_ALT_MAX_VS_FPM, errFt * AP_ALT_TO_VS_GAIN_FPM_PER_FT));

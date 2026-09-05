@@ -3,6 +3,7 @@ export const WATER_PLANE_Y_OFFSET_M = -30;
 export const WATER_NORMAL_RES = 512;
 export const WATER_BUMP_URL = 'https://assets.babylonjs.com/textures/waterbump.png';
 export const WATER_WIND_FORCE = -5;
+export const WATER_WIND_KT_TO_FORCE = 0.5;
 export const WATER_WAVE_HEIGHT_M = 0.4;
 export const WATER_BUMP_HEIGHT = 0.4;
 export const WATER_WAVE_LENGTH_M = 1.0;

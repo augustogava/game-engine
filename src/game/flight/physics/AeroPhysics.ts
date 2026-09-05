@@ -8,6 +8,9 @@ import {
     ISA_DELTA_TEMP_K_MIN,
 } from '../constants/index.js';
 
+const ASPECT_RATIO_MIN = 0.1;
+const OSWALD_EFFICIENCY_MIN = 0.05;
+
 export function getAirDensity(altitudeM: number, deltaTempK: number = 0): number {
     const h = Math.max(0, altitudeM);
     const dT = Number.isFinite(deltaTempK)
@@ -31,6 +34,9 @@ export function computeCoefficients(
     oswaldE: number, flapFraction: number, controlInput: number,
     groundEffectFactor: number, flapType: number,
 ): { cl: number; cd: number } {
+    // Guard degenerate surface configs (AR/e = 0 or NaN) that would otherwise divide by zero and poison the state with NaN.
+    if (!Number.isFinite(aspectRatio) || aspectRatio < ASPECT_RATIO_MIN) aspectRatio = ASPECT_RATIO_MIN;
+    if (!Number.isFinite(oswaldE) || oswaldE < OSWALD_EFFICIENCY_MIN) oswaldE = OSWALD_EFFICIENCY_MIN;
     const corrSlope = liftSlope * aspectRatio /
         (aspectRatio + 2 * (aspectRatio + 4) / (aspectRatio + 2));
     const absAlpha = Math.abs(alpha);
@@ -65,31 +71,39 @@ export function computeCoefficients(
 const SURFACE_FORWARD_AXIS = new BABYLON.Vector3(0, 0, 1);
 const SPAN_AXIS_MIN_LEN_SQ = 1e-6;
 
+// Scratch buffers: computeSurfaceForces runs per surface per physics substep, so intermediates are reused
+// instead of allocated. Only the three returned vectors are fresh allocations.
+const _spanAxis = new BABYLON.Vector3();
+const _chordPlaneVel = new BABYLON.Vector3();
+const _dragDir = new BABYLON.Vector3();
+const _cross1 = new BABYLON.Vector3();
+const _liftDir = new BABYLON.Vector3();
+const _dragVec = new BABYLON.Vector3();
+const _pitchMoment = new BABYLON.Vector3();
+
 export function computeSurfaceForces(
     surface: AeroSurface, bodyVelocity: BABYLON.Vector3, airDensity: number,
     groundEffectFactor: number, flapType: number, propwashSpeedBoost: number,
 ): { force: BABYLON.Vector3; torque: BABYLON.Vector3; liftVec: BABYLON.Vector3 } {
-    const zero  = { force: BABYLON.Vector3.Zero(), torque: BABYLON.Vector3.Zero(), liftVec: BABYLON.Vector3.Zero() };
-
-    const spanAxis = BABYLON.Vector3.Cross(surface.normal, SURFACE_FORWARD_AXIS);
-    const spanValid = spanAxis.lengthSquared() > SPAN_AXIS_MIN_LEN_SQ;
-    let chordPlaneVel = bodyVelocity;
+    BABYLON.Vector3.CrossToRef(surface.normal, SURFACE_FORWARD_AXIS, _spanAxis);
+    const spanValid = _spanAxis.lengthSquared() > SPAN_AXIS_MIN_LEN_SQ;
+    _chordPlaneVel.copyFrom(bodyVelocity);
     if (spanValid) {
-        spanAxis.normalize();
-        const spanComponent = BABYLON.Vector3.Dot(bodyVelocity, spanAxis);
-        chordPlaneVel = bodyVelocity.subtract(spanAxis.scale(spanComponent));
+        _spanAxis.normalize();
+        const spanComponent = BABYLON.Vector3.Dot(bodyVelocity, _spanAxis);
+        _chordPlaneVel.subtractInPlace(_spanAxis.scaleToRef(spanComponent, _dragDir));
     }
 
-    const speed = chordPlaneVel.length();
-    if (speed < 1.0) return zero;
+    const speed = _chordPlaneVel.length();
+    if (speed < 1.0) return { force: BABYLON.Vector3.Zero(), torque: BABYLON.Vector3.Zero(), liftVec: BABYLON.Vector3.Zero() };
 
-    const dragDir = chordPlaneVel.normalizeToNew().scaleInPlace(-1);
-    const cross1  = BABYLON.Vector3.Cross(dragDir, surface.normal);
-    const liftDir = BABYLON.Vector3.Cross(cross1, dragDir);
-    if (liftDir.lengthSquared() < 0.0001) return zero;
-    liftDir.normalize();
+    _chordPlaneVel.scaleToRef(-1 / speed, _dragDir);
+    BABYLON.Vector3.CrossToRef(_dragDir, surface.normal, _cross1);
+    BABYLON.Vector3.CrossToRef(_cross1, _dragDir, _liftDir);
+    if (_liftDir.lengthSquared() < 0.0001) return { force: BABYLON.Vector3.Zero(), torque: BABYLON.Vector3.Zero(), liftVec: BABYLON.Vector3.Zero() };
+    _liftDir.normalize();
 
-    const dot   = Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(dragDir, surface.normal)));
+    const dot   = Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(_dragDir, surface.normal)));
     const alpha = Math.asin(dot);
 
     const { cl, cd } = computeCoefficients(
@@ -101,14 +115,14 @@ export function computeSurfaceForces(
 
     const effectiveSpeed = speed + propwashSpeedBoost;
     const q     = 0.5 * airDensity * effectiveSpeed * effectiveSpeed * surface.area;
-    const liftVec = liftDir.scale(cl * q);
-    const dragVec = dragDir.scale(cd * q);
-    const force = liftVec.add(dragVec);
+    const liftVec = _liftDir.scale(cl * q);
+    _dragDir.scaleToRef(cd * q, _dragVec);
+    const force = liftVec.add(_dragVec);
     const torque = BABYLON.Vector3.Cross(surface.position, force);
 
     if (spanValid && surface.zeroLiftCm !== 0) {
         const pitchingMomentMag = surface.zeroLiftCm * q * surface.chord;
-        torque.addInPlace(spanAxis.scale(pitchingMomentMag));
+        torque.addInPlace(_spanAxis.scaleToRef(pitchingMomentMag, _pitchMoment));
     }
 
     return { force, torque, liftVec };

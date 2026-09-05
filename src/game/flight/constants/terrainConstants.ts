@@ -11,6 +11,12 @@ export const TERRAIN_TUNNEL_STREAK_REQUIRED = 3;
 export const GROUND_TERRAIN_SMOOTH_TAU_S = 0.18;
 export const GROUND_TERRAIN_SMOOTH_SNAP_DELTA_M = 3.0;
 
+export const SAVED_FLIGHT_STORAGE_KEY = 'flight_saved_free_flight_v1';
+export const SAVED_FLIGHT_URL_PARAM = 'resume';
+export const SAVED_FLIGHT_AUTOSAVE_INTERVAL_MS = 30000;
+export const SAVED_FLIGHT_MIN_AGL_M = 50;
+export const SAVED_FLIGHT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 export const WORLD_READY_TIMEOUT_MS = 15000;
 export const WORLD_READY_PROBE_HEIGHT_M = 5000;
 export const WORLD_READY_PROBE_LENGTH_M = 10000;

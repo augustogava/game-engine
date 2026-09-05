@@ -1,8 +1,15 @@
 export function getSunPosition(lat: number, lon: number, date: Date): { elevation: number; azimuth: number } {
     const rad = Math.PI / 180;
-    const jd = Math.floor(365.25 * (date.getUTCFullYear() + 4716))
-             + Math.floor(30.6001 * ((date.getUTCMonth() + 1 < 3 ? date.getUTCMonth() + 13 : date.getUTCMonth() + 1 + 1)))
-             + date.getUTCDate() + (date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600) / 24
+    // Meeus Julian Day: January/February count as months 13/14 of the previous year, plus the Gregorian correction B.
+    let year = date.getUTCFullYear();
+    let month = date.getUTCMonth() + 1;
+    if (month <= 2) { year -= 1; month += 12; }
+    const centuries = Math.floor(year / 100);
+    const gregorianB = 2 - centuries + Math.floor(centuries / 4);
+    const dayFraction = (date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600) / 24;
+    const jd = Math.floor(365.25 * (year + 4716))
+             + Math.floor(30.6001 * (month + 1))
+             + date.getUTCDate() + dayFraction + gregorianB
              - 1524.5;
     const n = jd - 2451545.0;
     const L = (280.460 + 0.9856474 * n) % 360;

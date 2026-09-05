@@ -151,9 +151,14 @@ export class ContrailRibbonSystem {
         mesh.isPickable = false;
         mesh.alphaIndex = CONTRAIL_RIBBON_ALPHA_INDEX;
         mesh.applyFog = false;
-        mesh.alwaysSelectAsActiveMesh = true;
+        // Vertices are authored in world space, so the world matrix stays identity and the bounding box is
+        // refreshed from the history in _rebuildVertices; normal frustum culling then replaces alwaysSelectAsActiveMesh.
+        mesh.freezeWorldMatrix();
         return mesh;
     }
+
+    private readonly _boundsMin = new BABYLON.Vector3();
+    private readonly _boundsMax = new BABYLON.Vector3();
 
     /**
      * Build a pair of ribbon emitters + meshes attached to a given parent root.
@@ -314,9 +319,14 @@ export class ContrailRibbonSystem {
         let perpX = handle.prevPerpValid ? handle.prevPerpX : 0;
         let perpY = handle.prevPerpValid ? handle.prevPerpY : 0;
         let perpZ = handle.prevPerpValid ? handle.prevPerpZ : 1;
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
         for (let i = 0; i < n; i++) {
             const a = handle.history[i];
+            if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
+            if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
+            if (a.z < minZ) minZ = a.z; if (a.z > maxZ) maxZ = a.z;
             if (i < n - 1) {
                 const b = handle.history[i + 1];
                 segDirX = a.x - b.x;
@@ -382,6 +392,16 @@ export class ContrailRibbonSystem {
         mesh.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
         mesh.updateVerticesData(BABYLON.VertexBuffer.UVKind, uvs);
         mesh.setIndices(indices, undefined, true);
+        if (n > 0 && Number.isFinite(minX) && Number.isFinite(maxX)) {
+            const pad = Math.max(CONTRAIL_RIBBON_HEAD_WIDTH_M, CONTRAIL_RIBBON_TAIL_WIDTH_M);
+            this._boundsMin.set(minX - pad, minY - pad, minZ - pad);
+            this._boundsMax.set(maxX + pad, maxY + pad, maxZ + pad);
+            try {
+                mesh.getBoundingInfo().reConstruct(this._boundsMin, this._boundsMax);
+            } catch (err) {
+                console.warn('[ContrailRibbon] Bounding info refresh failed:', err);
+            }
+        }
     }
 
     private _updateUniforms(handle: ContrailRibbonHandle): void {

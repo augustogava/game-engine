@@ -60,6 +60,24 @@ const AIRCRAFT_AMBIENT_COLOR_R = 0.85;
 const AIRCRAFT_AMBIENT_COLOR_G = 0.88;
 const AIRCRAFT_AMBIENT_COLOR_B = 0.95;
 
+const SUN_LIGHT_RENDER_PRIORITY = 100;
+const SHADOW_SELF_BIAS = 0.0008;
+const SHADOW_SELF_NORMAL_BIAS = 0.02;
+
+const STAR_COUNT = 800;
+const STAR_DISTANCE_M = 50000;
+const STAR_TWINKLE_MIN = 0.7;
+const STAR_TWINKLE_AMPLITUDE = 0.3;
+const STAR_LOOK_UP_VERTICAL_LIMIT = 0.99;
+
+interface StarThinGroup {
+    mesh: BABYLON.Mesh;
+    positions: BABYLON.Vector3[];
+    phases: number[];
+    baseScales: number[];
+    matrices: Float32Array | null;
+}
+
 export class LightingSystem {
     private readonly scene: any;
     private _aircraftAmbientLight: BABYLON.HemisphericLight | null = null;
@@ -124,6 +142,7 @@ export class LightingSystem {
         this.scene._hemiLight.groundColor = new BABYLON.Color3(0.25, 0.35, 0.18);
 
         this.scene._sunLight = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.4, -0.9, -0.3).normalize(), scene);
+        this.scene._sunLight.renderPriority = SUN_LIGHT_RENDER_PRIORITY;
         this.scene._sunLight.position = new BABYLON.Vector3(800, 1200, 800);
         this.scene._sunLight.intensity = 3.0;
         this.scene._sunLight.diffuse = new BABYLON.Color3(1.0, 0.92, 0.75);
@@ -144,6 +163,8 @@ export class LightingSystem {
         this.scene._shadowGen.stabilizeCascades      = true;
         this.scene._shadowGen.numCascades            = isMobile ? 2 : 4;
         this.scene._shadowGen.penumbraDarkness       = 0.6;
+        this.scene._shadowGen.bias                   = SHADOW_SELF_BIAS;
+        this.scene._shadowGen.normalBias             = SHADOW_SELF_NORMAL_BIAS;
         this.scene._shadowGen.usePercentageCloserFiltering = true;
         (this.scene._shadowGen as any).filteringQuality = isMobile ? BABYLON.ShadowGenerator.QUALITY_LOW : BABYLON.ShadowGenerator.QUALITY_HIGH;
         this.scene._shadow = this.scene._shadowGen;
@@ -196,6 +217,7 @@ export class LightingSystem {
         this.scene._sunMeshMat.disableDepthWrite = true;
         this.scene._sunMeshMat.alphaMode = BABYLON.Engine.ALPHA_ADD;
         this.scene._sunMeshMat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        this.scene._sunMeshMat.freeze();
         this.scene._sunMesh.material = this.scene._sunMeshMat;
 
         this.buildSunHalo(scene);
@@ -234,6 +256,7 @@ export class LightingSystem {
         mat.disableDepthWrite = true;
         mat.alphaMode = BABYLON.Engine.ALPHA_ADD;
         mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        mat.freeze();
         halo.material = mat;
 
         this.scene._sunHaloMesh = halo;
@@ -254,30 +277,27 @@ export class LightingSystem {
             new BABYLON.Color3(0.7, 0.8, 1.0),
         ];
 
+        // Stars are thin instances (one draw call per color) oriented toward the world origin instead of
+        // per-instance billboards: at STAR_DISTANCE_M the orientation error is negligible and it avoids
+        // hundreds of InstancedMesh world-matrix/frustum updates per frame.
         const starMats = starColors.map((c, i) => {
             const mat = new BABYLON.StandardMaterial(`starMat${i}`, scene);
             mat.emissiveColor = c;
             mat.disableLighting = true;
+            mat.backFaceCulling = false;
+            mat.freeze();
             return mat;
         });
 
-        const baseStar = BABYLON.MeshBuilder.CreatePlane('starBase', { size: 1 }, scene);
-        baseStar.material = starMats[2];
-        baseStar.isVisible = false;
-        baseStar.parent = this.scene._starRoot;
-
-        const starDist = 50000;
-        const STAR_COUNT = 800;
-        const baseStars: BABYLON.Mesh[] = [baseStar];
-        for (let m = 0; m < starMats.length; m++) {
-            if (m === 2) continue;
+        const starDist = STAR_DISTANCE_M;
+        const baseStars: BABYLON.Mesh[] = starMats.map((mat, m) => {
             const bs = BABYLON.MeshBuilder.CreatePlane(`starBase${m}`, { size: 1 }, scene);
-            bs.material = starMats[m];
-            bs.isVisible = false;
+            bs.material = mat;
+            bs.isPickable = false;
             bs.parent = this.scene._starRoot;
-            baseStars[m] = bs;
-        }
-        baseStars[2] = baseStar;
+            return bs;
+        });
+        const groups: StarThinGroup[] = baseStars.map((mesh) => ({ mesh, positions: [], phases: [], baseScales: [], matrices: null }));
 
         for (let i = 0; i < STAR_COUNT; i++) {
             const theta = Math.random() * Math.PI * 2;
@@ -288,17 +308,12 @@ export class LightingSystem {
             const y = starDist * cosP;
             const z = starDist * Math.sin(phi) * Math.sin(theta);
             const matIdx = Math.floor(Math.random() * starMats.length);
-            const inst = baseStars[matIdx].createInstance('star_' + i);
-            inst.position.set(x, y, z);
             const magnitude = Math.random();
             const sz = 8 + magnitude * 50;
-            inst.scaling.setAll(sz);
-            inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-            inst.isPickable = false;
-
-            this.scene._starInstances.push(inst);
-            this.scene._starPhases.push(Math.random() * Math.PI * 2);
-            this.scene._starBaseScales.push(sz);
+            const group = groups[matIdx];
+            group.positions.push(new BABYLON.Vector3(x, y, z));
+            group.phases.push(Math.random() * Math.PI * 2);
+            group.baseScales.push(sz);
         }
 
         const brightColors = [
@@ -314,15 +329,18 @@ export class LightingSystem {
             m.disableLighting = true;
             m.diffuseColor = new BABYLON.Color3(0, 0, 0);
             m.specularColor = new BABYLON.Color3(0, 0, 0);
+            m.backFaceCulling = false;
+            m.freeze();
             return m;
         });
         const brightBases: BABYLON.Mesh[] = brightMats.map((mat, i) => {
             const b = BABYLON.MeshBuilder.CreatePlane(`brightStarBase${i}`, { size: 1 }, scene);
             b.material = mat;
-            b.isVisible = false;
+            b.isPickable = false;
             b.parent = this.scene._starRoot;
             return b;
         });
+        const brightGroups: StarThinGroup[] = brightBases.map((mesh) => ({ mesh, positions: [], phases: [], baseScales: [], matrices: null }));
 
         for (let i = 0; i < BRIGHT_STAR_COUNT; i++) {
             const theta = Math.random() * Math.PI * 2;
@@ -333,18 +351,50 @@ export class LightingSystem {
             const y = starDist * cosP;
             const z = starDist * Math.sin(phi) * Math.sin(theta);
             const matIdx = Math.floor(Math.random() * brightBases.length);
-            const inst = brightBases[matIdx].createInstance('brightStar_' + i);
-            inst.position.set(x, y, z);
             const sz = BRIGHT_STAR_BASE_SIZE + Math.random() * BRIGHT_STAR_SIZE_RANDOM;
-            inst.scaling.setAll(sz);
-            inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-            inst.isPickable = false;
-            this.scene._starInstances.push(inst);
-            this.scene._starPhases.push(Math.random() * Math.PI * 2);
-            this.scene._starBaseScales.push(sz);
+            const group = brightGroups[matIdx];
+            group.positions.push(new BABYLON.Vector3(x, y, z));
+            group.phases.push(Math.random() * Math.PI * 2);
+            group.baseScales.push(sz);
+        }
+
+        this._starGroups = [];
+        for (const group of [...groups, ...brightGroups]) {
+            if (group.positions.length === 0) {
+                group.mesh.isVisible = false;
+                continue;
+            }
+            group.matrices = new Float32Array(group.positions.length * 16);
+            this._writeStarMatrices(group, 0);
+            group.mesh.thinInstanceSetBuffer('matrix', group.matrices, 16, false);
+            group.mesh.thinInstanceRefreshBoundingInfo(false);
+            group.mesh.freezeWorldMatrix();
+            this._starGroups.push(group);
         }
 
         this.scene._starRoot.setEnabled(false);
+    }
+
+    private readonly _starTmpQuat = new BABYLON.Quaternion();
+    private readonly _starTmpScale = new BABYLON.Vector3();
+    private readonly _starTmpDir = new BABYLON.Vector3();
+    private readonly _starTmpMatrix = new BABYLON.Matrix();
+    private _starGroups: StarThinGroup[] = [];
+
+    private _writeStarMatrices(group: StarThinGroup, time: number): void {
+        if (!group.matrices) return;
+        for (let i = 0; i < group.positions.length; i++) {
+            const pos = group.positions[i];
+            const phase = group.phases[i];
+            const flicker = STAR_TWINKLE_MIN + STAR_TWINKLE_AMPLITUDE * Math.sin(time * (1.5 + phase) + phase * 6.28);
+            const sz = group.baseScales[i] * flicker;
+            this._starTmpScale.set(sz, sz, sz);
+            pos.negateToRef(this._starTmpDir).normalize();
+            const up = Math.abs(this._starTmpDir.y) > STAR_LOOK_UP_VERTICAL_LIMIT ? BABYLON.Vector3.RightReadOnly : BABYLON.Vector3.UpReadOnly;
+            BABYLON.Quaternion.FromLookDirectionLHToRef(this._starTmpDir, up, this._starTmpQuat);
+            BABYLON.Matrix.ComposeToRef(this._starTmpScale, this._starTmpQuat, pos, this._starTmpMatrix);
+            this._starTmpMatrix.copyToArray(group.matrices, i * 16);
+        }
     }
 
     buildMoon(scene: BABYLON.Scene): void {
@@ -368,6 +418,7 @@ export class LightingSystem {
         this.scene._moonMat.specularColor = new BABYLON.Color3(0, 0, 0);
         this.scene._moonMat.disableLighting = true;
         this.scene._moonMat.backFaceCulling = true;
+        this.scene._moonMat.freeze();
         this.scene._moonMesh.material = this.scene._moonMat;
         this.scene._moonMesh.isVisible = false;
 
@@ -406,6 +457,7 @@ export class LightingSystem {
         mat.disableDepthWrite = true;
         mat.alphaMode = BABYLON.Engine.ALPHA_ADD;
         mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+        mat.freeze();
         halo.material = mat;
         halo.isVisible = false;
 
@@ -423,11 +475,11 @@ export class LightingSystem {
         this._starTwinkleAccumS += dt;
         if (this._starTwinkleAccumS < LightingSystem.STAR_TWINKLE_INTERVAL_S) return;
         this._starTwinkleAccumS = 0;
-        for (let i = 0; i < this.scene._starInstances.length; i++) {
-            const phase = this.scene._starPhases[i];
-            const base = this.scene._starBaseScales[i];
-            const flicker = 0.7 + 0.3 * Math.sin(this.scene._starTime * (1.5 + phase) + phase * 6.28);
-            this.scene._starInstances[i].scaling.setAll(base * flicker);
+        const time = this.scene._starTime;
+        for (const group of this._starGroups) {
+            if (!group.matrices) continue;
+            this._writeStarMatrices(group, time);
+            group.mesh.thinInstanceBufferUpdated('matrix');
         }
     }
 
@@ -659,6 +711,8 @@ export class LightingSystem {
                 this.scene._pipeline.imageProcessing.exposure = newExposure;
                 this._lastExposure = newExposure;
             }
+            // Base exposure for transient effects (lightning flash in VfxSystem) to restore to.
+            this.scene._baseExposure = newExposure;
         }
 
         if (this.scene._moonMesh) {
@@ -685,7 +739,10 @@ export class LightingSystem {
             const starFade = Math.max(0, Math.min(1, (-elevation + 5) / 12));
             const starsActive = starFade > 0.05;
             this.scene._starRoot.setEnabled(starsActive);
-            if (this.scene._milkyWayRoot) this.scene._milkyWayRoot.setEnabled(false);
+            if (this.scene._milkyWayRoot) {
+                const milkyWayActive = this.scene._milkyWayEnabled === true && starsActive;
+                if (this.scene._milkyWayRoot.isEnabled() !== milkyWayActive) this.scene._milkyWayRoot.setEnabled(milkyWayActive);
+            }
         }
 
         this.scene._applyCloudTint(elevation);

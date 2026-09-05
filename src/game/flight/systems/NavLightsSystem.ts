@@ -20,6 +20,9 @@ import {
     CAMERA_MODE_COCKPIT,
 } from '../constants/index.js';
 
+const NAV_LIGHT_PRIORITY_LANDING = 50;
+const NAV_LIGHT_PRIORITY_MINOR = 0;
+
 export class NavLightsSystem {
     private readonly scene: any;
 
@@ -88,6 +91,16 @@ export class NavLightsSystem {
             light.range = def.range;
             light.diffuse = def.color.clone();
             light.specular = def.color.clone();
+            // Tile PBR materials only take AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS lights: landing spots get priority
+            // (after the sun) so they reach the runway; small nav/strobe lights only affect the aircraft itself.
+            if (def.kind === NAV_LIGHT_KIND_LANDING) {
+                light.renderPriority = NAV_LIGHT_PRIORITY_LANDING;
+            } else {
+                light.renderPriority = NAV_LIGHT_PRIORITY_MINOR;
+                const aircraftMeshes: BABYLON.AbstractMesh[] = this.scene._loadedModelMeshes || [];
+                if (aircraftMeshes.length > 0) light.includedOnlyMeshes = aircraftMeshes.slice();
+            }
+            light.setEnabled(false);
 
             const core = BABYLON.MeshBuilder.CreateSphere(def.name + 'Core', { diameter: coreDiameter }, scene);
             core.parent = parent;
@@ -113,6 +126,7 @@ export class NavLightsSystem {
     disposeNavLights(): void {
         for (const nav of this.scene._navLights) {
             nav.light.dispose();
+            try { nav.core.material?.dispose(); } catch (err) { console.warn('[NavLights] core material dispose failed:', err); }
             nav.core.dispose();
         }
         this.scene._navLights = [];
@@ -150,9 +164,14 @@ export class NavLightsSystem {
                 default:
                     on = true;
             }
-            if (frontView) on = false;
-            nav.light.intensity = on ? nav.maxIntensity : 0;
-            nav.core.isVisible = false;
+            // In cockpit view the glow cores would sit in the pilot's face, so only the visual cores are hidden;
+            // the landing light keeps illuminating the runway, other point lights stay off to save the light budget.
+            const coreVisible = on && !frontView;
+            const lightOn = on && (!frontView || nav.kind === NAV_LIGHT_KIND_LANDING);
+            const intensity = lightOn ? nav.maxIntensity : 0;
+            if (nav.light.intensity !== intensity) nav.light.intensity = intensity;
+            if (nav.light.isEnabled() !== lightOn) nav.light.setEnabled(lightOn);
+            if (nav.core.isVisible !== coreVisible) nav.core.isVisible = coreVisible;
         }
     }
 }

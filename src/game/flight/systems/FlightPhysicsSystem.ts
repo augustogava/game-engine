@@ -60,6 +60,7 @@ const {
     BEST_POWER_MIX,
     MAGNETO_LEFT,
     MAGNETO_RIGHT,
+    MAGNETO_OFF,
     MAGNETO_SINGLE_FACTOR,
     JET_THRUST_LAPSE_EXPONENT,
     ISA_TROPOPAUSE_M,
@@ -97,15 +98,84 @@ const {
 import { UiPreferences } from '../../UiPreferences.js';
 
 const INERTIA_MIN_KGM2 = 1e-3;
+const MASS_MIN_KG = 1;
+const MS_TO_FPM = 196.850394;
+const TOUCHDOWN_MIN_AIRBORNE_S = 3;
+const TOUCHDOWN_CENTERLINE_MAX_ALONG_M = 6000;
 
 export class FlightPhysicsSystem {
     private readonly scene: any;
+    private _massClampWarned = false;
 
     private readonly _tmpPointVelCross = new BABYLON.Vector3();
     private readonly _tmpPointVel = new BABYLON.Vector3();
+    private readonly _tmpPredVel = new BABYLON.Vector3();
+    private readonly _tmpPredAngVel = new BABYLON.Vector3();
+    private readonly _tmpIw = new BABYLON.Vector3();
+    private readonly _tmpGyro = new BABYLON.Vector3();
+    private readonly _tmpAvgForce = new BABYLON.Vector3();
+    private readonly _tmpAvgTorque = new BABYLON.Vector3();
+    private readonly _tmpScaled = new BABYLON.Vector3();
+    private readonly _tmpOmegaQuat = new BABYLON.Quaternion();
+    private readonly _tmpQDot = new BABYLON.Quaternion();
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    private _airborneTimeS = 0;
+    private _lastAirborneVy = 0;
+
+    /** Captures the touchdown snapshot (sink rate, speed, centerline offset) used by the landing grade toast. */
+    private _recordTouchdown(anyGearOnGround: boolean, dt: number): void {
+        const wasOnGround = this.scene.isOnGround === true;
+        if (!anyGearOnGround) {
+            this._airborneTimeS += dt;
+            this._lastAirborneVy = this.scene.velocity.y;
+            return;
+        }
+        if (wasOnGround || this._airborneTimeS < TOUCHDOWN_MIN_AIRBORNE_S) {
+            this._airborneTimeS = 0;
+            return;
+        }
+        this._airborneTimeS = 0;
+        const vx = this.scene.velocity.x;
+        const vz = this.scene.velocity.z;
+        const speedKts = Math.sqrt(vx * vx + vz * vz) * MS_TO_KT;
+        const fpm = Math.min(0, this._lastAirborneVy) * MS_TO_FPM;
+        this.scene._lastTouchdown = {
+            fpm,
+            speedKts,
+            centerlineM: this._runwayCenterlineOffsetM(),
+            timeMs: performance.now(),
+        };
+        console.debug(`[Landing] Touchdown fpm=${fpm.toFixed(0)} speed=${speedKts.toFixed(0)}kt centerline=${this.scene._lastTouchdown.centerlineM == null ? 'n/a' : this.scene._lastTouchdown.centerlineM.toFixed(1) + 'm'}`);
+    }
+
+    /** Signed lateral distance (m) from the destination runway centerline, or null when no runway heading is known. */
+    private _runwayCenterlineOffsetM(): number | null {
+        try {
+            const nav = this.scene._activeFlightPlanNav || (typeof this.scene._missionDestForNav === 'function' ? this.scene._missionDestForNav() : null);
+            if (!nav) return null;
+            const rwyHdg = Number(nav.arr_rwy_heading);
+            const lat = Number(nav.arrival_lat);
+            const lon = Number(nav.arrival_lon);
+            if (!Number.isFinite(rwyHdg) || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            const thr = this.scene._latLonToLocal(lat, lon, 0);
+            const pos = this.scene.planeRoot.position;
+            const dx = pos.x - thr.x;
+            const dz = pos.z - thr.z;
+            const hdgRad = rwyHdg * Math.PI / 180;
+            // Local frame: +X east, -Z north; the runway direction vector is (sin h, -cos h).
+            const dirX = Math.sin(hdgRad);
+            const dirZ = -Math.cos(hdgRad);
+            const along = dx * dirX + dz * dirZ;
+            if (Math.abs(along) > TOUCHDOWN_CENTERLINE_MAX_ALONG_M) return null;
+            return dx * -dirZ + dz * dirX;
+        } catch (err) {
+            console.warn('[Landing] Centerline offset failed:', err);
+            return null;
+        }
     }
 
     triggerCrash(reason: string = 'unknown'): void {
@@ -438,7 +508,10 @@ export class FlightPhysicsSystem {
         const aliveForBurnRatio = Array.isArray(this.scene._engineAlive)
             ? this.scene._engineAlive.filter(Boolean).length / engineCountForBurn
             : 1;
-        if (this.scene.fuelRemaining > 0 && cfg.fuel_capacity_kg > 0 && aliveForBurnRatio > 0) {
+        // A piston engine with magnetos OFF (or electric propulsion) is not running, so it burns no idle fuel.
+        const pistonEngineOff = isPiston && this.scene.magnetoSwitch === MAGNETO_OFF;
+        const engineRunning = !pistonEngineOff && !isElectric;
+        if (engineRunning && this.scene.fuelRemaining > 0 && cfg.fuel_capacity_kg > 0 && aliveForBurnRatio > 0) {
             const burnFraction = (isPiston ? this.scene.enginePower : n1) * aliveForBurnRatio;
             const burnIdle = cfg.fuel_burn_rate_kg_per_s_idle;
             const burnMax  = cfg.fuel_burn_rate_kg_per_s_max;
@@ -454,9 +527,14 @@ export class FlightPhysicsSystem {
             }
             this.scene.fuelRemaining = Math.max(0, this.scene.fuelRemaining - burnRate * dt);
         }
-        const MASS = cfg.fuel_capacity_kg > 0
+        const rawMass = cfg.fuel_capacity_kg > 0
             ? cfg.mass_kg + this.scene.fuelRemaining
             : cfg.mass_kg;
+        const MASS = Number.isFinite(rawMass) && rawMass >= MASS_MIN_KG ? rawMass : MASS_MIN_KG;
+        if (MASS !== rawMass && !this._massClampWarned) {
+            this._massClampWarned = true;
+            console.warn(`[Physics] Mass clamped to min ${MASS_MIN_KG}kg (raw=${rawMass}); check aircraft config mass_kg.`);
+        }
         const rawIxx = cfg.inertia_xx;
         const rawIyy = cfg.inertia_yy;
         const rawIzz = cfg.inertia_zz;
@@ -707,24 +785,26 @@ export class FlightPhysicsSystem {
         const f1 = computeForces(this.scene.velocity, this.scene.angularVelocity);
 
         const halfDt  = dt * 0.5;
-        const predVel = this.scene.velocity.add(f1.force.scale(halfDt / MASS));
+        const predVel = this._tmpPredVel;
+        f1.force.scaleToRef(halfDt / MASS, predVel);
+        predVel.addInPlace(this.scene.velocity);
 
-        const Iw1   = new BABYLON.Vector3(cIxx * this.scene.angularVelocity.x, cIyy * this.scene.angularVelocity.y, cIzz * this.scene.angularVelocity.z);
-        const gyro1 = BABYLON.Vector3.Cross(this.scene.angularVelocity, Iw1);
-        const angAcc1 = new BABYLON.Vector3(
-            (f1.torque.x - gyro1.x) / cIxx,
-            (f1.torque.y - gyro1.y) / cIyy,
-            (f1.torque.z - gyro1.z) / cIzz,
+        const angVel = this.scene.angularVelocity as BABYLON.Vector3;
+        const Iw1 = this._tmpIw.set(cIxx * angVel.x, cIyy * angVel.y, cIzz * angVel.z);
+        const gyro1 = BABYLON.Vector3.CrossToRef(angVel, Iw1, this._tmpGyro);
+        const predAngVel = this._tmpPredAngVel.set(
+            angVel.x + ((f1.torque.x - gyro1.x) / cIxx) * halfDt,
+            angVel.y + ((f1.torque.y - gyro1.y) / cIyy) * halfDt,
+            angVel.z + ((f1.torque.z - gyro1.z) / cIzz) * halfDt,
         );
-        const predAngVel = this.scene.angularVelocity.add(angAcc1.scale(halfDt));
 
         const f2 = computeForces(predVel, predAngVel);
 
-        const avgForce  = f1.force.add(f2.force).scaleInPlace(0.5);
-        const avgTorque = f1.torque.add(f2.torque).scaleInPlace(0.5);
+        const avgForce  = f1.force.addToRef(f2.force, this._tmpAvgForce).scaleInPlace(0.5);
+        const avgTorque = f1.torque.addToRef(f2.torque, this._tmpAvgTorque).scaleInPlace(0.5);
 
-        this.scene.velocity.addInPlace(avgForce.scale(dt / MASS));
-        pos.addInPlace(this.scene.velocity.scale(dt));
+        this.scene.velocity.addInPlace(avgForce.scaleToRef(dt / MASS, this._tmpScaled));
+        pos.addInPlace(this.scene.velocity.scaleToRef(dt, this._tmpScaled));
 
         this.scene.groundSpeed = Math.hypot(this.scene.velocity.x, this.scene.velocity.z);
 
@@ -743,23 +823,15 @@ export class FlightPhysicsSystem {
             this.scene._gForceVertical = this.scene._gForceVertical + (verticalGNow - this.scene._gForceVertical) * G_FORCE_SMOOTHING;
         }
 
-        const Iw2   = new BABYLON.Vector3(cIxx * this.scene.angularVelocity.x, cIyy * this.scene.angularVelocity.y, cIzz * this.scene.angularVelocity.z);
-        const gyro2 = BABYLON.Vector3.Cross(this.scene.angularVelocity, Iw2);
-        const angAcc = new BABYLON.Vector3(
-            (avgTorque.x - gyro2.x) / cIxx,
-            (avgTorque.y - gyro2.y) / cIyy,
-            (avgTorque.z - gyro2.z) / cIzz,
-        );
-        this.scene.angularVelocity.addInPlace(angAcc.scale(dt));
-        this.scene.angularVelocity.scaleInPlace(Math.max(0, 1 - ANGULAR_DAMPING * dt));
+        const Iw2 = this._tmpIw.set(cIxx * angVel.x, cIyy * angVel.y, cIzz * angVel.z);
+        const gyro2 = BABYLON.Vector3.CrossToRef(angVel, Iw2, this._tmpGyro);
+        angVel.x += ((avgTorque.x - gyro2.x) / cIxx) * dt;
+        angVel.y += ((avgTorque.y - gyro2.y) / cIyy) * dt;
+        angVel.z += ((avgTorque.z - gyro2.z) / cIzz) * dt;
+        angVel.scaleInPlace(Math.max(0, 1 - ANGULAR_DAMPING * dt));
 
-        const omegaQuat = new BABYLON.Quaternion(
-            this.scene.angularVelocity.x,
-            this.scene.angularVelocity.y,
-            this.scene.angularVelocity.z,
-            0,
-        );
-        const qDot = orientation.multiply(omegaQuat);
+        const omegaQuat = this._tmpOmegaQuat.set(angVel.x, angVel.y, angVel.z, 0);
+        const qDot = orientation.multiplyToRef(omegaQuat, this._tmpQDot);
         orientation.x += qDot.x * 0.5 * dt;
         orientation.y += qDot.y * 0.5 * dt;
         orientation.z += qDot.z * 0.5 * dt;
@@ -767,6 +839,7 @@ export class FlightPhysicsSystem {
         orientation.normalize();
 
         // ── Ground contact ───────────────────────────────────────────────────
+        this._recordTouchdown(anyGearOnGround, dt);
         this.scene.isOnGround = anyGearOnGround;
 
         // Hard floor safety + crash detection

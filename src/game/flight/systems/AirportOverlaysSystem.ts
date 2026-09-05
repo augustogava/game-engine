@@ -30,7 +30,12 @@ interface OverlayRuntimeState {
     loadFailed: boolean;
     fadeT: number;
     clipZone: AirportClipZone | null;
+    dryRoughness: Map<BABYLON.PBRMaterial, number>;
 }
+
+const WET_RUNWAY_PRECIP_TYPE_RAIN = 1;
+const WET_RUNWAY_ROUGHNESS = 0.18;
+const WET_RUNWAY_WETNESS_EPSILON = 0.02;
 
 export class AirportOverlaysSystem {
     private readonly scene: any;
@@ -38,6 +43,7 @@ export class AirportOverlaysSystem {
     private _initialized = false;
     private _metadataFetched = false;
     private _metadataFetchInFlight = false;
+    private _lastWetness = -1;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -72,6 +78,7 @@ export class AirportOverlaysSystem {
                 loadFailed: false,
                 fadeT: 0,
                 clipZone: null,
+                dryRoughness: new Map(),
             });
         }
         console.log(`[AirportOverlays] Initialized with ${this._runtimes.size} configured overlay(s).`);
@@ -168,6 +175,37 @@ export class AirportOverlaysSystem {
                 }
             }
         }
+        this._updateWetSurfaces();
+    }
+
+    /** Rain lowers the PBR roughness of loaded airport surfaces toward a wet, reflective look. */
+    private _updateWetSurfaces(): void {
+        const precipType = Number(this.scene._precipitationType) || 0;
+        const intensity = Number.isFinite(this.scene._precipitationIntensity) ? this.scene._precipitationIntensity : 0;
+        const wetness = precipType === WET_RUNWAY_PRECIP_TYPE_RAIN ? Math.max(0, Math.min(1, intensity)) : 0;
+        if (Math.abs(wetness - this._lastWetness) < WET_RUNWAY_WETNESS_EPSILON) return;
+        this._lastWetness = wetness;
+        for (const rt of this._runtimes.values()) {
+            if (!rt.loadedRoot) continue;
+            for (const [mat, dry] of rt.dryRoughness) {
+                try {
+                    mat.roughness = dry + (Math.min(dry, WET_RUNWAY_ROUGHNESS) - dry) * wetness;
+                } catch (err) {
+                    console.warn(`[AirportOverlays] ${rt.icaoUpper}: wet roughness apply failed:`, err);
+                }
+            }
+        }
+    }
+
+    private _captureDryRoughness(rt: OverlayRuntimeState, meshes: BABYLON.AbstractMesh[]): void {
+        rt.dryRoughness.clear();
+        for (const mesh of meshes) {
+            const mat = mesh.material;
+            if (!(mat instanceof BABYLON.PBRMaterial) || rt.dryRoughness.has(mat)) continue;
+            const roughness = typeof mat.roughness === 'number' && Number.isFinite(mat.roughness) ? mat.roughness : 1;
+            rt.dryRoughness.set(mat, roughness);
+        }
+        this._lastWetness = -1;
     }
 
     private _latLonToLocal(lat: number, lon: number, altM: number): BABYLON.Vector3 {
@@ -223,6 +261,7 @@ export class AirportOverlaysSystem {
                 rt.loadedRoot = rootNode;
                 rt.loadedMeshes = meshes;
                 rt.fadeT = 0;
+                this._captureDryRoughness(rt, meshes);
                 const clipZone: AirportClipZone = {
                     centerVec: positionedAt.clone(),
                     clipRadiusM: rt.entry.clipRadiusM,
@@ -262,6 +301,7 @@ export class AirportOverlaysSystem {
             try { mesh.dispose(); } catch (_) { /* ignore */ }
         }
         rt.loadedMeshes = [];
+        rt.dryRoughness.clear();
         if (rt.loadedRoot) {
             try { rt.loadedRoot.dispose(); } catch (_) { /* ignore */ }
             rt.loadedRoot = null;

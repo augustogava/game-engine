@@ -177,7 +177,9 @@ function renderMissionMapPreview(mission: any): void {
 const scene = new FlightSceneSimple();
 let game: GameCore3D | null = null;
 
-const skipPreflight = !!(flightPlanId || missionId || spawnAirportId);
+const resumeSavedFlight = !flightPlanId && !missionId && !spawnAirportId
+    && scene.isResumeSavedFlightRequested() && scene.hasSavedFreeFlight();
+const skipPreflight = !!(flightPlanId || missionId || spawnAirportId || resumeSavedFlight);
 
 let multiplayerStarted = false;
 
@@ -193,10 +195,13 @@ function ensureGameCore(): GameCore3D {
             scene.initMultiplayer(token, () => {
                 console.warn('[flight-main] Auth failure — redirecting to login');
                 window.location.href = WEBSITE_LOGIN_URL;
-            }, () => {
-                console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
-                window.location.href = FLIGHT_HOURS_URL;
-            });
+            }
+            // Disabled: no-flight-hours redirect (buggy remaining-time check), see plan Fase 0.
+            // , () => {
+            //     console.warn('[flight-main] No flight hours remaining — redirecting to buy hours');
+            //     window.location.href = FLIGHT_HOURS_URL;
+            // }
+            );
             freeHourFirstTimer = window.setTimeout(() => { claimFreeFlightHour(token); }, FREE_HOUR_FIRST_DELAY_MS);
             if (freeHourTimer === undefined) {
                 freeHourTimer = window.setInterval(() => claimFreeFlightHour(token), FREE_HOUR_INTERVAL_MS);
@@ -522,7 +527,10 @@ async function startFlightGame(): Promise<void> {
     }
 
     if (token && !flightPlanId && !missionId) {
-        if (spawnAirportId && spawnRunwayId) {
+        if (resumeSavedFlight && scene.applySavedFreeFlightSpawn()) {
+            if (spawnSimTime) scene.setSimTimeOffsetFromIso(spawnSimTime);
+            console.log('[flight-main] Resuming saved free flight');
+        } else if (spawnAirportId && spawnRunwayId) {
             await applyAirportRunwaySpawn(spawnAirportId, spawnRunwayId, spawnRunwayEnd, spawnSimTime);
         } else {
             applyPreflightToUrlAndScene(scene);

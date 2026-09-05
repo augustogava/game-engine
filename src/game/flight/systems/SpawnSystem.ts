@@ -1,5 +1,6 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
+import { I18n } from '../../I18n.js';
 import {
     GROUND_Y,
     SPAWN_SNAP_FRAMES,
@@ -22,13 +23,172 @@ import {
     HUD_FADE_IN_MS,
     ENGINE_SOUND_FADE_IN_MS,
     RUNWAY_COLLIDER_Y_BIAS_M,
+    SAVED_FLIGHT_STORAGE_KEY,
+    SAVED_FLIGHT_URL_PARAM,
+    SAVED_FLIGHT_AUTOSAVE_INTERVAL_MS,
+    SAVED_FLIGHT_MIN_AGL_M,
+    SAVED_FLIGHT_MAX_AGE_MS,
 } from '../constants/index.js';
+
+const SAVED_FLIGHT_VERSION = 1;
+const SAVED_FLIGHT_PRESERVED_PARAMS = ['token', 'lang', 'simTime'];
+
+export interface SavedFreeFlight {
+    version: number;
+    savedAt: number;
+    lat: number;
+    lon: number;
+    altMslM: number;
+    headingDeg: number;
+    fuelKg: number;
+    aircraftId: number | null;
+    aircraftCode: string;
+}
 
 export class SpawnSystem {
     private readonly scene: any;
+    private _pendingResume: SavedFreeFlight | null = null;
+    private _autosaveTimer: number | null = null;
+    private _onPageHide: (() => void) | null = null;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    static loadSavedFreeFlight(): SavedFreeFlight | null {
+        try {
+            const raw = localStorage.getItem(SAVED_FLIGHT_STORAGE_KEY);
+            if (!raw) return null;
+            const data = JSON.parse(raw) as Partial<SavedFreeFlight>;
+            if (!data || data.version !== SAVED_FLIGHT_VERSION) return null;
+            const numeric = [data.savedAt, data.lat, data.lon, data.altMslM, data.headingDeg, data.fuelKg];
+            if (numeric.some((v) => typeof v !== 'number' || !Number.isFinite(v))) return null;
+            if (Math.abs(data.lat as number) > 90 || Math.abs(data.lon as number) > 180) return null;
+            if (Date.now() - (data.savedAt as number) > SAVED_FLIGHT_MAX_AGE_MS) return null;
+            return data as SavedFreeFlight;
+        } catch (err) {
+            console.warn('[SavedFlight] Failed to read saved flight:', err);
+            return null;
+        }
+    }
+
+    static hasSavedFreeFlight(): boolean {
+        return SpawnSystem.loadSavedFreeFlight() !== null;
+    }
+
+    static isResumeRequested(): boolean {
+        try {
+            return new URLSearchParams(window.location.search).get(SAVED_FLIGHT_URL_PARAM) === '1';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    private isFreeFlight(): boolean {
+        return !this.scene._activeMission && !this.scene._activeMissionId && !this.scene._activeFlightPlanId;
+    }
+
+    private currentHeadingDeg(): number {
+        const root = this.scene.planeRoot;
+        if (!root || !root.rotationQuaternion) return 0;
+        const fwd = root.forward;
+        const hdgRad = Math.atan2(fwd.x, -fwd.z);
+        return ((hdgRad * 180 / Math.PI) + 360) % 360;
+    }
+
+    saveFreeFlight(reason: string): boolean {
+        const root = this.scene.planeRoot;
+        if (!root || !this.scene.spawned || !this.scene._worldReady || this.scene._crashed) return false;
+        if (!this.isFreeFlight() || this.scene.isOnGround) return false;
+        const terrainY = Number.isFinite(this.scene.terrainY) && this.scene.terrainY !== TERRAIN_UNKNOWN_Y ? this.scene.terrainY : GROUND_Y;
+        if (root.position.y - terrainY < SAVED_FLIGHT_MIN_AGL_M) return false;
+        const geo = this.scene._apCurrentLatLon();
+        if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return false;
+        const altMslM = (Number.isFinite(this.scene.refAlt) ? this.scene.refAlt : 0) + root.position.y;
+        if (!Number.isFinite(altMslM)) return false;
+        const cfg = this.scene.aircraftConfig;
+        const saved: SavedFreeFlight = {
+            version: SAVED_FLIGHT_VERSION,
+            savedAt: Date.now(),
+            lat: geo.lat,
+            lon: geo.lon,
+            altMslM,
+            headingDeg: this.currentHeadingDeg(),
+            fuelKg: Number.isFinite(this.scene.fuelRemaining) ? Math.max(0, this.scene.fuelRemaining) : 0,
+            aircraftId: Number.isFinite(cfg?.id) ? cfg.id : null,
+            aircraftCode: typeof cfg?.code === 'string' ? cfg.code : '',
+        };
+        try {
+            localStorage.setItem(SAVED_FLIGHT_STORAGE_KEY, JSON.stringify(saved));
+            console.debug(`[SavedFlight] Saved (${reason}) lat=${saved.lat.toFixed(4)} lon=${saved.lon.toFixed(4)} altM=${saved.altMslM.toFixed(0)} hdg=${saved.headingDeg.toFixed(0)} fuelKg=${saved.fuelKg.toFixed(0)}`);
+            return true;
+        } catch (err) {
+            console.warn('[SavedFlight] Failed to persist saved flight:', err);
+            return false;
+        }
+    }
+
+    applySavedFreeFlightSpawn(): boolean {
+        const saved = SpawnSystem.loadSavedFreeFlight();
+        if (!saved) {
+            console.warn('[SavedFlight] Resume requested but no valid saved flight found');
+            return false;
+        }
+        this.scene._pendingMissionLat = saved.lat;
+        this.scene._pendingMissionLon = saved.lon;
+        this.scene._pendingMissionHdg = saved.headingDeg;
+        this.scene._pendingMissionAltM = Math.max(0, saved.altMslM - AIRBORNE_MISSION_MIN_OFFSET_M);
+        this.scene._pendingMissionAirborne = true;
+        this._pendingResume = saved;
+        console.log(`[SavedFlight] Resuming free flight lat=${saved.lat.toFixed(4)} lon=${saved.lon.toFixed(4)} altM=${saved.altMslM.toFixed(0)} hdg=${saved.headingDeg.toFixed(0)}`);
+        return true;
+    }
+
+    launchResume(): void {
+        if (!SpawnSystem.hasSavedFreeFlight()) {
+            console.warn('[SavedFlight] launchResume ignored: nothing saved');
+            return;
+        }
+        try {
+            const dest = new URL(window.location.href);
+            const keep = new URLSearchParams();
+            for (const key of SAVED_FLIGHT_PRESERVED_PARAMS) {
+                const v = dest.searchParams.get(key);
+                if (v) keep.set(key, v);
+            }
+            keep.set(SAVED_FLIGHT_URL_PARAM, '1');
+            dest.search = keep.toString();
+            window.location.href = dest.toString();
+        } catch (err) {
+            console.error('[SavedFlight] launchResume navigation failed:', err);
+        }
+    }
+
+    private applyPendingResumeState(): void {
+        const saved = this._pendingResume;
+        if (!saved) return;
+        const cfg = this.scene.aircraftConfig;
+        const capacity = Number.isFinite(cfg?.fuel_capacity_kg) ? cfg.fuel_capacity_kg : saved.fuelKg;
+        this.scene.fuelRemaining = Math.max(0, Math.min(capacity, saved.fuelKg));
+        console.debug(`[SavedFlight] Restored fuel=${this.scene.fuelRemaining.toFixed(0)}kg (saved aircraft=${saved.aircraftCode || saved.aircraftId || 'unknown'})`);
+    }
+
+    private startAutosave(): void {
+        if (this._autosaveTimer !== null || !this.isFreeFlight()) return;
+        this._autosaveTimer = window.setInterval(() => this.saveFreeFlight('autosave'), SAVED_FLIGHT_AUTOSAVE_INTERVAL_MS);
+        this._onPageHide = () => { this.saveFreeFlight('pagehide'); };
+        window.addEventListener('pagehide', this._onPageHide);
+    }
+
+    dispose(): void {
+        if (this._autosaveTimer !== null) {
+            window.clearInterval(this._autosaveTimer);
+            this._autosaveTimer = null;
+        }
+        if (this._onPageHide) {
+            window.removeEventListener('pagehide', this._onPageHide);
+            this._onPageHide = null;
+        }
     }
 
     private resolveSpawnHeadingDeg(): number {
@@ -93,8 +253,11 @@ export class SpawnSystem {
                 const isAirborneMission = this.scene._pendingMissionAirborne === true;
                 const minOffset = isAirborneMission ? AIRBORNE_MISSION_MIN_OFFSET_M : 100;
                 const altOffset = Math.max(minOffset, cfg.spawn_alt_offset_m);
-                const desiredY = this.scene.terrainY + altOffset;
                 const minSafeY = this.scene.terrainY + altOffset;
+                const resumeY = this._pendingResume && Number.isFinite(this.scene.refAlt)
+                    ? this._pendingResume.altMslM - this.scene.refAlt
+                    : Number.NaN;
+                const desiredY = Number.isFinite(resumeY) ? Math.max(minSafeY, resumeY) : minSafeY;
                 if (this.scene.planeRoot.position.y < minSafeY) {
                     console.warn(`[Spawn] Clamped pos.y from ${this.scene.planeRoot.position.y.toFixed(1)}m to ${minSafeY.toFixed(1)}m (below terrain+offset)`);
                 }
@@ -121,6 +284,7 @@ export class SpawnSystem {
                 console.debug(`[WorldReady] Ground spawn snapped to terrainY=${this.scene.terrainY.toFixed(1)}m + gearHeight=${gearHeight.toFixed(2)}m - eqComp=${eqComp.toFixed(3)}m -> pos.y=${this.scene.planeRoot.position.y.toFixed(2)}m`);
             }
         }
+        this.applyPendingResumeState();
         this.scene._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
         if (!this.scene._runwayCollidersLoaded && Number.isFinite(this.scene.originLat) && Number.isFinite(this.scene.originLon)) {
             this.scene._runwayCollidersLoaded = true;
@@ -159,6 +323,11 @@ export class SpawnSystem {
             }
             if (this.scene._missionSystem && typeof this.scene._missionSystem.refreshWeatherAtPosition === 'function') {
                 this.scene._missionSystem.refreshWeatherAtPosition('spawn');
+            }
+            this.startAutosave();
+            if (this._pendingResume) {
+                this.scene._showToast(I18n.t('savedFlight.resumed'));
+                this._pendingResume = null;
             }
             this.scene._safeSetTimeout(() => {
                 this.scene._cinematicActive = false;

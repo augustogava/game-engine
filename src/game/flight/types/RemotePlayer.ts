@@ -12,6 +12,7 @@ export interface RemotePlayer {
     prevState: PlayerState | null;
     nextState: PlayerState | null;
     lastUpdateTime: number;
+    updateIntervalMs: number;
     aircraftCode: string | null;
     labelPlane: BABYLON.Mesh | null;
     labelTexture: BABYLON.DynamicTexture | null;
