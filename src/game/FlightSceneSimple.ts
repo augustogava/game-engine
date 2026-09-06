@@ -336,6 +336,7 @@ import {
     BRIGHT_STAR_BASE_SIZE,
     BRIGHT_STAR_SIZE_RANDOM,
     BRIGHT_STAR_TWINKLE_AMOUNT,
+    HIGH_CLOUDS_DEFAULT_ENABLED,
 } from './flight/constants/index.js';
 
 import type { AircraftSurfaceConfig, AircraftConfig, RemotePlayer } from './flight/types/index.js';
@@ -1941,6 +1942,10 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _buildHighClouds(scene: BABYLON.Scene): void {
+        if (!HIGH_CLOUDS_DEFAULT_ENABLED) {
+            console.debug('[FlightSimple] High clouds (cirrus) disabled: skipping layer build');
+            return;
+        }
         void this._highCloudsSystem.build(scene);
     }
 
