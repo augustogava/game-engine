@@ -15,8 +15,16 @@
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+        :root {
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
+        }
+
         html, body {
             width: 100%; height: 100%;
+            height: 100dvh;
             overflow: hidden;
             background: #020810;
             font-family: 'Inter', system-ui, sans-serif;
@@ -27,6 +35,7 @@
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
+            height: 100dvh;
             touch-action: none;
             outline: none;
             z-index: 1;
@@ -423,7 +432,7 @@
         /* ── Debug UI ─────────────────────────────────────── */
         #debug-ui {
             position: fixed;
-            top: 10px; right: 10px;
+            top: calc(10px + var(--safe-top)); right: calc(10px + var(--safe-right));
             width: 320px;
             background: rgba(2, 10, 20, 0.85);
             backdrop-filter: blur(10px);
@@ -434,6 +443,7 @@
             flex-direction: column;
             gap: 12px;
             max-height: calc(100vh - 20px);
+            max-height: calc(100dvh - 20px - var(--safe-top) - var(--safe-bottom));
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
             z-index: 10000;
@@ -446,6 +456,15 @@
         }
         #debug-ui header {
             display: flex; justify-content: space-between; align-items: center;
+        }
+        /* Keeps the close button reachable while the panel content is scrolled (mobile). */
+        #debug-ui > header {
+            position: sticky;
+            top: 0;
+            margin: -16px -16px 0;
+            padding: 16px 16px 8px;
+            background: rgba(2, 10, 20, 0.95);
+            z-index: 1;
         }
         #debug-ui h3 {
             font-family: 'Orbitron', monospace;
@@ -496,7 +515,7 @@
 
         @media(max-width:768px){
             #debug-toggle{display:none!important}
-            #debug-ui{width:min(320px,calc(100vw - 20px))!important;max-height:calc(100vh - 60px)!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important}
+            #debug-ui{width:min(320px,calc(100vw - 20px - var(--safe-left) - var(--safe-right)))!important;max-height:calc(100dvh - 60px - var(--safe-top) - var(--safe-bottom))!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important}
             #debug-ui.minimized{transform:translateX(calc(100% + 20px))!important}
         }
 

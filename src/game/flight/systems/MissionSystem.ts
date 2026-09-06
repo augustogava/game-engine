@@ -3,6 +3,7 @@ import { I18n } from '../../I18n.js';
 import { MISSION_TOAST_VISIBLE_MS, MISSION_TOAST_FADE_MS } from '../constants/index.js';
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
 import { initialBearingDeg, haversineNm } from '../physics/NavMath.js';
+import { isValidFlightLogId, publishAndShareFlightLog } from './FlightShareService.js';
 
 function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -995,11 +996,18 @@ export class MissionSystem {
                 const avgSpd = log.avg_speed_knots != null ? `${Number(log.avg_speed_knots).toFixed(0)} kt` : '\u2014';
                 const lr = log.landing_rate_fpm != null ? `${Number(log.landing_rate_fpm).toFixed(0)} fpm` : '\u2014';
                 const when = log.departure_time ? new Date(log.departure_time).toLocaleString() : '';
+                const missionIdNum = Number(log.mission_id);
+                const isMissionFlight = Number.isFinite(missionIdNum) && missionIdNum > 0;
+                const missionLabel = isMissionFlight
+                    ? `${I18n.t('logbook.mission')}: ${log.mission_title ? String(log.mission_title) : `#${missionIdNum}`}`
+                    : '';
+                const canShare = log.status === 'landed' && isValidFlightLogId(log.id);
                 html += `<div style="border:1px solid rgba(80,255,160,.25);border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,20,15,.4)">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
                         <span style="font-weight:600;color:#fff">${escapeHtml(depIcao)} <span style="color:#40ffaa">\u2708</span> ${escapeHtml(arrIcao)}</span>
                         <span style="font-size:9px;color:${st.color};border:1px solid ${st.color};border-radius:3px;padding:1px 6px">${escapeHtml(st.label)}</span>
                     </div>
+                    ${isMissionFlight ? `<div style="font-size:9px;color:#ffd166;border:1px solid rgba(255,209,102,.5);border-radius:3px;padding:1px 6px;display:inline-block;margin-bottom:4px">\u{1F3AF} ${escapeHtml(missionLabel)}</div>` : ''}
                     <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:4px">${escapeHtml((log.departure_name || '') + (log.arrival_name ? ' \u2192 ' + log.arrival_name : ''))}</div>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:10px;color:rgba(255,255,255,.7)">
                         <span>\u23F1 ${escapeHtml(dur)}</span>
@@ -1008,7 +1016,10 @@ export class MissionSystem {
                         <span>GS ${escapeHtml(avgSpd)}</span>
                         ${log.status === 'landed' ? `<span>\u{1F6EC} ${escapeHtml(lr)}</span>` : ''}
                     </div>
-                    ${when ? `<div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:3px">${escapeHtml(when)}</div>` : ''}
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px">
+                        <span style="font-size:9px;color:rgba(255,255,255,.35)">${when ? escapeHtml(when) : ''}</span>
+                        ${canShare ? `<button type="button" data-share-log-id="${Number(log.id)}" style="background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit;touch-action:manipulation">${escapeHtml(I18n.t('share.flight'))}</button>` : ''}
+                    </div>
                 </div>`;
             }
 
@@ -1031,6 +1042,19 @@ export class MissionSystem {
             if (prevBtn) prevBtn.addEventListener('click', () => { if (safePage > 1) this.loadLogbook(safePage - 1); });
             const nextBtn = listEl.querySelector('[data-logbook-next]');
             if (nextBtn) nextBtn.addEventListener('click', () => { if (safePage < totalPages) this.loadLogbook(safePage + 1); });
+            listEl.querySelectorAll<HTMLButtonElement>('[data-share-log-id]').forEach((shareBtn) => {
+                shareBtn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    const shareId = Number(shareBtn.dataset.shareLogId);
+                    if (!isValidFlightLogId(shareId)) {
+                        console.warn(`[Logbook] Invalid share id: ${shareBtn.dataset.shareLogId}`);
+                        return;
+                    }
+                    shareBtn.disabled = true;
+                    void publishAndShareFlightLog(shareId, (m, d) => this.scene._showToast(m, d))
+                        .finally(() => { shareBtn.disabled = false; });
+                });
+            });
             console.log(`[Logbook] Loaded page ${safePage}/${totalPages} (${logs.length} of ${total})`);
         } catch (err) {
             listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Erro de conexão</div>';

@@ -275,9 +275,12 @@ async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end:
     }
 }
 
+// Only these statuses can be resumed; completed/failed/cancelled rows must never be bound to a new flight.
+const RESUMABLE_USER_MISSION_STATUSES = ['in_progress', 'started'];
+
 async function findUserMissionForMission(missionIdNum: number): Promise<{ id: number; status: string } | null> {
     const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
-    const endpoints = ['/api/user-missions', '/api/user-missions/active'];
+    const endpoints = [`/api/user-missions?status=${RESUMABLE_USER_MISSION_STATUSES.join(',')}`, '/api/user-missions/active'];
     for (const endpoint of endpoints) {
         try {
             const res = await fetch(endpoint, { headers });
@@ -287,15 +290,22 @@ async function findUserMissionForMission(missionIdNum: number): Promise<{ id: nu
             }
             const json = await res.json();
             const list: any[] = Array.isArray(json?.data) ? json.data : [];
+            let best: { id: number; status: string } | null = null;
             for (const item of list) {
                 const userMission = item?.user_mission ?? item;
                 const itemMissionId = Number(userMission?.mission_id ?? item?.mission_id ?? item?.id);
                 const userMissionId = Number(userMission?.id ?? item?.user_mission_id);
                 const status = String(userMission?.status ?? item?.status ?? '');
-                if (itemMissionId === missionIdNum && Number.isFinite(userMissionId) && userMissionId > 0) {
-                    return { id: userMissionId, status };
+                if (itemMissionId !== missionIdNum || !Number.isFinite(userMissionId) || userMissionId <= 0) continue;
+                if (!RESUMABLE_USER_MISSION_STATUSES.includes(status)) {
+                    console.debug(`[flight-main] Ignoring user-mission ${userMissionId} for mission ${missionIdNum} with status '${status}'`);
+                    continue;
                 }
+                const rank = RESUMABLE_USER_MISSION_STATUSES.indexOf(status);
+                const bestRank = best ? RESUMABLE_USER_MISSION_STATUSES.indexOf(best.status) : Number.POSITIVE_INFINITY;
+                if (rank < bestRank) best = { id: userMissionId, status };
             }
+            if (best) return best;
         } catch (err) {
             console.warn(`[flight-main] User mission lookup error at ${endpoint}:`, err);
         }

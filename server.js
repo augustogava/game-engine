@@ -11,6 +11,18 @@ const { handleMahjongRoutes, setDbPool: setMahjongDbPool } = require('./server/m
 const PORT = process.env.PORT || 3000;
 const DIST_DIR = path.join(__dirname, 'dist');
 
+function readAppVersion() {
+    try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+        return typeof pkg.version === 'string' && pkg.version.length > 0 ? pkg.version : 'unknown';
+    } catch (err) {
+        console.warn('[Health] Failed to read package.json version:', err && err.message);
+        return 'unknown';
+    }
+}
+const APP_VERSION = readAppVersion();
+let wsReady = false;
+
 const NEARBY_DEFAULT_RADIUS_KM = 10;
 const NEARBY_MIN_RADIUS_KM = 0.5;
 const NEARBY_MAX_RADIUS_KM = 50;
@@ -439,6 +451,8 @@ async function proxyToMainApi(apiPath, req, res, body, cacheOpts, transform) {
     const headers = { 'Content-Type': 'application/json' };
     const auth = req.headers['authorization'];
     if (auth) headers['Authorization'] = auth;
+    const requestedWith = req.headers['x-requested-with'];
+    if (typeof requestedWith === 'string' && requestedWith.length > 0) headers['X-Requested-With'] = requestedWith;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => { try { controller.abort(); } catch (_) { /* ignore */ } }, PROXY_FETCH_TIMEOUT_MS);
@@ -1273,9 +1287,16 @@ const server = http.createServer(async (req, res) => {
 
     // Health check (Railway)
     if (req.method === 'GET' && req.url.split('?')[0] === '/health') {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('OK');
-        return;
+        if (!wsReady) {
+            return jsonResponse(res, 503, { status: 'error' });
+        }
+        return jsonResponse(res, 200, {
+            status: 'ok',
+            version: APP_VERSION,
+            onlinePlayers: players.size,
+            uptimeSeconds: Math.floor(process.uptime()),
+            serverTime: new Date().toISOString(),
+        });
     }
 
     const urlPath = req.url.split('?')[0];
@@ -1522,6 +1543,16 @@ const server = http.createServer(async (req, res) => {
 
     // ── Flight Logs API ──────────────────────────────────────────────────
 
+    if (req.method === 'POST' && (routeParams = matchRoute(req.method, urlPath, '/api/flight-logs/:id/share'))) {
+        const flightLogId = Number(routeParams.id);
+        if (!Number.isInteger(flightLogId) || flightLogId <= 0) return jsonResponse(res, 400, { error: 'Invalid flight log id' });
+        return proxyToMainApi(`/api/flight-logs/${flightLogId}/share`, req, res, await parseBody(req));
+    }
+
+    if (req.method === 'GET' && urlPath === '/api/onboarding/me') {
+        return proxyToMainApi('/api/onboarding/me', req, res);
+    }
+
     if (req.method === 'GET' && urlPath === '/api/flight-logs/recent') {
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
@@ -1553,10 +1584,12 @@ const server = http.createServer(async (req, res) => {
                 `SELECT COUNT(*) AS total FROM flight_logs WHERE user_id = ?`, [user.id]);
             const [rows] = await dbPool.execute(
                 `SELECT fl.*, da.name AS departure_name, da.icao_code AS departure_icao,
-                        aa.name AS arrival_name, aa.icao_code AS arrival_icao
+                        aa.name AS arrival_name, aa.icao_code AS arrival_icao,
+                        m.title AS mission_title
                  FROM flight_logs fl
                  LEFT JOIN airports da ON fl.departure_airport_id = da.id
                  LEFT JOIN airports aa ON fl.arrival_airport_id = aa.id
+                 LEFT JOIN missions m ON fl.mission_id = m.id
                  WHERE fl.user_id = ? ORDER BY fl.departure_time DESC LIMIT ${limit} OFFSET ${offset}`, [user.id]);
             return jsonResponse(res, 200, { data: rows, total, page, limit });
         } catch (err) {
@@ -2138,6 +2171,10 @@ setInterval(() => {
 }, 300000);
 
 const wss = new WebSocketServer({ noServer: true });
+wss.on('error', (err) => {
+    wsReady = false;
+    console.error('[WS] WebSocket hub error:', err && err.message);
+});
 
 server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -2787,6 +2824,7 @@ setInterval(() => {
 // ── Graceful shutdown ────────────────────────────────────────────────────────
 async function gracefulShutdown() {
     console.log('[Server] Shutting down...');
+    wsReady = false;
     server.close();
 
     for (const [userId, entry] of players) {
@@ -2848,7 +2886,12 @@ process.on('SIGINT', gracefulShutdown);
 
 // ── Start ────────────────────────────────────────────────────────────────────
 Promise.all([initDatabase(), initRpgDatabase()]).then(() => {
+    server.on('error', (err) => {
+        wsReady = false;
+        console.error('[Server] HTTP server error:', err && err.message);
+    });
     server.listen(PORT, '0.0.0.0', () => {
-        console.log(`Production server running on port ${PORT}`);
+        wsReady = true;
+        console.log(`Production server running on port ${PORT} (version ${APP_VERSION})`);
     });
 });

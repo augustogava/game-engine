@@ -6,6 +6,7 @@ import { UiPreferences } from '../../UiPreferences.js';
 import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 import { detectGpuTier, type GpuTier } from './GpuTierDetector.js';
+import { isValidFlightLogId, publishAndShareFlightLog } from './FlightShareService.js';
 
 const HPA_TO_INHG = 0.02952998;
 const CHECKLIST_VR_STALL_FACTOR = 1.15;
@@ -20,6 +21,12 @@ const LANDING_GRADE_SPEED_TOLERANCE_KT = 10;
 const LANDING_GRADE_SCORE_BUTTER = 4;
 const LANDING_GRADE_SCORE_GOOD = 2;
 const LANDING_GRADE_TOAST_MS = 6000;
+const LANDING_SHARE_TOAST_MS = 15000;
+const ONBOARDING_TOAST_MS = 12000;
+const ONBOARDING_RECENT_COMPLETION_MS = 60000;
+const ONBOARDING_FIRST_FLIGHT_STEP = 'first_flight';
+const ONBOARDING_DASHBOARD_URL = 'https://simflightpro.com/dashboard';
+const TOAST_ACTION_BUTTON_STYLE = 'margin-left:10px;background:rgba(64,255,170,.16);border:1px solid rgba(80,255,160,.5);color:#7df9c8;padding:4px 10px;border-radius:5px;font-family:Inter,sans-serif;font-size:11px;cursor:pointer;touch-action:manipulation;pointer-events:auto';
 const RUNWAY_CROSSWIND_WARN_KT = 15;
 const RUNWAY_TAILWIND_WARN_KT = 5;
 const PFD_ATTITUDE_CENTER_Y_FRAC = 0.5;
@@ -127,6 +134,7 @@ export class HudSystem {
     private _cachedSpdMarksHalfH: number = 0;
     private _cachedAltMarksHalfH: number = 0;
     private _resizeHandler: (() => void) | null = null;
+    private _toastHideToken: symbol | null = null;
 
     private _lastChecklistHtml: string = '';
 
@@ -654,20 +662,96 @@ export class HudSystem {
         }
     }
 
+    private ensureToastEl(): HTMLElement {
+        let toast = document.getElementById('ux-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'ux-toast';
+            toast.style.cssText = 'position:fixed;top:20%;left:50%;transform:translateX(-50%);z-index:9999;background:rgba(0,30,20,.85);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:10px 20px;border-radius:8px;font-family:Inter,sans-serif;font-size:12px;pointer-events:none;backdrop-filter:blur(8px);transition:opacity .3s;max-width:calc(100vw - 24px);display:flex;align-items:center;flex-wrap:wrap;gap:4px';
+            document.body.appendChild(toast);
+        }
+        return toast;
+    }
+
+    private scheduleToastHide(toast: HTMLElement, durationMs: number): void {
+        const token = Symbol('toast');
+        this._toastHideToken = token;
+        this.scene._safeSetTimeout(() => {
+            if (this._toastHideToken !== token) return;
+            toast.style.opacity = '0';
+            toast.style.pointerEvents = 'none';
+        }, durationMs);
+    }
+
     showToast(message: string, durationMs: number = 2200): void {
         try {
-            let toast = document.getElementById('ux-toast');
-            if (!toast) {
-                toast = document.createElement('div');
-                toast.id = 'ux-toast';
-                toast.style.cssText = 'position:fixed;top:20%;left:50%;transform:translateX(-50%);z-index:9999;background:rgba(0,30,20,.85);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:10px 20px;border-radius:8px;font-family:Inter,sans-serif;font-size:12px;pointer-events:none;backdrop-filter:blur(8px);transition:opacity .3s';
-                document.body.appendChild(toast);
-            }
+            const toast = this.ensureToastEl();
             toast.textContent = message;
+            toast.style.pointerEvents = 'none';
             toast.style.opacity = '1';
-            this.scene._safeSetTimeout(() => { if (toast) toast.style.opacity = '0'; }, durationMs);
+            this.scheduleToastHide(toast, durationMs);
         } catch (err) {
             console.warn('[Toast] failed:', err);
+        }
+    }
+
+    /** Toast with clickable action buttons; stays interactive until it hides or an action runs. */
+    showActionToast(message: string, actions: Array<{ label: string; onClick: () => void }>, durationMs: number): void {
+        try {
+            const toast = this.ensureToastEl();
+            toast.textContent = '';
+            const text = document.createElement('span');
+            text.textContent = message;
+            toast.appendChild(text);
+            for (const action of actions) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = action.label;
+                btn.style.cssText = TOAST_ACTION_BUTTON_STYLE;
+                btn.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    try {
+                        action.onClick();
+                    } catch (err) {
+                        console.warn('[Toast] Action failed:', err);
+                    }
+                });
+                toast.appendChild(btn);
+            }
+            toast.style.pointerEvents = 'auto';
+            toast.style.opacity = '1';
+            this.scheduleToastHide(toast, durationMs);
+        } catch (err) {
+            console.warn('[Toast] Action toast failed:', err);
+        }
+    }
+
+    /** After a landing, shows the first-flight onboarding reward when the API reports it was just completed. */
+    async checkFirstFlightOnboarding(): Promise<void> {
+        const token = localStorage.getItem('auth_token') || '';
+        if (!token) return;
+        try {
+            const res = await fetch('/api/onboarding/me', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!res.ok) {
+                console.warn(`[Onboarding] GET /api/onboarding/me failed: HTTP ${res.status}`);
+                return;
+            }
+            const json = await res.json();
+            const steps: any[] = Array.isArray(json?.steps) ? json.steps : (Array.isArray(json?.data?.steps) ? json.data.steps : []);
+            const step = steps.find((s) => s?.code === ONBOARDING_FIRST_FLIGHT_STEP);
+            if (!step || !step.completed || !step.completed_at) return;
+            const completedAtMs = new Date(step.completed_at).getTime();
+            if (!Number.isFinite(completedAtMs)) return;
+            const ageMs = Date.now() - completedAtMs;
+            if (ageMs < 0 || ageMs > ONBOARDING_RECENT_COMPLETION_MS) return;
+            console.log(`[Onboarding] First flight step completed ${Math.round(ageMs / 1000)}s ago, showing reward toast`);
+            this.showActionToast(I18n.t('onboarding.firstFlight'), [{
+                label: I18n.t('onboarding.openDashboard'),
+                onClick: () => { window.open(ONBOARDING_DASHBOARD_URL, '_blank', 'noopener'); },
+            }], ONBOARDING_TOAST_MS);
+        } catch (err) {
+            console.warn('[Onboarding] Check failed:', err);
         }
     }
 
@@ -703,7 +787,16 @@ export class HudSystem {
         else if (score >= LANDING_GRADE_SCORE_GOOD) gradeKey = 'landing.grade.good';
         else gradeKey = 'landing.grade.firm';
 
-        this.showToast(`${I18n.t(gradeKey)} \u2014 ${parts.join(' \u00B7 ')}`, LANDING_GRADE_TOAST_MS);
+        const text = `${I18n.t(gradeKey)} \u2014 ${parts.join(' \u00B7 ')}`;
+        const flightLogId = Number(msg?.flightLogId);
+        if (isValidFlightLogId(flightLogId)) {
+            this.showActionToast(text, [{
+                label: I18n.t('share.flight'),
+                onClick: () => { void publishAndShareFlightLog(flightLogId, (m, d) => this.showToast(m, d)); },
+            }], LANDING_SHARE_TOAST_MS);
+        } else {
+            this.showToast(text, LANDING_GRADE_TOAST_MS);
+        }
         this.scene._lastTouchdown = null;
     }
 
@@ -1683,9 +1776,10 @@ export class HudSystem {
 #hud-utc{font-size:8px!important;letter-spacing:.08em!important}
 #flight-pfd{top:26%!important;transform:translate(-50%,-50%)!important;width:272px;height:184px}
 #flight-hsi{top:75%!important;width:172px!important;height:172px!important}
-#gps-map{width:168px!important;height:168px!important;top:2px!important;left:2px!important}
-.hud-panel-left{left:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom left}
-.hud-panel-right{right:6px!important;bottom:6px!important;transform:scale(.7);transform-origin:bottom right}
+#hud-utc{top:calc(2px + var(--safe-top))!important}
+#gps-map{width:168px!important;height:168px!important;top:calc(2px + var(--safe-top))!important;left:calc(2px + var(--safe-left))!important}
+.hud-panel-left{left:calc(6px + var(--safe-left))!important;bottom:calc(6px + var(--safe-bottom))!important;transform:scale(.7);transform-origin:bottom left}
+.hud-panel-right{right:calc(6px + var(--safe-right))!important;bottom:calc(6px + var(--safe-bottom))!important;transform:scale(.7);transform-origin:bottom right}
 .hud-tape-wrapper{height:140px!important;width:60px!important}
 .hud-vs-strip{height:140px!important}
 .hud-ticker-box{height:26px!important;font-size:15px!important;left:-6px!important;right:-6px!important}
@@ -1693,75 +1787,75 @@ export class HudSystem {
 .hud-rpm-gauge{width:48px!important;height:48px!important}
 .hud-rpm-needle{height:18px!important}
 .hud-vs-scale{font-size:8px!important}
-#missions-btn{top:22px!important;right:10px!important}
-#aircraft-btn{top:60px!important;right:10px!important}
-#flight-plans-btn{top:98px!important;right:10px!important}
-#logbook-btn{top:136px!important;right:10px!important}
-#efb-btn{top:174px!important;right:10px!important}
-#achievements-btn{top:212px!important;right:10px!important}
-#leaderboard-btn{top:250px!important;right:10px!important}
-#achievements-panel{top:206px!important;right:50px!important;width:280px!important;max-height:50vh!important}
-#leaderboard-panel{top:244px!important;right:50px!important;width:280px!important;max-height:50vh!important}
-#missions-panel{top:16px!important;right:50px!important;width:260px!important;max-height:50vh!important}
-#aircraft-panel{top:54px!important;right:50px!important;width:260px!important;max-height:50vh!important}
-#flight-plans-panel{top:92px!important;right:50px!important;width:260px!important;max-height:50vh!important}
-#logbook-panel{top:130px!important;right:50px!important;width:280px!important;max-height:50vh!important}
-#efb-panel{top:168px!important;right:50px!important;width:280px!important;max-height:50vh!important}
-#nav-info{top:185px!important;left:auto!important;right:2px!important;width:140px!important;font-size:9px!important}
-#ap-panel{top:auto!important;bottom:60px!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
+#missions-btn{top:calc(22px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#aircraft-btn{top:calc(60px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#flight-plans-btn{top:calc(98px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#logbook-btn{top:calc(136px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#efb-btn{top:calc(174px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#achievements-btn{top:calc(212px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#leaderboard-btn{top:calc(250px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#achievements-panel{top:calc(206px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:280px!important;max-height:50vh!important}
+#leaderboard-panel{top:calc(244px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:280px!important;max-height:50vh!important}
+#missions-panel{top:calc(16px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:260px!important;max-height:50vh!important}
+#aircraft-panel{top:calc(54px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:260px!important;max-height:50vh!important}
+#flight-plans-panel{top:calc(92px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:260px!important;max-height:50vh!important}
+#logbook-panel{top:calc(130px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:280px!important;max-height:50vh!important}
+#efb-panel{top:calc(168px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:280px!important;max-height:50vh!important}
+#nav-info{top:calc(185px + var(--safe-top))!important;left:auto!important;right:calc(2px + var(--safe-right))!important;width:140px!important;font-size:9px!important}
+#ap-panel{top:auto!important;bottom:calc(60px + var(--safe-bottom))!important;right:50%!important;transform:translateX(50%)!important;font-size:9px!important;padding:4px 5px!important;gap:4px!important}
 #ap-panel .ap-btn{padding:2px 5px!important;font-size:9px!important}
 #ap-panel .ap-units{gap:6px!important}
 #ap-panel .ap-display{font-size:10px!important;min-width:46px!important;padding:1px 4px!important}
 #ap-panel .ap-knob{width:22px!important;height:22px!important}
 #ap-panel .ap-knob-tick{height:7px!important;top:2px!important}
-#instrument-dock{bottom:10px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:4px!important}
+#instrument-dock{bottom:calc(10px + var(--safe-bottom))!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:4px!important}
 #pfd-panel{width:480px!important}
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
 #flight-pfd{top:22%!important;width:212px!important;height:143px!important}
 #flight-hsi{top:73%!important;width:150px!important;height:150px!important}
-#gps-map{width:132px!important;height:132px!important;top:4px!important;left:2px!important}
-.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom left}
-.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.55);transform-origin:bottom right}
+#gps-map{width:132px!important;height:132px!important;top:calc(4px + var(--safe-top))!important;left:calc(2px + var(--safe-left))!important}
+.hud-panel-left{left:calc(6px + var(--safe-left))!important;bottom:calc(4px + var(--safe-bottom))!important;transform:scale(.55);transform-origin:bottom left}
+.hud-panel-right{right:calc(6px + var(--safe-right))!important;bottom:calc(4px + var(--safe-bottom))!important;transform:scale(.55);transform-origin:bottom right}
 .hud-tape-wrapper{height:110px!important;width:56px!important}
 .hud-vs-strip{height:110px!important;width:30px!important}
 .hud-ticker-box{height:22px!important;font-size:13px!important;left:-4px!important;right:-4px!important}
 .hud-value-main{font-size:16px!important}
 .hud-vs-scale span:not(.hud-vs-scale-zero){visibility:hidden}
 #h-online{display:none!important}
-#missions-btn{top:6px!important;right:6px!important;width:28px!important;height:28px!important}
-#aircraft-btn{top:40px!important;right:6px!important;width:28px!important;height:28px!important}
-#missions-panel{top:4px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
-#aircraft-panel{top:38px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
-#flight-plans-btn{top:74px!important;right:6px!important;width:28px!important;height:28px!important}
-#flight-plans-panel{top:72px!important;right:40px!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
-#logbook-btn{top:108px!important;right:6px!important;width:28px!important;height:28px!important}
-#logbook-panel{top:106px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
-#efb-btn{top:142px!important;right:6px!important;width:28px!important;height:28px!important}
-#efb-panel{top:140px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
-#achievements-btn{top:176px!important;right:6px!important;width:28px!important;height:28px!important}
-#achievements-panel{top:174px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
-#leaderboard-btn{top:210px!important;right:6px!important;width:28px!important;height:28px!important}
-#leaderboard-panel{top:208px!important;right:40px!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
-#nav-info{top:150px!important;left:auto!important;right:2px!important;width:110px!important;font-size:8px!important}
-#ap-panel{top:auto!important;bottom:58px!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
+#missions-btn{top:calc(6px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#aircraft-btn{top:calc(40px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#missions-panel{top:calc(4px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+#aircraft-panel{top:calc(38px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+#flight-plans-btn{top:calc(74px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#flight-plans-panel{top:calc(72px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:200px!important;max-height:45vh!important;font-size:10px!important}
+#logbook-btn{top:calc(108px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#logbook-panel{top:calc(106px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#efb-btn{top:calc(142px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#efb-panel{top:calc(140px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#achievements-btn{top:calc(176px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#achievements-panel{top:calc(174px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#leaderboard-btn{top:calc(210px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#leaderboard-panel{top:calc(208px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#nav-info{top:calc(150px + var(--safe-top))!important;left:auto!important;right:calc(2px + var(--safe-right))!important;width:110px!important;font-size:8px!important}
+#ap-panel{top:auto!important;bottom:calc(58px + var(--safe-bottom))!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
 #ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
 #ap-panel .ap-units{gap:4px!important}
 #ap-panel .ap-display{font-size:9px!important;min-width:40px!important;padding:1px 3px!important}
 #ap-panel .ap-knob{width:20px!important;height:20px!important}
 #ap-panel .ap-knob-tick{height:6px!important;top:2px!important;width:2px!important}
-#instrument-dock{bottom:10px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:3px!important;gap:4px!important}
+#instrument-dock{bottom:calc(10px + var(--safe-bottom))!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:3px!important;gap:4px!important}
 #pfd-panel{width:380px!important}
 }
 @media(max-height:440px){
 #flight-pfd{top:24%!important;width:228px!important;height:154px!important}
 #flight-hsi{top:72%!important;width:160px!important;height:160px!important}
-#gps-map{width:120px!important;height:120px!important;top:2px!important;left:2px!important}
+#gps-map{width:120px!important;height:120px!important;top:calc(2px + var(--safe-top))!important;left:calc(2px + var(--safe-left))!important}
 #hud-utc{font-size:7px!important}
-.hud-panel-left{left:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom left}
-.hud-panel-right{right:6px!important;bottom:4px!important;transform:scale(.6);transform-origin:bottom right}
-#instrument-dock{bottom:8px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important}
+.hud-panel-left{left:calc(6px + var(--safe-left))!important;bottom:calc(4px + var(--safe-bottom))!important;transform:scale(.6);transform-origin:bottom left}
+.hud-panel-right{right:calc(6px + var(--safe-right))!important;bottom:calc(4px + var(--safe-bottom))!important;transform:scale(.6);transform-origin:bottom right}
+#instrument-dock{bottom:calc(8px + var(--safe-bottom))!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important}
 #pfd-panel{bottom:6px!important;width:560px!important}
 }
 

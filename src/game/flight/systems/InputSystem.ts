@@ -625,10 +625,10 @@ export class InputSystem {
 #touch-joy{position:absolute;width:120px;height:120px;border-radius:50%;border:none;background:none;display:none;pointer-events:none}
 #touch-joy-deadzone{position:absolute;top:50%;left:50%;border-radius:50%;border:2px dashed rgba(80,255,160,.0);pointer-events:none;transition:border-color .12s}
 #touch-joy-knob{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(0,255,128,.25);border:1px solid rgba(0,255,128,.15)}
-#touch-throttle{position:absolute;bottom:160px;left:10px;width:40px;height:150px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
+#touch-throttle{position:absolute;bottom:calc(160px + var(--safe-bottom));left:calc(10px + var(--safe-left));width:40px;height:150px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
 #touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:36px;height:12px;border-radius:6px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:340px;left:6px;display:grid;grid-template-columns:repeat(2,38px);grid-auto-rows:26px;gap:4px;pointer-events:auto}
+#touch-flap-btns{position:absolute;bottom:calc(340px + var(--safe-bottom));left:calc(6px + var(--safe-left));display:grid;grid-template-columns:repeat(2,38px);grid-auto-rows:26px;gap:4px;pointer-events:auto}
 #touch-flap-btns button{width:38px;height:26px;padding:0;border-radius:5px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.04em;cursor:pointer;touch-action:manipulation;transition:transform .1s,background .1s,border-color .1s;backdrop-filter:blur(2px)}
 #touch-flap-btns button:active{transform:scale(.92);background:rgba(0,40,25,.55);border-color:rgba(80,255,160,.45)}
 #touch-brk.active{background:rgba(255,40,40,.32);border-color:rgba(255,80,80,.5);color:#ff6060}
@@ -638,21 +638,21 @@ export class InputSystem {
 #touch-gear.up{color:#bbbbbb;border-color:rgba(180,180,180,.32)}
 #touch-gear.down{color:rgba(125,249,200,.85);border-color:rgba(80,255,160,.32)}
 #touch-gear.transit{color:#ffcc00;border-color:rgba(255,204,0,.45)}
-#touch-rudder{position:absolute;bottom:150px;right:12px;display:flex;gap:6px;pointer-events:auto}
+#touch-rudder{position:absolute;bottom:calc(150px + var(--safe-bottom));right:calc(12px + var(--safe-right));display:flex;gap:6px;pointer-events:auto}
 #touch-rudder button{width:56px;height:44px;padding:0;border-radius:8px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:11px;letter-spacing:.04em;cursor:pointer;touch-action:none;backdrop-filter:blur(2px);transition:transform .1s,background .1s,border-color .1s}
 #touch-rudder button.active{transform:scale(.94);background:rgba(0,60,35,.6);border-color:rgba(80,255,160,.55);color:#80ffa0}
-#touch-controls-btn{position:absolute;top:336px;right:14px;width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
-#touch-controls-panel{display:none;position:absolute;top:372px;right:14px;width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#touch-controls-btn{position:absolute;top:calc(336px + var(--safe-top));right:calc(14px + var(--safe-right));width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+#touch-controls-panel{display:none;position:absolute;top:calc(372px + var(--safe-top));right:calc(14px + var(--safe-right));width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
 #touch-controls-panel label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 #touch-controls-panel input[type=range]{width:120px}
 @media(max-width:768px){
-#touch-controls-btn{top:288px!important;right:10px!important}
-#touch-controls-panel{top:324px!important;right:10px!important}
+#touch-controls-btn{top:calc(288px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#touch-controls-panel{top:calc(324px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
 }
 @media(max-width:480px){
-#touch-controls-btn{top:244px!important;right:6px!important;width:28px!important;height:28px!important}
-#touch-controls-panel{top:278px!important;right:6px!important;width:200px!important}
-#touch-rudder{bottom:140px!important;right:8px!important}
+#touch-controls-btn{top:calc(244px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#touch-controls-panel{top:calc(278px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:200px!important}
+#touch-rudder{bottom:calc(140px + var(--safe-bottom))!important;right:calc(8px + var(--safe-right))!important}
 #touch-rudder button{width:48px!important;height:38px!important}
 }
 </style>

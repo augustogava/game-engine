@@ -27,6 +27,8 @@ const REMOTE_STATE_INTERVAL_MAX_MS = 2000;
 const REMOTE_STATE_INTERVAL_SMOOTHING = 0.2;
 const REMOTE_EXTRAPOLATION_MAX_T = 1.5;
 const REMOTE_STALE_TIMEOUT_MS = 15000;
+// Gives the main API time to credit the onboarding step after the landing is persisted.
+const ONBOARDING_CHECK_DELAY_MS = 3000;
 
 export class MultiplayerSystem {
     private readonly scene: any;
@@ -131,6 +133,9 @@ export class MultiplayerSystem {
                 } catch (err) {
                     console.warn('[Landing] Grade toast failed:', err);
                 }
+                this.scene._safeSetTimeout(() => {
+                    void this.scene._hudSystem?.checkFirstFlightOnboarding();
+                }, ONBOARDING_CHECK_DELAY_MS);
             }
             if (!this.scene._activeFlightPlanId) return;
             if (msg.status === 'landed') {

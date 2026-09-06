@@ -194,18 +194,30 @@ export class MiniMapSystem {
         handle.addEventListener('pointercancel', onPointerUp);
     }
 
+    private readSafeAreaInsetPx(varName: string): number {
+        try {
+            const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+            const px = parseFloat(raw);
+            return Number.isFinite(px) && px > 0 ? px : 0;
+        } catch {
+            return 0;
+        }
+    }
+
     clampGpsX(x: number, gps: HTMLElement): number {
         const m = GPS_DRAG_VIEWPORT_MARGIN_PX;
         const w = gps.offsetWidth || 216;
-        const max = Math.max(m, window.innerWidth - w - m);
-        return Math.min(max, Math.max(m, x));
+        const min = m + this.readSafeAreaInsetPx('--safe-left');
+        const max = Math.max(min, window.innerWidth - w - m - this.readSafeAreaInsetPx('--safe-right'));
+        return Math.min(max, Math.max(min, x));
     }
 
     clampGpsY(y: number, gps: HTMLElement): number {
         const m = GPS_DRAG_VIEWPORT_MARGIN_PX;
         const h = gps.offsetHeight || 216;
-        const max = Math.max(m, window.innerHeight - h - m);
-        return Math.min(max, Math.max(m, y));
+        const min = m + this.readSafeAreaInsetPx('--safe-top');
+        const max = Math.max(min, window.innerHeight - h - m - this.readSafeAreaInsetPx('--safe-bottom'));
+        return Math.min(max, Math.max(min, y));
     }
 
     latLonToMapPx(lat: number, lon: number, refLat: number, refLon: number, mapPxSize: number): { x: number; y: number; pxPerDegLon: number; pxPerDegLat: number } {

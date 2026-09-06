@@ -69,7 +69,11 @@ export class GameCore3D {
 
         this.input = new InputManager(config.canvas);
 
-        window.addEventListener('resize', () => this.engine.resize());
+        const onViewportResize = () => { try { this.engine.resize(); } catch (err) { console.warn('[GameCore3D] Engine resize failed:', err); } };
+        window.addEventListener('resize', onViewportResize);
+        // iOS Safari toolbar/keyboard changes only fire visualViewport resize, not window resize.
+        window.addEventListener('orientationchange', onViewportResize);
+        window.visualViewport?.addEventListener('resize', onViewportResize);
 
         this._visibilityHandler = () => {
             this._renderPaused = document.visibilityState === 'hidden';
