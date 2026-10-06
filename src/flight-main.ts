@@ -1,6 +1,7 @@
 import { GameCore3D } from './engine/3d/GameCore3D.js';
 import { FlightSceneSimple } from './game/FlightSceneSimple.js';
 import { PreflightController, applyPreflightToUrlAndScene } from './preflight/PreflightController.js';
+import { FLIGHT_PLAN_STATUS_CANCELLED } from './game/flight/constants/flightPlanConstants.js';
 
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
 const FLIGHT_HOURS_URL = 'https://simflightpro.com/flight-time';
@@ -691,7 +692,7 @@ function cancelActiveFlightPlanOnUnload(reason: string): void {
         void fetch(`/api/flight-plans/${Number(planId)}/status`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'cancelled' }),
+            body: JSON.stringify({ status: FLIGHT_PLAN_STATUS_CANCELLED }),
             keepalive: true,
         });
         (scene as any)._activeFlightPlanId = null;

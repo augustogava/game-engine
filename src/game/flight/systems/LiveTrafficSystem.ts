@@ -1,10 +1,17 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import type { LiveTrafficFlight } from '../types/LiveTrafficFlight.js';
-import { fetchLiveTrafficPositions, LiveTrafficBounds } from '../api/LiveTrafficApi.js';
+import {
+    fetchLiveTrafficPositions,
+    LiveTrafficBounds,
+    LIVE_TRAFFIC_STATUS_UNAUTHORIZED,
+    LIVE_TRAFFIC_STATUS_RATE_LIMITED,
+} from '../api/LiveTrafficApi.js';
 import {
     LIVE_TRAFFIC_INITIAL_DELAY_MS,
     LIVE_TRAFFIC_POLL_INTERVAL_MS,
+    LIVE_TRAFFIC_MIN_POLL_INTERVAL_MS,
+    LIVE_TRAFFIC_RATE_LIMIT_DEFAULT_BACKOFF_MS,
     LIVE_TRAFFIC_BACKOFF_MAX_MS,
     LIVE_TRAFFIC_BACKOFF_MAX_STEPS,
     LIVE_TRAFFIC_RANGE_DEG,
@@ -90,6 +97,9 @@ export class LiveTrafficSystem {
     private _firstFetchDone = false;
     private _fetchInFlight = false;
     private _consecutiveFailures = 0;
+    private _rateLimitedUntilMs = 0;
+    private _authRetryUsed = false;
+    private _authDisabled = false;
     private _initStartMs = 0;
     private _disposed = false;
     private readonly _abortController = new AbortController();
@@ -113,7 +123,8 @@ export class LiveTrafficSystem {
         const now = performance.now();
         if (this._initStartMs === 0) this._initStartMs = now;
 
-        if (!this._fetchInFlight) {
+        const rateLimited = now < this._rateLimitedUntilMs;
+        if (!this._fetchInFlight && !this._authDisabled && !rateLimited) {
             if (!this._firstFetchDone) {
                 if (now - this._initStartMs >= LIVE_TRAFFIC_INITIAL_DELAY_MS) {
                     this._triggerFetch(now);
@@ -127,10 +138,12 @@ export class LiveTrafficSystem {
             this._updateEntity(entity, now);
         }
 
-        for (const [id, entity] of this.entities) {
-            if (now - entity.lastSeenMs > LIVE_TRAFFIC_STALE_MS) {
-                this._disposeEntity(entity);
-                this.entities.delete(id);
+        if (!rateLimited) {
+            for (const [id, entity] of this.entities) {
+                if (now - entity.lastSeenMs > LIVE_TRAFFIC_STALE_MS) {
+                    this._disposeEntity(entity);
+                    this.entities.delete(id);
+                }
             }
         }
     }
@@ -197,9 +210,17 @@ export class LiveTrafficSystem {
             categories: LIVE_TRAFFIC_CATEGORIES,
             limit: LIVE_TRAFFIC_LIMIT,
             signal: this._abortController.signal,
-        }).then((flights) => {
+        }).then((result) => {
             if (this._disposed) return;
-            if (flights === null) {
+            if (result.status === LIVE_TRAFFIC_STATUS_RATE_LIMITED) {
+                this._registerRateLimit(result.retryAfterMs);
+                return;
+            }
+            if (result.status === LIVE_TRAFFIC_STATUS_UNAUTHORIZED) {
+                this._registerUnauthorized();
+                return;
+            }
+            if (result.flights === null) {
                 this._registerFetchFailure();
                 return;
             }
@@ -207,7 +228,8 @@ export class LiveTrafficSystem {
                 console.debug('[LiveTraffic] Fetch recovered; resuming normal poll interval');
             }
             this._consecutiveFailures = 0;
-            this._onFetchResult(flights);
+            this._authRetryUsed = false;
+            this._onFetchResult(result.flights);
         }).catch((err) => {
             console.warn('[LiveTraffic] fetch error:', err);
             this._registerFetchFailure();
@@ -218,9 +240,27 @@ export class LiveTrafficSystem {
     }
 
     private _currentPollIntervalMs(): number {
-        if (this._consecutiveFailures <= 0) return LIVE_TRAFFIC_POLL_INTERVAL_MS;
+        const base = Math.max(LIVE_TRAFFIC_MIN_POLL_INTERVAL_MS, LIVE_TRAFFIC_POLL_INTERVAL_MS);
+        if (this._consecutiveFailures <= 0) return base;
         const factor = 2 ** Math.min(this._consecutiveFailures, LIVE_TRAFFIC_BACKOFF_MAX_STEPS);
-        return Math.min(LIVE_TRAFFIC_BACKOFF_MAX_MS, LIVE_TRAFFIC_POLL_INTERVAL_MS * factor);
+        return Math.min(LIVE_TRAFFIC_BACKOFF_MAX_MS, base * factor);
+    }
+
+    private _registerRateLimit(retryAfterMs: number | null): void {
+        const waitMs = Math.max(LIVE_TRAFFIC_MIN_POLL_INTERVAL_MS, retryAfterMs ?? LIVE_TRAFFIC_RATE_LIMIT_DEFAULT_BACKOFF_MS);
+        this._rateLimitedUntilMs = performance.now() + waitMs;
+        console.warn(`[LiveTraffic] Rate limited (429); keeping last traffic on screen and retrying in ${(waitMs / 1000).toFixed(0)}s`);
+    }
+
+    private _registerUnauthorized(): void {
+        if (!this._authRetryUsed) {
+            this._authRetryUsed = true;
+            this._lastFetchMs = performance.now() - this._currentPollIntervalMs();
+            console.warn('[LiveTraffic] 401 received; retrying once with the current token');
+            return;
+        }
+        this._authDisabled = true;
+        console.warn('[LiveTraffic] 401 received again; live traffic paused for this session');
     }
 
     private _registerFetchFailure(): void {

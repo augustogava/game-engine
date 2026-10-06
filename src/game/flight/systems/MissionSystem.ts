@@ -1,6 +1,10 @@
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { I18n } from '../../I18n.js';
-import { MISSION_TOAST_VISIBLE_MS, MISSION_TOAST_FADE_MS } from '../constants/index.js';
+import {
+    MISSION_TOAST_VISIBLE_MS, MISSION_TOAST_FADE_MS,
+    FLIGHT_PLAN_STATUS_IN_PROGRESS, isFlightPlanStatusCode, type FlightPlanStatusCode,
+    FLIGHT_SCHOOL_LANDING_COMPLETE_NM, FLIGHT_SCHOOL_LANDING_CONFIRM_MS,
+} from '../constants/index.js';
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
 import { initialBearingDeg, haversineNm } from '../physics/NavMath.js';
 import { isValidFlightLogId, publishAndShareFlightLog } from './FlightShareService.js';
@@ -16,6 +20,8 @@ const MISSION_COMPLETE_MAX_RETRIES = 5;
 const MISSION_COMPLETE_RETRY_MS = 4000;
 const HTTP_STATUS_CONFLICT = 409;
 const MISSION_LAUNCH_PRESERVED_PARAMS = ['simTime', 'lang'];
+const GAME_REQUESTED_WITH_HEADER = 'SimFlightProGame';
+const POINTS_MULTIPLIER_DEFAULT = 1;
 
 export class MissionSystem {
     private readonly scene: any;
@@ -24,6 +30,9 @@ export class MissionSystem {
     private _lastWxLon = Number.NaN;
     private _completeRetries = 0;
     private _completeRetryTimer: number | null = null;
+    private _lessonLandingTimer: number | null = null;
+    private _activeMissionTitle = '';
+    private _activeMissionRewardPoints = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -48,7 +57,7 @@ export class MissionSystem {
 
         this.scene._activeFlightPlanId = Number(plan.id);
         this.scene._activeFlightPlanArrivalAirportId = plan.arrival_airport_id != null ? Number(plan.arrival_airport_id) : null;
-        this.patchFlightPlanStatus(this.scene._activeFlightPlanId, 'in_progress');
+        this.patchFlightPlanStatus(this.scene._activeFlightPlanId, FLIGHT_PLAN_STATUS_IN_PROGRESS);
         this.scene._pendingFlightPlanLat = spawnLat;
         this.scene._pendingFlightPlanLon = spawnLon;
         this.scene._pendingFlightPlanHdg = spawnHdg;
@@ -103,6 +112,13 @@ export class MissionSystem {
     setMissionSpawn(mission: any, userMissionId: number | null): void {
         this.scene._activeMissionId = Number(mission.id);
         this.scene._activeUserMissionId = userMissionId;
+        const trainingOrderRaw = Number(mission.training_order);
+        this.scene._activeTrainingOrder = Number.isInteger(trainingOrderRaw) && trainingOrderRaw > 0 ? trainingOrderRaw : null;
+        this.scene._missionAwaitingLanding = false;
+        this.scene._pendingApproachSpawn = false;
+        this._activeMissionTitle = String(mission.title ?? '');
+        const rewardRaw = Number(mission.reward_points);
+        this._activeMissionRewardPoints = Number.isFinite(rewardRaw) && rewardRaw > 0 ? rewardRaw : 0;
 
         this.scene._pendingFlightPlanLat = null;
         this.scene._pendingFlightPlanLon = null;
@@ -136,6 +152,10 @@ export class MissionSystem {
             this.scene._pendingMissionAltM = mission.spawn_altitude_ft != null ? Number(mission.spawn_altitude_ft) * 0.3048 : 1000;
             this.scene._pendingMissionHdg = headingToFirstWp(spawnLat, spawnLon);
             this.scene._pendingMissionAirborne = true;
+            this.scene._pendingApproachSpawn = this.scene._activeTrainingOrder != null;
+            if (this.scene._pendingApproachSpawn) {
+                console.debug(`[FlightSchool] Lesson ${this.scene._activeTrainingOrder} will spawn in approach configuration`);
+            }
             if (hasFirstWp) {
                 console.debug(`[Mission] Spawn heading aligned to next waypoint: hdg=${this.scene._pendingMissionHdg.toFixed(1)}° → wp lat=${firstWpLat} lon=${firstWpLon} order=${firstWp?.order_index}`);
             } else if (waypoints.length > 0) {
@@ -182,6 +202,7 @@ export class MissionSystem {
                 arr_rwy_heading: arrHdg != null && Number.isFinite(arrHdg) ? arrHdg : null,
                 arr_elevation_ft: arrElevFt != null && Number.isFinite(Number(arrElevFt)) ? Number(arrElevFt) : null,
                 arr_rwy_ident: mission.arr_rwy_ident || '',
+                reward_points: Number.isFinite(Number(mission.reward_points)) ? Number(mission.reward_points) : null,
             };
         }
 
@@ -252,13 +273,15 @@ export class MissionSystem {
             console.log(`[Mission] WP ${reachedNum}/${total} reached: order=${wp.order_index} name="${wp.name ?? 'unnamed'}" ${reason}`);
             this.scene._missionCurrentWpIndex++;
             if (this.scene._missionCurrentWpIndex >= total) {
-                if (this.scene._activeUserMissionId) {
+                if (this.scene._activeUserMissionId && this.isTrainingLessonActive()) {
+                    this.scene._missionAwaitingLanding = true;
+                    console.log(`[FlightSchool] All ${total} lesson waypoints reached; completion awaits landing for userMissionId=${this.scene._activeUserMissionId}`);
+                    try { this.scene._showToast(I18n.t('flightSchool.landToComplete')); } catch (_) { /* ignore */ }
+                } else if (this.scene._activeUserMissionId) {
                     console.log(`[Mission] All ${total} waypoints reached, calling /complete for userMissionId=${this.scene._activeUserMissionId}`);
                     this.completeActiveMission();
                 } else if (this.scene._activeFlightPlanId) {
-                    console.log(`[FlightPlan] All ${total} waypoints reached, marking plan ${this.scene._activeFlightPlanId} as completed`);
-                    this.patchFlightPlanStatus(this.scene._activeFlightPlanId, 'completed');
-                    this.scene._activeFlightPlanId = null;
+                    console.log(`[FlightPlan] All ${total} waypoints reached for plan ${this.scene._activeFlightPlanId}; completion awaits landing at the arrival airport`);
                     this.scene._missionWaypoints = [];
                     this.scene._missionCurrentWpIndex = 0;
                 }
@@ -266,8 +289,72 @@ export class MissionSystem {
         }
     }
 
+    isTrainingLessonActive(): boolean {
+        const order = Number(this.scene._activeTrainingOrder);
+        return this.scene._activeUserMissionId != null && Number.isInteger(order) && order > 0;
+    }
+
+    onTouchdown(): void {
+        if (!this.isTrainingLessonActive() || this.scene._missionCompletionInFlight || this._lessonLandingTimer != null) return;
+        const umId = this.scene._activeUserMissionId;
+        this._lessonLandingTimer = this.scene._safeSetTimeout(() => {
+            this._lessonLandingTimer = null;
+            this.evaluateLessonLanding(umId);
+        }, FLIGHT_SCHOOL_LANDING_CONFIRM_MS);
+    }
+
+    resetLessonProgress(): void {
+        if (this._lessonLandingTimer != null) {
+            clearTimeout(this._lessonLandingTimer);
+            this.scene._pendingTimeouts?.delete?.(this._lessonLandingTimer);
+            this._lessonLandingTimer = null;
+        }
+        this.scene._missionCurrentWpIndex = 0;
+        this.scene._missionAwaitingLanding = false;
+        console.log(`[FlightSchool] Lesson progress reset for userMissionId=${this.scene._activeUserMissionId}`);
+    }
+
+    private evaluateLessonLanding(umId: number | null): void {
+        if (umId == null || this.scene._activeUserMissionId !== umId || !this.isTrainingLessonActive()) return;
+        if (this.scene._crashed) {
+            console.log(`[FlightSchool] Touchdown ignored for userMissionId=${umId}: aircraft crashed`);
+            return;
+        }
+        const here = this.scene._apCurrentLatLon?.();
+        if (!here || !Number.isFinite(here.lat) || !Number.isFinite(here.lon)) {
+            console.warn(`[FlightSchool] Touchdown ignored for userMissionId=${umId}: current position unavailable`);
+            return;
+        }
+        const waypoints = Array.isArray(this.scene._missionWaypoints) ? this.scene._missionWaypoints : [];
+        const allWaypointsReached = waypoints.length === 0 || this.scene._missionCurrentWpIndex >= waypoints.length;
+        const mission = this.scene._activeMission;
+        let targetLat = Number.NaN;
+        let targetLon = Number.NaN;
+        if (mission && Number.isFinite(Number(mission.arrival_lat)) && Number.isFinite(Number(mission.arrival_lon))) {
+            targetLat = Number(mission.arrival_lat);
+            targetLon = Number(mission.arrival_lon);
+        } else if (waypoints.length > 0) {
+            targetLat = Number(waypoints[waypoints.length - 1].latitude);
+            targetLon = Number(waypoints[waypoints.length - 1].longitude);
+        }
+        if (!Number.isFinite(targetLat) || !Number.isFinite(targetLon)) {
+            console.warn(`[FlightSchool] Touchdown ignored for userMissionId=${umId}: lesson has no landing target`);
+            return;
+        }
+        const distNm = haversineNm(here.lat, here.lon, targetLat, targetLon);
+        if (!allWaypointsReached || distNm > FLIGHT_SCHOOL_LANDING_COMPLETE_NM) {
+            console.log(`[FlightSchool] Landing does not complete lesson: waypointsOk=${allWaypointsReached} dist=${distNm.toFixed(2)}nm limit=${FLIGHT_SCHOOL_LANDING_COMPLETE_NM}nm`);
+            try { this.scene._showToast(I18n.t('flightSchool.landingNotOnTarget')); } catch (_) { /* ignore */ }
+            return;
+        }
+        console.log(`[FlightSchool] Lesson landing confirmed dist=${distNm.toFixed(2)}nm, completing userMissionId=${umId}`);
+        this.scene._missionAwaitingLanding = false;
+        void this.completeActiveMission();
+    }
+
     private checkDirectMissionArrival(lat: number, lon: number): void {
         if (!this.scene._activeUserMissionId || this.scene._missionCompletionInFlight) return;
+        if (this.isTrainingLessonActive()) return;
         const mission = this.scene._activeMission;
         if (!mission || mission.arrival_lat == null || mission.arrival_lon == null) return;
         const arrLat = Number(mission.arrival_lat);
@@ -283,25 +370,39 @@ export class MissionSystem {
         const umId = this.scene._activeUserMissionId;
         if (!umId || this.scene._completedUserMissionIds.has(umId) || this.scene._missionCompletionInFlight) return;
         this.scene._missionCompletionInFlight = true;
-        const completedTitle = this.scene._activeMission?.mission_title || '';
+        const completedTitle = this.scene._activeMission?.mission_title || this._activeMissionTitle || '';
         const completedRewardRaw = Number(this.scene._activeMission?.reward_points);
-        const completedReward = Number.isFinite(completedRewardRaw) && completedRewardRaw > 0 ? completedRewardRaw : 0;
+        const completedReward = Number.isFinite(completedRewardRaw) && completedRewardRaw > 0 ? completedRewardRaw : this._activeMissionRewardPoints;
         try {
             const token = localStorage.getItem('auth_token') || '';
             const res = await fetch(`/api/user-missions/${umId}/complete`, {
                 method: 'PUT',
-                headers: { 'Authorization': `Bearer ${token}` },
+                headers: { 'Authorization': `Bearer ${token}`, 'X-Requested-With': GAME_REQUESTED_WITH_HEADER },
             });
             if (res.ok || res.status === HTTP_STATUS_CONFLICT) {
-                if (res.ok) console.log(`[Mission] Completed userMissionId=${umId}`);
-                else console.log(`[Mission] userMissionId=${umId} already completed server-side (HTTP ${res.status})`);
+                let pointsMultiplier = POINTS_MULTIPLIER_DEFAULT;
+                if (res.ok) {
+                    console.log(`[Mission] Completed userMissionId=${umId}`);
+                    try {
+                        const body = await res.json();
+                        const multiplier = Number(body?.points_multiplier);
+                        if (Number.isFinite(multiplier) && multiplier > 0) pointsMultiplier = multiplier;
+                    } catch {
+                        console.debug(`[Mission] Complete response for userMissionId=${umId} has no JSON body`);
+                    }
+                } else {
+                    console.log(`[Mission] userMissionId=${umId} already completed server-side (HTTP ${res.status}) treated as success`);
+                }
                 this._completeRetries = 0;
                 this.scene._completedUserMissionIds.add(umId);
                 this.scene._activeMissionId = null;
                 this.scene._activeUserMissionId = null;
                 this.scene._activeMission = null;
                 this.scene._missionWaypoints = [];
-                if (res.ok) this.showMissionCompleteToast(completedTitle, completedReward);
+                this.scene._activeTrainingOrder = null;
+                this.scene._missionAwaitingLanding = false;
+                this.scene._pendingApproachSpawn = false;
+                this.showMissionCompleteToast(completedTitle, completedReward * pointsMultiplier);
                 this.loadMissions();
             } else {
                 console.warn(`[Mission] Complete failed: HTTP ${res.status}`);
@@ -581,6 +682,7 @@ export class MissionSystem {
                     departure_icao: ami.departure_icao || activeFromList.departure_icao || '',
                     arrival_icao: ami.arrival_icao || activeFromList.arrival_icao || '',
                     mission_title: ami.title || activeFromList.mission_title || '',
+                    reward_points: Number.isFinite(Number(ami.reward_points ?? activeFromList.reward_points)) ? Number(ami.reward_points ?? activeFromList.reward_points) : null,
                 };
                 const nextUserMissionId = activeFromList.user_mission?.id ?? null;
                 const sameUserMission = nextUserMissionId != null
@@ -589,6 +691,9 @@ export class MissionSystem {
                 const previousWpIndex = Number(this.scene._missionCurrentWpIndex) || 0;
                 this.scene._activeUserMissionId = nextUserMissionId;
                 this.scene._activeMissionId = activeFromList.mission_id ?? null;
+                const reloadTrainingOrder = Number(ami.training_order ?? activeFromList.training_order);
+                this.scene._activeTrainingOrder = Number.isInteger(reloadTrainingOrder) && reloadTrainingOrder > 0 ? reloadTrainingOrder : null;
+                if (!sameUserMission) this.scene._missionAwaitingLanding = false;
                 const normalizedWaypoints = this.normalizeMissionWaypoints(ami.waypoints);
                 this.scene._missionWaypoints = normalizedWaypoints;
                 this.scene._missionCurrentWpIndex = sameUserMission
@@ -920,7 +1025,11 @@ export class MissionSystem {
         }
     }
 
-    async patchFlightPlanStatus(planId: number, status: string): Promise<void> {
+    async patchFlightPlanStatus(planId: number, status: FlightPlanStatusCode): Promise<void> {
+        if (!Number.isFinite(planId) || planId <= 0 || !isFlightPlanStatusCode(status)) {
+            console.warn(`[FlightPlan] PATCH status skipped: invalid planId=${planId} status=${status}`);
+            return;
+        }
         const token = localStorage.getItem('auth_token') || '';
         if (!token) return;
         try {

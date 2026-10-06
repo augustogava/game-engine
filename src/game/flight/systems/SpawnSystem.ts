@@ -28,6 +28,13 @@ import {
     SAVED_FLIGHT_AUTOSAVE_INTERVAL_MS,
     SAVED_FLIGHT_MIN_AGL_M,
     SAVED_FLIGHT_MAX_AGE_MS,
+    KT_TO_MS,
+    resolveFlightSchoolVappKt,
+    FLIGHT_SCHOOL_GLIDESLOPE_DEG,
+    FLIGHT_SCHOOL_APPROACH_FLAP_DEG,
+    FLIGHT_SCHOOL_APPROACH_THRUST,
+    FLIGHT_SCHOOL_APPROACH_TRIM_PITCH,
+    FLIGHT_SCHOOL_APPROACH_MIN_AGL_M,
 } from '../constants/index.js';
 
 const SAVED_FLIGHT_VERSION = 1;
@@ -257,8 +264,11 @@ export class SpawnSystem {
                 const resumeY = this._pendingResume && Number.isFinite(this.scene.refAlt)
                     ? this._pendingResume.altMslM - this.scene.refAlt
                     : Number.NaN;
-                const desiredY = Number.isFinite(resumeY) ? Math.max(minSafeY, resumeY) : minSafeY;
-                if (this.scene.planeRoot.position.y < minSafeY) {
+                const approachY = this.resolveApproachSpawnY();
+                const desiredY = approachY != null
+                    ? Math.max(this.scene.terrainY + FLIGHT_SCHOOL_APPROACH_MIN_AGL_M, approachY)
+                    : Number.isFinite(resumeY) ? Math.max(minSafeY, resumeY) : minSafeY;
+                if (approachY == null && this.scene.planeRoot.position.y < minSafeY) {
                     console.warn(`[Spawn] Clamped pos.y from ${this.scene.planeRoot.position.y.toFixed(1)}m to ${minSafeY.toFixed(1)}m (below terrain+offset)`);
                 }
                 this.scene.planeRoot.position.y = desiredY;
@@ -383,7 +393,7 @@ export class SpawnSystem {
             this.scene.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
             if (isAirborneMission) {
                 this.scene._spawnSnapFramesLeft = 0;
-                if (this.scene._gearUpAnimGroups.length > 0) {
+                if (this.scene._gearUpAnimGroups.length > 0 && this.scene._pendingApproachSpawn !== true) {
                     this.scene.gearState = GEAR_STATE_UP;
                     for (const g of this.scene._gearUpAnimGroups) g.start(false, 100.0, g.from, g.to);
                 }
@@ -400,6 +410,63 @@ export class SpawnSystem {
             this.scene.currentFlapDeg = this.scene.FLAP_STEPS[this.scene.flapIndex] || 15;
         }
 
+        if (useAirborne) this.applyApproachSpawnConfig();
         this.scene._inputSystem.applyMissionStartThrottle();
+    }
+
+    resolveApproachSpawnY(): number | null {
+        if (this.scene._pendingApproachSpawn !== true) return null;
+        const missionAltM = Number(this.scene._pendingMissionAltM);
+        const refAlt = Number(this.scene.refAlt);
+        if (!Number.isFinite(missionAltM) || !Number.isFinite(refAlt)) return null;
+        return missionAltM - refAlt;
+    }
+
+    applyApproachSpawnConfig(): void {
+        if (this.scene._pendingApproachSpawn !== true || !this.scene.planeRoot) return;
+        const vappKt = resolveFlightSchoolVappKt(this.scene.aircraftConfig?.stall_speed_kts);
+        const speedMs = vappKt * KT_TO_MS;
+
+        const approachY = this.resolveApproachSpawnY();
+        if (approachY != null) this.scene.planeRoot.position.y = approachY;
+
+        const rotMat = new BABYLON.Matrix();
+        BABYLON.Matrix.FromQuaternionToRef(this.scene.planeRoot.rotationQuaternion!, rotMat);
+        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
+        fwd.y = 0;
+        if (fwd.lengthSquared() > 0) fwd.normalize();
+        const slopeRad = FLIGHT_SCHOOL_GLIDESLOPE_DEG * Math.PI / 180;
+        this.scene.velocity = new BABYLON.Vector3(
+            fwd.x * Math.cos(slopeRad) * speedMs,
+            -Math.sin(slopeRad) * speedMs,
+            fwd.z * Math.cos(slopeRad) * speedMs,
+        );
+
+        const steps: number[] = Array.isArray(this.scene.FLAP_STEPS) ? this.scene.FLAP_STEPS : [];
+        let flapIndex = 0;
+        for (let i = 1; i < steps.length; i++) {
+            if (Math.abs(steps[i] - FLIGHT_SCHOOL_APPROACH_FLAP_DEG) < Math.abs(steps[flapIndex] - FLIGHT_SCHOOL_APPROACH_FLAP_DEG)) flapIndex = i;
+        }
+        this.scene.flapIndex = flapIndex;
+        this.scene.currentFlapDeg = steps[flapIndex] || 0;
+
+        this.scene.gearState = GEAR_STATE_DOWN;
+        this.scene._pendingAirborneGearRetract = false;
+
+        this.scene.thrust = FLIGHT_SCHOOL_APPROACH_THRUST;
+        this.scene.touchThrust = FLIGHT_SCHOOL_APPROACH_THRUST;
+        this.scene._inputSystem.refreshTouchThrottleVisual();
+        this.scene.trimPitch = FLIGHT_SCHOOL_APPROACH_TRIM_PITCH;
+
+        this.scene._autopilotMaster = false;
+        this.scene._autopilotHdgHold = false;
+        this.scene._autopilotAltHold = false;
+        this.scene._autopilotVsHold = false;
+        this.scene._autopilotNavHold = false;
+        this.scene._autopilotAprHold = false;
+        this.scene._autopilotAtHold = false;
+        this.scene._spawnSnapFramesLeft = 0;
+
+        console.debug(`[FlightSchool] Approach spawn: vapp=${vappKt.toFixed(0)}kt glideslope=${FLIGHT_SCHOOL_GLIDESLOPE_DEG}deg flaps=${this.scene.currentFlapDeg}deg thrust=${FLIGHT_SCHOOL_APPROACH_THRUST} trim=${FLIGHT_SCHOOL_APPROACH_TRIM_PITCH} posY=${this.scene.planeRoot.position.y.toFixed(1)}m gear=DOWN ap=OFF`);
     }
 }

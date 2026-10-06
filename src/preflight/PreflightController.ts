@@ -1,5 +1,6 @@
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../game/api/hudImageUrl.js';
 import { UiPreferences, UI_PREF_STORAGE_KEY, LANGUAGE_EN, LANGUAGE_PT } from '../game/UiPreferences.js';
+import { TRAINER_AIRCRAFT_CODE } from '../game/flight/constants/aircraftConstants.js';
 
 export const PREFLIGHT_AIRCRAFT_KEY = 'preflight_aircraft_id';
 export const PREFLIGHT_SPAWN_KEY = 'preflight_spawn';
@@ -641,6 +642,7 @@ export class PreflightController {
             }
             if (this.selectedAircraftId == null) {
                 const sel = this.aircraftRows.find((r) => r.is_selected === 1 && r.has_access)
+                    || this.aircraftRows.find((r) => r.has_access && String(r.aircraft?.code ?? '').toLowerCase() === TRAINER_AIRCRAFT_CODE)
                     || this.aircraftRows.find((r) => r.has_access);
                 if (sel) this.selectedAircraftId = sel.aircraft_id;
             }

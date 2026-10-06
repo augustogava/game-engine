@@ -165,6 +165,15 @@ export class MultiplayerClient {
         });
     }
 
+    sendTouchdown(fpm: number): void {
+        if (!Number.isFinite(fpm)) return;
+        if (!this.rt.connected) {
+            console.warn(`[Landing] sendTouchdown skipped: WebSocket not connected (fpm=${Math.round(fpm)})`);
+            return;
+        }
+        this.rt.send({ type: 'touchdown', fpm: Math.round(Math.abs(fpm)) });
+    }
+
     onPlayersUpdate(cb: PlayersUpdateCallback): void {
         this.onPlayersUpdateCb = cb;
     }

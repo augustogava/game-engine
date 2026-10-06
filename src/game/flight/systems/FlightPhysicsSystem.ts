@@ -119,6 +119,9 @@ const MASS_MIN_KG = 1;
 const MS_TO_FPM = 196.850394;
 const TOUCHDOWN_MIN_AIRBORNE_S = 3;
 const TOUCHDOWN_CENTERLINE_MAX_ALONG_M = 6000;
+const CRASH_RETRY_BUTTON_ID = 'crash-retry-btn';
+const CRASH_STATUS_ID = 'crash-overlay-status';
+const CRASH_RETRY_FALLBACK_DELAY_MS = 3000;
 
 export class FlightPhysicsSystem {
     private readonly scene: any;
@@ -214,6 +217,8 @@ export class FlightPhysicsSystem {
         };
         console.debug(`[Landing] Touchdown fpm=${fpm.toFixed(0)} speed=${speedKts.toFixed(0)}kt centerline=${this.scene._lastTouchdown.centerlineM == null ? 'n/a' : this.scene._lastTouchdown.centerlineM.toFixed(1) + 'm'}`);
         try { this.scene._vfxSystem?.emitTouchdownSmoke?.(fpm, speedKts); } catch (err) { console.warn('[Landing] Tire smoke failed:', err); }
+        try { this.scene.mpClient?.sendTouchdown(fpm); } catch (err) { console.warn('[Landing] sendTouchdown failed:', err); }
+        try { this.scene._missionSystem?.onTouchdown(); } catch (err) { console.warn('[FlightSchool] Touchdown evaluation failed:', err); }
         this._applyAutobrakeOnTouchdown();
     }
 
@@ -309,16 +314,57 @@ export class FlightPhysicsSystem {
             console.error('[Crash] Failed to notify server about crash:', (err as Error)?.message || err);
         }
         const RESPAWN_DELAY_MS = 3000;
-        this.scene._safeSetTimeout(() => {
-            if (!this.scene.planeRoot) return;
-            if (this.scene._crashOverlayEl) this.scene._crashOverlayEl.style.display = 'none';
-            this.scene._crashed = false;
-            this.scene._worldReady = false;
-            this.scene._worldReadyStartMs = 0;
-            this.scene._spawnSnapFramesLeft = 0;
-            console.debug('[Crash] Respawning at session origin');
-            this.scene._spawnPlane();
-        }, RESPAWN_DELAY_MS);
+        if (this.scene._missionSystem?.isTrainingLessonActive?.() === true) {
+            this._showLessonRetry();
+            return;
+        }
+        this.scene._safeSetTimeout(() => this.respawnAfterCrash(), RESPAWN_DELAY_MS);
+    }
+
+    respawnAfterCrash(): void {
+        if (!this.scene.planeRoot) return;
+        this._setLessonRetryVisible(false);
+        if (this.scene._crashOverlayEl) this.scene._crashOverlayEl.style.display = 'none';
+        this.scene._crashed = false;
+        this.scene._worldReady = false;
+        this.scene._worldReadyStartMs = 0;
+        this.scene._spawnSnapFramesLeft = 0;
+        console.debug('[Crash] Respawning at session origin');
+        this.scene._spawnPlane();
+    }
+
+    private _showLessonRetry(): void {
+        const button = document.getElementById(CRASH_RETRY_BUTTON_ID) as HTMLButtonElement | null;
+        if (!button) {
+            console.warn('[FlightSchool] Retry button missing; falling back to automatic respawn');
+            this.scene._safeSetTimeout(() => this.respawnAfterCrash(), CRASH_RETRY_FALLBACK_DELAY_MS);
+            return;
+        }
+        this._setLessonRetryVisible(true);
+        button.textContent = I18n.t('flightSchool.retry');
+        button.onclick = () => {
+            console.log('[FlightSchool] Retry requested after crash');
+            try { this.scene._missionSystem?.resetLessonProgress(); } catch (err) { console.warn('[FlightSchool] Progress reset failed:', err); }
+            this.respawnAfterCrash();
+        };
+        console.debug('[FlightSchool] Crash during lesson: waiting for retry instead of automatic respawn');
+    }
+
+    private _setLessonRetryVisible(visible: boolean): void {
+        const button = document.getElementById(CRASH_RETRY_BUTTON_ID) as HTMLButtonElement | null;
+        const status = document.getElementById(CRASH_STATUS_ID);
+        if (button) {
+            button.style.display = visible ? 'inline-block' : 'none';
+            if (!visible) button.onclick = null;
+        }
+        if (status) {
+            if (visible) {
+                if (status.dataset.defaultText == null) status.dataset.defaultText = status.textContent ?? '';
+                status.textContent = I18n.t('flightSchool.crashStatus');
+            } else if (status.dataset.defaultText != null) {
+                status.textContent = status.dataset.defaultText;
+            }
+        }
     }
 
     applySpoilers(dt: number, gearOnGround: boolean): void {

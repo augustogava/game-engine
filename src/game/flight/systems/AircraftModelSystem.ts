@@ -64,7 +64,7 @@ export class AircraftModelSystem {
             this.scene.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
             if (isAirborneMission) {
                 this.scene._spawnSnapFramesLeft = 0;
-                this.scene._pendingAirborneGearRetract = true;
+                this.scene._pendingAirborneGearRetract = this.scene._pendingApproachSpawn !== true;
                 const missionAlt = this.scene._pendingMissionAltM ?? 0;
                 console.debug(`[FlightSimple] Airborne mission spawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.scene.refAlt.toFixed(1)}m posY=${this.scene.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapDisabled pendingGearRetract terrainY=${this.scene.terrainY.toFixed(1)}m`);
             }
@@ -79,6 +79,7 @@ export class AircraftModelSystem {
             console.debug(`[FlightSimple] Initial ground spawn: snap window armed for ${SPAWN_SNAP_FRAMES} frames, gearHeight=${gearHeight.toFixed(3)}`);
         }
 
+        if (this.scene.spawnAirborne) this.scene._spawnSystem.applyApproachSpawnConfig();
         this.scene._inputSystem.applyMissionStartThrottle();
 
         this.loadAircraftModel(scene);

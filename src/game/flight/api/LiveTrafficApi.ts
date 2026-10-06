@@ -1,5 +1,5 @@
 import type { LiveTrafficFlight } from '../types/LiveTrafficFlight.js';
-import { LIVE_TRAFFIC_FETCH_TIMEOUT_MS } from '../constants/liveTrafficConstants.js';
+import { LIVE_TRAFFIC_FETCH_TIMEOUT_MS, LIVE_TRAFFIC_BOUNDS_DECIMALS } from '../constants/liveTrafficConstants.js';
 import { fetchJsonWithTimeout, FetchTimeoutError } from './fetchWithTimeout.js';
 
 export interface LiveTrafficBounds {
@@ -15,6 +15,19 @@ export interface LiveTrafficFetchOptions {
     signal?: AbortSignal;
 }
 
+export interface LiveTrafficFetchResult {
+    flights: LiveTrafficFlight[] | null;
+    status: number;
+    retryAfterMs: number | null;
+}
+
+export const LIVE_TRAFFIC_STATUS_OK = 200;
+export const LIVE_TRAFFIC_STATUS_UNAUTHORIZED = 401;
+export const LIVE_TRAFFIC_STATUS_RATE_LIMITED = 429;
+const LIVE_TRAFFIC_STATUS_NETWORK_ERROR = 0;
+const EPOCH_SECONDS_THRESHOLD = 1_000_000_000;
+const MS_PER_SECOND = 1000;
+
 function isValidBounds(b: LiveTrafficBounds): boolean {
     return Number.isFinite(b.north) && Number.isFinite(b.south)
         && Number.isFinite(b.west)  && Number.isFinite(b.east)
@@ -25,21 +38,39 @@ function isValidBounds(b: LiveTrafficBounds): boolean {
         && b.north > b.south;
 }
 
+export function parseRetryAfterMs(headers: Headers | null): number | null {
+    if (!headers) return null;
+    const reset = Number(headers.get('ratelimit-reset'));
+    if (Number.isFinite(reset) && reset > 0) {
+        if (reset > EPOCH_SECONDS_THRESHOLD) return Math.max(0, reset * MS_PER_SECOND - Date.now());
+        return reset * MS_PER_SECOND;
+    }
+    const retryAfter = headers.get('retry-after');
+    if (retryAfter) {
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds) && seconds >= 0) return seconds * MS_PER_SECOND;
+        const dateMs = Date.parse(retryAfter);
+        if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+    }
+    return null;
+}
+
 export async function fetchLiveTrafficPositions(
     bounds: LiveTrafficBounds,
     opts: LiveTrafficFetchOptions = {},
-): Promise<LiveTrafficFlight[] | null> {
+): Promise<LiveTrafficFetchResult> {
     if (!isValidBounds(bounds)) {
         console.warn('[LiveTraffic] fetchLiveTrafficPositions: invalid bounds', bounds);
-        return [];
+        return { flights: [], status: LIVE_TRAFFIC_STATUS_OK, retryAfterMs: null };
     }
     try {
         const token = localStorage.getItem('auth_token') || '';
         if (!token) {
             console.warn('[LiveTraffic] No auth token; skipping live traffic fetch');
-            return [];
+            return { flights: [], status: LIVE_TRAFFIC_STATUS_OK, retryAfterMs: null };
         }
-        const boundsStr = `${bounds.north.toFixed(3)},${bounds.south.toFixed(3)},${bounds.west.toFixed(3)},${bounds.east.toFixed(3)}`;
+        const decimals = LIVE_TRAFFIC_BOUNDS_DECIMALS;
+        const boundsStr = `${bounds.north.toFixed(decimals)},${bounds.south.toFixed(decimals)},${bounds.west.toFixed(decimals)},${bounds.east.toFixed(decimals)}`;
         const params = new URLSearchParams();
         params.set('bounds', boundsStr);
         if (opts.categories) params.set('categories', opts.categories);
@@ -53,8 +84,9 @@ export async function fetchLiveTrafficPositions(
             opts.signal,
         );
         if (!resp.ok) {
-            console.warn(`[LiveTraffic] HTTP ${resp.status} fetching positions`);
-            return null;
+            const retryAfterMs = parseRetryAfterMs(resp.headers);
+            console.warn(`[LiveTraffic] HTTP ${resp.status} fetching positions${retryAfterMs != null ? ` (retry after ${Math.round(retryAfterMs / MS_PER_SECOND)}s)` : ''}`);
+            return { flights: null, status: resp.status, retryAfterMs };
         }
         const json = resp.data;
         const data = Array.isArray(json?.data) ? json.data : [];
@@ -78,17 +110,17 @@ export async function fetchLiveTrafficPositions(
             });
         }
         console.debug(`[LiveTraffic] Fetched ${flights.length} flights (bounds=${boundsStr})`);
-        return flights;
+        return { flights, status: resp.status, retryAfterMs: null };
     } catch (err) {
         if (err instanceof FetchTimeoutError) {
             console.warn(`[LiveTraffic] ${err.message}`);
-            return null;
+            return { flights: null, status: LIVE_TRAFFIC_STATUS_NETWORK_ERROR, retryAfterMs: null };
         }
         if (err instanceof DOMException && err.name === 'AbortError') {
             console.debug('[LiveTraffic] fetchLiveTrafficPositions aborted');
-            return [];
+            return { flights: [], status: LIVE_TRAFFIC_STATUS_OK, retryAfterMs: null };
         }
         console.warn('[LiveTraffic] fetchLiveTrafficPositions failed:', err);
-        return null;
+        return { flights: null, status: LIVE_TRAFFIC_STATUS_NETWORK_ERROR, retryAfterMs: null };
     }
 }

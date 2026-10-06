@@ -91,6 +91,10 @@ export class InputSystem {
 
     applyMissionStartThrottle(): void {
         if (this.scene._activeMissionId == null) return;
+        if (this.scene._pendingApproachSpawn === true) {
+            console.debug('[Mission] Spawn throttle kept at approach power for Flight School lesson');
+            return;
+        }
         const ab = this.scene.aircraftConfig?.afterburner_thrust_mult;
         const abMax = Number.isFinite(ab) && ab > 1 ? ab : 1;
         const missionThrust = 0.9 * abMax;

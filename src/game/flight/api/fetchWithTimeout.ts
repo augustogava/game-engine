@@ -9,6 +9,7 @@ export interface JsonFetchResult {
     ok: boolean;
     status: number;
     data: any;
+    headers: Headers | null;
 }
 
 export async function fetchJsonWithTimeout(
@@ -29,9 +30,9 @@ export async function fetchJsonWithTimeout(
         : null;
     try {
         const resp = await fetch(url, { ...init, signal: controller.signal });
-        if (!resp.ok) return { ok: false, status: resp.status, data: null };
+        if (!resp.ok) return { ok: false, status: resp.status, data: null, headers: resp.headers };
         const data = await resp.json();
-        return { ok: true, status: resp.status, data };
+        return { ok: true, status: resp.status, data, headers: resp.headers };
     } catch (err) {
         if (timedOut) throw new FetchTimeoutError(url, timeoutMs);
         throw err;

@@ -1924,7 +1924,8 @@ export class HudSystem {
 <div id="crash-overlay" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(180,0,0,.35);z-index:500;pointer-events:none">
   <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
     <div style="font-family:'Orbitron',monospace;font-size:36px;color:#ff2200;letter-spacing:.3em;text-shadow:0 0 30px rgba(255,0,0,.8);animation:stallPulse 0.8s ease-in-out infinite">CRASHED</div>
-    <div style="font-family:'Inter',sans-serif;font-size:12px;color:rgba(255,255,255,.5);margin-top:12px;letter-spacing:.1em">Respawning...</div>
+    <div id="crash-overlay-status" style="font-family:'Inter',sans-serif;font-size:12px;color:rgba(255,255,255,.5);margin-top:12px;letter-spacing:.1em">Respawning...</div>
+    <button id="crash-retry-btn" type="button" style="display:none;margin-top:18px;padding:10px 26px;font-family:'Orbitron',monospace;font-size:14px;letter-spacing:.15em;color:#fff;background:rgba(0,0,0,.6);border:1px solid rgba(80,255,160,.7);border-radius:6px;cursor:pointer;pointer-events:auto"></button>
   </div>
 </div>
 

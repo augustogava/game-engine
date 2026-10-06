@@ -222,6 +222,28 @@ const PERIODIC_FLUSH_MS = 30000;
 const PERIODIC_MIN_SESSION_MIN = 0.5;
 const MISSION_WAYPOINT_REACH_NM = 2.4;
 
+// ── External API flight-log sync ─────────────────────────────────────────────
+const GAME_REQUESTED_WITH = 'SimFlightProGame';
+const EXTERNAL_API_TIMEOUT_MS = 10000;
+const LANDING_RATE_MIN_FPM = 10;
+const LANDING_RATE_MAX_FPM = 2000;
+const LANDING_TOUCHDOWN_MAX_AGE_MS = 120000;
+const LANDING_CONTACT_RESET_MS = 5000;
+const MS_PER_MINUTE = 60000;
+const HTTP_STATUS_CONFLICT = 409;
+const FLIGHT_PLAN_STATUS_PLANNED = 0;
+const FLIGHT_PLAN_STATUS_IN_PROGRESS = 1;
+const FLIGHT_PLAN_STATUS_COMPLETED = 2;
+const FLIGHT_PLAN_STATUS_CANCELLED = 3;
+const FLIGHT_SCHOOL_LANDING_COMPLETE_NM = 2.0;
+const SCENARIO_MISSION_TYPES = ['scheduled', 'challenge', 'milestone'];
+const FLIGHT_PLAN_STATUS_CODES = [
+    FLIGHT_PLAN_STATUS_PLANNED,
+    FLIGHT_PLAN_STATUS_IN_PROGRESS,
+    FLIGHT_PLAN_STATUS_COMPLETED,
+    FLIGHT_PLAN_STATUS_CANCELLED,
+];
+
 // ── WebSocket hardening ──────────────────────────────────────────────────────
 const WS_MAX_PAYLOAD_BYTES = 16 * 1024;
 const WS_JOIN_TIMEOUT_MS = 10000;
@@ -316,6 +338,7 @@ const MISSION_SELECT = `
     m.arrival_airport_id, m.arrival_runway_id,
     m.spawn_latitude, m.spawn_longitude, m.spawn_altitude_ft,
     m.distance_nm, m.estimated_duration_min, m.reward_points,
+    m.training_order, m.min_altitude_ft, m.max_altitude_ft,
     m.image_base64, m.is_active, m.is_enabled, m.sort_order,
     m.required_aircraft_id, m.required_aircraft_type,
     req_ac.code AS required_aircraft_code,
@@ -476,6 +499,8 @@ async function loadWaypointsForMissionIds(missionIds) {
 
 // ── Proxy to main API ────────────────────────────────────────────────────────
 const PROXY_FETCH_TIMEOUT_MS = 15000;
+const PROXY_FORWARDED_RESPONSE_HEADERS = ['ratelimit', 'ratelimit-limit', 'ratelimit-remaining', 'ratelimit-reset', 'ratelimit-policy', 'retry-after'];
+const HTTP_STATUS_SERVER_ERROR_MIN = 500;
 const LIVE_TRAFFIC_STALE_MS = 120000;
 const LIVE_TRAFFIC_CACHE_MAX_KEYS = 50;
 const liveTrafficCache = new Map();
@@ -500,6 +525,16 @@ function serveLiveTrafficStale(res, apiPath, cacheOpts, contextLabel) {
     return true;
 }
 
+function pickForwardedResponseHeaders(upstreamHeaders) {
+    const picked = {};
+    if (!upstreamHeaders || typeof upstreamHeaders.get !== 'function') return picked;
+    for (const name of PROXY_FORWARDED_RESPONSE_HEADERS) {
+        const value = upstreamHeaders.get(name);
+        if (typeof value === 'string' && value.length > 0) picked[name] = value;
+    }
+    return picked;
+}
+
 async function proxyToMainApi(apiPath, req, res, body, cacheOpts, transform) {
     if (!MAIN_API_URL) {
         return jsonResponse(res, 503, { error: 'Main API not configured' });
@@ -517,6 +552,7 @@ async function proxyToMainApi(apiPath, req, res, body, cacheOpts, transform) {
         const options = { method: req.method, headers, signal: controller.signal };
         if (body) options.body = JSON.stringify(body);
         const resp = await fetch(targetUrl, options);
+        const forwardedHeaders = pickForwardedResponseHeaders(resp.headers);
         const rawText = await resp.text();
         let data;
         let parsed = true;
@@ -535,11 +571,11 @@ async function proxyToMainApi(apiPath, req, res, body, cacheOpts, transform) {
                     console.warn(`[Proxy] ${req.method} ${apiPath} response transform failed:`, transformErr && transformErr.message);
                 }
             }
-            return jsonResponse(res, resp.status, data);
+            return jsonResponse(res, resp.status, data, forwardedHeaders);
         }
         console.warn(`[Proxy] ${req.method} ${apiPath} upstream status=${resp.status} parsed=${parsed} body="${rawText.slice(0, 120)}"`);
-        if (serveLiveTrafficStale(res, apiPath, cacheOpts, `upstream status=${resp.status}`)) return;
-        return jsonResponse(res, resp.status, data);
+        if (resp.status >= HTTP_STATUS_SERVER_ERROR_MIN && serveLiveTrafficStale(res, apiPath, cacheOpts, `upstream status=${resp.status}`)) return;
+        return jsonResponse(res, resp.status, data, forwardedHeaders);
     } catch (err) {
         console.error(`[Proxy] ${req.method} ${apiPath} network error host=${MAIN_API_URL} name=${err && err.name} code=${err && err.code} msg=${err && err.message}`);
         if (serveLiveTrafficStale(res, apiPath, cacheOpts, 'network error')) return;
@@ -547,6 +583,76 @@ async function proxyToMainApi(apiPath, req, res, body, cacheOpts, transform) {
     } finally {
         clearTimeout(timeout);
     }
+}
+
+function buildExternalApiHeaders(authToken) {
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+        'X-Requested-With': GAME_REQUESTED_WITH,
+    };
+}
+
+async function callExternalApi(method, apiPath, authToken, body) {
+    if (!MAIN_API_URL || !authToken) return { ok: false, status: 0, data: null };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { try { controller.abort(); } catch (_) { /* ignore */ } }, EXTERNAL_API_TIMEOUT_MS);
+    try {
+        const options = { method, headers: buildExternalApiHeaders(authToken), signal: controller.signal };
+        if (body !== undefined) options.body = JSON.stringify(body);
+        const resp = await fetch(`${MAIN_API_URL}${apiPath}`, options);
+        const text = await resp.text();
+        let data = null;
+        try { data = text.length ? JSON.parse(text) : {}; } catch (_) { data = null; }
+        if (!resp.ok) console.warn(`[ExternalApi] ${method} ${apiPath} failed: HTTP ${resp.status} body="${text.slice(0, 160)}"`);
+        return { ok: resp.ok, status: resp.status, data };
+    } catch (err) {
+        console.warn(`[ExternalApi] ${method} ${apiPath} error: ${err && err.message}`);
+        return { ok: false, status: 0, data: null };
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+function resolveLandingRateFpm(entry) {
+    const candidates = [];
+    if (Number.isFinite(entry.touchdownFpm) && entry.touchdownMs && Date.now() - entry.touchdownMs <= LANDING_TOUCHDOWN_MAX_AGE_MS) {
+        candidates.push(entry.touchdownFpm);
+    }
+    if (Number.isFinite(entry.firstContactFpm)) candidates.push(entry.firstContactFpm);
+    for (const value of candidates) {
+        const abs = Math.abs(value);
+        if (abs >= LANDING_RATE_MIN_FPM && abs <= LANDING_RATE_MAX_FPM) return -Math.round(abs * 100) / 100;
+    }
+    return null;
+}
+
+async function sendPostLandingStats(entry, userId) {
+    if (!entry || !entry.authToken) return;
+    try {
+        const result = await callExternalApi('GET', '/api/flight-stats', entry.authToken);
+        if (!result.ok || !result.data || typeof result.data !== 'object') return;
+        const rankUp = result.data.rank_up && typeof result.data.rank_up === 'object' ? result.data.rank_up : null;
+        const achievements = Array.isArray(result.data.newly_unlocked_achievements) ? result.data.newly_unlocked_achievements : [];
+        const multiplier = Number(result.data.points_multiplier);
+        if (!entry.ws || entry.ws.readyState !== 1) return;
+        entry.ws.send(JSON.stringify({
+            type: 'postLandingStats',
+            rankUp,
+            newlyUnlockedAchievements: achievements,
+            pointsMultiplier: Number.isFinite(multiplier) ? multiplier : null,
+        }));
+        console.log(`[Flight] postLandingStats sent: user=${userId} rankUp=${rankUp ? 'yes' : 'no'} achievements=${achievements.length}`);
+    } catch (err) {
+        console.warn(`[Flight] postLandingStats failed for user ${userId}:`, err && err.message);
+    }
+}
+
+function resetLandingCapture(entry) {
+    entry.touchdownFpm = null;
+    entry.touchdownMs = 0;
+    entry.firstContactFpm = null;
+    entry.firstContactMs = 0;
 }
 
 async function callExternalMissionComplete(userMissionId, authToken) {
@@ -562,25 +668,17 @@ async function callExternalMissionComplete(userMissionId, authToken) {
         console.warn(`[Mission] External /complete skipped: missing auth token (userMission=${userMissionId})`);
         return false;
     }
-    try {
-        const url = `${MAIN_API_URL}/api/user-missions/${userMissionId}/complete`;
-        const resp = await fetch(url, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`,
-            },
-        });
-        if (!resp.ok) {
-            console.warn(`[Mission] External /complete failed: HTTP ${resp.status} (userMission=${userMissionId})`);
-            return false;
-        }
-        console.log(`[Mission] External /complete OK (userMission=${userMissionId})`);
+    const result = await callExternalApi('PUT', `/api/user-missions/${userMissionId}/complete`, authToken);
+    if (result.status === HTTP_STATUS_CONFLICT) {
+        console.log(`[Mission] External /complete already completed (409) treated as success (userMission=${userMissionId})`);
         return true;
-    } catch (err) {
-        console.error(`[Mission] External /complete error (userMission=${userMissionId}):`, err.message);
+    }
+    if (!result.ok) {
+        console.warn(`[Mission] External /complete failed: HTTP ${result.status} (userMission=${userMissionId})`);
         return false;
     }
+    console.log(`[Mission] External /complete OK (userMission=${userMissionId})`);
+    return true;
 }
 
 async function callExternalFlightPlanStatus(flightPlanId, status, authToken) {
@@ -596,26 +694,17 @@ async function callExternalFlightPlanStatus(flightPlanId, status, authToken) {
         console.warn(`[FlightPlan] External status update skipped: missing auth token (flightPlan=${flightPlanId})`);
         return false;
     }
-    try {
-        const url = `${MAIN_API_URL}/api/flight-plans/${flightPlanId}/status`;
-        const resp = await fetch(url, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({ status }),
-        });
-        if (!resp.ok) {
-            console.warn(`[FlightPlan] External status update failed: HTTP ${resp.status} (flightPlan=${flightPlanId}, status=${status})`);
-            return false;
-        }
-        console.log(`[FlightPlan] External status update OK (flightPlan=${flightPlanId} -> ${status})`);
-        return true;
-    } catch (err) {
-        console.error(`[FlightPlan] External status update error (flightPlan=${flightPlanId}):`, err.message);
+    if (!FLIGHT_PLAN_STATUS_CODES.includes(status)) {
+        console.warn(`[FlightPlan] External status update skipped: invalid status=${status} (flightPlan=${flightPlanId})`);
         return false;
     }
+    const result = await callExternalApi('PATCH', `/api/flight-plans/${flightPlanId}/status`, authToken, { status });
+    if (!result.ok) {
+        console.warn(`[FlightPlan] External status update failed: HTTP ${result.status} (flightPlan=${flightPlanId}, status=${status})`);
+        return false;
+    }
+    console.log(`[FlightPlan] External status update OK (flightPlan=${flightPlanId} -> ${status})`);
+    return true;
 }
 
 // ── METAR (real weather) source + cache ──────────────────────────────────────
@@ -731,8 +820,42 @@ async function findNearestAirportWithFallback(lat, lon) {
     return airport;
 }
 
+function isTrainingMission(entry) {
+    return Number.isInteger(entry.missionTrainingOrder) && entry.missionTrainingOrder > 0;
+}
+
+function isScenarioMission(entry) {
+    return SCENARIO_MISSION_TYPES.includes(entry.missionType);
+}
+
+async function completeMissionOnLanding(userId, entry, status, arrivalAirportId, lastMsg) {
+    if (status !== 'landed' || !entry.userMissionId || entry.missionExternalCompleteSent) return;
+    if (isScenarioMission(entry)) {
+        console.log(`[Mission] Auto /complete skipped: user=${userId} userMission=${entry.userMissionId} type=${entry.missionType} is decided by the client scenario`);
+        return;
+    }
+    const hasWaypoints = Array.isArray(entry.missionWaypoints) && entry.missionWaypoints.length > 0;
+    const wpsOk = !hasWaypoints || entry.missionAllWpReached === true;
+    const requiredAirportId = entry.missionArrivalAirportId || null;
+    const airportOk = !requiredAirportId || (arrivalAirportId && Number(arrivalAirportId) === Number(requiredAirportId));
+    let lessonOk = true;
+    if (isTrainingMission(entry) && !requiredAirportId && hasWaypoints) {
+        const lastWp = entry.missionWaypoints[entry.missionWaypoints.length - 1];
+        const lat = Number(lastMsg?.lat);
+        const lon = Number(lastMsg?.lon);
+        lessonOk = Number.isFinite(lat) && Number.isFinite(lon)
+            && haversineNm(lat, lon, lastWp.lat, lastWp.lon) <= FLIGHT_SCHOOL_LANDING_COMPLETE_NM;
+    }
+    if (wpsOk && airportOk && lessonOk) {
+        entry.missionExternalCompleteSent = true;
+        await callExternalMissionComplete(entry.userMissionId, entry.authToken);
+    } else {
+        console.log(`[Mission] Auto /complete skipped: user=${userId} userMission=${entry.userMissionId} waypointsOk=${wpsOk} airportOk=${airportOk} lessonLandingOk=${lessonOk} arrivalAirportId=${arrivalAirportId} requiredAirportId=${requiredAirportId}`);
+    }
+}
+
 // ── Finalize flight log ──────────────────────────────────────────────────────
-async function finalizeFlight(userId, entry, status, lastMsg) {
+async function finalizeFlight(userId, entry, status, lastMsg, endReason) {
     if (!entry.flightLogId || !dbPool) return;
 
     const flightLogId = entry.flightLogId;
@@ -764,71 +887,100 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
 
     const maxAltFt = Math.round(entry.maxAltitudeFt * METERS_TO_FEET);
     const avgSpeedKnots = avgSpeed ? Math.round(avgSpeed * KMH_TO_KNOTS * 100) / 100 : null;
-    const landingFpm = status === 'landed' ? Math.round(entry.lastVerticalFpm * METERS_TO_FEET) : null;
+    const landingFpm = status === 'landed' ? resolveLandingRateFpm(entry) : null;
     const finalDistKm = Math.round(distKm * 100) / 100;
     const finalDistNm = Math.round(entry.flightDistanceNm * 100) / 100;
 
-    console.log(`[Flight] Finalizing: user=${userId}, log=${flightLogId}, status=${status}, elapsed=${elapsed}ms, dist=${finalDistKm}km, maxAlt=${maxAltFt}ft, avgSpd=${avgSpeedKnots}kts, routePts=${entry.routePoints.length}, startTime=${entry.flightStartTime}`);
+    console.log(`[Flight] Finalizing: user=${userId}, log=${flightLogId}, status=${status}, elapsed=${elapsed}ms, dist=${finalDistKm}km, maxAlt=${maxAltFt}ft, avgSpd=${avgSpeedKnots}kts, landingFpm=${landingFpm ?? 'omitted'}, routePts=${entry.routePoints.length}, startTime=${entry.flightStartTime}`);
 
-    try {
-        await dbPool.execute(
-            `UPDATE flight_logs SET
-                status = ?,
-                arrival_airport_id = ?,
-                arrival_time = NOW(),
-                flight_duration_min = TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60,
-                distance_km = ?,
-                distance_nm = ?,
-                max_altitude_ft = ?,
-                avg_speed_knots = ?,
-                landing_rate_fpm = ?,
-                route_data = ?
-             WHERE id = ?`,
-            [
-                status,
-                arrivalAirportId,
-                finalDistKm,
-                finalDistNm,
-                maxAltFt,
-                avgSpeedKnots,
-                landingFpm,
-                JSON.stringify(entry.routePoints),
-                flightLogId,
-            ]
-        );
-        console.log(`[Flight] ${status}: user ${userId}, log ${flightLogId}, ${finalDistNm}nm`);
-        if (entry.ws && entry.ws.readyState === 1) {
-            try {
-                entry.ws.send(JSON.stringify({
-                    type: 'flightLogEnded',
-                    flightLogId,
+    await completeMissionOnLanding(userId, entry, status, arrivalAirportId, lastMsg);
+
+    const apiBody = {
+        status,
+        flight_duration_min: Math.max(0, Math.round(elapsed / MS_PER_MINUTE)),
+        distance_km: finalDistKm,
+        distance_nm: finalDistNm,
+        max_altitude_ft: maxAltFt,
+        route_data: entry.routePoints,
+    };
+    if (avgSpeedKnots != null) apiBody.avg_speed_knots = avgSpeedKnots;
+    if (arrivalAirportId) apiBody.arrival_airport_id = arrivalAirportId;
+    if (landingFpm != null) apiBody.landing_rate_fpm = landingFpm;
+    if (status === 'cancelled' && Number.isInteger(endReason)) apiBody.end_reason = endReason;
+
+    let landingGrade = null;
+    let landingBonusCredits = null;
+    let persisted = false;
+    const apiResult = await callExternalApi('PUT', `/api/flight-logs/${flightLogId}`, entry.authToken, apiBody);
+    if (apiResult.ok) {
+        persisted = true;
+        const grade = Number(apiResult.data?.landing_grade);
+        const bonus = Number(apiResult.data?.landing_bonus_credits);
+        if (Number.isInteger(grade)) landingGrade = grade;
+        if (Number.isFinite(bonus)) landingBonusCredits = bonus;
+        console.log(`[Flight] ${status} persisted via API: user ${userId}, log ${flightLogId}, grade=${landingGrade ?? 'n/a'}, bonus=${landingBonusCredits ?? 'n/a'}`);
+        try {
+            await dbPool.execute(`UPDATE flight_logs SET arrival_time = COALESCE(arrival_time, NOW()) WHERE id = ?`, [flightLogId]);
+        } catch (err) {
+            console.warn(`[DB] arrival_time backfill failed for log ${flightLogId}:`, err.message);
+        }
+    } else {
+        console.warn(`[Flight] API flight-log update unavailable (status=${apiResult.status}); falling back to direct MySQL write for log ${flightLogId}`);
+        try {
+            await dbPool.execute(
+                `UPDATE flight_logs SET
+                    status = ?,
+                    arrival_airport_id = ?,
+                    arrival_time = NOW(),
+                    flight_duration_min = TIMESTAMPDIFF(SECOND, departure_time, NOW()) / 60,
+                    distance_km = ?,
+                    distance_nm = ?,
+                    max_altitude_ft = ?,
+                    avg_speed_knots = ?,
+                    landing_rate_fpm = ?,
+                    route_data = ?
+                 WHERE id = ?`,
+                [
                     status,
-                    distanceKm: finalDistKm,
-                    distanceNm: finalDistNm,
-                    maxAltitudeFt: maxAltFt,
-                    avgSpeedKnots,
-                    landingRateFpm: landingFpm,
                     arrivalAirportId,
-                }));
-            } catch (_) {}
-            entry.flightPlanFinalized = true;
+                    finalDistKm,
+                    finalDistNm,
+                    maxAltFt,
+                    avgSpeedKnots,
+                    landingFpm,
+                    JSON.stringify(entry.routePoints),
+                    flightLogId,
+                ]
+            );
+            persisted = true;
+            console.log(`[Flight] ${status}: user ${userId}, log ${flightLogId}, ${finalDistNm}nm (direct MySQL)`);
+        } catch (err) {
+            console.error(`[DB] Flight log finalize error (log ${flightLogId}, user ${userId}):`, err.message);
         }
-    } catch (err) {
-        console.error(`[DB] Flight log finalize error (log ${flightLogId}, user ${userId}):`, err.message);
     }
 
-    if (status === 'landed' && entry.userMissionId && !entry.missionExternalCompleteSent) {
-        const hasWaypoints = Array.isArray(entry.missionWaypoints) && entry.missionWaypoints.length > 0;
-        const wpsOk = !hasWaypoints || entry.missionAllWpReached === true;
-        const requiredAirportId = entry.missionArrivalAirportId || null;
-        const airportOk = !requiredAirportId || (arrivalAirportId && Number(arrivalAirportId) === Number(requiredAirportId));
-        if (wpsOk && airportOk) {
-            entry.missionExternalCompleteSent = true;
-            await callExternalMissionComplete(entry.userMissionId, entry.authToken);
-        } else {
-            console.log(`[Mission] Auto /complete skipped: user=${userId} userMission=${entry.userMissionId} waypointsOk=${wpsOk} airportOk=${airportOk} arrivalAirportId=${arrivalAirportId} requiredAirportId=${requiredAirportId}`);
-        }
+    if (persisted && entry.ws && entry.ws.readyState === 1) {
+        try {
+            entry.ws.send(JSON.stringify({
+                type: 'flightLogEnded',
+                flightLogId,
+                status,
+                distanceKm: finalDistKm,
+                distanceNm: finalDistNm,
+                maxAltitudeFt: maxAltFt,
+                avgSpeedKnots,
+                landingRateFpm: landingFpm,
+                arrivalAirportId,
+                landingGrade,
+                landingBonusCredits,
+            }));
+        } catch (_) {}
+        entry.flightPlanFinalized = true;
     }
+    if (persisted && apiResult.ok && status === 'landed') {
+        void sendPostLandingStats(entry, userId);
+    }
+    resetLandingCapture(entry);
 
     if (finalDistKm > 0 && (status === 'landed' || status === 'cancelled' || status === 'crashed')) {
         const flightPoints = Math.floor(finalDistKm * POINTS_PER_KM);
@@ -893,6 +1045,8 @@ async function finalizeFlight(userId, entry, status, lastMsg) {
     entry.missionId = null;
     entry.userMissionId = null;
     entry.missionArrivalAirportId = null;
+    entry.missionType = null;
+    entry.missionTrainingOrder = null;
     entry.missionWaypoints = null;
     entry.missionNextWpIndex = 0;
     entry.missionAllWpReached = false;
@@ -2378,6 +2532,8 @@ wss.on('connection', (ws) => {
                     missionId: reuseFlight ? existing.missionId : null,
                     userMissionId: reuseFlight ? existing.userMissionId : null,
                     missionArrivalAirportId: reuseFlight ? existing.missionArrivalAirportId : null,
+                    missionType: reuseFlight ? existing.missionType : null,
+                    missionTrainingOrder: reuseFlight ? existing.missionTrainingOrder : null,
                     missionWaypoints: reuseFlight ? existing.missionWaypoints : null,
                     missionNextWpIndex: reuseFlight ? existing.missionNextWpIndex : 0,
                     missionAllWpReached: reuseFlight ? existing.missionAllWpReached : false,
@@ -2389,6 +2545,10 @@ wss.on('connection', (ws) => {
                     aircraftType: reuseFlight ? existing.aircraftType : null,
                     statsRecalculated: false,
                     onGroundCount: reuseFlight ? existing.onGroundCount : 0,
+                    touchdownFpm: reuseFlight ? existing.touchdownFpm : null,
+                    touchdownMs: reuseFlight ? existing.touchdownMs : 0,
+                    firstContactFpm: reuseFlight ? existing.firstContactFpm : null,
+                    firstContactMs: reuseFlight ? existing.firstContactMs : 0,
                     lastFlightEndTime: reuseFlight ? existing.lastFlightEndTime : 0,
                     sessionDbId: undefined,
                 });
@@ -2503,7 +2663,7 @@ wss.on('connection', (ws) => {
                                     if (entry.missionNextWpIndex >= entry.missionWaypoints.length) {
                                         entry.missionAllWpReached = true;
                                         console.log(`[Mission] All waypoints reached: user=${playerId} mission=${entry.missionId} userMission=${entry.userMissionId}`);
-                                        if (!entry.missionArrivalAirportId && !entry.missionExternalCompleteSent) {
+                                        if (!entry.missionArrivalAirportId && !entry.missionExternalCompleteSent && !isTrainingMission(entry) && !isScenarioMission(entry)) {
                                             entry.missionExternalCompleteSent = true;
                                             callExternalMissionComplete(entry.userMissionId, entry.authToken)
                                                 .catch(err => console.error(`[Mission] Inflight external /complete error: ${err.message}`));
@@ -2571,10 +2731,13 @@ wss.on('connection', (ws) => {
 
                                 try {
                                     const [missionRows] = await dbPool.execute(
-                                        `SELECT arrival_airport_id FROM missions WHERE id = ?`,
+                                        `SELECT arrival_airport_id, type, training_order FROM missions WHERE id = ?`,
                                         [entry.missionId]
                                     );
                                     entry.missionArrivalAirportId = missionRows.length ? missionRows[0].arrival_airport_id : null;
+                                    entry.missionType = missionRows.length ? String(missionRows[0].type || '').toLowerCase() : null;
+                                    const trainingOrder = missionRows.length ? Number(missionRows[0].training_order) : NaN;
+                                    entry.missionTrainingOrder = Number.isInteger(trainingOrder) && trainingOrder > 0 ? trainingOrder : null;
                                     const wpsByMission = await loadWaypointsForMissionIds([entry.missionId]);
                                     const wps = wpsByMission.get(entry.missionId) || [];
                                     entry.missionWaypoints = wps
@@ -2589,7 +2752,7 @@ wss.on('connection', (ws) => {
                                     entry.missionNextWpIndex = 0;
                                     entry.missionAllWpReached = entry.missionWaypoints.length === 0;
                                     entry.missionExternalCompleteSent = false;
-                                    console.log(`[Mission] Tracking mission ${entry.missionId} for user ${playerId}: waypoints=${entry.missionWaypoints.length}, requiredArrivalAirportId=${entry.missionArrivalAirportId || 'none'}`);
+                                    console.log(`[Mission] Tracking mission ${entry.missionId} for user ${playerId}: type=${entry.missionType || 'unknown'}, trainingOrder=${entry.missionTrainingOrder ?? 'none'}, waypoints=${entry.missionWaypoints.length}, requiredArrivalAirportId=${entry.missionArrivalAirportId || 'none'}`);
                                 } catch (err) {
                                     console.error(`[Mission] Tracking setup error for user ${playerId}, mission=${entry.missionId}:`, err.message);
                                 }
@@ -2635,6 +2798,7 @@ wss.on('connection', (ws) => {
                             entry.departureAlt = alt;
                             entry.lastRouteSample = Date.now();
                             entry.statsRecalculated = false;
+                            resetLandingCapture(entry);
                             console.log(`[Flight] Departure logged for user ${playerId}, log id: ${entry.flightLogId}, aircraft: ${aircraftIdNum} (${entry.aircraftType || '?'}), mission: ${entry.missionId || 'none'}, userMission: ${entry.userMissionId || 'none'}`);
                             try {
                                 ws.send(JSON.stringify({
@@ -2684,15 +2848,40 @@ wss.on('connection', (ws) => {
 
                         const onGround = msg.onGround === true;
                         if (entry.isAirborne && onGround) {
+                            if (!entry.onGroundCount && !Number.isFinite(entry.firstContactFpm)) {
+                                const contactFpm = Number(entry.lastVerticalFpm) * METERS_TO_FEET;
+                                if (Number.isFinite(contactFpm)) {
+                                    entry.firstContactFpm = contactFpm;
+                                    entry.firstContactMs = Date.now();
+                                }
+                            }
                             entry.onGroundCount = (entry.onGroundCount || 0) + 1;
                             if (entry.onGroundCount >= 20) {
                                 await finalizeFlight(playerId, entry, 'landed', entry.state);
                             }
                         } else if (entry.isAirborne) {
                             entry.onGroundCount = 0;
+                            if (Number.isFinite(entry.firstContactFpm) && Date.now() - entry.firstContactMs > LANDING_CONTACT_RESET_MS) {
+                                entry.firstContactFpm = null;
+                                entry.firstContactMs = 0;
+                            }
                         }
                     }
                 }
+            }
+
+            if (msg.type === 'touchdown' && playerId) {
+                const entry = players.get(playerId);
+                if (!entry || !entry.flightLogId) return;
+                const fpm = Math.abs(Number(msg.fpm));
+                if (!Number.isFinite(fpm) || fpm < LANDING_RATE_MIN_FPM || fpm > LANDING_RATE_MAX_FPM) {
+                    logWsRejection(entry, playerId, 'touchdown out of range', `fpm=${msg.fpm}`);
+                    return;
+                }
+                entry.touchdownFpm = fpm;
+                entry.touchdownMs = Date.now();
+                console.debug(`[Flight] Touchdown recorded: user=${playerId} log=${entry.flightLogId} fpm=${Math.round(fpm)}`);
+                return;
             }
 
             if (msg.type === 'chat' && playerId) {
@@ -2781,7 +2970,7 @@ wss.on('connection', (ws) => {
         if (entry.flightPlanId && !entry.flightPlanFinalized) {
             entry.flightPlanFinalized = true;
             console.log(`[FlightPlan] Connection lost with active flight plan ${entry.flightPlanId} for user ${playerId}; cancelling via external API`);
-            await callExternalFlightPlanStatus(entry.flightPlanId, 'cancelled', entry.authToken);
+            await callExternalFlightPlanStatus(entry.flightPlanId, FLIGHT_PLAN_STATUS_CANCELLED, entry.authToken);
         }
 
         players.delete(playerId);

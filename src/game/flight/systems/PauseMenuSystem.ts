@@ -83,7 +83,12 @@ export class PauseMenuSystem {
                     document.getElementById(SETTINGS_TOGGLE_ID)?.click();
                     break;
                 case 'restart':
-                    this.scene._spawnPlane();
+                    if (this.scene._crashed === true && this.scene._missionSystem?.isTrainingLessonActive?.() === true) {
+                        this.scene._missionSystem.resetLessonProgress();
+                        this.scene._flightPhysicsSystem.respawnAfterCrash();
+                    } else {
+                        this.scene._spawnPlane();
+                    }
                     if (this.scene._paused) this.scene._togglePause();
                     break;
                 case 'photo':

@@ -23,3 +23,5 @@ export * from './waterConstants.js';
 export * from './windConstants.js';
 export * from './liveTrafficConstants.js';
 export * from './tutorialConstants.js';
+export * from './flightPlanConstants.js';
+export * from './flightSchoolConstants.js';

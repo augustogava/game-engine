@@ -6,7 +6,10 @@ import { fetchAircraftConfig } from '../api/AircraftConfigApi.js';
 import { MultiplayerClient, PlayerState } from '../../MultiplayerClient.js';
 import { EngineSound, ENGINE_SOUND_TYPE_TURBOFAN } from '../../EngineSound.js';
 import { AudioCore } from '../../AudioCore.js';
-import { CONTRAIL_EMIT_LERP_RATE, CONTRAIL_EMIT_RATE_MAX } from '../constants/index.js';
+import {
+    CONTRAIL_EMIT_LERP_RATE, CONTRAIL_EMIT_RATE_MAX,
+    FLIGHT_PLAN_STATUS_COMPLETED, FLIGHT_PLAN_STATUS_CANCELLED,
+} from '../constants/index.js';
 
 const REMOTE_MODEL_LOAD_TIMEOUT_MS = 12000;
 const failedRemoteModelUrls = new Set<string>();
@@ -191,9 +194,9 @@ export class MultiplayerSystem {
             if (msg.status === 'landed') {
                 const arrivedAtDest = this.scene._activeFlightPlanArrivalAirportId != null
                     && msg.arrivalAirportId === this.scene._activeFlightPlanArrivalAirportId;
-                this.scene._patchFlightPlanStatus(this.scene._activeFlightPlanId, arrivedAtDest ? 'completed' : 'cancelled');
+                this.scene._patchFlightPlanStatus(this.scene._activeFlightPlanId, arrivedAtDest ? FLIGHT_PLAN_STATUS_COMPLETED : FLIGHT_PLAN_STATUS_CANCELLED);
             } else if (msg.status === 'crashed' || msg.status === 'cancelled') {
-                this.scene._patchFlightPlanStatus(this.scene._activeFlightPlanId, 'cancelled');
+                this.scene._patchFlightPlanStatus(this.scene._activeFlightPlanId, FLIGHT_PLAN_STATUS_CANCELLED);
             }
             this.scene._activeFlightPlanId = null;
             this.scene._activeFlightPlanArrivalAirportId = null;

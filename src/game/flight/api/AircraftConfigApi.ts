@@ -1,6 +1,6 @@
 import { AircraftConfig, DEFAULT_AIRCRAFT_CONFIG } from '../types/AircraftConfig.js';
 import { PREFLIGHT_AIRCRAFT_KEY } from '../../../preflight/PreflightController.js';
-import { AIRCRAFT_CONFIG_FETCH_TIMEOUT_MS } from '../constants/aircraftConstants.js';
+import { AIRCRAFT_CONFIG_FETCH_TIMEOUT_MS, TRAINER_AIRCRAFT_CODE } from '../constants/aircraftConstants.js';
 import { fetchJsonWithTimeout } from './fetchWithTimeout.js';
 
 const CACHED_SELECTED_AIRCRAFT_KEY = 'cached_selected_aircraft_v1';
@@ -87,15 +87,18 @@ export async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
                     Number(ua?.aircraft_id ?? ua?.aircraft?.id) === preflightId && ua?.has_access === true);
             }
         }
+        const isTrainer = (ua: any): boolean => String(ua?.aircraft?.code ?? '').toLowerCase() === TRAINER_AIRCRAFT_CODE;
         if (!selected) {
             selected = list.find((ua: any) => ua.is_selected === 1 && ua?.has_access !== false)
                 || list.find((ua: any) => ua.is_selected === 1)
+                || list.find((ua: any) => ua?.has_access && ua.aircraft && isTrainer(ua))
                 || list.find((ua: any) => ua?.has_access && ua.aircraft);
         }
         if (selected?.aircraft) {
             const embedded = selected.aircraft as AircraftConfig;
             console.debug('[Aircraft] selected aircraft config:', JSON.stringify(embedded));
-            console.log(`[Aircraft] Using ${selected.is_selected === 1 ? 'SELECTED' : 'FALLBACK (first owned)'} aircraft: id=${embedded.id} code=${embedded.code} name=${embedded.name}`);
+            const selectionLabel = selected.is_selected === 1 ? 'SELECTED' : isTrainer(selected) ? 'FALLBACK (trainer)' : 'FALLBACK (first owned)';
+            console.log(`[Aircraft] Using ${selectionLabel} aircraft: id=${embedded.id} code=${embedded.code} name=${embedded.name}`);
             let cfg = embedded;
             const selectedId = Number(embedded.id);
             if (Number.isFinite(selectedId) && selectedId > 0) {
