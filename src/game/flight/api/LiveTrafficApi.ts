@@ -1,4 +1,6 @@
 import type { LiveTrafficFlight } from '../types/LiveTrafficFlight.js';
+import { LIVE_TRAFFIC_FETCH_TIMEOUT_MS } from '../constants/liveTrafficConstants.js';
+import { fetchJsonWithTimeout, FetchTimeoutError } from './fetchWithTimeout.js';
 
 export interface LiveTrafficBounds {
     north: number;
@@ -44,12 +46,17 @@ export async function fetchLiveTrafficPositions(
         if (Number.isFinite(opts.limit) && (opts.limit as number) > 0) params.set('limit', String(Math.floor(opts.limit as number)));
 
         const headers: Record<string, string> = { 'Authorization': `Bearer ${token}` };
-        const resp = await fetch(`/api/live-traffic/positions?${params.toString()}`, { headers, signal: opts.signal });
+        const resp = await fetchJsonWithTimeout(
+            `/api/live-traffic/positions?${params.toString()}`,
+            { headers },
+            LIVE_TRAFFIC_FETCH_TIMEOUT_MS,
+            opts.signal,
+        );
         if (!resp.ok) {
             console.warn(`[LiveTraffic] HTTP ${resp.status} fetching positions`);
             return null;
         }
-        const json = await resp.json();
+        const json = resp.data;
         const data = Array.isArray(json?.data) ? json.data : [];
         const flights: LiveTrafficFlight[] = [];
         for (const item of data) {
@@ -73,6 +80,10 @@ export async function fetchLiveTrafficPositions(
         console.debug(`[LiveTraffic] Fetched ${flights.length} flights (bounds=${boundsStr})`);
         return flights;
     } catch (err) {
+        if (err instanceof FetchTimeoutError) {
+            console.warn(`[LiveTraffic] ${err.message}`);
+            return null;
+        }
         if (err instanceof DOMException && err.name === 'AbortError') {
             console.debug('[LiveTraffic] fetchLiveTrafficPositions aborted');
             return [];

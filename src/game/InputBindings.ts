@@ -30,7 +30,11 @@ export type ActionId =
     | 'screenshot'
     | 'towerCamera'
     | 'replayToggle'
-    | 'autothrottleToggle';
+    | 'autothrottleToggle'
+    | 'reverseThrust'
+    | 'autobrakeCycle'
+    | 'chatOpen'
+    | 'photoMode';
 
 export type KeyBindings = Record<ActionId, string>;
 
@@ -65,6 +69,10 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
     towerCamera: 'KeyT',
     replayToggle: 'KeyV',
     autothrottleToggle: 'KeyO',
+    reverseThrust: 'KeyX',
+    autobrakeCycle: 'Digit4',
+    chatOpen: 'Enter',
+    photoMode: 'F9',
 };
 
 export const ACTION_LABELS: Record<ActionId, string> = {
@@ -98,6 +106,10 @@ export const ACTION_LABELS: Record<ActionId, string> = {
     towerCamera: 'Tower Cam',
     replayToggle: 'Replay',
     autothrottleToggle: 'Autothrottle',
+    reverseThrust: 'Reverse Thrust',
+    autobrakeCycle: 'Autobrake',
+    chatOpen: 'Chat',
+    photoMode: 'Photo Mode',
 };
 
 type Listener = (bindings: KeyBindings) => void;

@@ -76,6 +76,8 @@ export class AudioCore {
     private static _click: GainNode | null = null;
     private static _sfx: GainNode | null = null;
     private static _resumeBound = false;
+    private static _visibilityBound = false;
+    private static _suspendedByVisibility = false;
     private static _volumes: AudioVolumes = loadVolumes();
 
     public static getCtx(): AudioContext | null {
@@ -107,6 +109,7 @@ export class AudioCore {
                 ctx.resume().catch(err => console.warn('[AudioCore] Resume failed:', err));
                 this._installResumeOnGesture();
             }
+            this._installVisibilityHandler();
 
             console.log('[AudioCore] Initialized');
             return ctx;
@@ -206,6 +209,34 @@ export class AudioCore {
         }
     }
 
+    private static _installVisibilityHandler(): void {
+        if (this._visibilityBound || typeof document === 'undefined') return;
+        this._visibilityBound = true;
+        try {
+            document.addEventListener('visibilitychange', () => {
+                const ctx = this._ctx;
+                if (!ctx) return;
+                if (document.visibilityState === 'hidden') {
+                    if (ctx.state !== 'running') return;
+                    this._suspendedByVisibility = true;
+                    ctx.suspend()
+                        .then(() => console.debug('[AudioCore] Suspended while tab is hidden'))
+                        .catch(err => console.warn('[AudioCore] Suspend on hidden tab failed:', err));
+                } else if (this._suspendedByVisibility) {
+                    this._suspendedByVisibility = false;
+                    ctx.resume()
+                        .then(() => console.debug('[AudioCore] Resumed after tab became visible'))
+                        .catch((err) => {
+                            console.warn('[AudioCore] Resume after tab visible failed, waiting for user gesture:', err);
+                            this._installResumeOnGesture();
+                        });
+                }
+            });
+        } catch (err) {
+            console.warn('[AudioCore] Failed to register visibilitychange handler:', err);
+        }
+    }
+
     private static _installResumeOnGesture(): void {
         if (this._resumeBound) return;
         this._resumeBound = true;
@@ -225,6 +256,7 @@ export class AudioCore {
                 for (const ev of events) {
                     try { document.removeEventListener(ev, listener, true); } catch (_) { /* ignore */ }
                 }
+                this._resumeBound = false;
             }
         };
         for (const ev of events) {

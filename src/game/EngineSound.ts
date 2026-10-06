@@ -7,6 +7,7 @@ export const ENGINE_SOUND_TYPE_TURBOFAN  = 3;
 export const ENGINE_SOUND_TYPE_ELECTRIC  = 4;
 
 const ENGINE_GAIN_SMOOTHING = 0.08;
+const ENGINE_SILENCE_TIME_CONSTANT_S = 0.05;
 const ENGINE_FREQ_SMOOTHING = 0.06;
 const ENGINE_NOISE_BUFFER_SECONDS = 2;
 
@@ -433,6 +434,17 @@ export class EngineSound {
         this._fadeActive = true;
         this._fadeStartMs = performance.now();
         this._fadeDurationMs = Math.max(1, durationMs);
+    }
+
+    public silence(): void {
+        if (!this._output || !this._ctx) return;
+        try {
+            const t = this._ctx.currentTime;
+            this._output.gain.cancelScheduledValues(t);
+            this._output.gain.setTargetAtTime(0, t, ENGINE_SILENCE_TIME_CONSTANT_S);
+        } catch (err) {
+            console.warn('[EngineSound] silence failed:', err);
+        }
     }
 
     public setPosition(x: number, y: number, z: number): void {

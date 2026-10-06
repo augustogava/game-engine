@@ -1,5 +1,7 @@
 import { AircraftConfig, DEFAULT_AIRCRAFT_CONFIG } from '../types/AircraftConfig.js';
 import { PREFLIGHT_AIRCRAFT_KEY } from '../../../preflight/PreflightController.js';
+import { AIRCRAFT_CONFIG_FETCH_TIMEOUT_MS } from '../constants/aircraftConstants.js';
+import { fetchJsonWithTimeout } from './fetchWithTimeout.js';
 
 const CACHED_SELECTED_AIRCRAFT_KEY = 'cached_selected_aircraft_v1';
 
@@ -47,9 +49,10 @@ export async function fetchAircraftConfig(aircraftId: number): Promise<AircraftC
         const token = localStorage.getItem('auth_token') || '';
         const headers: Record<string, string> = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const resp = await fetch(`/api/aircrafts/${aircraftId}`, { headers });
+        const resp = await fetchJsonWithTimeout(`/api/aircrafts/${aircraftId}`, { headers }, AIRCRAFT_CONFIG_FETCH_TIMEOUT_MS);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
+        const data = resp.data;
+        if (!data || typeof data !== 'object') throw new Error('Empty aircraft config response');
         console.debug('[Aircraft] fetchAircraftConfig raw response:', JSON.stringify(data));
         if (typeof data.flap_steps_json === 'string') {
             data.flap_steps_json = JSON.parse(data.flap_steps_json);
@@ -70,11 +73,11 @@ export async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
             return DEFAULT_AIRCRAFT_CONFIG;
         }
         const headers: Record<string, string> = { 'Authorization': `Bearer ${token}` };
-        const resp = await fetch('/api/user-aircrafts', { headers });
+        const resp = await fetchJsonWithTimeout('/api/user-aircrafts', { headers }, AIRCRAFT_CONFIG_FETCH_TIMEOUT_MS);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
+        const data = resp.data;
         console.debug('[Aircraft] fetchSelectedAircraftConfig raw response:', JSON.stringify(data));
-        const list: any[] = Array.isArray(data.data) ? data.data : [];
+        const list: any[] = Array.isArray(data?.data) ? data.data : [];
         let selected: any = null;
         const preflightIdRaw = localStorage.getItem(PREFLIGHT_AIRCRAFT_KEY);
         if (preflightIdRaw) {

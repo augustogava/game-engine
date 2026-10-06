@@ -37,6 +37,12 @@ export class GamepadInput {
         return sign * Math.max(0, Math.min(1, scaled));
     }
 
+    private _applyIdleDeadzone(v01: number, dz: number): number {
+        if (!Number.isFinite(v01)) return 0;
+        if (v01 <= dz) return 0;
+        return Math.max(0, Math.min(1, (v01 - dz) / Math.max(0.0001, 1 - dz)));
+    }
+
     private _applyExpo(v: number, expo: number): number {
         if (!Number.isFinite(v)) return 0;
         const e = Math.max(1, expo);
@@ -78,7 +84,7 @@ export class GamepadInput {
             const rudder = this._applyExpo(this._applyDeadzone(axes[prefs.gpAxisRudder] ?? 0, deadzone), expo) * sensitivity * (prefs.gpInvertRudder ? -1 : 1);
             let thrRaw = axes[prefs.gpAxisThrottle] ?? 0;
             if (prefs.gpThrottleInverted) thrRaw = -thrRaw;
-            const throttle = Math.max(0, Math.min(1, (thrRaw + 1) * 0.5));
+            const throttle = this._applyIdleDeadzone(Math.max(0, Math.min(1, (thrRaw + 1) * 0.5)), deadzone);
             return {
                 aileron: Math.max(-1, Math.min(1, aileron)),
                 elevator: Math.max(-1, Math.min(1, elevator)),

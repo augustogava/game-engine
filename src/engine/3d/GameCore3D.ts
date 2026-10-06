@@ -17,7 +17,11 @@ import { Scene3D } from './Scene3D.js';
 export interface GameCore3DConfig {
     canvas: HTMLCanvasElement;
     antialias?: boolean;
+    powerPreference?: WebGLPowerPreference;
+    useFloatingOrigin?: boolean;
 }
+
+export const PERF_BENCHMARK_EVENT = 'perf-benchmark-complete';
 
 const PERF_BENCHMARK_DURATION_MS = 5000;
 const PERF_BENCHMARK_WARMUP_MS = 1500;
@@ -34,6 +38,7 @@ export class GameCore3D {
     private _lastTime: number = 0;
     private _renderPaused: boolean = false;
     private _visibilityHandler: (() => void) | null = null;
+    private _viewportResizeHandler: (() => void) | null = null;
     private _contextLostHandler: ((e: Event) => void) | null = null;
     private _contextRestoredHandler: (() => void) | null = null;
     private _canvasEl: HTMLCanvasElement | null = null;
@@ -41,6 +46,7 @@ export class GameCore3D {
     private _perfSamples: number[] = [];
     private _perfBenchmarkDone: boolean = false;
     private _skipPerfBenchmark: boolean = false;
+    private readonly _useFloatingOrigin: boolean;
 
     // Public stats
     fps: number = 0;
@@ -54,11 +60,14 @@ export class GameCore3D {
             console.debug('[GameCore3D] Chrome mobile: skipping FPS benchmark');
         }
         const antialias = config.antialias ?? true;
+        this._useFloatingOrigin = config.useFloatingOrigin === true;
 
         this.engine = new BABYLON.Engine(config.canvas, antialias, {
             preserveDrawingBuffer: !isMobile,
             stencil: true,
             disableWebGL2Support: false,
+            powerPreference: config.powerPreference ?? 'default',
+            useHighPrecisionMatrix: this._useFloatingOrigin,
         });
 
         if (isMobile) {
@@ -70,6 +79,7 @@ export class GameCore3D {
         this.input = new InputManager(config.canvas);
 
         const onViewportResize = () => { try { this.engine.resize(); } catch (err) { console.warn('[GameCore3D] Engine resize failed:', err); } };
+        this._viewportResizeHandler = onViewportResize;
         window.addEventListener('resize', onViewportResize);
         // iOS Safari toolbar/keyboard changes only fire visualViewport resize, not window resize.
         window.addEventListener('orientationchange', onViewportResize);
@@ -99,8 +109,9 @@ export class GameCore3D {
             this._babylonScene.dispose();
         }
 
-        const babylonScene = new BABYLON.Scene(this.engine);
+        const babylonScene = new BABYLON.Scene(this.engine, this._useFloatingOrigin ? { useFloatingOrigin: true } : undefined);
         this._babylonScene = babylonScene;
+        if (this._useFloatingOrigin) console.debug('[GameCore3D] Scene created with floating origin + high precision matrices');
         this._scene3D = scene;
 
         // Fire onCreate
@@ -141,6 +152,14 @@ export class GameCore3D {
         });
     }
 
+    restartPerfBenchmark(reason: string): void {
+        if (this._skipPerfBenchmark) return;
+        this._perfStartedAt = performance.now();
+        this._perfSamples = [];
+        this._perfBenchmarkDone = false;
+        console.debug(`[Perf] Benchmark restarted (${reason})`);
+    }
+
     private _finishPerfBenchmark(): void {
         this._perfBenchmarkDone = true;
         if (this._perfSamples.length === 0) return;
@@ -155,6 +174,11 @@ export class GameCore3D {
             localStorage.setItem(PERF_DETECTED_PRESET_KEY, JSON.stringify({ preset, medianFps: median, samples: this._perfSamples.length, ts: Date.now() }));
         } catch (err) {
             console.warn('[Perf] Failed to persist detected preset:', err);
+        }
+        try {
+            window.dispatchEvent(new CustomEvent(PERF_BENCHMARK_EVENT, { detail: { preset, medianFps: median } }));
+        } catch (err) {
+            console.warn('[Perf] Failed to dispatch benchmark event:', err);
         }
     }
 
@@ -184,6 +208,14 @@ export class GameCore3D {
             try { document.removeEventListener('visibilitychange', this._visibilityHandler); } catch (_) { /* ignore */ }
             this._visibilityHandler = null;
         }
+        if (this._viewportResizeHandler) {
+            const handler = this._viewportResizeHandler;
+            try { window.removeEventListener('resize', handler); } catch (_) { /* ignore */ }
+            try { window.removeEventListener('orientationchange', handler); } catch (_) { /* ignore */ }
+            try { window.visualViewport?.removeEventListener('resize', handler); } catch (_) { /* ignore */ }
+            this._viewportResizeHandler = null;
+        }
+        try { this.input.destroy(); } catch (err) { console.warn('[GameCore3D] InputManager destroy failed:', err); }
         if (this._canvasEl) {
             if (this._contextLostHandler) {
                 try { this._canvasEl.removeEventListener('webglcontextlost', this._contextLostHandler); } catch (_) { /* ignore */ }

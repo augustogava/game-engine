@@ -21,6 +21,8 @@ const {
     TERRAIN_UNKNOWN_Y,
     TERRAIN_HIT_ABOVE_LIMIT_M,
     TERRAIN_GRACE_SUBSTEPS,
+    TERRAIN_UNKNOWN_FALLBACK_MAX_AGL_M,
+    TERRAIN_UNKNOWN_FALLBACK_MAX_DIST_M,
     TERRAIN_TUNNEL_STREAK_REQUIRED,
     GROUND_TERRAIN_SMOOTH_SNAP_DELTA_M,
     GROUND_TERRAIN_SMOOTH_TAU_S,
@@ -80,6 +82,19 @@ const {
     CRASH_VS_THRESHOLD_MS,
     CRASH_GROUND_SPEED_MS,
     CRASH_GROUND_ATTITUDE_DEG,
+    CRASH_REASON_GEAR_UP_LANDING,
+    REVERSE_THRUST_FRACTION,
+    AUTOBRAKE_OFF,
+    AUTOBRAKE_LO,
+    AUTOBRAKE_MAX,
+    AUTOBRAKE_RTO,
+    AUTOBRAKE_LEVEL_COUNT,
+    AUTOBRAKE_FRICTION_FACTORS,
+    AUTOBRAKE_LABELS,
+    AUTOBRAKE_RTO_MIN_SPEED_KT,
+    AUTOBRAKE_RTO_IDLE_THRUST,
+    AUTOBRAKE_STOP_SPEED_KT,
+    AUTOBRAKE_DISARM_THRUST,
     GROUND_LATERAL_GRIP_PER_S,
     GROUND_WIND_AERO_FADE_MS,
     CINEMATIC_DURATION_MS,
@@ -96,8 +111,10 @@ const {
     CAMERA_MODE_CHASE,
 } = CONST as any;
 import { UiPreferences } from '../../UiPreferences.js';
+import { I18n } from '../../I18n.js';
 
 const INERTIA_MIN_KGM2 = 1e-3;
+const AUTOBRAKE_TOAST_MS = 2500;
 const MASS_MIN_KG = 1;
 const MS_TO_FPM = 196.850394;
 const TOUCHDOWN_MIN_AIRBORNE_S = 3;
@@ -118,9 +135,55 @@ export class FlightPhysicsSystem {
     private readonly _tmpScaled = new BABYLON.Vector3();
     private readonly _tmpOmegaQuat = new BABYLON.Quaternion();
     private readonly _tmpQDot = new BABYLON.Quaternion();
+    private readonly _f1 = { force: new BABYLON.Vector3(), torque: new BABYLON.Vector3() };
+    private readonly _f2 = { force: new BABYLON.Vector3(), torque: new BABYLON.Vector3() };
+    private readonly _tmpGearForce = new BABYLON.Vector3();
+    private readonly _tmpGearTorque = new BABYLON.Vector3();
+    private readonly _tmpGearBodyPos = new BABYLON.Vector3();
+    private readonly _tmpGearWorldOffset = new BABYLON.Vector3();
+    private readonly _tmpGearBodyVel = new BABYLON.Vector3();
+    private readonly _tmpGearWorldVel = new BABYLON.Vector3();
+    private readonly _tmpGearSpringBody = new BABYLON.Vector3();
+    private readonly _tmpCross = new BABYLON.Vector3();
+    private readonly _tmpLocal = new BABYLON.Vector3();
+    private readonly _tmpWorld = new BABYLON.Vector3();
+    private readonly _tmpAeroWind = new BABYLON.Vector3();
+    private readonly _tmpAirVelWorld = new BABYLON.Vector3();
+    private readonly _tmpBodyVel = new BABYLON.Vector3();
+    private readonly _tmpAirDir = new BABYLON.Vector3();
+    private readonly _tmpDragDir = new BABYLON.Vector3();
+    private readonly _tmpLiftPenalty = new BABYLON.Vector3();
+    private readonly _tmpBodyRight = new BABYLON.Vector3();
+    private readonly _tmpBodyFwd = new BABYLON.Vector3();
+    private readonly _tmpCorrectionQ = new BABYLON.Quaternion();
+    private readonly _axisX = new BABYLON.Vector3(1, 0, 0);
+    private readonly _axisY = new BABYLON.Vector3(0, 1, 0);
+    private readonly _axisZ = new BABYLON.Vector3(0, 0, 1);
+    private _lastValidTerrainPosX = 0;
+    private _lastValidTerrainPosZ = 0;
+    private _unknownTerrainFallbackActive = false;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    private _resolvePhysicsGroundLevel(pos: BABYLON.Vector3): number {
+        const terrainY = this.scene.terrainY;
+        if (terrainY !== TERRAIN_UNKNOWN_Y) {
+            this._unknownTerrainFallbackActive = false;
+            return terrainY;
+        }
+        const lastValidY = Number(this.scene._lastValidTerrainY);
+        if (!Number.isFinite(lastValidY) || lastValidY === TERRAIN_UNKNOWN_Y) return terrainY;
+        if (pos.y - lastValidY > TERRAIN_UNKNOWN_FALLBACK_MAX_AGL_M) return terrainY;
+        const dx = pos.x - this._lastValidTerrainPosX;
+        const dz = pos.z - this._lastValidTerrainPosZ;
+        if (dx * dx + dz * dz > TERRAIN_UNKNOWN_FALLBACK_MAX_DIST_M * TERRAIN_UNKNOWN_FALLBACK_MAX_DIST_M) return terrainY;
+        if (!this._unknownTerrainFallbackActive) {
+            this._unknownTerrainFallbackActive = true;
+            console.debug(`[Terrain] Ray miss near ground: holding last valid terrainY=${lastValidY.toFixed(1)}m at pos.y=${pos.y.toFixed(1)}m`);
+        }
+        return lastValidY;
     }
 
     private _airborneTimeS = 0;
@@ -150,6 +213,53 @@ export class FlightPhysicsSystem {
             timeMs: performance.now(),
         };
         console.debug(`[Landing] Touchdown fpm=${fpm.toFixed(0)} speed=${speedKts.toFixed(0)}kt centerline=${this.scene._lastTouchdown.centerlineM == null ? 'n/a' : this.scene._lastTouchdown.centerlineM.toFixed(1) + 'm'}`);
+        try { this.scene._vfxSystem?.emitTouchdownSmoke?.(fpm, speedKts); } catch (err) { console.warn('[Landing] Tire smoke failed:', err); }
+        this._applyAutobrakeOnTouchdown();
+    }
+
+    cycleAutobrake(): void {
+        const current = Number(this.scene._autobrakeLevel) || AUTOBRAKE_OFF;
+        const next = (current + 1) % AUTOBRAKE_LEVEL_COUNT;
+        this.scene._autobrakeLevel = next;
+        this.scene._autobrakeActive = false;
+        const label = AUTOBRAKE_LABELS[next] ?? String(next);
+        console.debug(`[Autobrake] Level set to ${label}`);
+        try { this.scene._showToast(I18n.format('autobrake.set', { level: label }), AUTOBRAKE_TOAST_MS); } catch (_) { /* ignore */ }
+    }
+
+    private _applyAutobrakeOnTouchdown(): void {
+        const level = Number(this.scene._autobrakeLevel) || AUTOBRAKE_OFF;
+        if (level < AUTOBRAKE_LO || level > AUTOBRAKE_MAX) return;
+        this.scene._autobrakeActive = true;
+        console.debug(`[Autobrake] Engaged on touchdown (${AUTOBRAKE_LABELS[level]})`);
+    }
+
+    private _updateAutobrakeOnGround(groundSpeedMs: number): void {
+        const level = Number(this.scene._autobrakeLevel) || AUTOBRAKE_OFF;
+        const groundSpeedKt = groundSpeedMs * MS_TO_KT;
+        const thrust = Number(this.scene.thrust) || 0;
+        if (this.scene._autobrakeActive) {
+            if (groundSpeedKt < AUTOBRAKE_STOP_SPEED_KT) {
+                this.scene._autobrakeActive = false;
+                this.scene._autobrakeLevel = AUTOBRAKE_OFF;
+                console.debug('[Autobrake] Disarmed: aircraft stopped');
+            } else if (thrust > AUTOBRAKE_DISARM_THRUST && this.scene._reverseThrustActive !== true) {
+                this.scene._autobrakeActive = false;
+                console.debug(`[Autobrake] Disarmed: thrust applied (${thrust.toFixed(2)})`);
+            }
+            return;
+        }
+        if (level === AUTOBRAKE_RTO && groundSpeedKt >= AUTOBRAKE_RTO_MIN_SPEED_KT && thrust <= AUTOBRAKE_RTO_IDLE_THRUST) {
+            this.scene._autobrakeActive = true;
+            console.debug(`[Autobrake] RTO engaged at ${groundSpeedKt.toFixed(0)}kt`);
+            try { this.scene._showToast(I18n.t('autobrake.rtoEngaged'), AUTOBRAKE_TOAST_MS); } catch (_) { /* ignore */ }
+        }
+    }
+
+    private _autobrakeFrictionFactor(): number {
+        if (this.scene._autobrakeActive !== true) return 0;
+        const level = Number(this.scene._autobrakeLevel) || AUTOBRAKE_OFF;
+        return AUTOBRAKE_FRICTION_FACTORS[level] ?? 0;
     }
 
     /** Signed lateral distance (m) from the destination runway centerline, or null when no runway heading is known. */
@@ -377,6 +487,8 @@ export class FlightPhysicsSystem {
                 }
                 this.scene._lastKnownSpawnTerrainY = resolvedTerrainY;
                 this.scene._lastValidTerrainY = this.scene.terrainY;
+                this._lastValidTerrainPosX = pos.x;
+                this._lastValidTerrainPosZ = pos.z;
                 this.scene._terrainGraceFramesLeft = TERRAIN_GRACE_SUBSTEPS;
             } else if (inSpawnWindow && this.scene._lastKnownSpawnTerrainY !== TERRAIN_UNKNOWN_Y) {
                 this.scene.terrainY = this.scene._lastKnownSpawnTerrainY;
@@ -562,8 +674,14 @@ export class FlightPhysicsSystem {
         let spoolSum = 0;
         for (let e = 0; e < engineCountTotal; e++) spoolSum += this.scene._engineSpool[e];
         const aliveThrustRatio = engineCountTotal > 0 ? spoolSum / engineCountTotal : 0;
+        const supportsReverse = cfg.engine_type !== ENGINE_TYPE_PISTON && cfg.engine_type !== ENGINE_TYPE_ELECTRIC;
+        const reverseActive = this.scene._reverseThrustRequested === true && this.scene.isOnGround === true && supportsReverse;
+        if (reverseActive !== (this.scene._reverseThrustActive === true)) {
+            this.scene._reverseThrustActive = reverseActive;
+            console.debug(`[Thrust] Reverse thrust ${reverseActive ? 'deployed' : 'stowed'}`);
+        }
         const thrustVec = this.scene._tmpFwd;
-        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * aliveThrustRatio);
+        thrustVec.set(0, 0, effectiveThrust * cfg.max_thrust_n * aliveThrustRatio * (reverseActive ? -REVERSE_THRUST_FRACTION : 1));
 
         let asymYawTorqueBody = 0;
         {
@@ -583,7 +701,7 @@ export class FlightPhysicsSystem {
         }
 
         // ── Ground effect ────────────────────────────────────────────────────
-        const groundLevel = this.scene.tiles ? this.scene.terrainY : GROUND_Y;
+        const groundLevel = this.scene.tiles ? this._resolvePhysicsGroundLevel(pos) : GROUND_Y;
         const agl = Math.max(0.1, pos.y - groundLevel);
         const hb = agl / Math.max(1, this.scene.wingSpan);
         const hb15 = Math.pow(hb, 1.5);
@@ -598,28 +716,32 @@ export class FlightPhysicsSystem {
         }
 
         // ── Gear oleo forces (position-dependent, computed once per substep) ─
-        const gearForce  = BABYLON.Vector3.Zero();
-        const gearTorque = BABYLON.Vector3.Zero();
+        const gearForce  = this._tmpGearForce.setAll(0);
+        const gearTorque = this._tmpGearTorque.setAll(0);
         let anyGearOnGround = false;
         if (gearDeployed) {
             for (let gi = 0; gi < cfg.gear_positions.length; gi++) {
                 const gp = cfg.gear_positions[gi];
-                const bodyPos = new BABYLON.Vector3(gp.x, gp.y, gp.z);
-                const worldOffset = toWorld(bodyPos);
-                const wheelY = pos.y + worldOffset.y;
+                const bodyPos = this._tmpGearBodyPos.set(gp.x, gp.y, gp.z);
+                BABYLON.Vector3.TransformNormalToRef(bodyPos, rotMatrix, this._tmpGearWorldOffset);
+                const wheelY = pos.y + this._tmpGearWorldOffset.y;
                 const compression = Math.max(0, groundLevel - wheelY);
                 this.scene.gearCompression[gi] = compression;
 
                 if (compression > 0) {
                     anyGearOnGround = true;
-                    const gearBodyVel = toBody(this.scene.velocity).add(
-                        BABYLON.Vector3.Cross(this.scene.angularVelocity, bodyPos),
-                    );
-                    const gearWorldVelY = toWorld(gearBodyVel).y;
+                    BABYLON.Vector3.TransformNormalToRef(this.scene.velocity, invRotMatrix, this._tmpGearBodyVel);
+                    BABYLON.Vector3.CrossToRef(this.scene.angularVelocity, bodyPos, this._tmpCross);
+                    this._tmpGearBodyVel.addInPlace(this._tmpCross);
+                    BABYLON.Vector3.TransformNormalToRef(this._tmpGearBodyVel, rotMatrix, this._tmpGearWorldVel);
+                    const gearWorldVelY = this._tmpGearWorldVel.y;
                     const compressionRate = -gearWorldVelY;
                     const springF = Math.max(0, cfg.gear_spring_k * compression + cfg.gear_damping_c * compressionRate);
                     gearForce.y += springF;
-                    gearTorque.addInPlace(BABYLON.Vector3.Cross(bodyPos, toBody(new BABYLON.Vector3(0, springF, 0))));
+                    this._tmpLocal.set(0, springF, 0);
+                    BABYLON.Vector3.TransformNormalToRef(this._tmpLocal, invRotMatrix, this._tmpGearSpringBody);
+                    BABYLON.Vector3.CrossToRef(bodyPos, this._tmpGearSpringBody, this._tmpCross);
+                    gearTorque.addInPlace(this._tmpCross);
                 }
             }
         } else {
@@ -634,19 +756,28 @@ export class FlightPhysicsSystem {
             ? Math.max(0, Math.min(1, this.scene.groundSpeed / GROUND_WIND_AERO_FADE_MS))
             : 1;
         const aeroWindWorld = groundAeroWindScale < 1
-            ? windWorld.scale(groundAeroWindScale)
+            ? windWorld.scaleToRef(groundAeroWindScale, this._tmpAeroWind)
             : windWorld;
 
-        const computeForces = (vel: BABYLON.Vector3, angVel: BABYLON.Vector3) => {
-            const totalForce  = BABYLON.Vector3.Zero();
-            const totalTorque = BABYLON.Vector3.Zero();
+        const addWorldFromBody = (bodyVec: BABYLON.Vector3, target: BABYLON.Vector3): void => {
+            BABYLON.Vector3.TransformNormalToRef(bodyVec, rotMatrix, this._tmpWorld);
+            target.addInPlace(this._tmpWorld);
+        };
+
+        const computeForces = (
+            vel: BABYLON.Vector3,
+            angVel: BABYLON.Vector3,
+            out: { force: BABYLON.Vector3; torque: BABYLON.Vector3 },
+        ) => {
+            const totalForce  = out.force.setAll(0);
+            const totalTorque = out.torque.setAll(0);
 
             totalForce.y -= MASS * G_ACCEL;
 
-            totalForce.addInPlace(toWorld(thrustVec));
+            addWorldFromBody(thrustVec, totalForce);
 
-            const airVelWorld = vel.subtract(aeroWindWorld);
-            const bodyVel = toBody(airVelWorld);
+            const airVelWorld = vel.subtractToRef(aeroWindWorld, this._tmpAirVelWorld);
+            const bodyVel = BABYLON.Vector3.TransformNormalToRef(airVelWorld, invRotMatrix, this._tmpBodyVel);
             let primaryAlpha = 0;
             for (let si = 0; si < this.scene.surfaces.length; si++) {
                 const surface = this.scene.surfaces[si];
@@ -660,14 +791,14 @@ export class FlightPhysicsSystem {
                 );
                 if ((si === 0 || si === 1) && this.scene._spoilerDeflection > 0) {
                     const liftLoss = Math.max(0, Math.min(1, (cfg.spoiler_lift_loss ?? SPOILER_DEFAULT_LIFT_LOSS) * this.scene._spoilerDeflection));
-                    const liftPenalty = liftVec.scale(-liftLoss);
+                    const liftPenalty = liftVec.scaleToRef(-liftLoss, this._tmpLiftPenalty);
                     force.addInPlace(liftPenalty);
-                    torque.addInPlace(BABYLON.Vector3.Cross(surface.position, liftPenalty));
+                    torque.addInPlace(BABYLON.Vector3.CrossToRef(surface.position, liftPenalty, this._tmpCross));
                 }
-                totalForce.addInPlace(toWorld(force));
+                addWorldFromBody(force, totalForce);
                 totalTorque.addInPlace(torque);
                 if (si === 0 && pointVel.lengthSquared() > 1.0) {
-                    const dragDirP = pointVel.normalizeToNew().scaleInPlace(-1);
+                    const dragDirP = pointVel.normalizeToRef(this._tmpDragDir).scaleInPlace(-1);
                     const dotP = Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(dragDirP, surface.normal)));
                     primaryAlpha = Math.asin(dotP);
                 }
@@ -698,29 +829,30 @@ export class FlightPhysicsSystem {
                 const transFactor = cfg.transonic_cd0_factor ?? 1.0;
                 const effectiveCd0 = baseCd0 * (machExcess > 0 ? transFactor : 1.0);
                 const qBody = 0.5 * airDensity * spd * spd * effectiveCd0 * cfg.fuselage_ref_area * machDragMult;
-                totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-qBody));
+                const airDir = airVelWorld.normalizeToRef(this._tmpAirDir);
+                totalForce.addInPlace(airDir.scaleToRef(-qBody, this._tmpWorld));
 
                 const wingAreaTotal = (cfg.surfaces[0]?.area ?? 0) + (cfg.surfaces[1]?.area ?? 0);
                 if (this.scene._spoilerDeflection > 0) {
                     const spoilerCd = (cfg.spoiler_drag_cd ?? SPOILER_DEFAULT_DRAG_CD) * this.scene._spoilerDeflection;
                     const spoilerRefArea = wingAreaTotal > 0 ? wingAreaTotal : cfg.fuselage_ref_area;
                     const qSpoiler = 0.5 * airDensity * spd * spd * spoilerCd * spoilerRefArea * machDragMult;
-                    totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-qSpoiler));
+                    totalForce.addInPlace(airDir.scaleToRef(-qSpoiler, this._tmpWorld));
                 }
 
                 if (machExcess > 0) {
                     if (wingAreaTotal > 0) {
                         const wingWaveDrag = 0.5 * airDensity * spd * spd * cfg.skin_friction * wingAreaTotal * (machDragMult - 1.0);
-                        totalForce.addInPlace(airVelWorld.normalizeToNew().scaleInPlace(-wingWaveDrag));
+                        totalForce.addInPlace(airDir.scaleToRef(-wingWaveDrag, this._tmpWorld));
                     }
                 }
 
                 // Fuselage sideslip Cy/Cn (air-relative)
-                const bodyVelNow = toBody(airVelWorld);
+                const bodyVelNow = bodyVel;
                 const beta = Math.atan2(bodyVelNow.x, Math.max(1, Math.abs(bodyVelNow.z)));
                 const qSide = 0.5 * airDensity * spd * spd * cfg.fuselage_side_area;
                 const sideForce = -beta * qSide * 0.4;
-                totalForce.addInPlace(toWorld(new BABYLON.Vector3(sideForce, 0, 0)));
+                addWorldFromBody(this._tmpLocal.set(sideForce, 0, 0), totalForce);
                 totalTorque.y += cfg.fuselage_cn_beta * beta * qSide * 5.0;
 
                 const halfSpanYawDamp = (this.scene.wingSpan || 16) * 0.5;
@@ -738,7 +870,7 @@ export class FlightPhysicsSystem {
                     if (Math.abs(vy) >= 1.0) {
                         const verticalDragMag = 0.5 * airDensity * vy * vy * cdVert * planformArea * machDragMult;
                         const verticalForceBodyY = -Math.sign(vy) * verticalDragMag;
-                        totalForce.addInPlace(toWorld(new BABYLON.Vector3(0, verticalForceBodyY, 0)));
+                        addWorldFromBody(this._tmpLocal.set(0, verticalForceBodyY, 0), totalForce);
                     }
                 }
             }
@@ -747,7 +879,7 @@ export class FlightPhysicsSystem {
             const propDirCommon = (_propRotRaw === 0 || _propRotRaw === 'cw') ? 1 : -1;
 
             if (hasProp && effectiveThrust > 0) {
-                const bodyVelNow = toBody(airVelWorld);
+                const bodyVelNow = bodyVel;
                 const alphaBody = Math.atan2(-bodyVelNow.y, Math.max(1, Math.abs(bodyVelNow.z)));
                 totalTorque.y += effectiveThrust * cfg.max_thrust_n * Math.sin(alphaBody) * 0.04 * propDirCommon;
 
@@ -778,11 +910,11 @@ export class FlightPhysicsSystem {
                 }
             }
 
-            return { force: totalForce, torque: totalTorque };
+            return out;
         };
 
         // ── Heun integrator ──────────────────────────────────────────────────
-        const f1 = computeForces(this.scene.velocity, this.scene.angularVelocity);
+        const f1 = computeForces(this.scene.velocity, this.scene.angularVelocity, this._f1);
 
         const halfDt  = dt * 0.5;
         const predVel = this._tmpPredVel;
@@ -798,7 +930,7 @@ export class FlightPhysicsSystem {
             angVel.z + ((f1.torque.z - gyro1.z) / cIzz) * halfDt,
         );
 
-        const f2 = computeForces(predVel, predAngVel);
+        const f2 = computeForces(predVel, predAngVel, this._f2);
 
         const avgForce  = f1.force.addToRef(f2.force, this._tmpAvgForce).scaleInPlace(0.5);
         const avgTorque = f1.torque.addToRef(f2.torque, this._tmpAvgTorque).scaleInPlace(0.5);
@@ -849,6 +981,12 @@ export class FlightPhysicsSystem {
                 this.scene._triggerCrash('hard_impact');
                 return;
             }
+            if (!gearDeployed && this.scene._spawnSnapFramesLeft <= 0) {
+                const groundSpeedKt = Math.hypot(this.scene.velocity.x, this.scene.velocity.z) * MS_TO_KT;
+                console.warn(`[Crash] Gear-up ground contact: gearState=${this.scene.gearState} vy=${this.scene.velocity.y.toFixed(2)}m/s gs=${groundSpeedKt.toFixed(0)}kt`);
+                this.scene._triggerCrash(CRASH_REASON_GEAR_UP_LANDING);
+                return;
+            }
             if (!this.scene._safetyFloorSnapActive) {
                 this.scene._safetyFloorSnapActive = true;
                 console.warn(`[Terrain] Safety-floor snap start: pos.y=${pos.y.toFixed(1)}m -> ${safetyFloor.toFixed(1)}m, terrainY=${this.scene.terrainY.toFixed(1)}m, vy=${this.scene.velocity.y.toFixed(2)}m/s`);
@@ -860,11 +998,21 @@ export class FlightPhysicsSystem {
             console.debug(`[Terrain] Safety-floor snap ended at pos.y=${pos.y.toFixed(1)}m, terrainY=${this.scene.terrainY.toFixed(1)}m`);
         }
 
+        if (!anyGearOnGround && this.scene._autobrakeActive === true) {
+            this.scene._autobrakeActive = false;
+            console.debug('[Autobrake] Disarmed: airborne');
+        }
         if (anyGearOnGround) {
             const speed = Math.sqrt(this.scene.velocity.x * this.scene.velocity.x + this.scene.velocity.z * this.scene.velocity.z);
+            this._updateAutobrakeOnGround(speed);
             if (speed > 0.5) {
                 const rollingFriction = cfg.rolling_friction;
-                const brakeFriction = this.scene.brakesOn ? cfg.brake_friction : (this.scene.thrust < 0.05 ? cfg.idle_friction : 0);
+                const autobrakeFactor = this._autobrakeFrictionFactor();
+                const brakeFriction = this.scene.brakesOn
+                    ? cfg.brake_friction
+                    : autobrakeFactor > 0
+                        ? cfg.brake_friction * autobrakeFactor
+                        : (this.scene.thrust < 0.05 ? cfg.idle_friction : 0);
                 const frictionDecel = (rollingFriction + brakeFriction) * dt;
                 const newSpeed = Math.max(0, speed - frictionDecel);
                 const scale = newSpeed / speed;
@@ -880,8 +1028,8 @@ export class FlightPhysicsSystem {
             }
 
             const wm = this.scene.planeRoot.getWorldMatrix();
-            const bodyRight = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
-            const worldUp = new BABYLON.Vector3(0, 1, 0);
+            const bodyRight = BABYLON.Vector3.TransformNormalToRef(this._axisX, wm, this._tmpBodyRight).normalize();
+            const worldUp = this._axisY;
             const rollAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(bodyRight, worldUp))));
 
             const lateralAxisX = bodyRight.x;
@@ -899,7 +1047,7 @@ export class FlightPhysicsSystem {
             }
             const horizSpeed = Math.sqrt(this.scene.velocity.x * this.scene.velocity.x + this.scene.velocity.z * this.scene.velocity.z);
             if (horizSpeed > CRASH_GROUND_SPEED_MS) {
-                const bodyFwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
+                const bodyFwd = BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this._tmpBodyFwd).normalize();
                 const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(bodyFwd, worldUp))));
                 const pitchAbsDeg = Math.abs(pitchAngle) * 180 / Math.PI;
                 const rollAbsDeg = Math.abs(rollAngle) * 180 / Math.PI;
@@ -910,11 +1058,12 @@ export class FlightPhysicsSystem {
                 }
             }
             const GROUND_ROLL_CORRECTION_RATE = 8.0;
-            const correction = BABYLON.Quaternion.RotationAxis(
-                BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize(),
+            BABYLON.Quaternion.RotationAxisToRef(
+                BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this._tmpBodyFwd).normalize(),
                 -rollAngle * Math.min(1, GROUND_ROLL_CORRECTION_RATE * dt),
+                this._tmpCorrectionQ,
             );
-            orientation.copyFrom(correction.multiply(orientation));
+            this._tmpCorrectionQ.multiplyToRef(orientation, orientation);
             orientation.normalize();
 
             this.scene.angularVelocity.z *= 0.05;
@@ -932,14 +1081,14 @@ export class FlightPhysicsSystem {
             const yawInput = this.scene.smoothedYaw;
             if (Math.abs(yawInput) > 0.01) {
                 const steerAngle = yawInput * GROUND_YAW_RATE * dt;
-                const yawCorrection = BABYLON.Quaternion.RotationAxis(worldUp, steerAngle);
-                orientation.copyFrom(yawCorrection.multiply(orientation));
+                BABYLON.Quaternion.RotationAxisToRef(worldUp, steerAngle, this._tmpCorrectionQ);
+                this._tmpCorrectionQ.multiplyToRef(orientation, orientation);
                 orientation.normalize();
 
                 const groundSpeed = Math.sqrt(this.scene.velocity.x * this.scene.velocity.x + this.scene.velocity.z * this.scene.velocity.z);
                 if (groundSpeed > 0.5) {
                     const wm2 = this.scene.planeRoot.getWorldMatrix();
-                    const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm2).normalize();
+                    const fwd = BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm2, this._tmpBodyFwd).normalize();
                     const fwdHorizLen = Math.sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
                     if (fwdHorizLen > 0.01) {
                         this.scene.velocity.x = (fwd.x / fwdHorizLen) * groundSpeed;
@@ -964,16 +1113,15 @@ export class FlightPhysicsSystem {
             this.scene.camera.target.copyFrom(pos);
 
             const wm = this.scene.planeRoot.getWorldMatrix();
-            BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this.scene._tmpFwd);
+            BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this.scene._tmpFwd);
             const targetAlpha = Math.atan2(-this.scene._tmpFwd.z, -this.scene._tmpFwd.x);
             let da = targetAlpha - this.scene.camera.alpha;
             da = ((da + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
             this.scene.camera.alpha += da * Math.min(1, 3 * dt);
         } else if (this.scene._cameraMode === CAMERA_MODE_COCKPIT) {
             const wm = this.scene.planeRoot.getWorldMatrix();
-            const cockpitOffset = BABYLON.Vector3.TransformCoordinates(new BABYLON.Vector3(0, 0.8, 0.5), wm);
-            this.scene.camera.target.copyFrom(cockpitOffset);
-            BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this.scene._tmpFwd);
+            BABYLON.Vector3.TransformCoordinatesToRef(this._tmpLocal.set(0, 0.8, 0.5), wm, this.scene.camera.target);
+            BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this.scene._tmpFwd);
             const targetAlpha = Math.atan2(-this.scene._tmpFwd.z, -this.scene._tmpFwd.x);
             this.scene.camera.alpha = targetAlpha;
             this.scene.camera.lowerRadiusLimit = CAMERA_COCKPIT_LOWER_RADIUS_M;
@@ -1012,8 +1160,8 @@ export class FlightPhysicsSystem {
     easyModeStabilization(): { pitch: number; roll: number } {
         if (!this.scene.planeRoot || !this.scene.planeRoot.rotationQuaternion) return { pitch: 0, roll: 0 };
         BABYLON.Matrix.FromQuaternionToRef(this.scene.planeRoot.rotationQuaternion, this.scene._tmpRotMatrix);
-        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), this.scene._tmpRotMatrix, this.scene._tmpFwd);
-        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(1, 0, 0), this.scene._tmpRotMatrix, this.scene._tmpRight);
+        BABYLON.Vector3.TransformNormalToRef(this._axisZ, this.scene._tmpRotMatrix, this.scene._tmpFwd);
+        BABYLON.Vector3.TransformNormalToRef(this._axisX, this.scene._tmpRotMatrix, this.scene._tmpRight);
         const pitchAngle = Math.asin(Math.max(-1, Math.min(1, this.scene._tmpFwd.y)));
         const bankSin = Math.max(-1, Math.min(1, this.scene._tmpRight.y));
         const desiredPitch = 0.05;

@@ -41,6 +41,13 @@ import {
 const CLOUD_TINT_EPSILON = 0.005;
 const CLOUD_MAX_TOTAL_INSTANCES = 2500;
 const CLOUD_MAX_TOTAL_INSTANCES_MOBILE = 700;
+const CLOUD_MAX_TOTAL_INSTANCES_BY_PRESET: Record<string, number> = {
+    low: 600,
+    medium: 1000,
+    high: 1600,
+    ultra: CLOUD_MAX_TOTAL_INSTANCES,
+};
+const GFX_PRESET_SELECT_ID = 'gfx-preset';
 const CLOUD_MOBILE_DENSITY_MULT = 0.5;
 const CLOUD_ADAPTIVE_REDUCTION_PER_STEP = 0.2;
 const CLOUD_ADAPTIVE_MIN_RATIO = 0.2;
@@ -65,7 +72,10 @@ export class CloudsSystem {
         let baseCloudTex: BABYLON.Texture | null = null;
         let totalInstances = 0;
         const isMobile = this.scene.isMobile === true;
-        const maxTotalInstances = isMobile ? CLOUD_MAX_TOTAL_INSTANCES_MOBILE : CLOUD_MAX_TOTAL_INSTANCES;
+        const presetValue = (document.getElementById(GFX_PRESET_SELECT_ID) as HTMLSelectElement | null)?.value || '';
+        const maxTotalInstances = isMobile
+            ? CLOUD_MAX_TOTAL_INSTANCES_MOBILE
+            : (CLOUD_MAX_TOTAL_INSTANCES_BY_PRESET[presetValue] ?? CLOUD_MAX_TOTAL_INSTANCES);
         const densityMult = (Number.isFinite(this.scene._cloudDensityMult) ? this.scene._cloudDensityMult : 1)
             * (isMobile ? CLOUD_MOBILE_DENSITY_MULT : 1);
         for (const layer of layers) {
@@ -138,8 +148,8 @@ export class CloudsSystem {
                 }
             }
         }
-        if (totalInstances >= CLOUD_MAX_TOTAL_INSTANCES) {
-            console.debug(`[Clouds] Instance cap reached: ${totalInstances}/${CLOUD_MAX_TOTAL_INSTANCES}`);
+        if (totalInstances >= maxTotalInstances) {
+            console.debug(`[Clouds] Instance cap reached: ${totalInstances}/${maxTotalInstances} (preset="${presetValue || 'custom'}")`);
         }
     }
 

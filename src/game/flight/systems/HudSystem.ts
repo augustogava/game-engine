@@ -7,6 +7,7 @@ import { AudioCore } from '../../AudioCore.js';
 import * as CONST from '../constants/index.js';
 import { detectGpuTier, type GpuTier } from './GpuTierDetector.js';
 import { isValidFlightLogId, publishAndShareFlightLog } from './FlightShareService.js';
+import { PERF_BENCHMARK_EVENT } from '../../../engine/3d/GameCore3D.js';
 
 const HPA_TO_INHG = 0.02952998;
 const CHECKLIST_VR_STALL_FACTOR = 1.15;
@@ -102,6 +103,13 @@ const PFD_BEARING_PTR_COLOR = '#79e7ff';
 const PFD_HSI_TERM_RANGE_NM = 30;
 const PFD_HSI_DISK_COLOR = 'rgba(0,0,0,0.45)';
 const PFD_NAV_BLOCK_LABEL_COLOR = 'rgba(255,255,255,0.55)';
+const SHADOW_MAP_SIZE_LOW = 1024;
+const SHADOW_MAP_SIZE_HIGH = 4096;
+const SHADOW_CASCADES_LOW = 2;
+const SHADOW_CASCADES_MEDIUM = 3;
+const SHADOW_CASCADES_HIGH = 4;
+const GFX_PRESET_ORDER = ['low', 'medium', 'high', 'ultra'];
+const GFX_AUTO_DOWNGRADE_TOAST_MS = 6000;
 
 const _C: any = CONST;
 const {
@@ -127,6 +135,8 @@ const {
     G_REDOUT_ONSET_G, G_REDOUT_FULL_G,
     G_STRESS_RISE_PER_S, G_STRESS_RECOVER_PER_S,
     G_STRESS_MAX_OPACITY,
+    SSAO_SAMPLES_ULTRA,
+    SSAO_SAMPLES_DEFAULT,
 } = CONST as any;
 
 export class HudSystem {
@@ -140,6 +150,22 @@ export class HudSystem {
 
     private _hudSpeedUnitEl: Element | null = null;
     private _hudAltUnitEl: Element | null = null;
+    private readonly _axisX = new BABYLON.Vector3(1, 0, 0);
+    private readonly _axisUp = new BABYLON.Vector3(0, 1, 0);
+    private readonly _axisZ = new BABYLON.Vector3(0, 0, 1);
+    private readonly _axisNorth = new BABYLON.Vector3(0, 0, -1);
+    private readonly _tmpHudFwd = new BABYLON.Vector3();
+    private readonly _tmpHudRight = new BABYLON.Vector3();
+    private readonly _tmpHudFwdFlat = new BABYLON.Vector3();
+    private readonly _tmpHudProj = new BABYLON.Vector3();
+    private readonly _idElementCache = new Map<string, HTMLElement>();
+
+    private _flatHeadingRad(fwd: BABYLON.Vector3): number {
+        const up = this._axisUp;
+        const fwdFlat = fwd.subtractToRef(up.scaleToRef(BABYLON.Vector3.Dot(fwd, up), this._tmpHudProj), this._tmpHudFwdFlat);
+        if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
+        return Math.atan2(BABYLON.Vector3.Dot(fwdFlat, this._axisX), BABYLON.Vector3.Dot(fwdFlat, this._axisNorth));
+    }
     private _lastHudCanvasDrawMs = 0;
     private _lastMapUpdateMs = 0;
     private static readonly HUD_CANVAS_DRAW_INTERVAL_MS = 33;
@@ -177,6 +203,7 @@ export class HudSystem {
             this._resizeHandler = null;
         }
         this._stopGpLiveUpdate();
+        this._stopPerfBenchmarkWatch();
         if (this._keymapUnsubscribe) {
             try { this._keymapUnsubscribe(); } catch (_) { /* ignore */ }
             this._keymapUnsubscribe = null;
@@ -755,12 +782,11 @@ export class HudSystem {
         }
     }
 
-    /** Landing report toast: sink rate (server value preferred), centerline offset and touchdown speed with a grade. */
-    showLandingGradeToast(msg: any): void {
+    computeLandingReport(msg: any): { gradeKey: string; fpm: number; centerlineM: number | null; speedKts: number | null; parts: string[] } | null {
         const td = this.scene._lastTouchdown as { fpm: number; speedKts: number; centerlineM: number | null; timeMs: number } | null;
         const serverFpm = Number(msg?.landingRateFpm);
         const fpmRaw = Number.isFinite(serverFpm) && serverFpm !== 0 ? serverFpm : (td ? td.fpm : Number.NaN);
-        if (!Number.isFinite(fpmRaw)) return;
+        if (!Number.isFinite(fpmRaw)) return null;
         const fpm = -Math.abs(fpmRaw);
 
         let score = 0;
@@ -769,12 +795,16 @@ export class HudSystem {
         else if (fpm > LANDING_GRADE_FIRM_FPM) score += 1;
 
         const parts: string[] = [`${I18n.t('landing.rate')}: ${Math.round(fpm)} fpm`];
+        let centerlineM: number | null = null;
         if (td && Number.isFinite(td.centerlineM as number) && td.centerlineM != null) {
             const off = Math.abs(td.centerlineM);
+            centerlineM = off;
             parts.push(`${I18n.t('landing.centerline')}: ${off.toFixed(0)} m`);
             if (off < LANDING_GRADE_CENTERLINE_GOOD_M) score += 1;
         }
+        let speedKts: number | null = null;
         if (td && Number.isFinite(td.speedKts)) {
+            speedKts = td.speedKts;
             parts.push(`${I18n.t('landing.speed')}: ${Math.round(td.speedKts)} kt`);
             const stall = Number(this.scene.aircraftConfig?.stall_speed_kts);
             const vApp = Number.isFinite(stall) && stall > 0 ? stall * CONST.TUTORIAL_APPROACH_SPEED_FACTOR : 0;
@@ -786,8 +816,14 @@ export class HudSystem {
         else if (score >= LANDING_GRADE_SCORE_BUTTER) gradeKey = 'landing.grade.butter';
         else if (score >= LANDING_GRADE_SCORE_GOOD) gradeKey = 'landing.grade.good';
         else gradeKey = 'landing.grade.firm';
+        return { gradeKey, fpm, centerlineM, speedKts, parts };
+    }
 
-        const text = `${I18n.t(gradeKey)} \u2014 ${parts.join(' \u00B7 ')}`;
+    /** Landing report toast: sink rate (server value preferred), centerline offset and touchdown speed with a grade. */
+    showLandingGradeToast(msg: any): void {
+        const report = this.computeLandingReport(msg);
+        if (!report) return;
+        const text = `${I18n.t(report.gradeKey)} \u2014 ${report.parts.join(' \u00B7 ')}`;
         const flightLogId = Number(msg?.flightLogId);
         if (isValidFlightLogId(flightLogId)) {
             this.showActionToast(text, [{
@@ -1074,6 +1110,60 @@ export class HudSystem {
         }
     }
 
+    private _perfBenchmarkHandler: ((e: Event) => void) | null = null;
+
+    private _watchPerfBenchmarkForDowngrade(appliedPreset: string, applyPresetByName: (name: string) => void): void {
+        this._stopPerfBenchmarkWatch();
+        const handler = (e: Event) => {
+            if (this.scene.spawned !== true) {
+                console.debug('[GFX] Ignoring benchmark result measured before spawn');
+                return;
+            }
+            this._stopPerfBenchmarkWatch();
+            const detail = (e as CustomEvent).detail || {};
+            const measuredPreset = String(detail.preset || '');
+            const measuredIdx = GFX_PRESET_ORDER.indexOf(measuredPreset);
+            const appliedIdx = GFX_PRESET_ORDER.indexOf(appliedPreset);
+            if (measuredIdx < 0 || appliedIdx < 0 || measuredIdx >= appliedIdx) {
+                console.debug(`[GFX] Benchmark median=${detail.medianFps}fps keeps preset "${appliedPreset}"`);
+                return;
+            }
+            console.debug(`[GFX] Benchmark median=${detail.medianFps}fps: downgrading preset "${appliedPreset}" -> "${measuredPreset}"`);
+            try {
+                applyPresetByName(measuredPreset);
+                this.scene._showToast(I18n.format('gfx.autoDowngraded', { preset: measuredPreset }), GFX_AUTO_DOWNGRADE_TOAST_MS);
+            } catch (err) {
+                console.warn('[GFX] Benchmark preset downgrade failed:', err);
+            }
+        };
+        window.addEventListener(PERF_BENCHMARK_EVENT, handler);
+        this._perfBenchmarkHandler = handler;
+    }
+
+    private _stopPerfBenchmarkWatch(): void {
+        if (!this._perfBenchmarkHandler) return;
+        try { window.removeEventListener(PERF_BENCHMARK_EVENT, this._perfBenchmarkHandler); } catch (_) { /* ignore */ }
+        this._perfBenchmarkHandler = null;
+    }
+
+    private _applyShadowCascadeQuality(mapSize: number): void {
+        const gen = this.scene._shadowGen as BABYLON.CascadedShadowGenerator | null;
+        if (!gen || !Number.isFinite(mapSize)) return;
+        const cascades = mapSize <= SHADOW_MAP_SIZE_LOW ? SHADOW_CASCADES_LOW
+            : mapSize >= SHADOW_MAP_SIZE_HIGH ? SHADOW_CASCADES_HIGH
+            : SHADOW_CASCADES_MEDIUM;
+        const filtering = mapSize <= SHADOW_MAP_SIZE_LOW ? BABYLON.ShadowGenerator.QUALITY_LOW
+            : mapSize >= SHADOW_MAP_SIZE_HIGH ? BABYLON.ShadowGenerator.QUALITY_HIGH
+            : BABYLON.ShadowGenerator.QUALITY_MEDIUM;
+        try {
+            if (gen.numCascades !== cascades) gen.numCascades = cascades;
+            if (gen.filteringQuality !== filtering) gen.filteringQuality = filtering;
+            console.debug(`[GFX] Shadow quality map=${mapSize} cascades=${cascades} filtering=${filtering}`);
+        } catch (err) {
+            console.warn('[GFX] Failed to apply shadow cascade quality:', err);
+        }
+    }
+
     initGraphicsSettings(scene: BABYLON.Scene): void {
         const saved = localStorage.getItem('gfx_settings');
         let cfg: Record<string, any> = {};
@@ -1130,6 +1220,7 @@ export class HudSystem {
             s.fxaaFallback     = this.scene._premium.fxaaFallback;
             s.vegetation       = this.scene._premium.vegetation;
             s.volumetricClouds = this.scene._premium.volumetricClouds;
+            s.taa              = this.scene._premium.taa;
             const disableDynEl = document.getElementById('gfx-disable-dynamic-lights') as HTMLInputElement | null;
             s.disableDynamicLights = disableDynEl?.checked ?? false;
             this.scene._disableDynamicLighting = s.disableDynamicLights;
@@ -1151,7 +1242,6 @@ export class HudSystem {
             requestAnimationFrame(() => {
                 try {
                     const p = this.scene._pipeline;
-                    const ssao = this.scene._ssao;
                     const engine = this.scene.scene?.getEngine();
                     if (!p || !engine) return;
 
@@ -1171,21 +1261,19 @@ export class HudSystem {
 
                     if (bloomEl) p.bloomEnabled = bloomEl.checked;
                     if (bloomWEl) p.bloomWeight = parseInt(bloomWEl.value) / 100;
-                    if (ssaoEl && ssao) {
-                        ssao.totalStrength = ssaoEl.checked ? 1.2 : 0;
+                    if (ssaoEl && this.scene.isMobile !== true) {
                         try {
                             const cam = this.scene.scene?.activeCamera;
                             const ppm = this.scene.scene?.postProcessRenderPipelineManager;
-                            if (cam && ppm) {
-                                if (ssaoEl.checked) {
-                                    if (!this.scene._ssaoAttached) {
-                                        ppm.attachCamerasToRenderPipeline('ssao', cam);
-                                        this.scene._ssaoAttached = true;
-                                    }
-                                } else if (this.scene._ssaoAttached !== false) {
-                                    ppm.detachCamerasFromRenderPipeline('ssao', cam);
-                                    this.scene._ssaoAttached = false;
+                            if (ssaoEl.checked) {
+                                const presetValue = (document.getElementById('gfx-preset') as HTMLSelectElement | null)?.value;
+                                const ssaoNow = this.scene._ensureSsaoPipeline(presetValue === 'ultra' ? SSAO_SAMPLES_ULTRA : SSAO_SAMPLES_DEFAULT);
+                                if (ssaoNow && cam && ppm && !this.scene._ssaoAttached) {
+                                    ppm.attachCamerasToRenderPipeline('ssao', cam);
+                                    this.scene._ssaoAttached = true;
                                 }
+                            } else if (this.scene._ssao) {
+                                this.scene._disposeSsaoPipeline();
                             }
                         } catch (err) {
                             console.warn('[SSAO] attach/detach failed:', err);
@@ -1201,6 +1289,7 @@ export class HudSystem {
                                 if (sz !== this.scene._shadowGen.mapSize) {
                                     this.scene._shadowGen.mapSize = sz;
                                 }
+                                this._applyShadowCascadeQuality(sz);
                             }
                         }
                     }
@@ -1299,6 +1388,7 @@ export class HudSystem {
                     this.scene._setColorLut(scene, this.scene._premium.colorLut);
                     this.scene._setWaterTilesReflection(this.scene._premium.waterTilesRefl);
                     this.scene._setFxaaFallback(this.scene._premium.fxaaFallback);
+                    this.scene._setTaa(scene, this.scene._premium.taa);
                     this.scene._setVegetation(scene, this.scene._premium.vegetation);
                     this.scene._setVolumetricClouds(scene, this.scene._premium.volumetricClouds);
                 } catch (e) {
@@ -1309,13 +1399,13 @@ export class HudSystem {
 
         const presets: Record<string, Record<string, any>> = {
             low:    { bloom: false, bloomWeight: 20, ssao: false, shadows: false, shadowQuality: '1024', fog: true, fogDensity: 30, aa: '1', vignette: false, chromatic: false, renderScale: 75, fpsLimit: '0',  cloudDensity: 'low',    overcast: false, hdrEnv: 'none',
-                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
+                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false, taa: false },
             medium: { bloom: true,  bloomWeight: 20, ssao: false, shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '2', vignette: true,  chromatic: false, renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, hdrEnv: 'auto',
-                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false },
+                      tileShadows: false, aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: false, waterTilesRefl: false, fxaaFallback: false, vegetation: false, volumetricClouds: false, taa: false },
             high:   { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '2048', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'medium', overcast: false, hdrEnv: 'auto',
-                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
+                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false, taa: true },
             ultra:  { bloom: true,  bloomWeight: 40, ssao: true,  shadows: true,  shadowQuality: '4096', fog: true, fogDensity: 30, aa: '4', vignette: true,  chromatic: true,  renderScale: 100, fpsLimit: '0', cloudDensity: 'high',   overcast: false, hdrEnv: 'auto',
-                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false },
+                      tileShadows: true,  aerialFog: false, tileFade: false, godRays: false, colorLut: false, cloudCameraFade: true,  waterTilesRefl: false, fxaaFallback: true,  vegetation: false, volumetricClouds: false, taa: true },
         };
 
         const applyPreset = (name: string) => {
@@ -1342,6 +1432,7 @@ export class HudSystem {
             this.scene._premium.fxaaFallback     = !!p.fxaaFallback;
             this.scene._premium.vegetation       = !!p.vegetation;
             this.scene._premium.volumetricClouds = !!p.volumetricClouds;
+            this.scene._premium.taa              = !!p.taa;
             applySettings();
         };
 
@@ -1372,6 +1463,11 @@ export class HudSystem {
             applyPreset(gpuTier);
             const presetElDesktop = document.getElementById('gfx-preset') as HTMLSelectElement | null;
             if (presetElDesktop) presetElDesktop.value = gpuTier;
+            this._watchPerfBenchmarkForDowngrade(gpuTier, (name: string) => {
+                applyPreset(name);
+                const presetElAfter = document.getElementById('gfx-preset') as HTMLSelectElement | null;
+                if (presetElAfter) presetElAfter.value = name;
+            });
         }
 
         if (isMobile && isFirstVisit) {
@@ -1432,6 +1528,7 @@ export class HudSystem {
                 this.scene._premium.fxaaFallback     = !!pd.fxaaFallback;
                 this.scene._premium.vegetation       = !!pd.vegetation;
                 this.scene._premium.volumetricClouds = !!pd.volumetricClouds;
+                this.scene._premium.taa              = !!pd.taa;
                 console.debug(`[GFX] Migrated cfg without premium keys using preset "${cfg.preset}" defaults`);
             } else {
                 if (cfg.tileShadows      !== undefined) this.scene._premium.tileShadows      = !!cfg.tileShadows;
@@ -1444,6 +1541,8 @@ export class HudSystem {
                 if (cfg.fxaaFallback     !== undefined) this.scene._premium.fxaaFallback     = !!cfg.fxaaFallback;
                 if (cfg.vegetation       !== undefined) this.scene._premium.vegetation       = !!cfg.vegetation;
                 if (cfg.volumetricClouds !== undefined) this.scene._premium.volumetricClouds = !!cfg.volumetricClouds;
+                if (cfg.taa !== undefined) this.scene._premium.taa = !!cfg.taa;
+                else if (cfg.preset && presets[cfg.preset]) this.scene._premium.taa = !!presets[cfg.preset].taa;
             }
 
             this.scene._safeSetTimeout(() => applySettings(), 100);
@@ -2339,26 +2438,26 @@ export class HudSystem {
         const listEl = document.getElementById('achievements-list');
         if (!listEl || this._achievementsLoading) return;
         const token = localStorage.getItem('auth_token') || '';
+        const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
+            '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
+        } as Record<string, string>)[ch] || ch);
         if (!token) {
-            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login required</div>';
+            listEl.innerHTML = `<div style="color:rgba(255,100,100,.8)">${esc(I18n.t('auth.loginRequired'))}</div>`;
             return;
         }
         this._achievementsLoading = true;
-        listEl.textContent = 'Loading...';
+        listEl.textContent = I18n.t('menu.loading');
         try {
             const resp = await fetch('/api/achievements', { headers: { 'Authorization': `Bearer ${token}` } });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
             const rows: any[] = Array.isArray(data?.data) ? data.data : [];
             if (!rows.length) {
-                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">Nenhuma conquista disponível</div>';
+                listEl.innerHTML = `<div style="color:rgba(255,255,255,.4)">${esc(I18n.t('achievements.none'))}</div>`;
                 return;
             }
             const unlockedCount = rows.filter((r) => r.unlocked_at != null).length;
-            const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
-                '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
-            } as Record<string, string>)[ch] || ch);
-            let html = `<div style="font-family:Orbitron,monospace;font-size:10px;color:#40ffaa;letter-spacing:.1em;margin-bottom:8px">${unlockedCount}/${rows.length} DESBLOQUEADAS</div>`;
+            let html = `<div style="font-family:Orbitron,monospace;font-size:10px;color:#40ffaa;letter-spacing:.1em;margin-bottom:8px">${esc(I18n.format('achievements.unlockedCount', { unlocked: unlockedCount, total: rows.length }))}</div>`;
             for (const a of rows) {
                 const unlocked = a.unlocked_at != null;
                 const border = unlocked ? 'rgba(80,255,160,.5)' : 'rgba(255,255,255,.1)';
@@ -2370,13 +2469,13 @@ export class HudSystem {
                         ${Number(a.credit_reward) > 0 ? `<span style="font-size:9px;color:#ffe27a;white-space:nowrap">+${Number(a.credit_reward)} cr</span>` : ''}
                     </div>
                     ${a.description ? `<div style="font-size:10px;color:rgba(255,255,255,.5);margin-top:3px">${esc(a.description)}</div>` : ''}
-                    ${unlocked ? `<div style="font-size:9px;color:rgba(100,240,180,.6);margin-top:3px">Desbloqueada em ${new Date(a.unlocked_at).toLocaleDateString()}</div>` : ''}
+                    ${unlocked ? `<div style="font-size:9px;color:rgba(100,240,180,.6);margin-top:3px">${esc(I18n.format('achievements.unlockedOn', { date: new Date(a.unlocked_at).toLocaleDateString() }))}</div>` : ''}
                 </div>`;
             }
             listEl.innerHTML = html;
         } catch (err) {
             console.error('[Achievements] Failed to load list:', err);
-            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+            listEl.innerHTML = `<div style="color:rgba(255,100,100,.8)">${esc(I18n.t('common.connectionError'))}</div>`;
         } finally {
             this._achievementsLoading = false;
         }
@@ -2409,7 +2508,10 @@ export class HudSystem {
         const listEl = document.getElementById('leaderboard-list');
         if (!listEl || this._leaderboardLoading) return;
         this._leaderboardLoading = true;
-        listEl.textContent = 'Loading...';
+        listEl.textContent = I18n.t('menu.loading');
+        const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
+            '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
+        } as Record<string, string>)[ch] || ch);
         try {
             const token = localStorage.getItem('auth_token') || '';
             const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -2419,19 +2521,16 @@ export class HudSystem {
             const rows: any[] = Array.isArray(data?.data) ? data.data : [];
             const me = data?.me ?? null;
             if (!rows.length) {
-                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">Sem dados ainda</div>';
+                listEl.innerHTML = `<div style="color:rgba(255,255,255,.4)">${esc(I18n.t('leaderboard.noData'))}</div>`;
                 return;
             }
-            const esc = (s: unknown): string => String(s ?? '').replace(/[<>&"']/g, (ch) => ({
-                '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', '\'': '&#39;',
-            } as Record<string, string>)[ch] || ch);
             const fmtHours = (h: unknown): string => (Number(h) || 0).toFixed(1);
             const myUserId = me ? Number(me.user_id) : -1;
             let html = '';
             if (me) {
                 html += `<div style="border:1px solid rgba(255,210,80,.55);border-radius:6px;padding:8px 10px;margin-bottom:8px;background:rgba(40,32,0,.5)">
-                    <span style="font-family:Orbitron,monospace;font-size:10px;color:#ffe27a;letter-spacing:.1em">SUA POSIÇÃO: #${Number(me.rank) || '-'}</span>
-                    <div style="font-size:10px;color:rgba(255,255,255,.7);margin-top:3px">${fmtHours(me.total_flight_hours)}h de voo · ${Number(me.total_flights) || 0} voos</div>
+                    <span style="font-family:Orbitron,monospace;font-size:10px;color:#ffe27a;letter-spacing:.1em">${esc(I18n.format('leaderboard.yourPosition', { rank: Number(me.rank) || '-' }))}</span>
+                    <div style="font-size:10px;color:rgba(255,255,255,.7);margin-top:3px">${esc(I18n.format('leaderboard.mySummary', { hours: fmtHours(me.total_flight_hours), flights: Number(me.total_flights) || 0 }))}</div>
                 </div>`;
             }
             for (let i = 0; i < rows.length; i++) {
@@ -2448,7 +2547,7 @@ export class HudSystem {
             listEl.innerHTML = html;
         } catch (err) {
             console.error('[Leaderboard] Failed to load:', err);
-            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Connection error</div>';
+            listEl.innerHTML = `<div style="color:rgba(255,100,100,.8)">${esc(I18n.t('common.connectionError'))}</div>`;
         } finally {
             this._leaderboardLoading = false;
         }
@@ -2572,19 +2671,31 @@ export class HudSystem {
         }
     }
 
-    setText(id: string, text: string): void {
+    private _getCachedElementById(id: string): HTMLElement | null {
+        const cached = this._idElementCache.get(id);
+        if (cached && cached.isConnected) return cached;
         const el = document.getElementById(id);
-        if (el) el.textContent = text;
+        if (el) this._idElementCache.set(id, el);
+        else this._idElementCache.delete(id);
+        return el;
+    }
+
+    setText(id: string, text: string): void {
+        const el = this._getCachedElementById(id);
+        if (el && el.textContent !== text) el.textContent = text;
     }
 
     setHtml(id: string, html: string): void {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = html;
+        const el = this._getCachedElementById(id);
+        if (!el) return;
+        if ((el as any).__hudHtml !== html) {
+            el.innerHTML = html;
+            (el as any).__hudHtml = html;
+        }
     }
 
     setStyle(id: string, prop: string, value: string): void {
-        const el = document.getElementById(id);
-        if (el) (el.style as unknown as Record<string, string>)[prop] = value;
+        this._setStyle(this._getCachedElementById(id), prop, value);
     }
 
     /** Head/tail and crosswind components on the destination runway from the surface wind. */
@@ -2632,16 +2743,18 @@ export class HudSystem {
                 : `${Math.round(totalDistNm)} nm`);
         }
         this._setText(this.scene._navBrgEl, `${Math.round(totalBrgMag)}\u00B0M`);
-        this.scene._setText('nav-total-dist', `${totalDistNm.toFixed(1)} nm`);
+        const totalDistDisp = this.scene._convertDistanceNm(totalDistNm);
+        this.scene._setText('nav-total-dist', `${totalDistDisp.value.toFixed(1)} ${totalDistDisp.unit}`);
 
         const gsKt = this.scene.groundSpeed * MS_TO_KT;
-        this.scene._setText('nav-gs', `${Math.round(gsKt)} kt`);
+        const gsDisp = this.convertSpeedKts(gsKt);
+        this.scene._setText('nav-gs', `${gsDisp.value} ${gsDisp.unit}`);
 
         const altMslFt = this.scene.planeRoot ? Math.max(0, (this.scene.refAlt + this.scene.planeRoot.position.y) * 3.28084) : 0;
         const wind = this.scene._getWindAtAltitude(altMslFt);
 
         const trackDeg = this.scene.groundSpeed > MIN_GS_FOR_ETE_MS && Number.isFinite(this.scene.velocity.x) && Number.isFinite(this.scene.velocity.z)
-            ? ((Math.atan2(this.scene.velocity.x, this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
+            ? ((Math.atan2(this.scene.velocity.x, -this.scene.velocity.z) * 180 / Math.PI) + 360) % 360
             : totalBrgDeg;
         const windAngleRad = (wind.dirDeg - trackDeg) * Math.PI / 180;
         const headComp = -wind.speedKt * Math.cos(windAngleRad);
@@ -2653,11 +2766,11 @@ export class HudSystem {
 
         const wpts = this.scene._missionWaypoints;
         const idx = this.scene._missionCurrentWpIndex;
-        const legBlock = document.getElementById('nav-leg-block');
+        const legBlock = this._getCachedElementById('nav-leg-block');
         const hasActiveWp = wpts.length > 0 && idx < wpts.length;
         const useArrivalAsLeg = !hasActiveWp && nav.arrival_lat != null && nav.arrival_lon != null;
         if (hasActiveWp || useArrivalAsLeg) {
-            if (legBlock) legBlock.style.display = 'block';
+            this._setStyle(legBlock, 'display', 'block');
             const wp = hasActiveWp ? wpts[idx] : {
                 name: nav.arrival_icao || 'DEST',
                 order_index: 1,
@@ -2671,12 +2784,13 @@ export class HudSystem {
             const legBrgDeg = this.scene._initialBearingDeg(lat, lon, wpLat, wpLon);
             this.scene._setText('nav-wpt-name', wp.name || `WP ${wp.order_index}`);
             this.scene._setText('nav-leg-idx', hasActiveWp ? `${idx + 1}/${wpts.length}` : 'DIRECT');
-            this.scene._setText('nav-leg-dist', `${legDistNm.toFixed(1)} nm`);
+            const legDistDisp = this.scene._convertDistanceNm(legDistNm);
+            this.scene._setText('nav-leg-dist', `${legDistDisp.value.toFixed(1)} ${legDistDisp.unit}`);
             const legBrgMag = ((legBrgDeg - magVarHere) + 360) % 360;
             this.scene._setText('nav-leg-brg', `${Math.round(legBrgMag)}\u00B0M`);
 
             const wm = this.scene.planeRoot ? this.scene.planeRoot.getWorldMatrix() : null;
-            const fwd = wm ? BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm) : null;
+            const fwd = wm ? BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this._tmpHudFwd) : null;
             const currentHdgDeg = fwd ? (((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360) : 0;
             const delta = ((legBrgDeg - currentHdgDeg + 540) % 360) - 180;
             const absD = Math.abs(delta);
@@ -2696,14 +2810,16 @@ export class HudSystem {
             const xteSide = xteNm >= 0 ? 'R' : 'L';
             const xteAbs = Math.abs(xteNm);
             const xteColor = xteAbs < 0.2 ? '#40ffaa' : xteAbs < 0.5 ? '#ffcc55' : '#ff5566';
-            this.scene._setHtml('nav-xte-val', `<span style="color:${xteColor}">${xteAbs.toFixed(2)} nm ${xteSide}</span>`);
+            const xteDisp = this.scene._convertDistanceNm(xteAbs);
+            this.scene._setHtml('nav-xte-val', `<span style="color:${xteColor}">${xteDisp.value.toFixed(2)} ${xteDisp.unit} ${xteSide}</span>`);
             const xteFrac = Math.max(-1, Math.min(1, xteNm / XTE_INDICATOR_MAX_NM));
             const xteLeftPct = 50 + xteFrac * 50;
             this.scene._setStyle('nav-xte-bar-dot', 'left', `${xteLeftPct}%`);
 
             if (wp.altitude_ft != null) {
                 const tgtAlt = Number(wp.altitude_ft);
-                this.scene._setText('nav-tgt-alt', `${tgtAlt} ft`);
+                const tgtAltDisp = this.convertAltitudeFt(tgtAlt);
+                this.scene._setText('nav-tgt-alt', Number.isFinite(tgtAlt) ? `${tgtAltDisp.value} ${tgtAltDisp.unit}` : '\u2014');
                 const altDelta = altMslFt - tgtAlt;
                 const altAbs = Math.abs(altDelta);
                 const altColor = altAbs < ALT_BAND_GREEN_FT ? '#40ffaa' : altAbs < ALT_BAND_AMBER_FT ? '#ffcc55' : '#ff5566';
@@ -2727,7 +2843,7 @@ export class HudSystem {
                 this.scene._setText('nav-eta', '--:--');
             }
         } else {
-            if (legBlock) legBlock.style.display = 'none';
+            this._setStyle(legBlock, 'display', 'none');
         }
     }
 
@@ -2771,7 +2887,7 @@ export class HudSystem {
         this._setText(this._hudSpeedUnitEl, speedDisp.unit);
         this._setText(this._hudAltUnitEl, altDisp.unit);
         this._setStyle(this.scene.hudThrottle, 'width', `${pct}%`);
-        if (this.scene.hudThrPct) this._setText(this.scene.hudThrPct, `${pct}%`);
+        if (this.scene.hudThrPct) this._setText(this.scene.hudThrPct, this.scene._reverseThrustActive ? `${I18n.t('hud.reverse')} ${pct}%` : `${pct}%`);
         const _engAliveArr = Array.isArray(this.scene._engineAlive) ? this.scene._engineAlive : [];
         const _eng1Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[0] === true);
         const _eng2Alive = _engAliveArr.length === 0 ? true : (_engAliveArr[1] === true);
@@ -2831,8 +2947,14 @@ export class HudSystem {
 
         const flapDeg = this.scene.FLAP_STEPS[this.scene.flapIndex];
         this._setText(this.scene.hudFlapVal, flapDeg > 0 ? `${flapDeg}\u00B0` : 'OFF');
-        this._setText(this.scene.hudBrakeVal, this.scene.brakesOn ? 'ON' : 'OFF');
-        this._setStyle(this.scene.hudBrakeVal, 'color', this.scene.brakesOn ? '#ff4040' : '');
+        const autobrakeLevel = Number(this.scene._autobrakeLevel) || 0;
+        const brakeText = this.scene.brakesOn
+            ? 'ON'
+            : this.scene._autobrakeActive
+                ? 'AUTO'
+                : autobrakeLevel > 0 ? `AB ${CONST.AUTOBRAKE_LABELS[autobrakeLevel] ?? autobrakeLevel}` : 'OFF';
+        this._setText(this.scene.hudBrakeVal, brakeText);
+        this._setStyle(this.scene.hudBrakeVal, 'color', this.scene.brakesOn || this.scene._autobrakeActive ? '#ff4040' : autobrakeLevel > 0 ? '#ffcc55' : '');
 
         if (this.scene.hudGearRow) {
             this._setStyle(this.scene.hudGearRow, 'display', '');
@@ -2866,7 +2988,7 @@ export class HudSystem {
         }
 
         const wm = this.scene.planeRoot.getWorldMatrix();
-        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this.scene._tmpFwd);
+        BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this.scene._tmpFwd);
         this.scene._tmpFwd.normalize();
         this.scene._tmpUp.set(0, 1, 0);
         const pitchAngle = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this.scene._tmpFwd, this.scene._tmpUp))));
@@ -2878,9 +3000,9 @@ export class HudSystem {
         const isOnGround = terrainKnown && aglM < ON_GROUND_AGL_M;
 
         this._setText(this.scene.hudAttitude,
-            isOnGround         ? 'GROUND'   :
-            pitchAngle > 0.08  ? 'CLIMB' :
-            pitchAngle < -0.08 ? 'DESC'   : 'LEVEL');
+            isOnGround         ? I18n.t('hud.attitude.ground') :
+            pitchAngle > 0.08  ? I18n.t('hud.attitude.climb')  :
+            pitchAngle < -0.08 ? I18n.t('hud.attitude.desc')   : I18n.t('hud.attitude.level'));
         try {
             this.scene._engineSound.setThrottle(this.scene.thrust);
             this.scene._engineSound.setRpm(this.scene.engineRpm);
@@ -3083,17 +3205,12 @@ export class HudSystem {
         }
 
         if (this.scene.hudHdgVal) {
-            const fwdFlat = this.scene._tmpFwd.subtract(this.scene._tmpUp.scale(BABYLON.Vector3.Dot(this.scene._tmpFwd, this.scene._tmpUp)));
-            if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
-            const hdgRad = Math.atan2(
-                BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
-                BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, -1)),
-            );
+            const hdgRad = this._flatHeadingRad(this.scene._tmpFwd);
             const hdgTrueDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
             const here = this.scene._apCurrentLatLon();
             const magVar = here ? this.scene._magneticVariationDeg(here.lat, here.lon) : 0;
             const hdgMagDeg = Math.round(((hdgTrueDeg - magVar) + 360) % 360);
-            this._setText(this.scene.hudHdgVal, `${hdgMagDeg}\u00B0M`);
+            this._setText(this.scene.hudHdgVal, `${String(hdgMagDeg % 360).padStart(3, '0')}\u00B0M`);
         }
 
         this.scene._updateTapeMarks(speedKts, altitudeMslFt);
@@ -3236,21 +3353,16 @@ export class HudSystem {
         ctx.clearRect(0, 0, W, H);
 
         const wm = this.scene.planeRoot.getWorldMatrix();
-        const fwd   = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
-        const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
-        const up    = new BABYLON.Vector3(0, 1, 0);
+        const fwd   = BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this._tmpHudFwd).normalize();
+        const right = BABYLON.Vector3.TransformNormalToRef(this._axisX, wm, this._tmpHudRight).normalize();
+        const up    = this._axisUp;
 
         const pitchRad = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(fwd, up))));
         const rollRad  = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(right, up))));
         const pitchDeg = pitchRad * 180 / Math.PI;
         const rollDeg  = rollRad * 180 / Math.PI;
 
-        const fwdFlat = fwd.subtract(up.scale(BABYLON.Vector3.Dot(fwd, up)));
-        if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
-        const hdgRad = Math.atan2(
-            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
-            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, -1)),
-        );
+        const hdgRad = this._flatHeadingRad(fwd);
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
         const iasMs = Number.isFinite(this.scene._lastIasMs) ? this.scene._lastIasMs : this.scene.velocity.length();
@@ -3891,21 +4003,16 @@ export class HudSystem {
         ctx.clearRect(0, 0, W, canvas.height);
 
         const wm = this.scene.planeRoot.getWorldMatrix();
-        const fwd   = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm).normalize();
-        const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm).normalize();
-        const up    = new BABYLON.Vector3(0, 1, 0);
+        const fwd   = BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this._tmpHudFwd).normalize();
+        const right = BABYLON.Vector3.TransformNormalToRef(this._axisX, wm, this._tmpHudRight).normalize();
+        const up    = this._axisUp;
 
         const pitchRad = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(fwd, up))));
         const rollRad  = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(right, up))));
         const pitchDeg = pitchRad * 180 / Math.PI;
         const rollDeg  = rollRad * 180 / Math.PI;
 
-        const fwdFlat = fwd.subtract(up.scale(BABYLON.Vector3.Dot(fwd, up)));
-        if (fwdFlat.lengthSquared() > 0.0001) fwdFlat.normalize();
-        const hdgRad = Math.atan2(
-            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(1, 0, 0)),
-            BABYLON.Vector3.Dot(fwdFlat, new BABYLON.Vector3(0, 0, -1)),
-        );
+        const hdgRad = this._flatHeadingRad(fwd);
         const hdgDeg = ((hdgRad * 180 / Math.PI) + 360) % 360;
 
         const iasMsFull = Number.isFinite(this.scene._lastIasMs) ? this.scene._lastIasMs : this.scene.velocity.length();

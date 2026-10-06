@@ -5,6 +5,9 @@ import { PreflightController, applyPreflightToUrlAndScene } from './preflight/Pr
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
 const FLIGHT_HOURS_URL = 'https://simflightpro.com/flight-time';
 const WEBSITE_STORE_URL = 'https://simflightpro.com/aircrafts';
+const FLIGHT_GPU_POWER_PREFERENCE: WebGLPowerPreference = 'high-performance';
+const FLOATING_ORIGIN_URL_PARAM = 'floatingOrigin';
+const FLOATING_ORIGIN_DISABLED_VALUE = '0';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const loadingEl = document.getElementById('loading')!;
@@ -44,7 +47,6 @@ if (!token) {
 
 if (token) {
     localStorage.setItem('auth_token', token);
-    localStorage.setItem('token', token);
 }
 
 const FREE_HOUR_FIRST_DELAY_MS = 2000;
@@ -185,11 +187,14 @@ let multiplayerStarted = false;
 
 function ensureGameCore(): GameCore3D {
     if (game) return game;
-    game = new GameCore3D({ canvas, antialias: false });
+    const useFloatingOrigin = params.get(FLOATING_ORIGIN_URL_PARAM) !== FLOATING_ORIGIN_DISABLED_VALUE;
+    game = new GameCore3D({ canvas, antialias: false, powerPreference: FLIGHT_GPU_POWER_PREFERENCE, useFloatingOrigin });
+    console.debug(`[flight-main] Floating origin ${useFloatingOrigin ? 'enabled' : 'disabled via URL'}`);
     scene.onSpawned = () => {
         sceneReady = true;
         console.log('[flight-main] Scene spawned');
         dismissLoading();
+        game?.restartPerfBenchmark('scene spawned');
         if (token && !multiplayerStarted) {
             multiplayerStarted = true;
             scene.initMultiplayer(token, () => {

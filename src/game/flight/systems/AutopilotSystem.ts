@@ -39,6 +39,10 @@ const FD_PITCH_CMD_LIMIT_DEG = 12;
 
 export class AutopilotSystem {
     private readonly scene: any;
+    private readonly _axisZ = new BABYLON.Vector3(0, 0, 1);
+    private readonly _axisX = new BABYLON.Vector3(1, 0, 0);
+    private readonly _tmpFwd = new BABYLON.Vector3();
+    private readonly _tmpRight = new BABYLON.Vector3();
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -146,8 +150,8 @@ export class AutopilotSystem {
         }
         const stepDt = Math.max(0.001, Math.min(0.1, dt));
         const wm = this.scene.planeRoot.getWorldMatrix();
-        const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
-        const right = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(1, 0, 0), wm);
+        const fwd = BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this._tmpFwd);
+        const right = BABYLON.Vector3.TransformNormalToRef(this._axisX, wm, this._tmpRight);
         const curHdgDeg = ((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360;
 
         if ((this.scene._autopilotNavHold || this.scene._autopilotAprHold) && this.scene.surfaces.length >= 4) {
@@ -318,7 +322,7 @@ export class AutopilotSystem {
             this.scene._autopilotAprHold = false;
             if (this.scene.planeRoot) {
                 const wm = this.scene.planeRoot.getWorldMatrix();
-                const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), wm);
+                const fwd = BABYLON.Vector3.TransformNormalToRef(this._axisZ, wm, this._tmpFwd);
                 this.scene._autopilotTargetHdgDeg = ((Math.atan2(fwd.x, -fwd.z) * 180 / Math.PI) + 360) % 360;
             }
         }
@@ -647,7 +651,9 @@ export class AutopilotSystem {
             this.scene._autopilotVsHold = false;
             this.scene._autopilotNavHold = false;
             this.scene._autopilotAprHold = false;
-            console.log('[AP] Disengaged by stick input');
+            const autothrottleWasOn = this.scene._autopilotAtHold === true;
+            this.scene._autopilotAtHold = false;
+            console.debug(`[AP] Disengaged by stick input (autothrottle ${autothrottleWasOn ? 'also disengaged' : 'was off'})`);
         }
     }
 }

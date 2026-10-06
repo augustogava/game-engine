@@ -13,6 +13,15 @@ interface InputEvents {
     wheel: { delta: number; x: number; y: number };
 }
 
+const TEXT_ENTRY_INPUT_TYPES = new Set(['text', 'search', 'email', 'password', 'url', 'tel', 'number']);
+
+interface BoundDomListener {
+    target: EventTarget;
+    type: string;
+    handler: EventListener;
+    options?: AddEventListenerOptions;
+}
+
 export class InputManager extends EventEmitter<InputEvents> {
     private keysDown: Set<string> = new Set();
     private keysPressed: Set<string> = new Set(); // pressed this frame
@@ -22,6 +31,7 @@ export class InputManager extends EventEmitter<InputEvents> {
     private mouseDelta: Vector2 = new Vector2();
     private wheelDelta: number = 0;
     private canvas: HTMLElement;
+    private boundDomListeners: BoundDomListener[] = [];
 
     constructor(canvas: HTMLElement) {
         super();
@@ -29,8 +39,15 @@ export class InputManager extends EventEmitter<InputEvents> {
         this.bindEvents();
     }
 
+    private listen(target: EventTarget, type: string, handler: EventListener, options?: AddEventListenerOptions): void {
+        target.addEventListener(type, handler, options);
+        this.boundDomListeners.push({ target, type, handler, options });
+    }
+
     private bindEvents(): void {
-        window.addEventListener('keydown', (e) => {
+        this.listen(window, 'keydown', (ev) => {
+            const e = ev as KeyboardEvent;
+            if (InputManager.isEditableTarget(e.target)) return;
             if (!this.keysDown.has(e.code)) {
                 this.keysPressed.add(e.code);
             }
@@ -38,34 +55,59 @@ export class InputManager extends EventEmitter<InputEvents> {
             this.emit('keydown', { key: e.key, code: e.code });
         });
 
-        window.addEventListener('keyup', (e) => {
+        this.listen(window, 'keyup', (ev) => {
+            const e = ev as KeyboardEvent;
             this.keysDown.delete(e.code);
             this.keysReleased.add(e.code);
             this.emit('keyup', { key: e.key, code: e.code });
         });
 
-        this.canvas.addEventListener('mousedown', (e) => {
+        this.listen(this.canvas, 'mousedown', (ev) => {
+            const e = ev as MouseEvent;
             this.mouseButtons.add(e.button);
             this.emit('mousedown', { button: e.button, x: e.clientX, y: e.clientY });
             e.preventDefault();
         });
 
-        window.addEventListener('mouseup', (e) => {
+        this.listen(window, 'mouseup', (ev) => {
+            const e = ev as MouseEvent;
             this.mouseButtons.delete(e.button);
             this.emit('mouseup', { button: e.button, x: e.clientX, y: e.clientY });
         });
 
-        window.addEventListener('mousemove', (e) => {
+        this.listen(window, 'mousemove', (ev) => {
+            const e = ev as MouseEvent;
             this.mouseDelta.set(e.movementX, e.movementY);
             this.mousePos.set(e.clientX, e.clientY);
             this.emit('mousemove', { x: e.clientX, y: e.clientY, dx: e.movementX, dy: e.movementY });
         });
 
-        this.canvas.addEventListener('wheel', (e) => {
+        this.listen(this.canvas, 'wheel', (ev) => {
+            const e = ev as WheelEvent;
             this.wheelDelta += e.deltaY;
             this.emit('wheel', { delta: e.deltaY, x: e.clientX, y: e.clientY });
             e.preventDefault();
         }, { passive: false });
+
+        this.listen(window, 'blur', () => this.releaseAllHeldInputs('window blur'));
+        this.listen(document, 'visibilitychange', () => {
+            if (document.visibilityState === 'hidden') this.releaseAllHeldInputs('tab hidden');
+        });
+    }
+
+    static isEditableTarget(target: EventTarget | null): boolean {
+        if (!target || !(target instanceof HTMLElement)) return false;
+        if (target.isContentEditable || target.tagName === 'TEXTAREA') return true;
+        if (target.tagName !== 'INPUT') return false;
+        return TEXT_ENTRY_INPUT_TYPES.has((target as HTMLInputElement).type || 'text');
+    }
+
+    private releaseAllHeldInputs(reason: string): void {
+        if (this.keysDown.size === 0 && this.mouseButtons.size === 0) return;
+        for (const code of this.keysDown) this.keysReleased.add(code);
+        console.debug(`[InputManager] Released ${this.keysDown.size} held key(s) and ${this.mouseButtons.size} mouse button(s) on ${reason}`);
+        this.keysDown.clear();
+        this.mouseButtons.clear();
     }
 
     /** Call at end of each frame to reset single-frame state */
@@ -85,5 +127,11 @@ export class InputManager extends EventEmitter<InputEvents> {
     getMouseDelta(): Vector2 { return this.mouseDelta.clone(); }
     getWheelDelta(): number { return this.wheelDelta; }
 
-    destroy(): void { this.removeAllListeners(); }
+    destroy(): void {
+        for (const { target, type, handler, options } of this.boundDomListeners) {
+            try { target.removeEventListener(type, handler, options); } catch (err) { console.warn(`[InputManager] Failed to remove '${type}' listener:`, err); }
+        }
+        this.boundDomListeners = [];
+        this.removeAllListeners();
+    }
 }

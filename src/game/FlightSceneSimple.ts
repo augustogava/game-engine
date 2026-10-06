@@ -391,6 +391,13 @@ import { HudSystem } from './flight/systems/HudSystem.js';
 import { AtcSystem } from './flight/systems/AtcSystem.js';
 import { WeatherService } from './flight/systems/WeatherService.js';
 import { TutorialSystem } from './flight/systems/TutorialSystem.js';
+import { RunwayLightsSystem } from './flight/systems/RunwayLightsSystem.js';
+import { WindshieldRainSystem } from './flight/systems/WindshieldRainSystem.js';
+import { PauseMenuSystem } from './flight/systems/PauseMenuSystem.js';
+import { FlightDebriefSystem } from './flight/systems/FlightDebriefSystem.js';
+import { TcasSystem } from './flight/systems/TcasSystem.js';
+import { ChatSystem } from './flight/systems/ChatSystem.js';
+import { PhotoModeSystem } from './flight/systems/PhotoModeSystem.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 const PAUSED_UI_UPDATE_INTERVAL_FRAMES = 6;
@@ -429,6 +436,14 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _weatherService = new WeatherService(this);
     /** @internal */ private readonly _atcSystem = new AtcSystem(this);
     /** @internal */ private readonly _tutorialSystem = new TutorialSystem(this);
+    /** @internal */ private readonly _runwayLightsSystem = new RunwayLightsSystem(this);
+    /** @internal */ private readonly _windshieldRainSystem = new WindshieldRainSystem(this);
+    /** @internal */ private readonly _pauseMenuSystem = new PauseMenuSystem(this);
+    /** @internal */ private readonly _flightDebriefSystem = new FlightDebriefSystem(this);
+    /** @internal */ private readonly _tcasSystem = new TcasSystem(this);
+    /** @internal */ private readonly _chatSystem = new ChatSystem(this);
+    /** @internal */ private readonly _photoModeSystem = new PhotoModeSystem(this);
+    /** @internal */ _photoModeActive = false;
     private planeRoot!: BABYLON.TransformNode;
     private velocity        = BABYLON.Vector3.Zero();
     private angularVelocity = BABYLON.Vector3.Zero();
@@ -888,7 +903,14 @@ export class FlightSceneSimple extends Scene3D {
         fxaaFallback: false,
         vegetation: false,
         volumetricClouds: false,
+        taa: false,
     };
+    /** @internal */ _taaPipeline: BABYLON.TAARenderingPipeline | null = null;
+    /** @internal */ _reverseThrustRequested = false;
+    /** @internal */ _reverseThrustActive = false;
+    /** @internal */ _autobrakeLevel = 0;
+    /** @internal */ _autobrakeActive = false;
+    /** @internal */ _autobrakeKeyLock = false;
     private _fogColorBase: BABYLON.Color3 = new BABYLON.Color3(0.55, 0.7, 0.95);
     private _fogDensityBase: number = 0.000008;
     private _tileFadeEntries: Map<string, { meshes: BABYLON.AbstractMesh[]; t: number }> = new Map();
@@ -1096,6 +1118,7 @@ export class FlightSceneSimple extends Scene3D {
         }
 
         this._handleInput(dt);
+        this._pauseMenuSystem.update();
 
         const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
         if (replayFrame && this.planeRoot && this.planeRoot.rotationQuaternion) {
@@ -1161,8 +1184,10 @@ export class FlightSceneSimple extends Scene3D {
             : 0;
         this._updateTurbulence(dt, aglForTurb);
         if (!this._disableDynamicLighting) this._updateNavLights(dt);
+        this._runwayLightsSystem.update(dt);
         this._updateClouds(dt);
         this._updatePrecipitation(dt);
+        this._windshieldRainSystem.update(dt);
         this._vfxSystem.updateLightning(dt);
         this._updateHighClouds(dt);
         this._updateSeascapeSky(dt);
@@ -1190,11 +1215,18 @@ export class FlightSceneSimple extends Scene3D {
             console.warn('[LiveTraffic] update failed:', err);
         }
         this._atcSystem.update(dt);
+        this._tcasSystem.update(dt);
+        this._chatSystem.update();
         try {
             this._tutorialSystem.update(dt);
         } catch (err) {
             console.warn('[Tutorial] update failed:', err);
         }
+    }
+
+    /** @internal */
+    _togglePhotoMode(): void {
+        this._photoModeSystem.toggle();
     }
 
     /** @internal */
@@ -1489,6 +1521,10 @@ export class FlightSceneSimple extends Scene3D {
         this._flightPhysicsSystem.toggleGear();
     }
 
+    private _cycleAutobrake(): void {
+        this._flightPhysicsSystem.cycleAutobrake();
+    }
+
     private _updateGearState(): void {
         this._flightPhysicsSystem.updateGearState();
     }
@@ -1516,6 +1552,12 @@ export class FlightSceneSimple extends Scene3D {
         document.getElementById('touch-overlay')?.remove();
         document.getElementById('mp-conn-indicator')?.remove();
         try { this._inputSystem.dispose(); } catch (err) { console.warn('[FlightSimple] InputSystem dispose failed:', err); }
+        try { this._windshieldRainSystem.dispose(); } catch (err) { console.warn('[FlightSimple] WindshieldRainSystem dispose failed:', err); }
+        try { this._pauseMenuSystem.dispose(); } catch (err) { console.warn('[FlightSimple] PauseMenuSystem dispose failed:', err); }
+        try { this._flightDebriefSystem.dispose(); } catch (err) { console.warn('[FlightSimple] FlightDebriefSystem dispose failed:', err); }
+        try { this._tcasSystem.dispose(); } catch (err) { console.warn('[FlightSimple] TcasSystem dispose failed:', err); }
+        try { this._chatSystem.dispose(); } catch (err) { console.warn('[FlightSimple] ChatSystem dispose failed:', err); }
+        try { this._photoModeSystem.dispose(); } catch (err) { console.warn('[FlightSimple] PhotoModeSystem dispose failed:', err); }
         try { this._hudSystem.disposeResizeListener(); } catch (err) { console.warn('[FlightSimple] HudSystem resize listener dispose failed:', err); }
         document.getElementById('aircraft-btn')?.remove();
         document.getElementById('aircraft-panel')?.remove();
@@ -1691,11 +1733,17 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _latLonToLocal(lat: number, lon: number, alt: number): BABYLON.Vector3 {
-        const metersPerDegLat = 111320;
-        const metersPerDegLon = 111320 * Math.cos(this.originLat * Math.PI / 180);
-        const x = (lon - this.originLon) * metersPerDegLon;
-        const z = -(lat - this.originLat) * metersPerDegLat;
-        return new BABYLON.Vector3(x, alt - this.refAlt, z);
+        return this._latLonToLocalToRef(lat, lon, alt, new BABYLON.Vector3());
+    }
+
+    private _latLonToLocalToRef(lat: number, lon: number, alt: number, out: BABYLON.Vector3): BABYLON.Vector3 {
+        const metersPerDegLon = METERS_PER_DEG_LAT * Math.cos(this.originLat * Math.PI / 180);
+        out.set(
+            (lon - this.originLon) * metersPerDegLon,
+            alt - this.refAlt,
+            -(lat - this.originLat) * METERS_PER_DEG_LAT,
+        );
+        return out;
     }
 
     private _updateRemotePlayers(): void {
@@ -2024,6 +2072,14 @@ export class FlightSceneSimple extends Scene3D {
         return this._runwayCollidersSystem.buildRunwayCollider(r, icao);
     }
 
+    private _rebuildRunwayLights(): void {
+        this._runwayLightsSystem.rebuild();
+    }
+
+    private _disposeRunwayLights(): void {
+        this._runwayLightsSystem.dispose();
+    }
+
     private _disposeRunwayColliders(): void {
         this._runwayCollidersSystem.disposeRunwayColliders();
     }
@@ -2234,6 +2290,14 @@ export class FlightSceneSimple extends Scene3D {
         this._postProcessingSystem.setupPostProcessing(scene);
     }
 
+    private _ensureSsaoPipeline(samples: number): BABYLON.SSAO2RenderingPipeline | null {
+        return this._postProcessingSystem.ensureSsaoPipeline(this.scene, samples);
+    }
+
+    private _disposeSsaoPipeline(): void {
+        this._postProcessingSystem.disposeSsaoPipeline(this.scene);
+    }
+
     // ── Premium Visual Helpers ────────────────────────────────────────────────
 
     private _setGodRays(scene: BABYLON.Scene, enabled: boolean): void {
@@ -2252,6 +2316,10 @@ export class FlightSceneSimple extends Scene3D {
 
     private _setFxaaFallback(enabled: boolean): void {
         this._vfxSystem.setFxaaFallback(enabled);
+    }
+
+    private _setTaa(scene: BABYLON.Scene, enabled: boolean): void {
+        this._vfxSystem.setTaa(scene, enabled);
     }
 
     private _setVegetation(scene: BABYLON.Scene, enabled: boolean): void {

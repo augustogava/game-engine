@@ -1,4 +1,6 @@
 import { AudioCore } from './AudioCore.js';
+import { I18n } from './I18n.js';
+import { LANGUAGE_EN } from './UiPreferences.js';
 
 const PINK_NOISE_BUFFER_SECONDS = 4;
 const WIND_LOWPASS_MIN_HZ = 200;
@@ -25,6 +27,8 @@ const GPWS_TTS_VOLUME = 1.0;
 const ATC_TTS_RATE = 1.0;
 const ATC_TTS_PITCH = 1.0;
 const ATC_TTS_VOLUME = 1.0;
+const TTS_LANG_EN = 'en-US';
+const TTS_LANG_PT = 'pt-BR';
 
 const GEAR_WHIRR_FREQ_BASE_HZ = 220;
 const GEAR_WHIRR_GAIN = 0.04;
@@ -367,6 +371,7 @@ export class FlightAudio {
             const synth = (window as unknown as { speechSynthesis?: SpeechSynthesis }).speechSynthesis;
             if (!synth) return;
             const u = new SpeechSynthesisUtterance(phrase);
+            u.lang = I18n.currentLanguage() === LANGUAGE_EN ? TTS_LANG_EN : TTS_LANG_PT;
             u.rate = ATC_TTS_RATE;
             u.pitch = ATC_TTS_PITCH;
             u.volume = ATC_TTS_VOLUME * AudioCore.getVolumes().atc * AudioCore.getVolumes().master;

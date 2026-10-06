@@ -4,14 +4,57 @@ import {
     VOLUMETRIC_CLOUDS_SHADER_URL,
     VOLUMETRIC_CLOUDS_NOISE_URL,
     VOLUMETRIC_CLOUDS_BLUE_NOISE_URL,
+    VOLUMETRIC_CLOUDS_DEFAULT_BASE_M,
+    VOLUMETRIC_CLOUDS_DEFAULT_TOP_M,
+    VOLUMETRIC_CLOUDS_MIN_BASE_M,
+    VOLUMETRIC_CLOUDS_MAX_BASE_M,
+    VOLUMETRIC_CLOUDS_STEPS_ULTRA,
+    VOLUMETRIC_CLOUDS_LIGHT_STEPS_ULTRA,
+    VOLUMETRIC_CLOUDS_STEPS_HIGH,
+    VOLUMETRIC_CLOUDS_LIGHT_STEPS_HIGH,
+    VOLUMETRIC_CLOUDS_STEPS_DEFAULT,
+    VOLUMETRIC_CLOUDS_LIGHT_STEPS_DEFAULT,
 } from '../constants/index.js';
+
+const FEET_TO_METERS = 0.3048;
+const VOLUMETRIC_AMBIENT_SCALE = 0.4;
+const GFX_PRESET_SELECT_ID = 'gfx-preset';
 
 export class VolumetricCloudsSystem {
     private readonly scene: any;
     private _toggleToken = 0;
+    private readonly _tmpViewProj = new BABYLON.Matrix();
+    private readonly _tmpInvViewProj = new BABYLON.Matrix();
+    private readonly _tmpAmbient = new BABYLON.Color3();
+    private readonly _fallbackSunDir = new BABYLON.Vector3(0, -1, 0.5).normalize();
+    private readonly _fallbackSunColor = new BABYLON.Color3(1, 1, 1);
+    private readonly _fallbackAmbient = new BABYLON.Color3(0.3, 0.4, 0.5);
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    private resolveCloudLayerAltitudes(): { baseM: number; topM: number } {
+        const layerThicknessM = VOLUMETRIC_CLOUDS_DEFAULT_TOP_M - VOLUMETRIC_CLOUDS_DEFAULT_BASE_M;
+        const metarBaseFt = Number(this.scene._metarCloudBaseFt);
+        if (this.scene._metarApplied === true && Number.isFinite(metarBaseFt) && metarBaseFt > 0) {
+            const baseM = Math.max(VOLUMETRIC_CLOUDS_MIN_BASE_M, Math.min(VOLUMETRIC_CLOUDS_MAX_BASE_M, metarBaseFt * FEET_TO_METERS));
+            return { baseM, topM: baseM + layerThicknessM };
+        }
+        return { baseM: VOLUMETRIC_CLOUDS_DEFAULT_BASE_M, topM: VOLUMETRIC_CLOUDS_DEFAULT_TOP_M };
+    }
+
+    private resolveRaymarchDefines(): string {
+        const presetEl = document.getElementById(GFX_PRESET_SELECT_ID) as HTMLSelectElement | null;
+        const preset = presetEl?.value || '';
+        const steps = preset === 'ultra' ? VOLUMETRIC_CLOUDS_STEPS_ULTRA
+            : preset === 'high' ? VOLUMETRIC_CLOUDS_STEPS_HIGH
+            : VOLUMETRIC_CLOUDS_STEPS_DEFAULT;
+        const lightSteps = preset === 'ultra' ? VOLUMETRIC_CLOUDS_LIGHT_STEPS_ULTRA
+            : preset === 'high' ? VOLUMETRIC_CLOUDS_LIGHT_STEPS_HIGH
+            : VOLUMETRIC_CLOUDS_LIGHT_STEPS_DEFAULT;
+        console.debug(`[VolumetricClouds] Raymarch quality preset="${preset || 'custom'}" steps=${steps} lightSteps=${lightSteps}`);
+        return `#define MAX_STEPS ${steps}\n#define LIGHT_STEPS ${lightSteps}`;
     }
 
     async registerVolumetricShader(): Promise<boolean> {
@@ -86,23 +129,27 @@ export class VolumetricCloudsSystem {
                         BABYLON.Texture.BILINEAR_SAMPLINGMODE,
                         scene.getEngine(),
                         false,
+                        this.resolveRaymarchDefines(),
                     );
                     post.onApply = (effect) => {
                         const camera = scene.activeCamera;
                         if (!camera) return;
-                        const vp = camera.getProjectionMatrix().multiply(camera.getViewMatrix());
-                        const inv = BABYLON.Matrix.Invert(vp);
-                        effect.setMatrix('invViewProj', inv);
+                        camera.getProjectionMatrix().multiplyToRef(camera.getViewMatrix(), this._tmpViewProj);
+                        this._tmpViewProj.invertToRef(this._tmpInvViewProj);
+                        effect.setMatrix('invViewProj', this._tmpInvViewProj);
                         effect.setVector3('cameraPos', camera.globalPosition);
-                        const sd = this.scene._sunLight ? this.scene._sunLight.direction : new BABYLON.Vector3(0, -1, 0.5).normalize();
+                        const sd = this.scene._sunLight ? this.scene._sunLight.direction : this._fallbackSunDir;
                         effect.setVector3('sunDir', sd);
-                        const sCol = this.scene._sunLight ? this.scene._sunLight.diffuse : new BABYLON.Color3(1, 1, 1);
+                        const sCol = this.scene._sunLight ? this.scene._sunLight.diffuse : this._fallbackSunColor;
                         effect.setColor3('sunColor', sCol);
-                        const aCol = this.scene._hemiLight ? this.scene._hemiLight.diffuse.scale(0.4) : new BABYLON.Color3(0.3, 0.4, 0.5);
+                        const aCol = this.scene._hemiLight
+                            ? this.scene._hemiLight.diffuse.scaleToRef(VOLUMETRIC_AMBIENT_SCALE, this._tmpAmbient)
+                            : this._fallbackAmbient;
                         effect.setColor3('ambientColor', aCol);
                         effect.setFloat('time', performance.now() * 0.001);
-                        effect.setFloat('cloudBaseAlt', 800);
-                        effect.setFloat('cloudTopAlt', 5500);
+                        const layer = this.resolveCloudLayerAltitudes();
+                        effect.setFloat('cloudBaseAlt', layer.baseM);
+                        effect.setFloat('cloudTopAlt', layer.topM);
                         const metarCov = Number(this.scene._currentCloudCoverage);
                         const coverage = Number.isFinite(metarCov) && metarCov > 0
                             ? Math.max(0.1, Math.min(1, metarCov))

@@ -24,8 +24,12 @@ uniform vec2 windOffset;
 uniform vec2 screenSize;
 
 #define NOISE_SLICES 128.0
+#ifndef MAX_STEPS
 #define MAX_STEPS 64
+#endif
+#ifndef LIGHT_STEPS
 #define LIGHT_STEPS 6
+#endif
 #define EPS 0.0001
 
 vec4 sample3D(vec3 uvw) {

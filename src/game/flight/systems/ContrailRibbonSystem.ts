@@ -33,6 +33,12 @@ interface TrailPoint {
     age: number;
 }
 
+interface TrailRing {
+    points: TrailPoint[];
+    head: number;
+    count: number;
+}
+
 export interface ContrailRibbonHandle {
     parentRoot: BABYLON.TransformNode;
     emitter: BABYLON.TransformNode;
@@ -40,11 +46,12 @@ export interface ContrailRibbonHandle {
     idTag: string;
     mesh: BABYLON.Mesh | null;
     material: BABYLON.ShaderMaterial | null;
-    history: TrailPoint[];
+    history: TrailRing;
     pushDtAccum: number;
     positions: Float32Array;
     uvs: Float32Array;
     indices: Uint16Array;
+    uploadedIndexPointCount: number;
     prevPerpX: number;
     prevPerpY: number;
     prevPerpZ: number;
@@ -91,6 +98,26 @@ export class ContrailRibbonSystem {
             }
         })();
         return this._shadersRegistering;
+    }
+
+    private _createRing(): TrailRing {
+        const points: TrailPoint[] = new Array(CONTRAIL_RIBBON_MAX_POINTS);
+        for (let i = 0; i < CONTRAIL_RIBBON_MAX_POINTS; i++) points[i] = { x: 0, y: 0, z: 0, age: 0 };
+        return { points, head: 0, count: 0 };
+    }
+
+    private _ringAt(ring: TrailRing, newestFirstIndex: number): TrailPoint {
+        return ring.points[(ring.head + newestFirstIndex) % CONTRAIL_RIBBON_MAX_POINTS];
+    }
+
+    private _ringPushFront(ring: TrailRing, x: number, y: number, z: number): void {
+        ring.head = (ring.head - 1 + CONTRAIL_RIBBON_MAX_POINTS) % CONTRAIL_RIBBON_MAX_POINTS;
+        const p = ring.points[ring.head];
+        p.x = x;
+        p.y = y;
+        p.z = z;
+        p.age = 0;
+        if (ring.count < CONTRAIL_RIBBON_MAX_POINTS) ring.count++;
     }
 
     private _allocateBuffers(): { positions: Float32Array; uvs: Float32Array; indices: Uint16Array } {
@@ -159,6 +186,10 @@ export class ContrailRibbonSystem {
 
     private readonly _boundsMin = new BABYLON.Vector3();
     private readonly _boundsMax = new BABYLON.Vector3();
+    private readonly _tmpShaderCamPos = new BABYLON.Vector3();
+    private readonly _fallbackSunDir = new BABYLON.Vector3(0, -1, 0.5).normalize();
+    private readonly _fallbackSunColor = new BABYLON.Color3(1.0, 0.95, 0.8);
+    private readonly _fallbackHorizonColor = new BABYLON.Color3(0.6, 0.7, 0.85);
 
     /**
      * Build a pair of ribbon emitters + meshes attached to a given parent root.
@@ -200,11 +231,12 @@ export class ContrailRibbonSystem {
             idTag,
             mesh: null,
             material: null,
-            history: [],
+            history: this._createRing(),
             pushDtAccum: 0,
             positions: buffers.positions,
             uvs: buffers.uvs,
             indices: buffers.indices,
+            uploadedIndexPointCount: -1,
             prevPerpX: 0,
             prevPerpY: 0,
             prevPerpZ: 1,
@@ -245,7 +277,8 @@ export class ContrailRibbonSystem {
         try { handle.mesh?.dispose(); } catch (_) { /* ignore */ }
         handle.material = null;
         handle.mesh = null;
-        handle.history.length = 0;
+        handle.history.count = 0;
+        handle.uploadedIndexPointCount = -1;
     }
 
     /**
@@ -260,17 +293,18 @@ export class ContrailRibbonSystem {
 
         const safeIntensity = Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : 0;
 
-        for (let i = 0; i < handle.history.length; i++) {
-            handle.history[i].age += dtClamp;
+        const ring = handle.history;
+        for (let i = 0; i < ring.count; i++) {
+            this._ringAt(ring, i).age += dtClamp;
         }
-        while (handle.history.length > 0 && handle.history[handle.history.length - 1].age > CONTRAIL_RIBBON_MAX_AGE_S) {
-            handle.history.pop();
+        while (ring.count > 0 && this._ringAt(ring, ring.count - 1).age > CONTRAIL_RIBBON_MAX_AGE_S) {
+            ring.count--;
         }
 
         handle.pushDtAccum += dtClamp;
         try { handle.emitter.computeWorldMatrix(true); } catch (_) { /* ignore */ }
         const emPos = handle.emitter.getAbsolutePosition();
-        const head = handle.history[0];
+        const head = ring.count > 0 ? this._ringAt(ring, 0) : null;
         let shouldPush = false;
         if (safeIntensity > 0) {
             if (!head) {
@@ -281,7 +315,7 @@ export class ContrailRibbonSystem {
                 const dz = emPos.z - head.z;
                 const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                 if (dist > CONTRAIL_RIBBON_MAX_JUMP_M) {
-                    handle.history.length = 0;
+                    ring.count = 0;
                     handle.prevPerpValid = false;
                     shouldPush = true;
                 } else if (dist > CONTRAIL_RIBBON_MIN_SEGMENT_M || handle.pushDtAccum > CONTRAIL_RIBBON_MAX_PUSH_DT_S) {
@@ -290,16 +324,13 @@ export class ContrailRibbonSystem {
             }
         }
         if (shouldPush) {
-            handle.history.unshift({ x: emPos.x, y: emPos.y, z: emPos.z, age: 0 });
+            this._ringPushFront(ring, emPos.x, emPos.y, emPos.z);
             handle.pushDtAccum = 0;
-            if (handle.history.length > CONTRAIL_RIBBON_MAX_POINTS) {
-                handle.history.length = CONTRAIL_RIBBON_MAX_POINTS;
-            }
         }
 
         if (!handle.mesh || !handle.material) return;
 
-        const n = handle.history.length;
+        const n = ring.count;
         if (n < 2) {
             handle.mesh.setEnabled(false);
             return;
@@ -311,7 +342,8 @@ export class ContrailRibbonSystem {
     }
 
     private _rebuildVertices(handle: ContrailRibbonHandle): void {
-        const n = handle.history.length;
+        const ring = handle.history;
+        const n = ring.count;
         const positions = handle.positions;
         const uvs = handle.uvs;
         const indices = handle.indices;
@@ -323,12 +355,12 @@ export class ContrailRibbonSystem {
         let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
         for (let i = 0; i < n; i++) {
-            const a = handle.history[i];
+            const a = this._ringAt(ring, i);
             if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
             if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
             if (a.z < minZ) minZ = a.z; if (a.z > maxZ) maxZ = a.z;
             if (i < n - 1) {
-                const b = handle.history[i + 1];
+                const b = this._ringAt(ring, i + 1);
                 segDirX = a.x - b.x;
                 segDirY = a.y - b.y;
                 segDirZ = a.z - b.z;
@@ -371,27 +403,30 @@ export class ContrailRibbonSystem {
         handle.prevPerpZ = perpZ;
         handle.prevPerpValid = true;
 
-        let idxWrite = 0;
-        for (let i = 0; i < n - 1; i++) {
-            const leftA = i * 2;
-            const rightA = i * 2 + 1;
-            const leftB = (i + 1) * 2;
-            const rightB = (i + 1) * 2 + 1;
-            indices[idxWrite++] = leftA;
-            indices[idxWrite++] = leftB;
-            indices[idxWrite++] = rightA;
-            indices[idxWrite++] = leftB;
-            indices[idxWrite++] = rightB;
-            indices[idxWrite++] = rightA;
-        }
-        for (let i = idxWrite; i < indices.length; i++) {
-            indices[i] = 0;
+        const mesh = handle.mesh!;
+        if (handle.uploadedIndexPointCount !== n) {
+            let idxWrite = 0;
+            for (let i = 0; i < n - 1; i++) {
+                const leftA = i * 2;
+                const rightA = i * 2 + 1;
+                const leftB = (i + 1) * 2;
+                const rightB = (i + 1) * 2 + 1;
+                indices[idxWrite++] = leftA;
+                indices[idxWrite++] = leftB;
+                indices[idxWrite++] = rightA;
+                indices[idxWrite++] = leftB;
+                indices[idxWrite++] = rightB;
+                indices[idxWrite++] = rightA;
+            }
+            for (let i = idxWrite; i < indices.length; i++) {
+                indices[i] = 0;
+            }
+            mesh.setIndices(indices, undefined, true);
+            handle.uploadedIndexPointCount = n;
         }
 
-        const mesh = handle.mesh!;
         mesh.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
         mesh.updateVerticesData(BABYLON.VertexBuffer.UVKind, uvs);
-        mesh.setIndices(indices, undefined, true);
         if (n > 0 && Number.isFinite(minX) && Number.isFinite(maxX)) {
             const pad = Math.max(CONTRAIL_RIBBON_HEAD_WIDTH_M, CONTRAIL_RIBBON_TAIL_WIDTH_M);
             this._boundsMin.set(minX - pad, minY - pad, minZ - pad);
@@ -408,16 +443,18 @@ export class ContrailRibbonSystem {
         const mat = handle.material!;
         const scene = this._sceneRef ?? this.scene.scene;
         const cam: BABYLON.Camera | null = scene?.activeCamera ?? null;
-        const camPos = cam ? cam.globalPosition : (this.scene.planeRoot?.position ?? BABYLON.Vector3.Zero());
+        const camPos = cam ? cam.globalPosition : (this.scene.planeRoot?.position ?? BABYLON.Vector3.ZeroReadOnly);
         const sun = this.scene._sunLight;
-        const sunDir = sun ? sun.direction : new BABYLON.Vector3(0, -1, 0.5).normalize();
-        const sunColor = sun ? sun.diffuse : new BABYLON.Color3(1.0, 0.95, 0.8);
-        const horizonColor = scene?.fogColor ?? new BABYLON.Color3(0.6, 0.7, 0.85);
+        const sunDir = sun ? sun.direction : this._fallbackSunDir;
+        const sunColor = sun ? sun.diffuse : this._fallbackSunColor;
+        const horizonColor = scene?.fogColor ?? this._fallbackHorizonColor;
+        const originOffset = scene?.floatingOriginOffset;
+        const shaderCamPos = originOffset ? camPos.subtractToRef(originOffset, this._tmpShaderCamPos) : camPos;
 
         mat.setFloat('time', this._timeAccum);
         mat.setVector3('sunDir', sunDir);
         mat.setColor3('sunColor', sunColor);
-        mat.setVector3('cameraPos', camPos);
+        mat.setVector3('cameraPos', shaderCamPos);
         mat.setColor3('horizonColor', horizonColor);
     }
 }

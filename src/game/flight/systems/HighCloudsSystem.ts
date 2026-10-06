@@ -59,6 +59,7 @@ export class HighCloudsSystem {
     private _lastShadowSampleMs = 0;
     private _lastShadowDl = 0;
     private _sceneRef: BABYLON.Scene | null = null;
+    private readonly _tmpShaderCamPos = new BABYLON.Vector3();
     private _autoTintEnabled = true;
     private _lastTintR = Number.NaN;
     private _lastTintG = Number.NaN;
@@ -175,7 +176,8 @@ export class HighCloudsSystem {
         this._material.setColor3('cloudColor', this._color);
         this._material.setVector3('sunDir', sunDir);
         this._material.setColor3('sunColor', sunColor);
-        this._material.setVector3('cameraPos', camPos);
+        const originOffset = this._sceneRef?.floatingOriginOffset ?? this.scene.scene?.floatingOriginOffset;
+        this._material.setVector3('cameraPos', originOffset ? camPos.subtractToRef(originOffset, this._tmpShaderCamPos) : camPos);
         this._material.setColor3('horizonColor', horizonColor);
 
         this.applyCloudShadow();

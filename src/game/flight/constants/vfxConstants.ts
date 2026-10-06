@@ -35,6 +35,10 @@ export const COLOR_GRADE_SATURATION_DAY   = 1.05;
 
 export const COLOR_LUT_URL = 'src/game/assets/luts/cinematic_warm.png';
 
+export const GFX_SETTINGS_STORAGE_KEY = 'gfx_settings';
+export const SSAO_SAMPLES_ULTRA = 16;
+export const SSAO_SAMPLES_DEFAULT = 8;
+
 // Contrail render mode (ribbon shader vs legacy particles)
 export const CONTRAIL_MODE_RIBBON = 'ribbon';
 export const CONTRAIL_MODE_PARTICLES = 'particles';

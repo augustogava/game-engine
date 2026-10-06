@@ -24,6 +24,15 @@ export interface PlayerState {
 type PlayersUpdateCallback = (players: PlayerState[]) => void;
 type CountChangeCallback = (count: number) => void;
 
+export interface ChatMessage {
+    userId: string;
+    username: string;
+    text: string;
+    ts: number;
+}
+
+const CHAT_MAX_LEN = 200;
+
 export class MultiplayerClient {
     private rt: RealtimeClient;
     private token: string;
@@ -36,6 +45,7 @@ export class MultiplayerClient {
     private _onFlightLogEndedCb: ((msg: any) => void) | null = null;
     private _onAchievementsUnlockedCb: ((achievements: any[]) => void) | null = null;
     private _onDailyBonusCb: ((msg: any) => void) | null = null;
+    private _onChatCb: ((msg: ChatMessage) => void) | null = null;
     private _onlineCount = 0;
     private _pendingCrash: { reason: string; altitudeFt: number; verticalSpeedFpm: number } | null = null;
 
@@ -84,6 +94,14 @@ export class MultiplayerClient {
             if (msg.type === 'dailyBonus') {
                 console.log(`[Daily] Bonus received: streakDays=${msg.streakDays} streakPoints=${msg.streakPoints} dailyMissionPoints=${msg.dailyMissionPoints}`);
                 this._onDailyBonusCb?.(msg);
+            }
+            if (msg.type === 'chat' && typeof msg.text === 'string' && msg.text.length > 0) {
+                this._onChatCb?.({
+                    userId: String(msg.userId ?? ''),
+                    username: typeof msg.username === 'string' ? msg.username : '',
+                    text: msg.text.slice(0, CHAT_MAX_LEN),
+                    ts: Number(msg.ts) || Date.now(),
+                });
             }
         });
 
@@ -177,6 +195,18 @@ export class MultiplayerClient {
 
     onDailyBonus(cb: (msg: any) => void): void {
         this._onDailyBonusCb = cb;
+    }
+
+    onChat(cb: (msg: ChatMessage) => void): void {
+        this._onChatCb = cb;
+    }
+
+    sendChat(text: string): boolean {
+        if (typeof text !== 'string') return false;
+        const trimmed = text.trim().slice(0, CHAT_MAX_LEN);
+        if (!trimmed || !this.rt.connected) return false;
+        this.rt.send({ type: 'chat', text: trimmed });
+        return true;
     }
 
     getLastMessageAgeMs(): number {

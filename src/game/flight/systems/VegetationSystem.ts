@@ -10,6 +10,7 @@ import {
     VEGETATION_FADE_BAND_M,
     VEGETATION_FADE_RANGE_M,
     VEGETATION_RESEED_DIST_M,
+    VEGETATION_RESEED_BATCH_PER_FRAME,
     GROUND_Y,
     TERRAIN_UNKNOWN_Y,
     AIRCRAFT_PBR_MAX_SIMULTANEOUS_LIGHTS,
@@ -20,9 +21,20 @@ const VEGETATION_PROBE_LENGTH_M = 1200;
 const VEGETATION_ADAPTIVE_REDUCTION_PER_STEP = 0.2;
 const VEGETATION_ADAPTIVE_MIN_RATIO = 0.2;
 
+interface VegetationPlacement {
+    templateIndex: number;
+    x: number;
+    z: number;
+    scale: number;
+    name: string;
+}
+
 export class VegetationSystem {
     private readonly scene: any;
     private readonly _probeRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), VEGETATION_PROBE_LENGTH_M);
+    private _pendingPlacements: VegetationPlacement[] = [];
+    private _pendingIndex = 0;
+    private _pendingBaseGroundY = GROUND_Y;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -47,7 +59,7 @@ export class VegetationSystem {
             if (!this.scene._vegetationBuilt) this.buildVegetation(scene);
             this.seedVegetation();
             for (const tpl of this.scene._vegetationTemplates) tpl.setEnabled(true);
-            console.debug(`[Vegetation] Enabled with ${this.scene._vegetationInstances.length} instances`);
+            console.debug(`[Vegetation] Enabled (${this._pendingPlacements.length} placements seeding progressively)`);
         } else {
             this.clearVegetationInstances();
             for (const tpl of this.scene._vegetationTemplates) tpl.setEnabled(false);
@@ -103,11 +115,12 @@ export class VegetationSystem {
             try { inst.dispose(); } catch (_) { /* ignore */ }
         }
         this.scene._vegetationInstances = [];
+        this._pendingPlacements = [];
+        this._pendingIndex = 0;
     }
 
     seedVegetation(): void {
         if (!this.scene.planeRoot || this.scene._vegetationTemplates.length === 0) return;
-        this.clearVegetationInstances();
 
         const cx = this.scene.planeRoot.position.x;
         const cz = this.scene.planeRoot.position.z;
@@ -122,9 +135,9 @@ export class VegetationSystem {
         const startX = cx - half;
         const startZ = cz - half;
 
-        let total = 0;
-        for (let iz = 0; iz < cellsPerSide && total < VEGETATION_MAX_INSTANCES; iz++) {
-            for (let ix = 0; ix < cellsPerSide && total < VEGETATION_MAX_INSTANCES; ix++) {
+        const placements: VegetationPlacement[] = [];
+        for (let iz = 0; iz < cellsPerSide && placements.length < VEGETATION_MAX_INSTANCES; iz++) {
+            for (let ix = 0; ix < cellsPerSide && placements.length < VEGETATION_MAX_INSTANCES; ix++) {
                 const cellSeed = (((ix + 1024) * 73856093) ^ ((iz + 1024) * 19349663)) >>> 0;
                 const r1 = (cellSeed % 10000) / 10000;
                 if (r1 > 0.5) continue;
@@ -133,42 +146,73 @@ export class VegetationSystem {
                 const r4 = ((Math.imul(cellSeed, 53) >>> 0) % 10000) / 10000;
                 const r5 = ((Math.imul(cellSeed, 97) >>> 0) % 10000) / 10000;
 
-                const speciesIdx = Math.min(speciesCount - 1, Math.floor(r4 * speciesCount));
-                const tpl = this.scene._vegetationTemplates[speciesIdx];
-                const wx = startX + ix * cellM + (r2 - 0.5) * cellM;
-                const wz = startZ + iz * cellM + (r3 - 0.5) * cellM;
-                const scale = 0.6 + r5 * 0.6;
-
-                try {
-                    const inst = tpl.createInstance(`veg_${ix}_${iz}`);
-                    const wy = this.groundYAt(wx, wz, baseGroundY) + VEGETATION_TREE_HEIGHT_M * 0.5 * scale;
-                    inst.position.set(wx, wy, wz);
-                    inst.scaling.setAll(scale);
-                    inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
-                    inst.isPickable = false;
-                    this.scene._vegetationInstances.push(inst);
-                    total++;
-                } catch (err) {
-                    console.warn('[Vegetation] Failed to spawn instance:', err);
-                    break;
-                }
+                placements.push({
+                    templateIndex: Math.min(speciesCount - 1, Math.floor(r4 * speciesCount)),
+                    x: startX + ix * cellM + (r2 - 0.5) * cellM,
+                    z: startZ + iz * cellM + (r3 - 0.5) * cellM,
+                    scale: 0.6 + r5 * 0.6,
+                    name: `veg_${ix}_${iz}`,
+                });
             }
         }
+        this._pendingPlacements = placements;
+        this._pendingIndex = 0;
+        this._pendingBaseGroundY = baseGroundY;
         this.scene._vegetationSeeded = true;
-        this.scene._vegetationVisibility = 1;
         this._lastAdaptiveStep = -1;
-        for (const inst of this.scene._vegetationInstances) inst.visibility = 1;
-        console.debug(`[Vegetation] Seeded ${total} instances at (${cx.toFixed(0)},${cz.toFixed(0)})`);
+        console.debug(`[Vegetation] Reseed scheduled: ${placements.length} placements at (${cx.toFixed(0)},${cz.toFixed(0)}), ${VEGETATION_RESEED_BATCH_PER_FRAME} per frame`);
+        this.processPendingPlacements();
+    }
+
+    private processPendingPlacements(): void {
+        if (this._pendingPlacements.length === 0) return;
+        const instances: BABYLON.InstancedMesh[] = this.scene._vegetationInstances;
+        const total = this._pendingPlacements.length;
+        const end = Math.min(total, this._pendingIndex + VEGETATION_RESEED_BATCH_PER_FRAME);
+        const visibility = Number.isFinite(this.scene._vegetationVisibility) ? this.scene._vegetationVisibility : 1;
+        for (let i = this._pendingIndex; i < end; i++) {
+            const p = this._pendingPlacements[i];
+            const tpl = this.scene._vegetationTemplates[p.templateIndex];
+            if (!tpl) continue;
+            try {
+                let inst = instances[i];
+                if (!inst || inst.sourceMesh !== tpl) {
+                    if (inst) inst.dispose();
+                    inst = tpl.createInstance(p.name);
+                    inst.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
+                    inst.isPickable = false;
+                    instances[i] = inst;
+                }
+                const wy = this.groundYAt(p.x, p.z, this._pendingBaseGroundY) + VEGETATION_TREE_HEIGHT_M * 0.5 * p.scale;
+                inst.position.set(p.x, wy, p.z);
+                inst.scaling.setAll(p.scale);
+                inst.visibility = visibility;
+            } catch (err) {
+                console.warn('[Vegetation] Failed to place instance:', err);
+            }
+        }
+        this._pendingIndex = end;
+        if (end < total) return;
+
+        for (let i = instances.length - 1; i >= total; i--) {
+            try { instances[i].dispose(); } catch (_) { /* ignore */ }
+        }
+        instances.length = Math.min(instances.length, total);
+        this._pendingPlacements = [];
+        this._pendingIndex = 0;
+        this._lastAdaptiveStep = -1;
+        console.debug(`[Vegetation] Seeded ${instances.length} instances`);
     }
 
     updateVegetation(): void {
         if (!this.scene._premium.vegetation || !this.scene._vegetationSeeded || !this.scene.planeRoot) return;
+        this.processPendingPlacements();
         const px = this.scene.planeRoot.position.x;
         const py = this.scene.planeRoot.position.y;
         const pz = this.scene.planeRoot.position.z;
         const dx = px - this.scene._vegetationGridCenter.x;
         const dz = pz - this.scene._vegetationGridCenter.z;
-        if ((dx * dx + dz * dz) > VEGETATION_RESEED_DIST_M * VEGETATION_RESEED_DIST_M) {
+        if (this._pendingPlacements.length === 0 && (dx * dx + dz * dz) > VEGETATION_RESEED_DIST_M * VEGETATION_RESEED_DIST_M) {
             this.seedVegetation();
             return;
         }

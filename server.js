@@ -222,6 +222,63 @@ const PERIODIC_FLUSH_MS = 30000;
 const PERIODIC_MIN_SESSION_MIN = 0.5;
 const MISSION_WAYPOINT_REACH_NM = 2.4;
 
+// ── WebSocket hardening ──────────────────────────────────────────────────────
+const WS_MAX_PAYLOAD_BYTES = 16 * 1024;
+const WS_JOIN_TIMEOUT_MS = 10000;
+const WS_CLOSE_CODE_POLICY_VIOLATION = 1008;
+const WS_CLOSE_CODE_RATE_LIMIT = 4008;
+const WS_UPDATE_MIN_INTERVAL_MS = 25;
+const WS_UPDATE_DROP_WINDOW_MS = 10000;
+const WS_UPDATE_MAX_DROPS_PER_WINDOW = 300;
+const WS_MAX_STRING_FIELD_LEN = 64;
+const WS_MIN_ALT_M = -500;
+const WS_MAX_ALT_M = 30000;
+const WS_MAX_AIRSPEED_KMH = 4000;
+const WS_MAX_THROTTLE = 3;
+const WS_MAX_IMPLIED_GROUND_SPEED_KT = 3000;
+const WS_TELEPORT_COOLDOWN_MS = 5000;
+const WS_REJECTION_LOG_INTERVAL_MS = 10000;
+const WS_CHAT_MAX_LEN = 200;
+const WS_CHAT_MIN_INTERVAL_MS = 1500;
+
+function sanitizeChatText(value) {
+    if (typeof value !== 'string') return '';
+    return value.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, WS_CHAT_MAX_LEN);
+}
+
+function sanitizeWsString(value) {
+    return typeof value === 'string' ? value.slice(0, WS_MAX_STRING_FIELD_LEN) : undefined;
+}
+
+function clampNumber(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+}
+
+function isValidWsPosition(lat, lon, alt, airspeed) {
+    return lat >= -90 && lat <= 90
+        && lon >= -180 && lon <= 180
+        && alt >= WS_MIN_ALT_M && alt <= WS_MAX_ALT_M
+        && airspeed >= 0 && airspeed <= WS_MAX_AIRSPEED_KMH;
+}
+
+function logWsRejection(entryOrSocket, playerId, reason, detail) {
+    const now = Date.now();
+    if (entryOrSocket.lastWsRejectionLogMs && now - entryOrSocket.lastWsRejectionLogMs < WS_REJECTION_LOG_INTERVAL_MS) return;
+    entryOrSocket.lastWsRejectionLogMs = now;
+    console.warn(`[WS] Rejected update from user ${playerId}: ${reason} (${detail})`);
+}
+
+function registerWsUpdateDrop(entry, nowMs) {
+    if (!entry.updateDropWindowStartMs || nowMs - entry.updateDropWindowStartMs > WS_UPDATE_DROP_WINDOW_MS) {
+        entry.updateDropWindowStartMs = nowMs;
+        entry.updateDropCount = 0;
+    }
+    entry.updateDropCount = (entry.updateDropCount || 0) + 1;
+    return entry.updateDropCount > WS_UPDATE_MAX_DROPS_PER_WINDOW;
+}
+
 // ── HTTP infrastructure helpers ──────────────────────────────────────────────
 function parseBody(req) {
     return new Promise((resolve) => {
@@ -2170,7 +2227,7 @@ setInterval(() => {
     }
 }, 300000);
 
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES });
 wss.on('error', (err) => {
     wsReady = false;
     console.error('[WS] WebSocket hub error:', err && err.message);
@@ -2193,6 +2250,18 @@ wss.on('connection', (ws) => {
     ws.on('pong', () => { ws.isAlive = true; });
 
     const clientIp = (ws._socket?.remoteAddress || '').replace('::ffff:', '');
+    let joinTimeoutTimer = setTimeout(() => {
+        joinTimeoutTimer = null;
+        if (playerId || ws.readyState !== 1) return;
+        console.warn(`[WS] Closing unauthenticated socket from ${clientIp || 'unknown'}: no join within ${WS_JOIN_TIMEOUT_MS}ms`);
+        try { ws.close(WS_CLOSE_CODE_POLICY_VIOLATION, 'Join timeout'); } catch (_) {}
+    }, WS_JOIN_TIMEOUT_MS);
+    const clearJoinTimeout = () => {
+        if (joinTimeoutTimer) {
+            clearTimeout(joinTimeoutTimer);
+            joinTimeoutTimer = null;
+        }
+    };
 
     ws.on('message', async (raw) => {
         try {
@@ -2232,6 +2301,8 @@ wss.on('connection', (ws) => {
                 }
 
                 playerId = decoded.id;
+                ws.sfpUserId = playerId;
+                clearJoinTimeout();
                 const username = decoded.username;
 
                 const existing = players.get(playerId);
@@ -2356,6 +2427,35 @@ wss.on('connection', (ws) => {
 
                 const entry = players.get(playerId);
                 if (entry) {
+                    if (!isValidWsPosition(lat, lon, alt, airspeed)) {
+                        logWsRejection(entry, playerId, 'out of range', `lat=${lat} lon=${lon} alt=${alt} airspeed=${airspeed}`);
+                        return;
+                    }
+                    const recvNowMs = Date.now();
+                    if (entry.lastUpdateRecvMs && recvNowMs - entry.lastUpdateRecvMs < WS_UPDATE_MIN_INTERVAL_MS) {
+                        if (registerWsUpdateDrop(entry, recvNowMs)) {
+                            console.warn(`[WS] Closing socket for user ${playerId}: update rate exceeded (${entry.updateDropCount} drops in ${WS_UPDATE_DROP_WINDOW_MS}ms)`);
+                            try { ws.close(WS_CLOSE_CODE_RATE_LIMIT, 'Update rate exceeded'); } catch (_) {}
+                        }
+                        return;
+                    }
+                    if (entry.prevLat !== null && entry.prevLon !== null && entry.lastUpdateRecvMs) {
+                        const jumpNm = haversineNm(entry.prevLat, entry.prevLon, lat, lon);
+                        const elapsedHours = Math.max(1, recvNowMs - entry.lastUpdateRecvMs) / 3600000;
+                        if (jumpNm > MAX_STEP_NM && jumpNm / elapsedHours > WS_MAX_IMPLIED_GROUND_SPEED_KT) {
+                            if (entry.lastTeleportMs && recvNowMs - entry.lastTeleportMs < WS_TELEPORT_COOLDOWN_MS) {
+                                logWsRejection(entry, playerId, 'teleport cooldown', `jump=${jumpNm.toFixed(1)}nm`);
+                                return;
+                            }
+                            entry.lastTeleportMs = recvNowMs;
+                            console.log(`[WS] Position jump accepted for user ${playerId}: ${jumpNm.toFixed(1)}nm (respawn/relocation)`);
+                        }
+                    }
+                    entry.lastUpdateRecvMs = recvNowMs;
+                    msg.aircraft = sanitizeWsString(msg.aircraft);
+                    msg.aircraftCode = sanitizeWsString(msg.aircraftCode);
+                    msg.aircraftRegistration = sanitizeWsString(msg.aircraftRegistration);
+
                     if (!entry.flightPlanFinalized && msg.flightPlanId !== undefined) {
                         const fpId = Number(msg.flightPlanId);
                         entry.flightPlanId = Number.isFinite(fpId) && fpId > 0 ? fpId : null;
@@ -2366,12 +2466,12 @@ wss.on('connection', (ws) => {
                         lon,
                         alt,
                         airspeed,
-                        throttle: Number(msg.throttle) || 0,
-                        heading: Number(msg.heading) || 0,
-                        pitch: Number(msg.pitch) || 0,
-                        roll: Number(msg.roll) || 0,
+                        throttle: clampNumber(msg.throttle, 0, WS_MAX_THROTTLE, 0),
+                        heading: ((clampNumber(msg.heading, -720, 720, 0) % 360) + 360) % 360,
+                        pitch: clampNumber(msg.pitch, -90, 90, 0),
+                        roll: clampNumber(msg.roll, -180, 180, 0),
                         aircraft: msg.aircraft || null,
-                        aircraftId: msg.aircraftId ? Number(msg.aircraftId) : null,
+                        aircraftId: Number.isInteger(Number(msg.aircraftId)) && Number(msg.aircraftId) > 0 ? Number(msg.aircraftId) : null,
                         aircraftCode: msg.aircraftCode || null,
                     };
 
@@ -2595,6 +2695,22 @@ wss.on('connection', (ws) => {
                 }
             }
 
+            if (msg.type === 'chat' && playerId) {
+                const entry = players.get(playerId);
+                if (!entry) return;
+                const nowMs = Date.now();
+                if (entry.lastChatMs && nowMs - entry.lastChatMs < WS_CHAT_MIN_INTERVAL_MS) {
+                    logWsRejection(entry, playerId, 'chat rate limit', `interval=${nowMs - entry.lastChatMs}ms`);
+                    return;
+                }
+                const text = sanitizeChatText(msg.text);
+                if (!text) return;
+                entry.lastChatMs = nowMs;
+                broadcast({ type: 'chat', userId: playerId, username: entry.username, text, ts: nowMs });
+                console.log(`[Chat] Message from user ${playerId} (${text.length} chars) broadcast to ${players.size} player(s)`);
+                return;
+            }
+
             if (msg.type === 'crash' && playerId) {
                 const entry = players.get(playerId);
                 if (!entry) {
@@ -2619,6 +2735,7 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', async () => {
+        clearJoinTimeout();
         if (!playerId) return;
         const entry = players.get(playerId);
         if (!entry || entry.ws !== ws) {
@@ -2691,16 +2808,24 @@ function broadcast(msg) {
 setInterval(() => {
     if (players.size === 0) return;
 
+    const serializedStates = [];
+    for (const [otherId, otherEntry] of players) {
+        if (!otherEntry.state) continue;
+        serializedStates.push({
+            id: otherId,
+            json: JSON.stringify({ ...otherEntry.state, username: otherEntry.username, avatarUrl: otherEntry.avatarUrl }),
+        });
+    }
+
     for (const [selfId, selfEntry] of players) {
         if (selfEntry.ws.readyState !== 1) continue;
-        const others = [];
-        for (const [otherId, otherEntry] of players) {
-            if (otherId !== selfId && otherEntry.state) {
-                others.push({ ...otherEntry.state, username: otherEntry.username, avatarUrl: otherEntry.avatarUrl });
-            }
+        let body = '';
+        for (const s of serializedStates) {
+            if (s.id === selfId) continue;
+            body += body ? `,${s.json}` : s.json;
         }
         try {
-            selfEntry.ws.send(JSON.stringify({ type: 'state', players: others }));
+            selfEntry.ws.send(`{"type":"state","players":[${body}]}`);
         } catch (e) { /* ignore */ }
     }
 }, 50);
@@ -2810,14 +2935,14 @@ setInterval(async () => {
 
 // Ping/pong heartbeat + stale connection cleanup
 setInterval(() => {
-    for (const [userId, entry] of players) {
-        if (entry.ws.isAlive === false) {
-            console.log(`[WS] Stale connection detected for user ${userId}, cleaning up`);
-            entry.ws.terminate();
+    for (const client of wss.clients) {
+        if (client.isAlive === false) {
+            console.log(`[WS] Stale connection detected for user ${client.sfpUserId ?? 'unauthenticated'}, cleaning up`);
+            client.terminate();
             continue;
         }
-        entry.ws.isAlive = false;
-        entry.ws.ping();
+        client.isAlive = false;
+        try { client.ping(); } catch (err) { console.warn('[WS] Ping failed:', err && err.message); }
     }
 }, 30000);
 

@@ -27,6 +27,8 @@ const REMOTE_STATE_INTERVAL_MAX_MS = 2000;
 const REMOTE_STATE_INTERVAL_SMOOTHING = 0.2;
 const REMOTE_EXTRAPOLATION_MAX_T = 1.5;
 const REMOTE_STALE_TIMEOUT_MS = 15000;
+const REMOTE_ATTITUDE_SMOOTHING_PER_S = 20;
+const DEG_TO_RAD = Math.PI / 180;
 // Gives the main API time to credit the onboarding step after the landing is persisted.
 const ONBOARDING_CHECK_DELAY_MS = 3000;
 
@@ -37,12 +39,48 @@ export class MultiplayerSystem {
     private readonly _tmpPitchQ = new BABYLON.Quaternion();
     private readonly _tmpRollQ = new BABYLON.Quaternion();
     private readonly _tmpTargetQ = new BABYLON.Quaternion();
+    private readonly _tmpPrevQ = new BABYLON.Quaternion();
+    private readonly _tmpTargetPos = new BABYLON.Vector3();
+    private readonly _tmpPrevPos = new BABYLON.Vector3();
     private readonly _axisUp = BABYLON.Vector3.Up();
     private readonly _axisRight = BABYLON.Vector3.Right();
     private readonly _axisForward = BABYLON.Vector3.Forward();
+    private readonly _bodyForward = new BABYLON.Vector3(0, 0, 1);
+    private readonly _bodyRight = new BABYLON.Vector3(1, 0, 0);
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    private stateToQuaternionToRef(state: PlayerState, out: BABYLON.Quaternion): BABYLON.Quaternion {
+        const yawRad = (180 - (Number(state.heading) || 0)) * DEG_TO_RAD;
+        const pitchRad = -(Number(state.pitch) || 0) * DEG_TO_RAD;
+        const rollRad = (Number(state.roll) || 0) * DEG_TO_RAD;
+        BABYLON.Quaternion.RotationAxisToRef(this._axisUp, yawRad, this._tmpYawQ);
+        BABYLON.Quaternion.RotationAxisToRef(this._axisRight, pitchRad, this._tmpPitchQ);
+        BABYLON.Quaternion.RotationAxisToRef(this._axisForward, rollRad, this._tmpRollQ);
+        this._tmpYawQ.multiplyToRef(this._tmpPitchQ, out);
+        out.multiplyToRef(this._tmpRollQ, out);
+        return out;
+    }
+
+    private hideRemotesForDisconnect(): void {
+        let hidden = 0;
+        for (const [, remote] of this.scene.remotePlayers) {
+            try {
+                if (!remote.root.isEnabled(false)) continue;
+                remote.root.setEnabled(false);
+                remote.engineSound?.silence();
+                if (remote.contrailPSLeft) remote.contrailPSLeft.emitRate = 0;
+                if (remote.contrailPSRight) remote.contrailPSRight.emitRate = 0;
+                remote.contrailRibbonLeft?.mesh?.setEnabled(false);
+                remote.contrailRibbonRight?.mesh?.setEnabled(false);
+                hidden++;
+            } catch (err) {
+                console.warn('[MP] Failed to hide remote on disconnect:', err);
+            }
+        }
+        if (hidden > 0) console.debug(`[MP] Disconnected; hid ${hidden} remote player(s) until fresh state arrives`);
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
@@ -85,6 +123,11 @@ export class MultiplayerSystem {
                         remote.updateIntervalMs += (measured - remote.updateIntervalMs) * REMOTE_STATE_INTERVAL_SMOOTHING;
                     }
                 }
+                if (!remote.root.isEnabled(false)) {
+                    remote.root.setEnabled(true);
+                    remote.nextState = null;
+                    console.debug(`[MP] Remote ${p.userId} visible again after reconnect`);
+                }
                 remote.prevState = remote.nextState;
                 remote.nextState = p;
                 remote.lastUpdateTime = now;
@@ -118,9 +161,11 @@ export class MultiplayerSystem {
             this._setConnectionIndicator(connected);
             // Remote players are kept across short disconnects so a reconnect reuses loaded GLBs;
             // stale entries are pruned by updateRemotePlayers() after REMOTE_STALE_TIMEOUT_MS.
-            if (!connected) {
-                console.debug('[MP] Disconnected; keeping remote players until stale timeout');
-            }
+            if (!connected) this.hideRemotesForDisconnect();
+        });
+
+        this.scene.mpClient.onChat((msg: any) => {
+            try { this.scene._chatSystem?.receive(msg); } catch (err) { console.warn('[Chat] Receive failed:', err); }
         });
 
         if (onAuthFailure) this.scene.mpClient.onAuthFailure(onAuthFailure);
@@ -128,6 +173,11 @@ export class MultiplayerSystem {
 
         this.scene.mpClient.onFlightLogEnded((msg: any) => {
             if (msg && msg.status === 'landed') {
+                try {
+                    this.scene._flightDebriefSystem?.show(msg);
+                } catch (err) {
+                    console.warn('[Debrief] Show failed:', err);
+                }
                 try {
                     this.scene._hudSystem?.showLandingGradeToast(msg);
                 } catch (err) {
@@ -660,8 +710,11 @@ export class MultiplayerSystem {
                 continue;
             }
 
+            if (!remote.root.isEnabled(false)) continue;
+
             const ns = remote.nextState;
-            const targetPos = this.scene._latLonToLocal(ns.lat, ns.lon, ns.alt);
+            const targetPos = this.scene._latLonToLocalToRef(ns.lat, ns.lon, ns.alt, this._tmpTargetPos);
+            this.stateToQuaternionToRef(ns, this._tmpTargetQ);
 
             if (remote.prevState) {
                 const elapsed = now - remote.lastUpdateTime;
@@ -669,26 +722,19 @@ export class MultiplayerSystem {
                 // t > 1 extrapolates along the last measured motion so remotes keep moving between packets.
                 const t = Math.min(REMOTE_EXTRAPOLATION_MAX_T, elapsed / interval);
                 const ps = remote.prevState;
-                const prevPos = this.scene._latLonToLocal(ps.lat, ps.lon, ps.alt);
+                const prevPos = this.scene._latLonToLocalToRef(ps.lat, ps.lon, ps.alt, this._tmpPrevPos);
                 BABYLON.Vector3.LerpToRef(prevPos, targetPos, t, remote.root.position);
+                this.stateToQuaternionToRef(ps, this._tmpPrevQ);
+                BABYLON.Quaternion.SlerpToRef(this._tmpPrevQ, this._tmpTargetQ, Math.max(0, Math.min(1, t)), this._tmpTargetQ);
             } else {
                 remote.root.position.copyFrom(targetPos);
             }
 
-            const yawRad = (180 - ns.heading) * Math.PI / 180;
-            const pitchRad = -ns.pitch * Math.PI / 180;
-            const rollRad = ns.roll * Math.PI / 180;
-
-            BABYLON.Quaternion.RotationAxisToRef(this._axisUp, yawRad, this._tmpYawQ);
-            BABYLON.Quaternion.RotationAxisToRef(this._axisRight, pitchRad, this._tmpPitchQ);
-            BABYLON.Quaternion.RotationAxisToRef(this._axisForward, rollRad, this._tmpRollQ);
-            this._tmpYawQ.multiplyToRef(this._tmpPitchQ, this._tmpTargetQ);
-            this._tmpTargetQ.multiplyToRef(this._tmpRollQ, this._tmpTargetQ);
-
+            const attitudeBlend = 1 - Math.exp(-REMOTE_ATTITUDE_SMOOTHING_PER_S * dt);
             BABYLON.Quaternion.SlerpToRef(
                 remote.root.rotationQuaternion!,
                 this._tmpTargetQ,
-                0.15,
+                attitudeBlend,
                 remote.root.rotationQuaternion!,
             );
 
@@ -745,9 +791,9 @@ export class MultiplayerSystem {
         const pos = this.scene.planeRoot.position;
 
         const wm = this.scene.planeRoot.getWorldMatrix();
-        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(0, 0, 1), wm, this.scene._tmpFwd);
+        BABYLON.Vector3.TransformNormalToRef(this._bodyForward, wm, this.scene._tmpFwd);
         this.scene._tmpFwd.normalize();
-        BABYLON.Vector3.TransformNormalToRef(new BABYLON.Vector3(1, 0, 0), wm, this.scene._tmpRight);
+        BABYLON.Vector3.TransformNormalToRef(this._bodyRight, wm, this.scene._tmpRight);
         this.scene._tmpRight.normalize();
         this.scene._tmpUp.set(0, 1, 0);
         const pitchDeg = Math.asin(Math.max(-1, Math.min(1, BABYLON.Vector3.Dot(this.scene._tmpFwd, this.scene._tmpUp)))) * 180 / Math.PI;

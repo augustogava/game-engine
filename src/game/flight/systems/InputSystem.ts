@@ -25,6 +25,7 @@ const {
     PINCH_THROTTLE_PX_TO_DELTA,
     PINCH_ZOOM_PX_TO_RADIUS,
     TWO_FINGER_SWIPE_MIN_PX, TWO_FINGER_DISTANCE_TOLERANCE_RATIO,
+    GAMEPAD_THROTTLE_TAKEOVER_DELTA,
 } = CONST as any;
 
 const CONTROL_SETTINGS_STORAGE_KEY = 'flight_controls_v1';
@@ -49,6 +50,8 @@ export class InputSystem {
     private _touchMoveHandler: ((e: TouchEvent) => void) | null = null;
     private _touchEndHandler: ((e: TouchEvent) => void) | null = null;
     private _touchCancelHandler: ((e: TouchEvent) => void) | null = null;
+    private _gamepadThrottleBaseline: number | null = null;
+    private _gamepadOwnsThrottle = false;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -256,8 +259,15 @@ export class InputSystem {
         } else {
             const p = (code: string) => this.scene.input.isKeyDown(code);
 
-            if (p(bind('throttleUp'))) this.scene.thrust = Math.min(this.scene.aircraftConfig.afterburner_thrust_mult ?? 1.0, this.scene.thrust + _dt * this.scene.aircraftConfig.throttle_up_rate);
-            if (p(bind('throttleDown'))) this.scene.thrust = Math.max(0, this.scene.thrust - _dt * this.scene.aircraftConfig.throttle_down_rate);
+            const keyThrottleUp = p(bind('throttleUp'));
+            const keyThrottleDown = p(bind('throttleDown'));
+            if (keyThrottleUp) this.scene.thrust = Math.min(this.scene.aircraftConfig.afterburner_thrust_mult ?? 1.0, this.scene.thrust + _dt * this.scene.aircraftConfig.throttle_up_rate);
+            if (keyThrottleDown) this.scene.thrust = Math.max(0, this.scene.thrust - _dt * this.scene.aircraftConfig.throttle_down_rate);
+            if ((keyThrottleUp || keyThrottleDown) && this._gamepadOwnsThrottle) {
+                this._gamepadOwnsThrottle = false;
+                this._gamepadThrottleBaseline = gpAxes.connected ? gpAxes.throttle : null;
+                console.debug('[Gamepad] Throttle control returned to keyboard');
+            }
 
             const applyAxisShape = (raw: number): number => {
                 const dz = gpDeadzone;
@@ -281,7 +291,18 @@ export class InputSystem {
                 if (Math.abs(gpAxes.elevator) > 0.001) targetPitch = -gpAxes.elevator * KEY_PITCH_MAGNITUDE;
                 if (Math.abs(gpAxes.aileron)  > 0.001) targetRoll  = -gpAxes.aileron  * KEY_ROLL_MAGNITUDE;
                 if (Math.abs(gpAxes.rudder)   > 0.001) targetYaw   =  gpAxes.rudder   * KEY_YAW_MAGNITUDE;
-                this.scene.thrust = Math.max(0, Math.min(this.scene.aircraftConfig.afterburner_thrust_mult ?? 1.0, gpAxes.throttle * (this.scene.aircraftConfig.afterburner_thrust_mult ?? 1.0)));
+                if (this._gamepadThrottleBaseline === null) {
+                    this._gamepadThrottleBaseline = gpAxes.throttle;
+                } else if (!this._gamepadOwnsThrottle && Math.abs(gpAxes.throttle - this._gamepadThrottleBaseline) > GAMEPAD_THROTTLE_TAKEOVER_DELTA) {
+                    this._gamepadOwnsThrottle = true;
+                    console.debug(`[Gamepad] Throttle axis moved (${this._gamepadThrottleBaseline.toFixed(2)} -> ${gpAxes.throttle.toFixed(2)}); gamepad now controls throttle`);
+                }
+                if (this._gamepadOwnsThrottle && !this.scene._autopilotAtHold) {
+                    this.scene.thrust = Math.max(0, Math.min(this.scene.aircraftConfig.afterburner_thrust_mult ?? 1.0, gpAxes.throttle * (this.scene.aircraftConfig.afterburner_thrust_mult ?? 1.0)));
+                }
+            } else if (this._gamepadThrottleBaseline !== null || this._gamepadOwnsThrottle) {
+                this._gamepadThrottleBaseline = null;
+                this._gamepadOwnsThrottle = false;
             }
 
             if (this.scene._mouseYokeActive) {
@@ -313,9 +334,22 @@ export class InputSystem {
             if ((p(brakeCode) && !this.scene.brakeKeyLock) || gpEdges.brake) {
                 this.scene.brakeKeyLock = true;
                 this.scene.brakesOn = !this.scene.brakesOn;
+                if (this.scene._autobrakeActive) {
+                    this.scene._autobrakeActive = false;
+                    console.debug('[Autobrake] Disarmed: manual brake input');
+                }
                 this.scene._cockpitClick();
             }
             if (!p(brakeCode)) this.scene.brakeKeyLock = false;
+
+            this.scene._reverseThrustRequested = p(bind('reverseThrust'));
+            const autobrakeCode = bind('autobrakeCycle');
+            if (p(autobrakeCode) && !this.scene._autobrakeKeyLock) {
+                this.scene._autobrakeKeyLock = true;
+                this.scene._cycleAutobrake();
+                this.scene._cockpitClick();
+            }
+            if (!p(autobrakeCode)) this.scene._autobrakeKeyLock = false;
 
             const camCode = bind('cameraCycle');
             if ((p(camCode) && !this.scene._cameraModeKeyLock) || gpEdges.camera) {

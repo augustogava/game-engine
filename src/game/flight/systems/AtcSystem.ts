@@ -1,4 +1,5 @@
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
+import { I18n } from '../../I18n.js';
 import * as NavMath from '../physics/NavMath.js';
 import { TERRAIN_UNKNOWN_Y } from '../constants/index.js';
 
@@ -10,6 +11,7 @@ const ATC_TRAFFIC_HORIZONTAL_M = 5556;
 const ATC_TRAFFIC_VERTICAL_M = 304.8;
 const ATC_TRAFFIC_COOLDOWN_MS = 25000;
 const ATC_NEAR_ARRIVAL_NM = 15;
+const ATC_TOAST_PREFIX = 'ATC: ';
 
 export class AtcSystem {
     private readonly scene: any;
@@ -99,7 +101,13 @@ export class AtcSystem {
                 return `${wind.dirDeg.toFixed(0)}°/${wind.speedKt.toFixed(0)}kt`;
             }
         } catch { /* ignore */ }
-        return 'calm';
+        return I18n.t('atc.windCalm');
+    }
+
+    private _announce(phrase: string): void {
+        if (!phrase) return;
+        try { this.scene._showToast(`${ATC_TOAST_PREFIX}${phrase}`, ATC_MSG_DURATION_MS); } catch { /* ignore */ }
+        try { this.scene._flightAudio?.speakAtc?.(phrase); } catch (err) { console.warn('[ATC] speakAtc failed:', err); }
     }
 
     private _emitPhaseMessage(phase: AtcPhase): void {
@@ -112,37 +120,43 @@ export class AtcSystem {
         let msg = '';
         switch (phase) {
             case 'taxi':
-                msg = depRwy ? `ATC: Taxi to runway ${depRwy}.` : 'ATC: Taxi to the active runway.';
+                msg = depRwy ? I18n.format('atc.taxi.rwy', { rwy: depRwy }) : I18n.t('atc.taxi');
                 break;
             case 'takeoff':
-                msg = depRwy ? `ATC: Runway ${depRwy}, cleared for takeoff. Wind ${this._windText(depElevFt)}.` : `ATC: Cleared for takeoff. Wind ${this._windText(depElevFt)}.`;
+                msg = depRwy
+                    ? I18n.format('atc.takeoff.rwy', { rwy: depRwy, wind: this._windText(depElevFt) })
+                    : I18n.format('atc.takeoff', { wind: this._windText(depElevFt) });
                 break;
             case 'climb':
-                msg = 'ATC: Climb approved. Contact Control.';
+                msg = I18n.t('atc.climb');
                 break;
             case 'cruise':
-                msg = 'ATC: Cruising. Radar contact.';
+                msg = I18n.t('atc.cruise');
                 break;
             case 'descent':
-                msg = 'ATC: Descent approved.';
+                msg = I18n.t('atc.descent');
                 break;
-            case 'approach':
-                msg = (arrIcao || arrRwy)
-                    ? `ATC: Approach to ${arrIcao || 'destination'}${arrRwy ? ` runway ${arrRwy}` : ''}.`
-                    : 'ATC: On approach.';
+            case 'approach': {
+                const dest = arrIcao || I18n.t('atc.destination');
+                msg = arrRwy
+                    ? I18n.format('atc.approach.rwy', { dest, rwy: arrRwy })
+                    : arrIcao ? I18n.format('atc.approach.dest', { dest }) : I18n.t('atc.approach');
                 break;
+            }
             case 'landing':
-                msg = arrRwy ? `ATC: Runway ${arrRwy}, cleared to land. Wind ${this._windText(arrElevFt)}.` : `ATC: Cleared to land. Wind ${this._windText(arrElevFt)}.`;
+                msg = arrRwy
+                    ? I18n.format('atc.landing.rwy', { rwy: arrRwy, wind: this._windText(arrElevFt) })
+                    : I18n.format('atc.landing', { wind: this._windText(arrElevFt) });
                 break;
             case 'taxi_in':
-                msg = arrIcao ? `ATC: Landing confirmed. Taxi to the ramp. Welcome to ${arrIcao}.` : 'ATC: Landing confirmed. Taxi to the ramp.';
+                msg = arrIcao ? I18n.format('atc.taxiIn.dest', { dest: arrIcao }) : I18n.t('atc.taxiIn');
                 break;
             default:
                 return;
         }
         if (msg) {
-            try { this.scene._showToast(msg, ATC_MSG_DURATION_MS); } catch { /* ignore */ }
-            console.log(`[ATC] phase=${phase} -> ${msg}`);
+            this._announce(msg);
+            console.debug(`[ATC] phase=${phase} -> ${msg}`);
         }
     }
 
@@ -156,13 +170,13 @@ export class AtcSystem {
         for (const [, remote] of players) {
             const pos = remote?.root?.position;
             if (!pos) continue;
+            if (typeof remote.root.isEnabled === 'function' && !remote.root.isEnabled(false)) continue;
             const dxz = Math.hypot(pos.x - me.x, pos.z - me.z);
             const dy = Math.abs(pos.y - me.y);
             if (dxz < ATC_TRAFFIC_HORIZONTAL_M && dy < ATC_TRAFFIC_VERTICAL_M) {
                 this._lastTrafficMs = now;
-                const msg = 'ATC: Traffic nearby, maintain visual separation.';
-                try { this.scene._showToast(msg, ATC_MSG_DURATION_MS); } catch { /* ignore */ }
-                console.log('[ATC] traffic advisory issued');
+                this._announce(I18n.t('atc.traffic'));
+                console.debug('[ATC] traffic advisory issued');
                 return;
             }
         }

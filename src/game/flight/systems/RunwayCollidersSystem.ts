@@ -42,6 +42,7 @@ export class RunwayCollidersSystem {
                 }
             }
             console.log(`[Runway] loaded ${count} collider(s) from ${airports.length} airport(s) near (${centerLat.toFixed(4)}, ${centerLon.toFixed(4)})`);
+            try { this.scene._rebuildRunwayLights?.(); } catch (err) { console.warn('[Runway] runway lights rebuild failed:', err); }
         } catch (err) {
             console.warn('[Runway] failed to load nearby runways:', err);
         }
@@ -120,7 +121,15 @@ export class RunwayCollidersSystem {
         mesh.isPickable = true;
         mesh.checkCollisions = false;
         mesh.receiveShadows = false;
-        mesh.metadata = { type: 'runway-collider', icao, leIdent: r.le_ident, heIdent: r.he_ident };
+        mesh.metadata = {
+            type: 'runway-collider',
+            icao,
+            leIdent: r.le_ident,
+            heIdent: r.he_ident,
+            lengthM,
+            widthM,
+            headingDeg: Number(r.le_heading_deg_true),
+        };
         mesh.renderingGroupId = RUNWAY_RENDERING_GROUP_ID;
 
         const mat = new BABYLON.StandardMaterial(name + 'Mat', babylonScene);
@@ -140,6 +149,7 @@ export class RunwayCollidersSystem {
     }
 
     disposeRunwayColliders(): void {
+        try { this.scene._disposeRunwayLights?.(); } catch (err) { console.warn('[Runway] runway lights dispose failed:', err); }
         for (const m of this.scene._runwayColliders) {
             try { m.dispose(); } catch { /* ignore */ }
         }

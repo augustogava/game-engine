@@ -67,6 +67,17 @@ import { ContrailRibbonSystem, type ContrailRibbonHandle } from './ContrailRibbo
 const COLOR_GRADE_TINT_HUE_EPSILON_DEG = 1.0;
 const COLOR_GRADE_TINT_DENSITY_EPSILON = 0.5;
 const COLOR_GRADE_CONTRAST_EPSILON = 0.01;
+const TAA_PIPELINE_NAME = 'taa';
+const TAA_SAMPLES = 8;
+const TAA_HISTORY_FACTOR = 0.1;
+const TIRE_SMOKE_CAPACITY = 400;
+const TIRE_SMOKE_MAX_PARTICLES = 220;
+const TIRE_SMOKE_MIN_INTENSITY = 0.2;
+const TIRE_SMOKE_MIN_SPEED_KT = 30;
+const TIRE_SMOKE_FULL_SINK_FPM = 600;
+const TIRE_SMOKE_FULL_SPEED_KT = 160;
+const TIRE_SMOKE_MIN_HALF_TRACK_M = 0.8;
+const TIRE_SMOKE_MAX_HALF_TRACK_M = 6;
 
 export interface ContrailPairResult {
     emL: BABYLON.TransformNode;
@@ -109,9 +120,91 @@ export class VfxSystem {
     }
 
     disposeSharedResources(): void {
+        if (this._tireSmokePS) {
+            try { this._tireSmokePS.dispose(false); } catch (_) { /* ignore */ }
+            this._tireSmokePS = null;
+        }
+        if (this.scene._taaPipeline) {
+            try { this.scene._taaPipeline.dispose(); } catch (_) { /* ignore */ }
+            this.scene._taaPipeline = null;
+        }
         if (this._sharedParticleTexture) {
             try { this._sharedParticleTexture.dispose(); } catch (_) { /* ignore */ }
             this._sharedParticleTexture = null;
+        }
+    }
+
+    private _tireSmokePS: BABYLON.ParticleSystem | null = null;
+    private readonly _tireSmokeEmitPos = new BABYLON.Vector3();
+    private readonly _tmpGearLocal = new BABYLON.Vector3();
+    private readonly _tmpGearWorld = new BABYLON.Vector3();
+
+    private _ensureTireSmoke(scene: BABYLON.Scene): BABYLON.ParticleSystem | null {
+        if (this._tireSmokePS) return this._tireSmokePS;
+        const ps = new BABYLON.ParticleSystem('tireSmoke', TIRE_SMOKE_CAPACITY, scene);
+        ps.particleTexture = this._getSharedParticleTexture(scene);
+        ps.emitter = this._tireSmokeEmitPos;
+        ps.minEmitBox = new BABYLON.Vector3(-1, 0, -1);
+        ps.maxEmitBox = new BABYLON.Vector3(1, 0.3, 1);
+        ps.color1 = new BABYLON.Color4(0.86, 0.86, 0.86, 0.55);
+        ps.color2 = new BABYLON.Color4(0.74, 0.74, 0.74, 0.4);
+        ps.colorDead = new BABYLON.Color4(0.7, 0.7, 0.7, 0);
+        ps.addSizeGradient(0, 1.2, 2.2);
+        ps.addSizeGradient(1, 4.5, 7.5);
+        ps.minLifeTime = 1.2;
+        ps.maxLifeTime = 2.8;
+        ps.emitRate = 0;
+        ps.manualEmitCount = 0;
+        ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+        ps.gravity = new BABYLON.Vector3(0, 0.6, 0);
+        ps.direction1 = new BABYLON.Vector3(-1, 0.4, -1);
+        ps.direction2 = new BABYLON.Vector3(1, 1, 1);
+        ps.minEmitPower = 0.5;
+        ps.maxEmitPower = 2;
+        ps.updateSpeed = 0.016;
+        ps.start();
+        this._tireSmokePS = ps;
+        return ps;
+    }
+
+    emitTouchdownSmoke(sinkFpm: number, groundSpeedKts: number): void {
+        if (this.scene.isMobile === true) return;
+        if (!Number.isFinite(groundSpeedKts) || groundSpeedKts < TIRE_SMOKE_MIN_SPEED_KT) return;
+        const scene: BABYLON.Scene | null = this.scene.scene ?? null;
+        const root: BABYLON.TransformNode | null = this.scene.planeRoot ?? null;
+        const gears: { x: number; y: number; z: number }[] = this.scene.aircraftConfig?.gear_positions;
+        if (!scene || !root || !Array.isArray(gears) || gears.length === 0) return;
+        try {
+            const ps = this._ensureTireSmoke(scene);
+            if (!ps) return;
+            const noseZ = gears.length >= 3 ? Math.max(...gears.map((g) => Number(g.z) || 0)) : Number.POSITIVE_INFINITY;
+            const wm = root.computeWorldMatrix(true);
+            let count = 0;
+            let minLateral = Number.POSITIVE_INFINITY;
+            let maxLateral = Number.NEGATIVE_INFINITY;
+            this._tireSmokeEmitPos.setAll(0);
+            for (const g of gears) {
+                const gz = Number(g.z) || 0;
+                if (gears.length >= 3 && gz >= noseZ) continue;
+                this._tmpGearLocal.set(Number(g.x) || 0, Number(g.y) || 0, gz);
+                BABYLON.Vector3.TransformCoordinatesToRef(this._tmpGearLocal, wm, this._tmpGearWorld);
+                this._tireSmokeEmitPos.addInPlace(this._tmpGearWorld);
+                minLateral = Math.min(minLateral, this._tmpGearLocal.x);
+                maxLateral = Math.max(maxLateral, this._tmpGearLocal.x);
+                count++;
+            }
+            if (count === 0) return;
+            this._tireSmokeEmitPos.scaleInPlace(1 / count);
+            const halfTrack = Math.max(TIRE_SMOKE_MIN_HALF_TRACK_M, Math.min(TIRE_SMOKE_MAX_HALF_TRACK_M, (maxLateral - minLateral) / 2));
+            ps.minEmitBox.set(-halfTrack, 0, -halfTrack);
+            ps.maxEmitBox.set(halfTrack, 0.3, halfTrack);
+            const sinkFactor = Math.min(1, Math.abs(Number(sinkFpm) || 0) / TIRE_SMOKE_FULL_SINK_FPM);
+            const speedFactor = Math.min(1, groundSpeedKts / TIRE_SMOKE_FULL_SPEED_KT);
+            const intensity = Math.max(TIRE_SMOKE_MIN_INTENSITY, 0.5 * sinkFactor + 0.5 * speedFactor);
+            ps.manualEmitCount = Math.round(TIRE_SMOKE_MAX_PARTICLES * intensity);
+            console.debug(`[TireSmoke] Touchdown burst particles=${ps.manualEmitCount} sink=${Math.round(sinkFpm)}fpm gs=${Math.round(groundSpeedKts)}kt`);
+        } catch (err) {
+            console.warn('[TireSmoke] Emit failed:', err);
         }
     }
 
@@ -609,6 +702,40 @@ export class VfxSystem {
             } catch (_) { /* ignore */ }
             this.scene._godRays = null;
             console.debug('[GodRays] Disposed');
+        }
+    }
+
+    setTaa(scene: BABYLON.Scene, enabled: boolean): void {
+        const want = enabled && this.scene.isMobile !== true;
+        if (want === !!this.scene._taaPipeline) return;
+        if (want) {
+            const cam = scene.activeCamera;
+            if (!cam) {
+                console.warn('[TAA] No active camera; TAA not enabled');
+                return;
+            }
+            try {
+                const taa = new BABYLON.TAARenderingPipeline(TAA_PIPELINE_NAME, scene, [cam]);
+                if (!taa.isSupported) {
+                    taa.dispose();
+                    console.warn('[TAA] Not supported on this device; keeping MSAA/FXAA only');
+                    return;
+                }
+                taa.samples = TAA_SAMPLES;
+                taa.factor = TAA_HISTORY_FACTOR;
+                taa.disableOnCameraMove = false;
+                taa.reprojectHistory = true;
+                taa.clampHistory = true;
+                this.scene._taaPipeline = taa;
+                console.debug(`[TAA] Enabled (samples=${TAA_SAMPLES}, factor=${TAA_HISTORY_FACTOR}, reprojection on)`);
+            } catch (err) {
+                console.warn('[TAA] Failed to create pipeline:', err);
+                this.scene._taaPipeline = null;
+            }
+        } else {
+            try { this.scene._taaPipeline.dispose(); } catch (err) { console.warn('[TAA] Dispose failed:', err); }
+            this.scene._taaPipeline = null;
+            console.debug('[TAA] Disabled');
         }
     }
 

@@ -582,10 +582,21 @@ export class MissionSystem {
                     arrival_icao: ami.arrival_icao || activeFromList.arrival_icao || '',
                     mission_title: ami.title || activeFromList.mission_title || '',
                 };
-                this.scene._activeUserMissionId = activeFromList.user_mission?.id ?? null;
+                const nextUserMissionId = activeFromList.user_mission?.id ?? null;
+                const sameUserMission = nextUserMissionId != null
+                    && this.scene._activeUserMissionId != null
+                    && Number(nextUserMissionId) === Number(this.scene._activeUserMissionId);
+                const previousWpIndex = Number(this.scene._missionCurrentWpIndex) || 0;
+                this.scene._activeUserMissionId = nextUserMissionId;
                 this.scene._activeMissionId = activeFromList.mission_id ?? null;
-                this.scene._missionWaypoints = this.normalizeMissionWaypoints(ami.waypoints);
-                this.scene._missionCurrentWpIndex = 0;
+                const normalizedWaypoints = this.normalizeMissionWaypoints(ami.waypoints);
+                this.scene._missionWaypoints = normalizedWaypoints;
+                this.scene._missionCurrentWpIndex = sameUserMission
+                    ? Math.max(0, Math.min(previousWpIndex, normalizedWaypoints.length))
+                    : 0;
+                if (sameUserMission) {
+                    console.debug(`[Missions] Panel reload kept waypoint progress ${this.scene._missionCurrentWpIndex}/${normalizedWaypoints.length} for user mission ${nextUserMissionId}`);
+                }
                 }
             } else {
                 this.scene._activeMission = null;
@@ -951,11 +962,11 @@ export class MissionSystem {
         const listEl = document.getElementById('logbook-list');
         if (!listEl) return;
         const safePage = Math.max(1, Math.floor(page) || 1);
-        listEl.textContent = 'Carregando...';
+        listEl.textContent = I18n.t('menu.loading');
 
         const token = localStorage.getItem('auth_token') || '';
         if (!token) {
-            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Login necessário</div>';
+            listEl.innerHTML = `<div style="color:rgba(255,100,100,.8)">${escapeHtml(I18n.t('auth.loginRequired'))}</div>`;
             return;
         }
 
@@ -965,7 +976,7 @@ export class MissionSystem {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) {
-                listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Falha ao carregar logbook</div>';
+                listEl.innerHTML = `<div style="color:rgba(255,100,100,.8)">${escapeHtml(I18n.t('logbook.loadFailed'))}</div>`;
                 console.warn(`[Logbook] GET /api/flight-logs failed: ${res.status}`);
                 return;
             }
@@ -974,16 +985,17 @@ export class MissionSystem {
             const total = Number(json.total) || logs.length;
 
             if (!logs.length) {
-                listEl.innerHTML = '<div style="color:rgba(255,255,255,.4)">Sem voos registrados</div>';
+                listEl.innerHTML = `<div style="color:rgba(255,255,255,.4)">${escapeHtml(I18n.t('logbook.empty'))}</div>`;
                 return;
             }
 
             const statusMap: Record<string, { label: string; color: string }> = {
-                landed: { label: 'Pousou', color: '#40ffaa' },
-                cancelled: { label: 'Cancelado', color: '#ffaa55' },
-                in_flight: { label: 'Em voo', color: '#9cf' },
-                departed: { label: 'Decolou', color: '#9cf' },
+                landed: { label: I18n.t('logbook.status.landed'), color: '#40ffaa' },
+                cancelled: { label: I18n.t('logbook.status.cancelled'), color: '#ffaa55' },
+                in_flight: { label: I18n.t('logbook.status.inFlight'), color: '#9cf' },
+                departed: { label: I18n.t('logbook.status.departed'), color: '#9cf' },
             };
+            const fmtUnit = (conv: { value: number; unit: string }, decimals: number): string => `${Number(conv.value).toFixed(decimals)} ${conv.unit}`;
 
             let html = '';
             for (const log of logs) {
@@ -991,10 +1003,11 @@ export class MissionSystem {
                 const depIcao = log.departure_icao || '???';
                 const arrIcao = log.arrival_icao || '???';
                 const dur = log.flight_duration_min != null ? `${Number(log.flight_duration_min).toFixed(0)} min` : '\u2014';
-                const distNm = log.distance_nm != null ? `${Number(log.distance_nm).toFixed(1)} nm` : '\u2014';
-                const maxAlt = log.max_altitude_ft != null ? `${Number(log.max_altitude_ft).toFixed(0)} ft` : '\u2014';
-                const avgSpd = log.avg_speed_knots != null ? `${Number(log.avg_speed_knots).toFixed(0)} kt` : '\u2014';
-                const lr = log.landing_rate_fpm != null ? `${Number(log.landing_rate_fpm).toFixed(0)} fpm` : '\u2014';
+                const distNm = log.distance_nm != null ? fmtUnit(this.scene._convertDistanceNm(Number(log.distance_nm)), 1) : '\u2014';
+                const maxAlt = log.max_altitude_ft != null ? fmtUnit(this.scene._convertAltitudeFt(Number(log.max_altitude_ft)), 0) : '\u2014';
+                const avgSpd = log.avg_speed_knots != null ? fmtUnit(this.scene._convertSpeedKts(Number(log.avg_speed_knots)), 0) : '\u2014';
+                const lrConv = this.scene._convertVsFpm(Number(log.landing_rate_fpm));
+                const lr = log.landing_rate_fpm != null ? fmtUnit(lrConv, Number.isInteger(lrConv.value) ? 0 : 2) : '\u2014';
                 const when = log.departure_time ? new Date(log.departure_time).toLocaleString() : '';
                 const missionIdNum = Number(log.mission_id);
                 const isMissionFlight = Number.isFinite(missionIdNum) && missionIdNum > 0;
@@ -1031,9 +1044,9 @@ export class MissionSystem {
                     ? 'background:rgba(0,255,128,.15);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit'
                     : 'background:rgba(80,80,80,.2);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.35);padding:3px 10px;border-radius:3px;font-size:9px;font-family:inherit;cursor:not-allowed';
                 html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-                    <button data-logbook-prev ${prevDisabled ? 'disabled' : ''} style="${pagerBtn(!prevDisabled)}">Anterior</button>
+                    <button data-logbook-prev ${prevDisabled ? 'disabled' : ''} style="${pagerBtn(!prevDisabled)}">${escapeHtml(I18n.t('logbook.prev'))}</button>
                     <span style="font-size:9px;color:rgba(255,255,255,.5)">${safePage} / ${totalPages}</span>
-                    <button data-logbook-next ${nextDisabled ? 'disabled' : ''} style="${pagerBtn(!nextDisabled)}">Próximo</button>
+                    <button data-logbook-next ${nextDisabled ? 'disabled' : ''} style="${pagerBtn(!nextDisabled)}">${escapeHtml(I18n.t('logbook.next'))}</button>
                 </div>`;
             }
 
@@ -1057,7 +1070,7 @@ export class MissionSystem {
             });
             console.log(`[Logbook] Loaded page ${safePage}/${totalPages} (${logs.length} of ${total})`);
         } catch (err) {
-            listEl.innerHTML = '<div style="color:rgba(255,100,100,.8)">Erro de conexão</div>';
+            listEl.innerHTML = `<div style="color:rgba(255,100,100,.8)">${escapeHtml(I18n.t('common.connectionError'))}</div>`;
             console.error('[Logbook] load error:', err);
         }
     }

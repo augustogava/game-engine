@@ -21,6 +21,7 @@ import {
 } from '../constants/index.js';
 
 const NAV_LIGHT_PRIORITY_LANDING = 50;
+const NAV_GLOW_BLUR_KERNEL_SIZE = 64;
 const NAV_LIGHT_PRIORITY_MINOR = 0;
 
 export class NavLightsSystem {
@@ -115,7 +116,7 @@ export class NavLightsSystem {
             this.scene._navLights.push({ light, core, kind: def.kind, phase: def.phase, maxIntensity: def.intensity });
         }
 
-        const gl = new BABYLON.GlowLayer('navGlow', scene, { blurKernelSize: 128 });
+        const gl = new BABYLON.GlowLayer('navGlow', scene, { blurKernelSize: NAV_GLOW_BLUR_KERNEL_SIZE });
         gl.intensity = 2.0;
         this.scene._navGlowLayer = gl;
         for (const nav of this.scene._navLights) {

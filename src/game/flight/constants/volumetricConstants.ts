@@ -1,3 +1,13 @@
 export const VOLUMETRIC_CLOUDS_NOISE_URL = 'src/game/assets/textures/cloud_noise_3d.png';
 export const VOLUMETRIC_CLOUDS_BLUE_NOISE_URL = 'src/game/assets/textures/blue_64_64/LDR_LLL1_0.png';
 export const VOLUMETRIC_CLOUDS_SHADER_URL = 'src/game/shaders/volumetricClouds.fragment.fx';
+export const VOLUMETRIC_CLOUDS_DEFAULT_BASE_M = 800;
+export const VOLUMETRIC_CLOUDS_DEFAULT_TOP_M = 5500;
+export const VOLUMETRIC_CLOUDS_MIN_BASE_M = 150;
+export const VOLUMETRIC_CLOUDS_MAX_BASE_M = 8000;
+export const VOLUMETRIC_CLOUDS_STEPS_ULTRA = 64;
+export const VOLUMETRIC_CLOUDS_LIGHT_STEPS_ULTRA = 6;
+export const VOLUMETRIC_CLOUDS_STEPS_HIGH = 48;
+export const VOLUMETRIC_CLOUDS_LIGHT_STEPS_HIGH = 5;
+export const VOLUMETRIC_CLOUDS_STEPS_DEFAULT = 32;
+export const VOLUMETRIC_CLOUDS_LIGHT_STEPS_DEFAULT = 4;

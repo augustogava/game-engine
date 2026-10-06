@@ -23,3 +23,5 @@ export const GEAR_STATE_RETRACTING = 1;
 export const GEAR_STATE_UP         = 2;
 export const GEAR_STATE_EXTENDING  = 3;
 export const GEAR_INSTANT_TRANSITION_MS = 1500;
+
+export const AIRCRAFT_CONFIG_FETCH_TIMEOUT_MS = 10000;
