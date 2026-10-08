@@ -18,11 +18,18 @@ const RUNWAY_TILE_ALIGN_LOG_DELTA_M = 1.0;
 const RUNWAY_NEAR_ORIGIN_FALLBACK_M = 8000;
 const RUNWAY_MAX_GRADIENT = 0.03;
 const RUNWAY_DB_OFFSET_MAX_ABS_M = 120;
+const RUNWAY_TILE_ABOVE_TOLERANCE_M = 0.5;
+const RUNWAY_TILE_ABOVE_MAX_M = 8;
+const RUNWAY_COLLIDER_FLOAT_TOLERANCE_M = 1.0;
+const RUNWAY_COLLIDER_HOLE_GUARD_M = 5;
+const RUNWAY_GROUND_SOURCE_LOG_INTERVAL_MS = 5000;
 
 export class RunwayCollidersSystem {
     private readonly scene: any;
     private _tileAlignDeltasM: number[] = [];
     private _dbFallbackColliders: BABYLON.Mesh[] = [];
+    private _lastPreferTile: boolean | null = null;
+    private _lastGroundSourceLogMs = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -277,6 +284,17 @@ export class RunwayCollidersSystem {
                 if (!bestOther || h.pickedPoint.y > bestOther.pickedPoint!.y) bestOther = h;
             }
         }
-        return bestRunway || bestOther;
+        if (!bestRunway || !bestOther) return bestRunway || bestOther;
+        const tileAboveColliderM = bestOther.pickedPoint!.y - bestRunway.pickedPoint!.y;
+        const colliderAboveTileM = -tileAboveColliderM;
+        const preferTile = (tileAboveColliderM > RUNWAY_TILE_ABOVE_TOLERANCE_M && tileAboveColliderM <= RUNWAY_TILE_ABOVE_MAX_M)
+            || (colliderAboveTileM > RUNWAY_COLLIDER_FLOAT_TOLERANCE_M && colliderAboveTileM <= RUNWAY_COLLIDER_HOLE_GUARD_M);
+        const now = Date.now();
+        if (preferTile !== this._lastPreferTile && now - this._lastGroundSourceLogMs >= RUNWAY_GROUND_SOURCE_LOG_INTERVAL_MS) {
+            this._lastPreferTile = preferTile;
+            this._lastGroundSourceLogMs = now;
+            console.debug(`[Runway] Ground source -> ${preferTile ? 'tiles' : 'runway collider'} (tile-collider=${tileAboveColliderM.toFixed(2)}m, collider=${bestRunway.pickedMesh?.name ?? 'unknown'})`);
+        }
+        return preferTile ? bestOther : bestRunway;
     }
 }
