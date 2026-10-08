@@ -369,6 +369,7 @@ export class SpawnSystem {
         this.scene.gearState = GEAR_STATE_DOWN;
         this.scene._gearTransitionStartMs = 0;
         this.scene._spawnSnapFramesLeft = SPAWN_SNAP_FRAMES;
+        try { this.scene._atcSystem?.reset?.(); } catch (err) { console.warn('[Spawn] ATC reset failed:', err); }
         for (const g of this.scene._gearUpAnimGroups) g.stop();
         for (const g of this.scene._gearDownAnimGroups) g.stop();
         if (cfg.engine_type === ENGINE_TYPE_PISTON) {

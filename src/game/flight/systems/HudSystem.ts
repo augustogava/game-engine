@@ -233,10 +233,10 @@ export class HudSystem {
     showHudWarningOverlay(text: string, visible: boolean): void {
         if (!this.scene.hudWarning) return;
         if (visible) {
-            this.scene.hudWarning.textContent = text;
-            this.scene.hudWarning.style.display = 'block';
+            this._setText(this.scene.hudWarning, text);
+            this._setStyle(this.scene.hudWarning, 'display', 'block');
         } else if (this.scene.hudWarning.textContent === text) {
-            this.scene.hudWarning.style.display = 'none';
+            this._setStyle(this.scene.hudWarning, 'display', 'none');
         }
     }
 
@@ -705,7 +705,7 @@ export class HudSystem {
         if (!toast) {
             toast = document.createElement('div');
             toast.id = 'ux-toast';
-            toast.style.cssText = 'position:fixed;top:20%;left:50%;transform:translateX(-50%);z-index:9999;background:rgba(0,30,20,.85);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:10px 20px;border-radius:8px;font-family:Inter,sans-serif;font-size:12px;pointer-events:none;backdrop-filter:blur(8px);transition:opacity .3s;max-width:calc(100vw - 24px);display:flex;align-items:center;flex-wrap:wrap;gap:4px';
+            toast.style.cssText = 'position:fixed;top:calc(26px + var(--safe-top, 0px));left:50%;transform:translateX(-50%);z-index:9999;background:rgba(0,30,20,.85);border:1px solid rgba(80,255,160,.4);color:#40ffaa;padding:10px 20px;border-radius:8px;font-family:Inter,sans-serif;font-size:12px;pointer-events:none;backdrop-filter:blur(8px);transition:opacity .3s;max-width:min(560px, calc(100vw - 464px));display:flex;align-items:center;flex-wrap:wrap;gap:4px';
             document.body.appendChild(toast);
         }
         return toast;
@@ -1858,6 +1858,7 @@ export class HudSystem {
 #ap-panel .ap-knob-tick{height:7px!important;top:2px!important}
 #instrument-dock{bottom:calc(10px + var(--safe-bottom))!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:4px!important}
 #pfd-panel{width:480px!important}
+#ux-toast{top:calc(22px + var(--safe-top))!important;left:calc(176px + var(--safe-left))!important;right:calc(50px + var(--safe-right))!important;transform:none!important;max-width:none!important;justify-content:center;font-size:11px!important;padding:8px 12px!important}
 }
 @media(max-width:480px){
 #hud-utc{font-size:7px!important;letter-spacing:.06em!important}
@@ -1897,6 +1898,7 @@ export class HudSystem {
 #ap-panel .ap-knob-tick{height:6px!important;top:2px!important;width:2px!important}
 #instrument-dock{bottom:calc(10px + var(--safe-bottom))!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;padding:3px!important;gap:4px!important}
 #pfd-panel{width:380px!important}
+#ux-toast{top:calc(16px + var(--safe-top))!important;left:calc(140px + var(--safe-left))!important;right:calc(40px + var(--safe-right))!important;font-size:10px!important;padding:6px 10px!important}
 }
 @media(max-height:440px){
 #flight-pfd{top:24%!important;width:228px!important;height:154px!important}
@@ -1907,6 +1909,7 @@ export class HudSystem {
 .hud-panel-right{right:calc(6px + var(--safe-right))!important;bottom:calc(4px + var(--safe-bottom))!important;transform:scale(.6);transform-origin:bottom right}
 #instrument-dock{bottom:calc(8px + var(--safe-bottom))!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important}
 #pfd-panel{bottom:6px!important;width:560px!important}
+#ux-toast{top:calc(128px + var(--safe-top))!important;left:calc(4px + var(--safe-left))!important;right:auto!important;transform:none!important;max-width:calc(50vw - 124px)!important;justify-content:flex-start;font-size:10px!important;padding:6px 10px!important}
 }
 
 </style>
@@ -3120,8 +3123,8 @@ export class HudSystem {
             this.scene._updateGPWS(aglFtForGpws, vsFpmForGpws);
         }
         const anyWarn = stallActive || this.scene._overspeedActive;
-        this._setStyle(this.scene.hudWarning, 'display', anyWarn ? 'block' : 'none');
-        if (anyWarn && this.scene.hudWarning) {
+        if (this.scene._paused !== true) this._setStyle(this.scene.hudWarning, 'display', anyWarn ? 'block' : 'none');
+        if (anyWarn && this.scene._paused !== true && this.scene.hudWarning) {
             const label = this.scene._overspeedActive ? 'OVERSPEED' : 'STALL';
             this._setText(this.scene.hudWarning, `\u26A0 ${label} \u26A0`);
         }

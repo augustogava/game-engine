@@ -16,15 +16,21 @@ import {
 
 const RUNWAY_TILE_ALIGN_LOG_DELTA_M = 1.0;
 const RUNWAY_NEAR_ORIGIN_FALLBACK_M = 8000;
+const RUNWAY_MAX_GRADIENT = 0.03;
+const RUNWAY_DB_OFFSET_MAX_ABS_M = 120;
 
 export class RunwayCollidersSystem {
     private readonly scene: any;
+    private _tileAlignDeltasM: number[] = [];
+    private _dbFallbackColliders: BABYLON.Mesh[] = [];
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
     }
 
     async buildNearbyRunwayColliders(centerLat: number, centerLon: number): Promise<void> {
+        this._tileAlignDeltasM = [];
+        this._dbFallbackColliders = [];
         try {
             const url = `/api/airports/nearby?lat=${centerLat}&lng=${centerLon}&radius_km=${RUNWAY_COLLIDER_RADIUS_KM}`;
             const resp = await fetch(url);
@@ -42,6 +48,7 @@ export class RunwayCollidersSystem {
                 }
             }
             console.log(`[Runway] loaded ${count} collider(s) from ${airports.length} airport(s) near (${centerLat.toFixed(4)}, ${centerLon.toFixed(4)})`);
+            this._applyDbFallbackOffset();
             try { this.scene._rebuildRunwayLights?.(); } catch (err) { console.warn('[Runway] runway lights rebuild failed:', err); }
         } catch (err) {
             console.warn('[Runway] failed to load nearby runways:', err);
@@ -67,6 +74,13 @@ export class RunwayCollidersSystem {
             : (leElevFt != null) ? leElevFt
             : (heElevFt != null) ? heElevFt
             : 0;
+        const rawElevationDiffM = (leElevFt != null && heElevFt != null && Number.isFinite(leElevFt) && Number.isFinite(heElevFt))
+            ? (heElevFt - leElevFt) * FT_TO_M
+            : 0;
+        const elevationDiffM = Math.abs(rawElevationDiffM) <= lengthM * RUNWAY_MAX_GRADIENT ? rawElevationDiffM : 0;
+        if (elevationDiffM !== rawElevationDiffM) {
+            console.warn(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: ignoring implausible end elevation difference ${rawElevationDiffM.toFixed(1)}m over ${lengthM.toFixed(0)}m`);
+        }
 
         const cosOriginLat = Math.cos(this.scene.originLat * Math.PI / 180);
         const eastM = (centerLon - this.scene.originLon) * METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
@@ -96,14 +110,20 @@ export class RunwayCollidersSystem {
             probeSource = 'scene.terrainY';
         }
         let sceneY: number;
+        let usedDbElevation = false;
         if (tileY != null && Number.isFinite(tileY)) {
-            sceneY = tileY + RUNWAY_COLLIDER_Y_BIAS_M;
+            const probeToCenterM = probeSource === 'LE' ? elevationDiffM / 2
+                : probeSource === 'HE' ? -elevationDiffM / 2
+                : 0;
+            sceneY = tileY + RUNWAY_COLLIDER_Y_BIAS_M + probeToCenterM;
             const delta = sceneY - dbSceneY;
+            if (probeSource !== 'scene.terrainY' && Number.isFinite(delta)) this._tileAlignDeltasM.push(delta);
             if (Math.abs(delta) >= RUNWAY_TILE_ALIGN_LOG_DELTA_M) {
                 console.log(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: aligned to tile terrain y=${sceneY.toFixed(2)}m via ${probeSource} (db-derived=${dbSceneY.toFixed(2)}m, delta=${delta.toFixed(2)}m)`);
             }
         } else {
             sceneY = dbSceneY;
+            usedDbElevation = true;
             console.warn(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: tile probe missed at center/LE/HE — using db elevation y=${sceneY.toFixed(2)}m (risk: plane may fall through if this is the spawn runway)`);
         }
 
@@ -115,7 +135,7 @@ export class RunwayCollidersSystem {
             sideOrientation: BABYLON.Mesh.DOUBLESIDE,
         }, babylonScene);
         mesh.position.set(sceneX, sceneY, sceneZ);
-        mesh.rotation.x = Math.PI / 2;
+        mesh.rotation.x = Math.PI / 2 - Math.asin(elevationDiffM / lengthM);
         mesh.rotation.y = (180 - Number(r.le_heading_deg_true)) * Math.PI / 180;
         mesh.isVisible = false;
         mesh.isPickable = true;
@@ -129,6 +149,7 @@ export class RunwayCollidersSystem {
             lengthM,
             widthM,
             headingDeg: Number(r.le_heading_deg_true),
+            elevationDiffM,
         };
         mesh.renderingGroupId = RUNWAY_RENDERING_GROUP_ID;
 
@@ -145,7 +166,41 @@ export class RunwayCollidersSystem {
         mesh.freezeWorldMatrix();
 
         this.scene._runwayColliders.push(mesh);
+        if (usedDbElevation) this._dbFallbackColliders.push(mesh);
         return true;
+    }
+
+    private _applyDbFallbackOffset(): void {
+        const fallbacks = this._dbFallbackColliders;
+        const deltas = this._tileAlignDeltasM.filter((d) => Number.isFinite(d));
+        this._dbFallbackColliders = [];
+        this._tileAlignDeltasM = [];
+        if (fallbacks.length === 0) return;
+        if (deltas.length === 0) {
+            console.warn(`[Runway] ${fallbacks.length} collider(s) kept at db elevation: no tile-aligned runway available to calibrate the db/tile offset`);
+            return;
+        }
+        const sorted = [...deltas].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        const offsetM = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        if (!Number.isFinite(offsetM) || Math.abs(offsetM) > RUNWAY_DB_OFFSET_MAX_ABS_M) {
+            console.warn(`[Runway] Skipping db/tile offset ${offsetM}m (outside ±${RUNWAY_DB_OFFSET_MAX_ABS_M}m) for ${fallbacks.length} collider(s)`);
+            return;
+        }
+        let applied = 0;
+        for (const mesh of fallbacks) {
+            if (!mesh || mesh.isDisposed()) continue;
+            try {
+                mesh.unfreezeWorldMatrix();
+                mesh.position.y += offsetM;
+                mesh.computeWorldMatrix(true);
+                mesh.freezeWorldMatrix();
+                applied++;
+            } catch (err) {
+                console.warn(`[Runway] Failed to apply db/tile offset to ${mesh.name}:`, err);
+            }
+        }
+        console.log(`[Runway] Applied db/tile offset ${offsetM.toFixed(2)}m (median of ${deltas.length} tile-aligned runway(s)) to ${applied} db-elevation collider(s)`);
     }
 
     disposeRunwayColliders(): void {

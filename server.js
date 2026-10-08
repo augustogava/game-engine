@@ -1242,8 +1242,8 @@ async function recalculateStats(userId) {
     try {
         const [[flightAgg]] = await dbPool.execute(
             `SELECT
-                SUM(CASE WHEN status = 'landed' THEN 1 ELSE 0 END) AS cnt,
-                COALESCE(SUM(CASE WHEN status IN ('landed','cancelled') THEN flight_duration_min ELSE 0 END), 0) / 60 AS hours,
+                SUM(CASE WHEN status IN ('landed','cancelled','crashed') THEN 1 ELSE 0 END) AS cnt,
+                COALESCE(SUM(CASE WHEN status IN ('landed','cancelled','crashed') THEN flight_duration_min ELSE 0 END), 0) / 60 AS hours,
                 COALESCE(SUM(CASE WHEN status IN ('landed','cancelled') THEN distance_km ELSE 0 END), 0) AS dist_km,
                 COALESCE(SUM(CASE WHEN status IN ('landed','cancelled') THEN distance_nm ELSE 0 END), 0) AS dist_nm,
                 MAX(CASE WHEN status = 'landed' THEN landing_rate_fpm END) AS best_lr,
@@ -2554,8 +2554,7 @@ wss.on('connection', (ws) => {
                         }
 
                         if (!reuseFlight && !existing.statsRecalculated) {
-                            const sm = (Date.now() - existing.lastPersist) / 60000;
-                            const hi = existing.flightLogId ? 0 : sm / 60;
+                            const hi = 0;
                             const distNm = existing.flightLogId ? 0 : existing.distanceNm;
                             const dk = distNm * 1.852;
                             dbPool.execute(
@@ -3037,8 +3036,7 @@ wss.on('connection', (ws) => {
             }
 
             if (!entry.statsRecalculated) {
-                const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
-                const hoursIncrement = entry.flightLogId ? 0 : sessionMinutes / 60;
+                const hoursIncrement = 0;
                 const distNm = entry.flightLogId ? 0 : entry.distanceNm;
                 const distKm = distNm * 1.852;
                 try {
@@ -3135,7 +3133,7 @@ setInterval(async () => {
         if (sessionMinutes < PERIODIC_MIN_SESSION_MIN) continue;
 
         const hasActiveFlight = !!entry.flightLogId;
-        const hoursIncrement = sessionMinutes / 60;
+        const hoursIncrement = hasActiveFlight ? sessionMinutes / 60 : 0;
         const distNm = entry.distanceNm;
         const distKm = distNm * 1.852;
 
@@ -3249,8 +3247,7 @@ async function gracefulShutdown() {
             }
 
             if (!entry.statsRecalculated) {
-                const sessionMinutes = (Date.now() - entry.lastPersist) / 60000;
-                const hoursIncrement = entry.flightLogId ? 0 : sessionMinutes / 60;
+                const hoursIncrement = 0;
                 const distNm = entry.flightLogId ? 0 : entry.distanceNm;
                 const distKm = distNm * 1.852;
                 try {

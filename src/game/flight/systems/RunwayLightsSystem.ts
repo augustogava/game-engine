@@ -78,6 +78,9 @@ export class RunwayLightsSystem {
             const cx = collider.position.x;
             const cz = collider.position.z;
             const y = collider.position.y + RUNWAY_LIGHT_HEIGHT_ABOVE_COLLIDER_M;
+            const elevationDiffM = Number(meta?.elevationDiffM);
+            const gradient = Number.isFinite(elevationDiffM) ? elevationDiffM / lengthM : 0;
+            const yAt = (along: number): number => y + along * gradient;
             const headingRad = headingDeg * DEG_TO_RAD;
             const dirX = Math.sin(headingRad);
             const dirZ = -Math.cos(headingRad);
@@ -92,8 +95,9 @@ export class RunwayLightsSystem {
                 const along = -halfLength + (lengthM * i) / (edgeCount - 1);
                 const ax = cx + dirX * along;
                 const az = cz + dirZ * along;
-                pushStatic(ax + rightX * edgeOffset, y, az + rightZ * edgeOffset, COLOR_EDGE_WHITE);
-                pushStatic(ax - rightX * edgeOffset, y, az - rightZ * edgeOffset, COLOR_EDGE_WHITE);
+                const edgeY = yAt(along);
+                pushStatic(ax + rightX * edgeOffset, edgeY, az + rightZ * edgeOffset, COLOR_EDGE_WHITE);
+                pushStatic(ax - rightX * edgeOffset, edgeY, az - rightZ * edgeOffset, COLOR_EDGE_WHITE);
             }
 
             const thresholdCount = Math.max(2, Math.floor(widthM / RUNWAY_THRESHOLD_LIGHT_SPACING_M) + 1);
@@ -101,9 +105,10 @@ export class RunwayLightsSystem {
                 const along = endSign * (halfLength + RUNWAY_THRESHOLD_LIGHT_SETBACK_M);
                 const tx = cx + dirX * along;
                 const tz = cz + dirZ * along;
+                const thresholdY = yAt(along);
                 for (let i = 0; i < thresholdCount; i++) {
                     const lateral = -halfWidth + (widthM * i) / (thresholdCount - 1);
-                    pushStatic(tx + rightX * lateral, y, tz + rightZ * lateral, COLOR_THRESHOLD_GREEN);
+                    pushStatic(tx + rightX * lateral, thresholdY, tz + rightZ * lateral, COLOR_THRESHOLD_GREEN);
                 }
 
                 const thresholdX = cx + dirX * endSign * halfLength;
@@ -114,10 +119,11 @@ export class RunwayLightsSystem {
                 const leftZ = endSign < 0 ? -rightZ : rightZ;
                 const baseX = thresholdX + landingDirX * PAPI_DISTANCE_FROM_THRESHOLD_M + leftX * (halfWidth + PAPI_LATERAL_FROM_EDGE_M);
                 const baseZ = thresholdZ + landingDirZ * PAPI_DISTANCE_FROM_THRESHOLD_M + leftZ * (halfWidth + PAPI_LATERAL_FROM_EDGE_M);
+                const papiY = yAt(endSign * (halfLength - PAPI_DISTANCE_FROM_THRESHOLD_M));
                 for (let u = 0; u < PAPI_UNIT_ANGLES_DEG.length; u++) {
                     this._papiUnits.push({
                         x: baseX + leftX * u * PAPI_UNIT_SPACING_M,
-                        y,
+                        y: papiY,
                         z: baseZ + leftZ * u * PAPI_UNIT_SPACING_M,
                         angleDeg: PAPI_UNIT_ANGLES_DEG[u],
                         thresholdX,
@@ -251,7 +257,7 @@ export class RunwayLightsSystem {
             this._papiColors.set(color, i * 4);
             const o = i * 16;
             const dist = Math.hypot(u.x - camPos.x, u.y - camPos.y, u.z - camPos.z);
-            const scale = Math.max(1, Math.min(RUNWAY_LIGHT_MAX_SCALE, dist / RUNWAY_LIGHT_SCALE_REF_DIST_M));
+            const scale = color === COLOR_OFF ? 0 : Math.max(1, Math.min(RUNWAY_LIGHT_MAX_SCALE, dist / RUNWAY_LIGHT_SCALE_REF_DIST_M));
             this._papiMatrices[o] = scale;
             this._papiMatrices[o + 5] = scale;
             this._papiMatrices[o + 10] = scale;

@@ -11,6 +11,7 @@ const ATC_TRAFFIC_HORIZONTAL_M = 5556;
 const ATC_TRAFFIC_VERTICAL_M = 304.8;
 const ATC_TRAFFIC_COOLDOWN_MS = 25000;
 const ATC_NEAR_ARRIVAL_NM = 15;
+const ATC_LANDING_CLEARANCE_NM = 5;
 const ATC_TOAST_PREFIX = 'ATC: ';
 
 export class AtcSystem {
@@ -23,6 +24,14 @@ export class AtcSystem {
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
+    }
+
+    reset(): void {
+        this._phase = null;
+        this._pendingPhase = null;
+        this._pendingSinceMs = 0;
+        this._hasBeenAirborne = false;
+        console.debug('[ATC] Phase tracking reset on spawn');
     }
 
     update(_dt: number): void {
@@ -67,7 +76,7 @@ export class AtcSystem {
             return this._hasBeenAirborne ? 'taxi_in' : 'parked';
         }
 
-        if (aglFt < 600 && vsFpm < 50) return 'landing';
+        if (aglFt < 600 && vsFpm < 50 && this._withinLandingClearance()) return 'landing';
         if (vsFpm > 300) return 'climb';
         if (vsFpm < -300) {
             return (aglFt < 4000 || this._nearArrival()) ? 'approach' : 'descent';
@@ -85,12 +94,22 @@ export class AtcSystem {
     }
 
     private _nearArrival(): boolean {
-        const nav = this.scene._activeFlightPlanNav;
-        if (!nav || !Number.isFinite(nav.arrival_lat) || !Number.isFinite(nav.arrival_lon)) return false;
+        const distNm = this._distanceToArrivalNm(this.scene._activeFlightPlanNav);
+        return distNm != null && distNm <= ATC_NEAR_ARRIVAL_NM;
+    }
+
+    private _withinLandingClearance(): boolean {
+        const nav = this.scene._activeFlightPlanNav ?? this.scene._missionDestForNav?.() ?? null;
+        const distNm = this._distanceToArrivalNm(nav);
+        return distNm == null || distNm <= ATC_LANDING_CLEARANCE_NM;
+    }
+
+    private _distanceToArrivalNm(nav: any): number | null {
+        if (!nav || !Number.isFinite(nav.arrival_lat) || !Number.isFinite(nav.arrival_lon)) return null;
         const here = this.scene._autopilotSystem?.apCurrentLatLon?.();
-        if (!here) return false;
+        if (!here) return null;
         const distNm = NavMath.haversineNm(here.lat, here.lon, Number(nav.arrival_lat), Number(nav.arrival_lon));
-        return Number.isFinite(distNm) && distNm <= ATC_NEAR_ARRIVAL_NM;
+        return Number.isFinite(distNm) ? distNm : null;
     }
 
     private _windText(elevFt: number = 0): string {

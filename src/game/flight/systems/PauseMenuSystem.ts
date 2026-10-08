@@ -88,6 +88,7 @@ export class PauseMenuSystem {
                         this.scene._missionSystem.resetLessonProgress();
                         this.scene._flightPhysicsSystem.respawnAfterCrash();
                     } else {
+                        if (this.scene._missionSystem?.isTrainingLessonActive?.() === true) this.scene._missionSystem.resetLessonProgress();
                         this.scene._spawnPlane();
                     }
                     if (this.scene._paused) this.scene._togglePause();

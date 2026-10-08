@@ -83,8 +83,7 @@ export class InputSystem {
 
     togglePause(): void {
         this.scene._paused = !this.scene._paused;
-        const lbl = this.scene._paused ? I18n.t('hud.paused') : '';
-        this.scene._showHudWarningOverlay(lbl, this.scene._paused);
+        this.scene._showHudWarningOverlay(I18n.t('hud.paused'), this.scene._paused);
         console.log(`[Pause] ${this.scene._paused ? 'paused' : 'resumed'} timeScale=${this.scene._timeScale.toFixed(2)}`);
         this.scene._cockpitClick();
     }
@@ -93,6 +92,13 @@ export class InputSystem {
         if (this.scene._activeMissionId == null) return;
         if (this.scene._pendingApproachSpawn === true) {
             console.debug('[Mission] Spawn throttle kept at approach power for Flight School lesson');
+            return;
+        }
+        if (this.scene._activeTrainingOrder != null && this.scene._pendingMissionAirborne !== true) {
+            this.scene.thrust = 0;
+            this.scene.touchThrust = 0;
+            this.refreshTouchThrottleVisual();
+            console.debug(`[FlightSchool] Lesson ${this.scene._activeTrainingOrder} ground spawn: throttle kept at idle for student takeoff`);
             return;
         }
         const ab = this.scene.aircraftConfig?.afterburner_thrust_mult;
