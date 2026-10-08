@@ -400,7 +400,7 @@ function isDataUrl(value) {
 // duplicates per item) with a lazily-fetched image_url served by GET /api/missions/:id/image.
 function replaceMissionImageWithUrl(obj, missionId) {
     if (!obj || typeof obj !== 'object') return;
-    const hasInlineImage = !!obj.image_base64 || isDataUrl(obj.image_url);
+    const hasInlineImage = !!obj.image_base64 || isDataUrl(obj.image_url) || obj.has_image === true;
     if (obj.image_base64 !== undefined) delete obj.image_base64;
     if (isDataUrl(obj.image_url)) delete obj.image_url;
     if (hasInlineImage && !obj.image_url && missionId != null) {
