@@ -4,6 +4,7 @@ import { TRAINER_AIRCRAFT_CODE } from '../game/flight/constants/aircraftConstant
 
 export const PREFLIGHT_AIRCRAFT_KEY = 'preflight_aircraft_id';
 export const PREFLIGHT_SPAWN_KEY = 'preflight_spawn';
+const HOME_BASE_FLAG = 1;
 
 export type PreflightSpawnConfig = {
     airportId: number;
@@ -52,6 +53,9 @@ const I18N: Record<Lang, Record<string, string>> = {
         'airport.end': 'Extremidade',
         'airport.datetime': 'Data e hora do voo',
         'airport.searchPlaceholder': 'ICAO ou nome (ex. SBGR)',
+        'airport.setHomeBase': 'DEFINIR COMO HOME BASE',
+        'airport.homeBaseSet': 'HOME BASE DEFINIDO',
+        'airport.homeBaseFail': 'FALHA AO DEFINIR HOME BASE',
         'cta.flyNow': 'VOAR AGORA',
         'cta.startFly': 'INICIAR E VOAR',
         'cta.locked': 'BLOQUEADO',
@@ -110,6 +114,9 @@ const I18N: Record<Lang, Record<string, string>> = {
         'airport.end': 'Runway end',
         'airport.datetime': 'Flight date & time',
         'airport.searchPlaceholder': 'ICAO or name (e.g. SBGR)',
+        'airport.setHomeBase': 'SET AS HOME BASE',
+        'airport.homeBaseSet': 'HOME BASE SET',
+        'airport.homeBaseFail': 'FAILED TO SET HOME BASE',
         'cta.flyNow': 'FLY NOW',
         'cta.startFly': 'START & FLY',
         'cta.locked': 'LOCKED',
@@ -165,21 +172,104 @@ export function setPreflightUiActive(active: boolean): void {
     }
 }
 
-export function ensureDefaultSpawnConfig(): void {
-    try {
-        const raw = localStorage.getItem(PREFLIGHT_SPAWN_KEY);
-        if (raw) {
-            const parsed = JSON.parse(raw) as PreflightSpawnConfig;
-            if (Number.isFinite(parsed.lat) && Number.isFinite(parsed.lon)) return;
-        }
-    } catch (err) {
-        console.warn('[Preflight] Invalid spawn config in storage, applying SBGR default:', err);
-    }
+function localNowIso(): string {
     const d = new Date();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString();
+}
+
+function readStoredSpawn(): PreflightSpawnConfig | null {
+    try {
+        const raw = localStorage.getItem(PREFLIGHT_SPAWN_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as PreflightSpawnConfig;
+        return parsed && Number.isFinite(parsed.lat) && Number.isFinite(parsed.lon) ? parsed : null;
+    } catch (err) {
+        console.warn('[Preflight] Invalid spawn config in storage:', err);
+        return null;
+    }
+}
+
+function isRunwayClosed(runway: any): boolean {
+    return runway?.closed === true || Number(runway?.closed) === 1;
+}
+
+function isFiniteCoordinate(value: unknown): boolean {
+    return value != null && value !== '' && Number.isFinite(Number(value));
+}
+
+export function pickLongestOpenRunway(runways: any[]): any | null {
+    if (!Array.isArray(runways)) return null;
+    const open = runways.filter((r) => !isRunwayClosed(r)
+        && isFiniteCoordinate(r?.le_latitude_deg)
+        && isFiniteCoordinate(r?.le_longitude_deg));
+    open.sort((a, b) => (Number(b?.length_ft) || 0) - (Number(a?.length_ft) || 0));
+    return open[0] ?? null;
+}
+
+export async function resolveHomeBaseSpawn(token: string): Promise<PreflightSpawnConfig | null> {
+    if (!token) return null;
+    try {
+        const res = await fetch('/api/airports/acquired', { headers: authHeaders(token) });
+        if (!res.ok) {
+            console.warn(`[Preflight] Home base lookup failed: HTTP ${res.status}`);
+            return null;
+        }
+        const json = await res.json();
+        const rows: any[] = Array.isArray(json?.data) ? json.data : [];
+        const home = rows.find((r) => Number(r?.is_home_base) === HOME_BASE_FLAG);
+        const airportId = Number(home?.airport_id);
+        if (!home || !Number.isInteger(airportId) || airportId <= 0) return null;
+        const rwyRes = await fetch(`/api/airports/${airportId}/runways`);
+        if (!rwyRes.ok) {
+            console.warn(`[Preflight] Home base runways lookup failed: HTTP ${rwyRes.status}`);
+            return null;
+        }
+        const rwyJson = await rwyRes.json();
+        const runway = pickLongestOpenRunway(Array.isArray(rwyJson?.data) ? rwyJson.data : []);
+        if (!runway) {
+            console.warn(`[Preflight] Home base ${airportId} has no open runway with coordinates`);
+            return null;
+        }
+        const hdg = Number(runway.le_heading_deg_true);
+        const elevationFt = Number(runway.le_elevation_ft ?? runway.elevation_ft ?? home.elevation_ft ?? 0);
+        const spawn: PreflightSpawnConfig = {
+            airportId,
+            icao: String(home.icao_code || ''),
+            runwayId: Number(runway.id) || 0,
+            end: 'le',
+            lat: Number(runway.le_latitude_deg),
+            lon: Number(runway.le_longitude_deg),
+            hdg: Number.isFinite(hdg) ? hdg : 0,
+            elevationFt: Number.isFinite(elevationFt) ? elevationFt : 0,
+            simTimeIso: localNowIso(),
+        };
+        console.debug(`[Preflight] Home base spawn resolved icao=${spawn.icao} runway=${runway.le_ident || '?'} lengthFt=${runway.length_ft ?? '?'}`);
+        return spawn;
+    } catch (err) {
+        console.warn('[Preflight] Home base spawn resolution error:', err);
+        return null;
+    }
+}
+
+export async function ensureHomeBaseSpawnConfig(token: string): Promise<void> {
+    const stored = readStoredSpawn();
+    if (stored && Number(stored.airportId) > 0) return;
+    const homeBase = await resolveHomeBaseSpawn(token);
+    if (!homeBase) return;
+    try {
+        localStorage.setItem(PREFLIGHT_SPAWN_KEY, JSON.stringify(homeBase));
+        console.debug(`[Preflight] Home base stored as default spawn icao=${homeBase.icao}`);
+    } catch (err) {
+        console.warn('[Preflight] Failed to persist home base spawn:', err);
+    }
+}
+
+export function ensureDefaultSpawnConfig(): void {
+    if (readStoredSpawn()) return;
     const spawn: PreflightSpawnConfig = {
         ...DEFAULT_SBGR_SPAWN,
-        simTimeIso: d.toISOString(),
+        simTimeIso: localNowIso(),
     };
     try {
         localStorage.setItem(PREFLIGHT_SPAWN_KEY, JSON.stringify(spawn));
@@ -243,6 +333,8 @@ export class PreflightController {
     private searchTimer: number | undefined;
     private flyResolve: (() => void) | null = null;
     private leaderboardLoading = false;
+    private ownedAirports = new Map<number, { isHomeBase: boolean; row: any }>();
+    private homeBaseSaving = false;
 
     constructor(token: string) {
         this.token = token;
@@ -269,6 +361,7 @@ export class PreflightController {
         this.wireFlyButton();
         this.wireDetailBack();
         this.wireAirportFields();
+        this.wireHomeBaseButton();
         this.setDefaultDateTime();
         this.updateFooterVisibility('aircraft');
         setPreflightUiActive(true);
@@ -456,6 +549,7 @@ export class PreflightController {
             if (this.searchTimer) clearTimeout(this.searchTimer);
             const q = search!.value.trim();
             this.selectedAirportId = null;
+            this.updateHomeBaseButton();
             if (!q) {
                 this.clearRunwaySelection();
                 this.hideAirportSuggestions();
@@ -490,10 +584,117 @@ export class PreflightController {
     }
 
     private async initDefaultAirport(): Promise<void> {
+        await this.loadOwnedAirports();
+        const home = [...this.ownedAirports.values()].find((a) => a.isHomeBase);
+        if (home && await this.selectHomeBaseAirport(home.row)) return;
         const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
         if (search) search.value = 'SBGR';
         await this.searchAirports('SBGR', true);
         if (!this.selectedAirportId) ensureDefaultSpawnConfig();
+    }
+
+    private async loadOwnedAirports(): Promise<void> {
+        this.ownedAirports.clear();
+        if (!this.token) return;
+        try {
+            const res = await fetch('/api/airports/acquired', { headers: authHeaders(this.token) });
+            if (!res.ok) {
+                console.warn(`[Preflight] Owned airports load failed: HTTP ${res.status}`);
+                return;
+            }
+            const json = await res.json();
+            const rows: any[] = Array.isArray(json?.data) ? json.data : [];
+            for (const row of rows) {
+                const airportId = Number(row?.airport_id);
+                if (!Number.isInteger(airportId) || airportId <= 0) continue;
+                this.ownedAirports.set(airportId, { isHomeBase: Number(row?.is_home_base) === HOME_BASE_FLAG, row });
+            }
+            console.debug(`[Preflight] Owned airports loaded: ${this.ownedAirports.size}`);
+        } catch (err) {
+            console.warn('[Preflight] Owned airports load error:', err);
+        }
+    }
+
+    private async selectHomeBaseAirport(row: any): Promise<boolean> {
+        const airportId = Number(row?.airport_id);
+        if (!Number.isInteger(airportId) || airportId <= 0) return false;
+        const airport: AirportRow = {
+            id: airportId,
+            icao_code: row.icao_code ?? undefined,
+            iata_code: row.iata_code ?? undefined,
+            name: row.name ?? undefined,
+            municipality: row.municipality ?? undefined,
+            elevation_ft: row.elevation_ft != null ? Number(row.elevation_ft) : undefined,
+        };
+        this.airports = [airport];
+        await this.selectAirport(airport);
+        if (this.selectedAirportId !== airportId || !this.runways.length) {
+            console.warn(`[Preflight] Home base ${airportId} could not be preselected; falling back to default airport`);
+            return false;
+        }
+        const longest = pickLongestOpenRunway(this.runways);
+        const rwySel = document.getElementById('preflight-runway-select') as HTMLSelectElement | null;
+        const endSel = document.getElementById('preflight-runway-end') as HTMLSelectElement | null;
+        if (longest && rwySel) rwySel.value = String(longest.id);
+        if (endSel) endSel.value = 'le';
+        this.persistSpawnFromForm();
+        console.debug(`[Preflight] Home base preselected airport=${airportId} runway=${longest?.le_ident ?? '?'}`);
+        return true;
+    }
+
+    private updateHomeBaseButton(): void {
+        const btn = document.getElementById('preflight-home-base-btn') as HTMLButtonElement | null;
+        if (!btn) return;
+        const owned = this.selectedAirportId != null ? this.ownedAirports.get(this.selectedAirportId) : undefined;
+        if (!owned) {
+            btn.style.display = 'none';
+            return;
+        }
+        btn.style.display = '';
+        btn.disabled = owned.isHomeBase || this.homeBaseSaving;
+        btn.textContent = this.t(owned.isHomeBase ? 'airport.homeBaseSet' : 'airport.setHomeBase');
+    }
+
+    private wireHomeBaseButton(): void {
+        const btn = document.getElementById('preflight-home-base-btn') as HTMLButtonElement | null;
+        btn?.addEventListener('click', () => void this.setSelectedAirportAsHomeBase());
+    }
+
+    private async setSelectedAirportAsHomeBase(): Promise<void> {
+        const airportId = this.selectedAirportId;
+        const btn = document.getElementById('preflight-home-base-btn') as HTMLButtonElement | null;
+        if (airportId == null || !this.ownedAirports.has(airportId) || this.homeBaseSaving) return;
+        this.homeBaseSaving = true;
+        this.updateHomeBaseButton();
+        try {
+            const res = await fetch(`/api/airports/acquired/${airportId}`, {
+                method: 'PATCH',
+                headers: { ...authHeaders(this.token), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_home_base: HOME_BASE_FLAG }),
+            });
+            if (!res.ok) {
+                console.warn(`[Preflight] Set home base failed: HTTP ${res.status}`);
+                this.showHomeBaseFailure(btn);
+                return;
+            }
+            for (const entry of this.ownedAirports.values()) entry.isHomeBase = false;
+            const owned = this.ownedAirports.get(airportId);
+            if (owned) owned.isHomeBase = true;
+            console.debug(`[Preflight] Home base set to airport ${airportId}`);
+        } catch (err) {
+            console.warn('[Preflight] Set home base error:', err);
+            this.showHomeBaseFailure(btn);
+            return;
+        } finally {
+            this.homeBaseSaving = false;
+        }
+        this.updateHomeBaseButton();
+    }
+
+    private showHomeBaseFailure(btn: HTMLButtonElement | null): void {
+        if (!btn) return;
+        btn.textContent = this.t('airport.homeBaseFail');
+        btn.disabled = false;
     }
 
     private async searchAirports(q: string, autoSelect = false): Promise<void> {
@@ -555,6 +756,7 @@ export class PreflightController {
         const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
         if (search) search.value = ap.icao_code || ap.name || '';
         this.hideAirportSuggestions();
+        this.updateHomeBaseButton();
         await this.loadRunways(ap.id);
     }
 
@@ -1033,11 +1235,22 @@ type GroundSpawnScene = {
     setFreeFlightGroundSpawn(lat: number, lon: number, hdg: number, elevationFt: number): void;
 };
 
+export function applyPreflightSpawnForMission(scene: GroundSpawnScene): void {
+    ensureDefaultSpawnConfig();
+    try {
+        const spawn = readStoredSpawn() ?? DEFAULT_SBGR_SPAWN;
+        scene.setFreeFlightGroundSpawn(spawn.lat, spawn.lon, spawn.hdg, spawn.elevationFt ?? 0);
+        if (spawn.simTimeIso) scene.setSimTimeOffsetFromIso(spawn.simTimeIso);
+        console.debug(`[Preflight] Mission fallback ground spawn icao=${spawn.icao} lat=${spawn.lat} lon=${spawn.lon} hdg=${spawn.hdg} elevFt=${spawn.elevationFt ?? 0}`);
+    } catch (err) {
+        console.warn('[Preflight] applyPreflightSpawnForMission failed:', err);
+    }
+}
+
 export function applyPreflightToUrlAndScene(scene: GroundSpawnScene): void {
     ensureDefaultSpawnConfig();
     try {
-        const raw = localStorage.getItem(PREFLIGHT_SPAWN_KEY);
-        const spawn = raw ? (JSON.parse(raw) as PreflightSpawnConfig) : DEFAULT_SBGR_SPAWN;
+        const spawn = readStoredSpawn() ?? DEFAULT_SBGR_SPAWN;
         scene.setFreeFlightGroundSpawn(spawn.lat, spawn.lon, spawn.hdg, spawn.elevationFt ?? 0);
         if (spawn.simTimeIso) scene.setSimTimeOffsetFromIso(spawn.simTimeIso);
         const params = new URLSearchParams(window.location.search);

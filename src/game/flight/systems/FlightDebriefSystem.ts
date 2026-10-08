@@ -34,6 +34,7 @@ export class FlightDebriefSystem {
                 rows.push({ label: I18n.t('landing.rate'), value: this.formatConverted(vs, Number.isInteger(vs.value) ? 0 : 2) });
                 if (report.centerlineM != null) rows.push({ label: I18n.t('landing.centerline'), value: `${report.centerlineM.toFixed(0)} m` });
                 if (report.speedKts != null) rows.push({ label: I18n.t('landing.speed'), value: this.formatConverted(this.scene._convertSpeedKts(report.speedKts), 0) });
+                if (report.bonusCredits != null) rows.push({ label: I18n.t('landing.bonus'), value: I18n.format('landing.bonusCredits', { credits: report.bonusCredits }) });
             }
             const distanceNm = Number(msg?.distanceNm);
             if (Number.isFinite(distanceNm)) rows.push({ label: I18n.t('debrief.distance'), value: this.formatConverted(this.scene._convertDistanceNm(distanceNm), 1) });

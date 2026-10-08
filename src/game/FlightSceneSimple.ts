@@ -400,6 +400,8 @@ import { TcasSystem } from './flight/systems/TcasSystem.js';
 import { ChatSystem } from './flight/systems/ChatSystem.js';
 import { PhotoModeSystem } from './flight/systems/PhotoModeSystem.js';
 import { FlightSchoolCoachSystem } from './flight/systems/FlightSchoolCoachSystem.js';
+import { MissionScenarioSystem } from './flight/systems/MissionScenarioSystem.js';
+import { WeeklyChallengesSystem } from './flight/systems/WeeklyChallengesSystem.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 const PAUSED_UI_UPDATE_INTERVAL_FRAMES = 6;
@@ -446,6 +448,11 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _chatSystem = new ChatSystem(this);
     /** @internal */ private readonly _photoModeSystem = new PhotoModeSystem(this);
     /** @internal */ private readonly _flightSchoolCoachSystem = new FlightSchoolCoachSystem(this);
+    /** @internal */ private readonly _missionScenarioSystem = new MissionScenarioSystem(this);
+    /** @internal */ private readonly _weeklyChallengesSystem = new WeeklyChallengesSystem(this);
+    /** @internal */ _weeklyBtnEl: HTMLElement | null = null;
+    /** @internal */ _weeklyPanelEl: HTMLElement | null = null;
+    /** @internal */ _pointsMultiplier: number | null = null;
     /** @internal */ _photoModeActive = false;
     private planeRoot!: BABYLON.TransformNode;
     private velocity        = BABYLON.Vector3.Zero();
@@ -1223,6 +1230,7 @@ export class FlightSceneSimple extends Scene3D {
         this._atcSystem.update(dt);
         this._tcasSystem.update(dt);
         this._flightSchoolCoachSystem.update(dt);
+        this._missionScenarioSystem.update(dt);
         this._chatSystem.update();
         try {
             this._tutorialSystem.update(dt);
@@ -1564,6 +1572,7 @@ export class FlightSceneSimple extends Scene3D {
         try { this._flightDebriefSystem.dispose(); } catch (err) { console.warn('[FlightSimple] FlightDebriefSystem dispose failed:', err); }
         try { this._tcasSystem.dispose(); } catch (err) { console.warn('[FlightSimple] TcasSystem dispose failed:', err); }
         try { this._flightSchoolCoachSystem.dispose(); } catch (err) { console.warn('[FlightSimple] FlightSchoolCoachSystem dispose failed:', err); }
+        try { this._missionScenarioSystem.dispose(); } catch (err) { console.warn('[FlightSimple] MissionScenarioSystem dispose failed:', err); }
         try { this._chatSystem.dispose(); } catch (err) { console.warn('[FlightSimple] ChatSystem dispose failed:', err); }
         try { this._photoModeSystem.dispose(); } catch (err) { console.warn('[FlightSimple] PhotoModeSystem dispose failed:', err); }
         try { this._hudSystem.disposeResizeListener(); } catch (err) { console.warn('[FlightSimple] HudSystem resize listener dispose failed:', err); }
@@ -1673,8 +1682,8 @@ export class FlightSceneSimple extends Scene3D {
         this._missionSystem.setFlightPlanSpawn(plan);
     }
 
-    setMissionSpawn(mission: any, userMissionId: number | null): void {
-        this._missionSystem.setMissionSpawn(mission, userMissionId);
+    setMissionSpawn(mission: any, userMissionId: number | null): boolean {
+        return this._missionSystem.setMissionSpawn(mission, userMissionId);
     }
 
     setSimTimeOffsetFromIso(iso: string): void {

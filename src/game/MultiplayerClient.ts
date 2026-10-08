@@ -45,6 +45,7 @@ export class MultiplayerClient {
     private _onFlightLogEndedCb: ((msg: any) => void) | null = null;
     private _onAchievementsUnlockedCb: ((achievements: any[]) => void) | null = null;
     private _onDailyBonusCb: ((msg: any) => void) | null = null;
+    private _onPostLandingStatsCb: ((msg: any) => void) | null = null;
     private _onChatCb: ((msg: ChatMessage) => void) | null = null;
     private _onlineCount = 0;
     private _pendingCrash: { reason: string; altitudeFt: number; verticalSpeedFpm: number } | null = null;
@@ -90,6 +91,11 @@ export class MultiplayerClient {
             if (msg.type === 'achievementsUnlocked' && Array.isArray(msg.achievements) && msg.achievements.length) {
                 console.log(`[Achievements] Unlocked: ${msg.achievements.map((a: any) => a.code).join(', ')}`);
                 this._onAchievementsUnlockedCb?.(msg.achievements);
+            }
+            if (msg.type === 'postLandingStats') {
+                const achievementCount = Array.isArray(msg.newlyUnlockedAchievements) ? msg.newlyUnlockedAchievements.length : 0;
+                console.log(`[PostLanding] Stats received: rankUp=${msg.rankUp ? 'yes' : 'no'} achievements=${achievementCount} pointsMultiplier=${msg.pointsMultiplier}`);
+                this._onPostLandingStatsCb?.(msg);
             }
             if (msg.type === 'dailyBonus') {
                 console.log(`[Daily] Bonus received: streakDays=${msg.streakDays} streakPoints=${msg.streakPoints} dailyMissionPoints=${msg.dailyMissionPoints}`);
@@ -165,6 +171,16 @@ export class MultiplayerClient {
         });
     }
 
+    endFlight(reason: number): void {
+        if (!Number.isInteger(reason) || reason <= 0) return;
+        if (!this.rt.connected) {
+            console.warn(`[Flight] endFlight skipped: WebSocket not connected (reason=${reason})`);
+            return;
+        }
+        console.log(`[Flight] endFlight reason=${reason}`);
+        this.rt.send({ type: 'endFlight', reason });
+    }
+
     sendTouchdown(fpm: number): void {
         if (!Number.isFinite(fpm)) return;
         if (!this.rt.connected) {
@@ -204,6 +220,10 @@ export class MultiplayerClient {
 
     onDailyBonus(cb: (msg: any) => void): void {
         this._onDailyBonusCb = cb;
+    }
+
+    onPostLandingStats(cb: (msg: any) => void): void {
+        this._onPostLandingStatsCb = cb;
     }
 
     onChat(cb: (msg: ChatMessage) => void): void {

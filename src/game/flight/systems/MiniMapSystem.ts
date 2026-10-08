@@ -20,6 +20,7 @@ const MINIMAP_TRAFFIC_EDGE_COLOR = 'rgba(255, 215, 0, 0.65)';
 const MINIMAP_REMOTE_PLAYER_RADIUS = 3.5;
 const MINIMAP_REMOTE_PLAYER_COLOR = 'rgba(255, 140, 0, 0.95)';
 const MINIMAP_REMOTE_PLAYER_OUTLINE = 'rgba(0, 0, 0, 0.7)';
+const MINIMAP_GROUP_PLAYER_COLOR = 'rgba(255, 226, 122, 1)';
 const MINIMAP_REMOTE_PLAYER_EDGE_INSET_PX = 6;
 const MINIMAP_LABEL_FONT = '7px Inter, sans-serif';
 
@@ -613,7 +614,7 @@ export class MiniMapSystem {
             const p = this.latLonToMapPx(ns.lat, ns.lon, refLat, refLon, cv.width);
             const screen = rotXY(p.x, p.y);
             const clamped = this._clampToCircleEdge(screen.x, screen.y, cx, cy, edgeRadius);
-            ctx.fillStyle = MINIMAP_REMOTE_PLAYER_COLOR;
+            ctx.fillStyle = remote?.currentGroupMember === true ? MINIMAP_GROUP_PLAYER_COLOR : MINIMAP_REMOTE_PLAYER_COLOR;
             ctx.strokeStyle = MINIMAP_REMOTE_PLAYER_OUTLINE;
             ctx.lineWidth = 0.6;
             ctx.beginPath();

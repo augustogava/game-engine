@@ -235,6 +235,10 @@ const FLIGHT_PLAN_STATUS_PLANNED = 0;
 const FLIGHT_PLAN_STATUS_IN_PROGRESS = 1;
 const FLIGHT_PLAN_STATUS_COMPLETED = 2;
 const FLIGHT_PLAN_STATUS_CANCELLED = 3;
+const AIRPORT_FLAG_OFF = 0;
+const AIRPORT_FLAG_ON = 1;
+const AIRPORT_FLAG_FIELDS = ['is_home_base', 'is_favorite'];
+const WEEKLY_CHALLENGE_CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const FLIGHT_SCHOOL_LANDING_COMPLETE_NM = 2.0;
 const SCENARIO_MISSION_TYPES = ['scheduled', 'challenge', 'milestone'];
 const FLIGHT_PLAN_STATUS_CODES = [
@@ -249,6 +253,23 @@ const WS_MAX_PAYLOAD_BYTES = 16 * 1024;
 const WS_JOIN_TIMEOUT_MS = 10000;
 const WS_CLOSE_CODE_POLICY_VIOLATION = 1008;
 const WS_CLOSE_CODE_RATE_LIMIT = 4008;
+const WS_CLOSE_CODE_ABNORMAL = 1006;
+const WS_CLOSE_CODE_NO_FLIGHT_HOURS = 4002;
+const END_REASON_UNKNOWN = 0;
+const END_REASON_PILOT_QUIT = 1;
+const END_REASON_TAB_CLOSED = 2;
+const END_REASON_CONNECTION_LOST = 3;
+const END_REASON_SESSION_TIMEOUT = 4;
+const END_REASON_OUT_OF_HOURS = 5;
+const CLIENT_END_REASONS = [END_REASON_PILOT_QUIT, END_REASON_TAB_CLOSED];
+
+function resolveEndReason(ws, entry, closeCode) {
+    if (Number.isInteger(entry?.endReason)) return entry.endReason;
+    if (Number.isInteger(ws?.sfpEndReason)) return ws.sfpEndReason;
+    if (closeCode === WS_CLOSE_CODE_NO_FLIGHT_HOURS) return END_REASON_OUT_OF_HOURS;
+    if (closeCode === WS_CLOSE_CODE_ABNORMAL) return END_REASON_CONNECTION_LOST;
+    return END_REASON_UNKNOWN;
+}
 const WS_UPDATE_MIN_INTERVAL_MS = 25;
 const WS_UPDATE_DROP_WINDOW_MS = 10000;
 const WS_UPDATE_MAX_DROPS_PER_WINDOW = 300;
@@ -1690,6 +1711,37 @@ const server = http.createServer(async (req, res) => {
             (data) => stripMissionImagesFromList(data && data.data));
     }
 
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/progress'))) {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        const userMissionId = Number(routeParams.id);
+        if (!Number.isInteger(userMissionId) || userMissionId <= 0) return jsonResponse(res, 400, { error: 'Invalid user mission id' });
+        try {
+            const [owned] = await dbPool.execute(
+                `SELECT id, mission_id FROM user_missions WHERE id = ? AND user_id = ? LIMIT 1`,
+                [userMissionId, user.id]);
+            if (!owned.length) return jsonResponse(res, 404, { error: 'User mission not found' });
+            const [rows] = await dbPool.execute(
+                `SELECT COALESCE(SUM(distance_nm), 0) AS distance_nm, COUNT(*) AS landed_flights
+                 FROM flight_logs
+                 WHERE user_id = ? AND user_mission_id = ? AND status = 'landed'`,
+                [user.id, userMissionId]);
+            const distanceNm = Math.round(Number(rows[0]?.distance_nm || 0) * 100) / 100;
+            const landedFlights = Number(rows[0]?.landed_flights || 0);
+            console.debug(`[API] GET /api/user-missions/${userMissionId}/progress user=${user.id} distanceNm=${distanceNm} landed=${landedFlights}`);
+            return jsonResponse(res, 200, {
+                user_mission_id: userMissionId,
+                mission_id: owned[0].mission_id,
+                distance_nm: distanceNm,
+                landed_flights: landedFlights,
+            });
+        } catch (err) {
+            console.error('[API] GET /api/user-missions/:id/progress error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/complete'))) {
         return proxyToMainApi(`/api/user-missions/${routeParams.id}/complete`, req, res);
     }
@@ -1921,6 +1973,16 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    if (req.method === 'GET' && urlPath === '/api/flight-stats/weekly-challenges') {
+        return proxyToMainApi('/api/flight-stats/weekly-challenges', req, res);
+    }
+
+    if (req.method === 'POST' && (routeParams = matchRoute(req.method, urlPath, '/api/flight-stats/weekly-challenges/:code/claim'))) {
+        const code = String(routeParams.code || '');
+        if (!WEEKLY_CHALLENGE_CODE_PATTERN.test(code)) return jsonResponse(res, 400, { error: 'Invalid challenge code' });
+        return proxyToMainApi(`/api/flight-stats/weekly-challenges/${encodeURIComponent(code)}/claim`, req, res);
+    }
+
     if (req.method === 'POST' && urlPath === '/api/flight-stats/claim-free-hour') {
         return proxyToMainApi('/api/flight-stats/claim-free-hour', req, res, await parseBody(req));
     }
@@ -2087,7 +2149,8 @@ const server = http.createServer(async (req, res) => {
         if (!dbPool) return jsonResponse(res, 200, { data: [] });
         try {
             const [rows] = await dbPool.execute(
-                `SELECT ua.*, a.name, a.icao_code, a.iata_code, a.type, a.country_code, a.municipality
+                `SELECT ua.*, a.name, a.icao_code, a.iata_code, a.type, a.country_code, a.municipality,
+                        a.latitude, a.longitude, a.elevation_ft
                  FROM user_airports ua JOIN airports a ON ua.airport_id = a.id
                  WHERE ua.user_id = ?`, [user.id]);
             return jsonResponse(res, 200, { data: rows });
@@ -2095,6 +2158,25 @@ const server = http.createServer(async (req, res) => {
             console.error('[API] GET /api/airports/acquired error:', err.message);
             return jsonResponse(res, 500, { error: 'Internal server error' });
         }
+    }
+
+    if (req.method === 'PATCH' && (routeParams = matchRoute(req.method, urlPath, '/api/airports/acquired/:airportId'))) {
+        const airportId = Number(routeParams.airportId);
+        if (!Number.isInteger(airportId) || airportId <= 0) return jsonResponse(res, 400, { error: 'Invalid airport id' });
+        const body = await parseBody(req);
+        if (!body || typeof body !== 'object') return jsonResponse(res, 400, { error: 'Invalid JSON body' });
+        const patch = {};
+        for (const field of AIRPORT_FLAG_FIELDS) {
+            if (body?.[field] === undefined) continue;
+            const value = Number(body[field]);
+            if (value !== AIRPORT_FLAG_OFF && value !== AIRPORT_FLAG_ON) {
+                return jsonResponse(res, 400, { error: `${field} must be 0 or 1` });
+            }
+            patch[field] = value;
+        }
+        if (!Object.keys(patch).length) return jsonResponse(res, 400, { error: 'Nothing to update' });
+        console.debug(`[API] PATCH /api/airports/acquired/${airportId} fields=${Object.keys(patch).join(',')}`);
+        return proxyToMainApi(`/api/airports/acquired/${airportId}`, req, res, patch);
     }
 
     if (req.method === 'POST' && (routeParams = matchRoute(req.method, urlPath, '/api/airports/:id/acquire'))) {
@@ -2633,6 +2715,7 @@ wss.on('connection', (ws) => {
                         aircraft: msg.aircraft || null,
                         aircraftId: Number.isInteger(Number(msg.aircraftId)) && Number(msg.aircraftId) > 0 ? Number(msg.aircraftId) : null,
                         aircraftCode: msg.aircraftCode || null,
+                        missionId: Number.isInteger(Number(msg.missionId)) && Number(msg.missionId) > 0 ? Number(msg.missionId) : null,
                     };
 
                     let stepNm = 0;
@@ -2870,6 +2953,21 @@ wss.on('connection', (ws) => {
                 }
             }
 
+            if (msg.type === 'endFlight' && playerId) {
+                const entry = players.get(playerId);
+                if (!entry) return;
+                const reason = Number(msg.reason);
+                if (!CLIENT_END_REASONS.includes(reason)) {
+                    logWsRejection(entry, playerId, 'invalid end reason', `reason=${msg.reason}`);
+                    return;
+                }
+                if (!Number.isInteger(entry.endReason)) {
+                    entry.endReason = reason;
+                    console.log(`[Flight] End reason reported by user ${playerId}: ${reason}`);
+                }
+                return;
+            }
+
             if (msg.type === 'touchdown' && playerId) {
                 const entry = players.get(playerId);
                 if (!entry || !entry.flightLogId) return;
@@ -2923,7 +3021,7 @@ wss.on('connection', (ws) => {
         } catch (e) { /* ignore malformed */ }
     });
 
-    ws.on('close', async () => {
+    ws.on('close', async (closeCode) => {
         clearJoinTimeout();
         if (!playerId) return;
         const entry = players.get(playerId);
@@ -2933,7 +3031,9 @@ wss.on('connection', (ws) => {
         }
         if (dbPool) {
             if (entry.flightLogId) {
-                await finalizeFlight(playerId, entry, 'cancelled', entry.state);
+                const endReason = resolveEndReason(ws, entry, closeCode);
+                console.log(`[Flight] Connection closed for user ${playerId}: closeCode=${closeCode} endReason=${endReason}`);
+                await finalizeFlight(playerId, entry, 'cancelled', entry.state, endReason);
             }
 
             if (!entry.statsRecalculated) {
@@ -3127,6 +3227,7 @@ setInterval(() => {
     for (const client of wss.clients) {
         if (client.isAlive === false) {
             console.log(`[WS] Stale connection detected for user ${client.sfpUserId ?? 'unauthenticated'}, cleaning up`);
+            client.sfpEndReason = END_REASON_SESSION_TIMEOUT;
             client.terminate();
             continue;
         }

@@ -6,6 +6,7 @@ import { fetchAircraftConfig } from '../api/AircraftConfigApi.js';
 import { MultiplayerClient, PlayerState } from '../../MultiplayerClient.js';
 import { EngineSound, ENGINE_SOUND_TYPE_TURBOFAN } from '../../EngineSound.js';
 import { AudioCore } from '../../AudioCore.js';
+import { I18n } from '../../I18n.js';
 import {
     CONTRAIL_EMIT_LERP_RATE, CONTRAIL_EMIT_RATE_MAX,
     FLIGHT_PLAN_STATUS_COMPLETED, FLIGHT_PLAN_STATUS_CANCELLED,
@@ -34,6 +35,10 @@ const REMOTE_ATTITUDE_SMOOTHING_PER_S = 20;
 const DEG_TO_RAD = Math.PI / 180;
 // Gives the main API time to credit the onboarding step after the landing is persisted.
 const ONBOARDING_CHECK_DELAY_MS = 3000;
+const GROUP_INDICATOR_ID = 'h-group';
+const GROUP_LABEL_BORDER_COLOR = 'rgba(255, 210, 80, 0.95)';
+const GROUP_LABEL_BORDER_WIDTH = 3;
+const GROUP_LABEL_TEXT_COLOR = '#ffe27a';
 
 export class MultiplayerSystem {
     private readonly scene: any;
@@ -50,6 +55,8 @@ export class MultiplayerSystem {
     private readonly _axisForward = BABYLON.Vector3.Forward();
     private readonly _bodyForward = new BABYLON.Vector3(0, 0, 1);
     private readonly _bodyRight = new BABYLON.Vector3(1, 0, 0);
+    private readonly _shownAchievementCodes = new Set<string>();
+    private _lastGroupCount = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -146,6 +153,7 @@ export class MultiplayerSystem {
                     this.scene.remotePlayers.delete(id);
                 }
             }
+            this.updateGroupIndicator();
         });
 
         this.scene.mpClient.onPlayerCountChange((count: number) => {
@@ -189,6 +197,7 @@ export class MultiplayerSystem {
                 this.scene._safeSetTimeout(() => {
                     void this.scene._hudSystem?.checkFirstFlightOnboarding();
                 }, ONBOARDING_CHECK_DELAY_MS);
+                try { this.scene._weeklyChallengesSystem?.refreshIfVisible(); } catch (err) { console.warn('[Weekly] Refresh failed:', err); }
             }
             if (!this.scene._activeFlightPlanId) return;
             if (msg.status === 'landed') {
@@ -204,10 +213,28 @@ export class MultiplayerSystem {
 
         this.scene.mpClient.onAchievementsUnlocked((achievements: any[]) => {
             try {
-                this.scene._hudSystem?.showAchievementToast(achievements);
+                const fresh = achievements.filter((a: any) => {
+                    const code = String(a?.code ?? a?.id ?? '');
+                    if (!code) return true;
+                    if (this._shownAchievementCodes.has(code)) return false;
+                    this._shownAchievementCodes.add(code);
+                    return true;
+                });
+                if (fresh.length) this.scene._hudSystem?.showAchievementToast(fresh);
             } catch (err) {
                 console.warn('[Achievements] Toast display failed:', err);
             }
+        });
+
+        this.scene.mpClient.onPostLandingStats((msg: any) => {
+            const multiplier = Number(msg?.pointsMultiplier);
+            if (Number.isFinite(multiplier) && multiplier > 0) this.scene._pointsMultiplier = multiplier;
+            try {
+                this.scene._hudSystem?.showPostLandingStats(msg, this._shownAchievementCodes);
+            } catch (err) {
+                console.warn('[PostLanding] Celebration display failed:', err);
+            }
+            try { this.scene._weeklyChallengesSystem?.refreshIfVisible(); } catch (err) { console.warn('[Weekly] Refresh failed:', err); }
         });
 
         this.scene.mpClient.onDailyBonus((msg: any) => {
@@ -547,7 +574,32 @@ export class MultiplayerSystem {
         });
     }
 
-    createPlayerLabel(remote: RemotePlayer, username: string, avatarUrl: string | null): void {
+    isGroupMember(state: PlayerState | null | undefined): boolean {
+        const ownMissionId = Number(this.scene._activeMissionId);
+        const otherMissionId = Number(state?.missionId);
+        return Number.isInteger(ownMissionId) && ownMissionId > 0 && otherMissionId === ownMissionId;
+    }
+
+    private updateGroupIndicator(): void {
+        let groupCount = 0;
+        for (const [, remote] of this.scene.remotePlayers) {
+            if (remote?.currentGroupMember === true) groupCount++;
+        }
+        if (groupCount !== this._lastGroupCount) {
+            console.debug(`[Group] Pilots on the same mission: ${groupCount}`);
+            this._lastGroupCount = groupCount;
+        }
+        const el = document.getElementById(GROUP_INDICATOR_ID);
+        if (!el) return;
+        if (groupCount > 0) {
+            el.textContent = I18n.format('group.pilots', { count: groupCount });
+            el.style.display = '';
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
+    createPlayerLabel(remote: RemotePlayer, username: string, avatarUrl: string | null, isGroupMember = false): void {
         const scene = this.scene.scene;
         const texW = LABEL_TEX_W;
         const texH = LABEL_TEX_H;
@@ -576,15 +628,16 @@ export class MultiplayerSystem {
         remote.labelTexture = tex;
         remote.currentUsername = username;
         remote.currentAvatarUrl = avatarUrl ?? null;
+        remote.currentGroupMember = isGroupMember;
 
-        this.drawPlayerLabel(tex, username, null);
+        this.drawPlayerLabel(tex, username, null, isGroupMember);
 
         if (avatarUrl) {
-            this.loadAvatarAndRedraw(tex, username, avatarUrl);
+            this.loadAvatarAndRedraw(tex, username, avatarUrl, isGroupMember);
         }
     }
 
-    drawPlayerLabel(tex: BABYLON.DynamicTexture, username: string, avatarImg: HTMLImageElement | null): void {
+    drawPlayerLabel(tex: BABYLON.DynamicTexture, username: string, avatarImg: HTMLImageElement | null, isGroupMember = false): void {
         const texW = LABEL_TEX_W;
         const texH = LABEL_TEX_H;
         const avatarSz = LABEL_AVATAR_SIZE;
@@ -603,8 +656,8 @@ export class MultiplayerSystem {
         }
         ctx.fill();
 
-        ctx.strokeStyle = 'rgba(64, 255, 170, 0.4)';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = isGroupMember ? GROUP_LABEL_BORDER_COLOR : 'rgba(64, 255, 170, 0.4)';
+        ctx.lineWidth = isGroupMember ? GROUP_LABEL_BORDER_WIDTH : 1.5;
         ctx.beginPath();
         if (ctx.roundRect) {
             ctx.roundRect(0, 0, texW, texH, radius);
@@ -644,7 +697,7 @@ export class MultiplayerSystem {
         ctx.stroke();
 
         const textX = pad + avatarSz + 8;
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = isGroupMember ? GROUP_LABEL_TEXT_COLOR : '#ffffff';
         ctx.font = 'bold 16px Inter, sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -654,10 +707,10 @@ export class MultiplayerSystem {
         tex.update();
     }
 
-    loadAvatarAndRedraw(tex: BABYLON.DynamicTexture, username: string, avatarUrl: string): void {
+    loadAvatarAndRedraw(tex: BABYLON.DynamicTexture, username: string, avatarUrl: string, isGroupMember = false): void {
         const img = new Image();
-        img.onload = () => this.drawPlayerLabel(tex, username, img);
-        img.onerror = () => this.drawPlayerLabel(tex, username, null);
+        img.onload = () => this.drawPlayerLabel(tex, username, img, isGroupMember);
+        img.onerror = () => this.drawPlayerLabel(tex, username, null, isGroupMember);
         img.src = avatarUrl;
     }
 
@@ -666,23 +719,26 @@ export class MultiplayerSystem {
         if (!username) return;
 
         const avatarUrl = state.avatarUrl ?? null;
+        const isGroupMember = this.isGroupMember(state);
         const nameChanged = remote.currentUsername !== username;
         const avatarChanged = remote.currentAvatarUrl !== avatarUrl;
+        const groupChanged = remote.currentGroupMember !== isGroupMember;
 
         if (!remote.labelPlane) {
-            this.createPlayerLabel(remote, username, avatarUrl);
+            this.createPlayerLabel(remote, username, avatarUrl, isGroupMember);
             return;
         }
 
-        if (!nameChanged && !avatarChanged) return;
+        if (!nameChanged && !avatarChanged && !groupChanged) return;
 
         remote.currentUsername = username;
         remote.currentAvatarUrl = avatarUrl;
+        remote.currentGroupMember = isGroupMember;
 
         if (avatarUrl) {
-            this.loadAvatarAndRedraw(remote.labelTexture!, username, avatarUrl);
+            this.loadAvatarAndRedraw(remote.labelTexture!, username, avatarUrl, isGroupMember);
         } else {
-            this.drawPlayerLabel(remote.labelTexture!, username, null);
+            this.drawPlayerLabel(remote.labelTexture!, username, null, isGroupMember);
         }
     }
 

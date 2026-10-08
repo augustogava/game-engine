@@ -52,8 +52,8 @@ export class DebugPanelSystem {
     }
 
     closeAllPanels(except?: HTMLElement | null): void {
-        const panels = [this.scene._missionPanelEl, this.scene._aircraftPanelEl, this.scene._flightPlansPanelEl, this.scene._logbookPanelEl, this.scene._efbPanelEl, this.scene._achievementsPanelEl, this.scene._leaderboardPanelEl];
-        const btns = [this.scene._missionBtnEl, this.scene._aircraftBtnEl, this.scene._flightPlansBtnEl, this.scene._logbookBtnEl, this.scene._efbBtnEl, this.scene._achievementsBtnEl, this.scene._leaderboardBtnEl];
+        const panels = [this.scene._missionPanelEl, this.scene._aircraftPanelEl, this.scene._flightPlansPanelEl, this.scene._logbookPanelEl, this.scene._efbPanelEl, this.scene._achievementsPanelEl, this.scene._leaderboardPanelEl, this.scene._weeklyPanelEl];
+        const btns = [this.scene._missionBtnEl, this.scene._aircraftBtnEl, this.scene._flightPlansBtnEl, this.scene._logbookBtnEl, this.scene._efbBtnEl, this.scene._achievementsBtnEl, this.scene._leaderboardBtnEl, this.scene._weeklyBtnEl];
         for (let i = 0; i < panels.length; i++) {
             const p = panels[i];
             if (!p || p === except) continue;

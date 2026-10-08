@@ -1,7 +1,8 @@
 import { GameCore3D } from './engine/3d/GameCore3D.js';
 import { FlightSceneSimple } from './game/FlightSceneSimple.js';
-import { PreflightController, applyPreflightToUrlAndScene } from './preflight/PreflightController.js';
+import { PreflightController, applyPreflightToUrlAndScene, applyPreflightSpawnForMission, ensureHomeBaseSpawnConfig } from './preflight/PreflightController.js';
 import { FLIGHT_PLAN_STATUS_CANCELLED } from './game/flight/constants/flightPlanConstants.js';
+import { END_REASON_TAB_CLOSED } from './game/flight/constants/flightEndConstants.js';
 
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
 const FLIGHT_HOURS_URL = 'https://simflightpro.com/flight-time';
@@ -319,6 +320,13 @@ async function findUserMissionForMission(missionIdNum: number): Promise<{ id: nu
     return null;
 }
 
+async function applyMissionSpawnOrFallback(mission: any, userMissionId: number | null): Promise<void> {
+    if (scene.setMissionSpawn(mission, userMissionId)) return;
+    console.log(`[flight-main] Mission ${mission?.id} has no own spawn; using the preflight airport or home base`);
+    await ensureHomeBaseSpawnConfig(token || '');
+    applyPreflightSpawnForMission(scene);
+}
+
 async function startFlightGame(): Promise<void> {
     if (flightPlanId && token) {
         try {
@@ -476,7 +484,7 @@ async function startFlightGame(): Promise<void> {
                         }
                     }
                     console.log(`[flight-main] Mission ${missionId} already active, userMissionId=${userMissionId}`);
-                    scene.setMissionSpawn(mission, userMissionId);
+                    await applyMissionSpawnOrFallback(mission, userMissionId);
                 } else {
                     const startRes = await fetch('/api/user-missions', {
                         method: 'POST',
@@ -508,7 +516,7 @@ async function startFlightGame(): Promise<void> {
                                 return;
                             }
                         }
-                        scene.setMissionSpawn(mission, userMissionId);
+                        await applyMissionSpawnOrFallback(mission, userMissionId);
                     } else if (startRes.status === 409) {
                         console.log(`[flight-main] Mission ${missionId} already active (race), fetching active userMissionId`);
                         let recoveredUserMissionId: number | null = null;
@@ -527,7 +535,7 @@ async function startFlightGame(): Promise<void> {
                             showLoadingError('Não foi possível recuperar a missão ativa.');
                             return;
                         }
-                        scene.setMissionSpawn(mission, recoveredUserMissionId);
+                        await applyMissionSpawnOrFallback(mission, recoveredUserMissionId);
                     } else {
                         console.warn(`[flight-main] Mission ${missionId} acquire failed: ${startRes.status}`);
                         showLoadingError('Não foi possível adquirir a missão.');
@@ -549,6 +557,7 @@ async function startFlightGame(): Promise<void> {
         } else if (spawnAirportId && spawnRunwayId) {
             await applyAirportRunwaySpawn(spawnAirportId, spawnRunwayId, spawnRunwayEnd, spawnSimTime);
         } else {
+            await ensureHomeBaseSpawnConfig(token);
             applyPreflightToUrlAndScene(scene);
         }
         try {
@@ -708,6 +717,7 @@ function disposeGame(reason: string): void {
     disposed = true;
     try {
         console.debug(`[flight-main] Disposing game to free WebGL/tiles memory (reason=${reason})`);
+        try { (scene as any).mpClient?.endFlight(END_REASON_TAB_CLOSED); } catch (err) { console.warn('[flight-main] endFlight on unload failed:', err); }
         cancelActiveFlightPlanOnUnload(reason);
         clearRuntimeTimers();
         game?.dispose();

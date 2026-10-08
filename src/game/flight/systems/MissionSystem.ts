@@ -109,7 +109,7 @@ export class MissionSystem {
         console.log(`[FlightPlan] Active plan id=${this.scene._activeFlightPlanId}, spawn lat=${spawnLat} lon=${spawnLon} hdg=${spawnHdg} (runway=${hasRunway})`);
     }
 
-    setMissionSpawn(mission: any, userMissionId: number | null): void {
+    setMissionSpawn(mission: any, userMissionId: number | null): boolean {
         this.scene._activeMissionId = Number(mission.id);
         this.scene._activeUserMissionId = userMissionId;
         const trainingOrderRaw = Number(mission.training_order);
@@ -119,6 +119,7 @@ export class MissionSystem {
         this._activeMissionTitle = String(mission.title ?? '');
         const rewardRaw = Number(mission.reward_points);
         this._activeMissionRewardPoints = Number.isFinite(rewardRaw) && rewardRaw > 0 ? rewardRaw : 0;
+        try { this.scene._missionScenarioSystem?.start(mission, userMissionId); } catch (err) { console.warn('[Scenario] Start failed:', err); }
 
         this.scene._pendingFlightPlanLat = null;
         this.scene._pendingFlightPlanLon = null;
@@ -182,7 +183,7 @@ export class MissionSystem {
             console.warn('[Mission] Route mission has no runway centerline — falling back to airport center');
         } else {
             console.warn(`[Mission] Mission ${mission.id} has no spawn coordinates — skipping spawn override`);
-            return;
+            return false;
         }
 
         if (mission.arrival_lat != null && mission.arrival_lon != null) {
@@ -211,6 +212,11 @@ export class MissionSystem {
         }
 
         console.log(`[Mission] Active mission id=${this.scene._activeMissionId}, type=${mission.type}, spawn lat=${this.scene._pendingMissionLat} lon=${this.scene._pendingMissionLon} hdg=${this.scene._pendingMissionHdg} airborne=${this.scene._pendingMissionAirborne} waypoints=${waypoints.length}`);
+        return true;
+    }
+
+    isScenarioMissionActive(): boolean {
+        return this.scene._missionScenarioSystem?.isActive?.() === true;
     }
 
     private normalizeMissionWaypoints(raw: unknown): Array<{ id: number; order_index: number; name: string | null; latitude: number; longitude: number; altitude_ft: number | null }> {
@@ -273,7 +279,9 @@ export class MissionSystem {
             console.log(`[Mission] WP ${reachedNum}/${total} reached: order=${wp.order_index} name="${wp.name ?? 'unnamed'}" ${reason}`);
             this.scene._missionCurrentWpIndex++;
             if (this.scene._missionCurrentWpIndex >= total) {
-                if (this.scene._activeUserMissionId && this.isTrainingLessonActive()) {
+                if (this.scene._activeUserMissionId && this.isScenarioMissionActive()) {
+                    console.log(`[Scenario] All ${total} waypoints reached; completion is decided by the scenario`);
+                } else if (this.scene._activeUserMissionId && this.isTrainingLessonActive()) {
                     this.scene._missionAwaitingLanding = true;
                     console.log(`[FlightSchool] All ${total} lesson waypoints reached; completion awaits landing for userMissionId=${this.scene._activeUserMissionId}`);
                     try { this.scene._showToast(I18n.t('flightSchool.landToComplete')); } catch (_) { /* ignore */ }
@@ -295,6 +303,7 @@ export class MissionSystem {
     }
 
     onTouchdown(): void {
+        try { this.scene._missionScenarioSystem?.onTouchdown(); } catch (err) { console.warn('[Scenario] Touchdown handling failed:', err); }
         if (!this.isTrainingLessonActive() || this.scene._missionCompletionInFlight || this._lessonLandingTimer != null) return;
         const umId = this.scene._activeUserMissionId;
         this._lessonLandingTimer = this.scene._safeSetTimeout(() => {
@@ -354,7 +363,7 @@ export class MissionSystem {
 
     private checkDirectMissionArrival(lat: number, lon: number): void {
         if (!this.scene._activeUserMissionId || this.scene._missionCompletionInFlight) return;
-        if (this.isTrainingLessonActive()) return;
+        if (this.isTrainingLessonActive() || this.isScenarioMissionActive()) return;
         const mission = this.scene._activeMission;
         if (!mission || mission.arrival_lat == null || mission.arrival_lon == null) return;
         const arrLat = Number(mission.arrival_lat);
@@ -380,7 +389,8 @@ export class MissionSystem {
                 headers: { 'Authorization': `Bearer ${token}`, 'X-Requested-With': GAME_REQUESTED_WITH_HEADER },
             });
             if (res.ok || res.status === HTTP_STATUS_CONFLICT) {
-                let pointsMultiplier = POINTS_MULTIPLIER_DEFAULT;
+                const knownMultiplier = Number(this.scene._pointsMultiplier);
+                let pointsMultiplier = Number.isFinite(knownMultiplier) && knownMultiplier > 0 ? knownMultiplier : POINTS_MULTIPLIER_DEFAULT;
                 if (res.ok) {
                     console.log(`[Mission] Completed userMissionId=${umId}`);
                     try {

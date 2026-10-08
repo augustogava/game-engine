@@ -18,6 +18,7 @@ export interface RemotePlayer {
     labelTexture: BABYLON.DynamicTexture | null;
     currentUsername: string | null;
     currentAvatarUrl: string | null;
+    currentGroupMember?: boolean;
     engineSound: EngineSound | null;
     engineTypeResolved: boolean;
     contrailEmitterLeft: BABYLON.TransformNode | null;

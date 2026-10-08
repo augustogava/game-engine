@@ -108,6 +108,7 @@ async function build() {
         external: ['three', 'three/*'],
         define: {
             '__GOOGLE_MAPS_API_KEY__': JSON.stringify(process.env.GOOGLE_MAPS_API_KEY || env.GOOGLE_MAPS_API_KEY || ''),
+            '__MISSION_SCENARIO_CONFIG_JSON__': JSON.stringify(process.env.MISSION_SCENARIO_CONFIG_JSON || env.MISSION_SCENARIO_CONFIG_JSON || ''),
         },
     });
 

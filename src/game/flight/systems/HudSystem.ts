@@ -23,6 +23,17 @@ const LANDING_GRADE_SCORE_BUTTER = 4;
 const LANDING_GRADE_SCORE_GOOD = 2;
 const LANDING_GRADE_TOAST_MS = 6000;
 const LANDING_SHARE_TOAST_MS = 15000;
+const POST_LANDING_TOAST_SPACING_MS = 6600;
+const API_LANDING_GRADE_BUTTER = 1;
+const API_LANDING_GRADE_SMOOTH = 2;
+const API_LANDING_GRADE_FIRM = 3;
+const API_LANDING_GRADE_HARD = 4;
+const API_LANDING_GRADE_KEYS: Record<number, string> = {
+    [API_LANDING_GRADE_BUTTER]: 'landing.grade.butter',
+    [API_LANDING_GRADE_SMOOTH]: 'landing.grade.smooth',
+    [API_LANDING_GRADE_FIRM]: 'landing.grade.firm',
+    [API_LANDING_GRADE_HARD]: 'landing.grade.hard',
+};
 const ONBOARDING_TOAST_MS = 12000;
 const ONBOARDING_RECENT_COMPLETION_MS = 60000;
 const ONBOARDING_FIRST_FLIGHT_STEP = 'first_flight';
@@ -782,7 +793,7 @@ export class HudSystem {
         }
     }
 
-    computeLandingReport(msg: any): { gradeKey: string; fpm: number; centerlineM: number | null; speedKts: number | null; parts: string[] } | null {
+    computeLandingReport(msg: any): { gradeKey: string; fpm: number; centerlineM: number | null; speedKts: number | null; parts: string[]; bonusCredits: number | null } | null {
         const td = this.scene._lastTouchdown as { fpm: number; speedKts: number; centerlineM: number | null; timeMs: number } | null;
         const serverFpm = Number(msg?.landingRateFpm);
         const fpmRaw = Number.isFinite(serverFpm) && serverFpm !== 0 ? serverFpm : (td ? td.fpm : Number.NaN);
@@ -816,7 +827,14 @@ export class HudSystem {
         else if (score >= LANDING_GRADE_SCORE_BUTTER) gradeKey = 'landing.grade.butter';
         else if (score >= LANDING_GRADE_SCORE_GOOD) gradeKey = 'landing.grade.good';
         else gradeKey = 'landing.grade.firm';
-        return { gradeKey, fpm, centerlineM, speedKts, parts };
+
+        const apiGrade = Number(msg?.landingGrade);
+        const apiGradeKey = Number.isInteger(apiGrade) ? API_LANDING_GRADE_KEYS[apiGrade] : undefined;
+        if (apiGradeKey) gradeKey = apiGradeKey;
+        const bonusRaw = Number(msg?.landingBonusCredits);
+        const bonusCredits = Number.isFinite(bonusRaw) && bonusRaw > 0 ? Math.round(bonusRaw) : null;
+        if (bonusCredits != null) parts.push(I18n.format('landing.bonusCredits', { credits: bonusCredits }));
+        return { gradeKey, fpm, centerlineM, speedKts, parts, bonusCredits };
     }
 
     /** Landing report toast: sink rate (server value preferred), centerline offset and touchdown speed with a grade. */
@@ -1824,6 +1842,8 @@ export class HudSystem {
 #leaderboard-btn{top:calc(250px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
 #achievements-panel{top:calc(206px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:280px!important;max-height:50vh!important}
 #leaderboard-panel{top:calc(244px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:280px!important;max-height:50vh!important}
+#weekly-btn{top:calc(288px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#weekly-panel{top:calc(282px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:280px!important;max-height:50vh!important}
 #missions-panel{top:calc(16px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:260px!important;max-height:50vh!important}
 #aircraft-panel{top:calc(54px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:260px!important;max-height:50vh!important}
 #flight-plans-panel{top:calc(92px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;width:260px!important;max-height:50vh!important}
@@ -1866,6 +1886,8 @@ export class HudSystem {
 #achievements-panel{top:calc(174px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
 #leaderboard-btn{top:calc(210px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
 #leaderboard-panel{top:calc(208px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
+#weekly-btn{top:calc(244px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#weekly-panel{top:calc(242px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:220px!important;max-height:45vh!important;font-size:10px!important}
 #nav-info{top:calc(150px + var(--safe-top))!important;left:auto!important;right:calc(2px + var(--safe-right))!important;width:110px!important;font-size:8px!important}
 #ap-panel{top:auto!important;bottom:calc(58px + var(--safe-bottom))!important;right:50%!important;transform:translateX(50%)!important;font-size:8px!important;padding:3px 4px!important;gap:3px!important;max-width:96vw!important}
 #ap-panel .ap-btn{padding:2px 4px!important;font-size:8px!important;letter-spacing:.02em!important}
@@ -1893,6 +1915,7 @@ export class HudSystem {
 <div style="position:absolute;top:4px;right:6px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:10px;font-family:'Inter',sans-serif;padding:4px 6px">
   <div id="hfps" style="color:rgba(100,240,180,.4)"></div>
   <div id="h-online" style="color:rgba(100,240,180,.4)">0 ONLINE</div>
+  <div id="h-group" style="display:none;color:#ffe27a;font-size:10px"></div>
   <div id="h-rank" style="display:none;color:#ffe27a;font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.1em;text-shadow:0 0 6px rgba(255,210,80,.4)"></div>
 </div>
 <div id="hud-utc" style="position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:11px;font-family:'Orbitron',monospace;color:rgba(100,240,180,.7);letter-spacing:.12em;text-shadow:0 0 6px rgba(0,0,0,.8)"></div>
@@ -2251,6 +2274,25 @@ export class HudSystem {
   <div class="panel-resize" data-panel="leaderboard-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
 </div>
 
+<div id="weekly-btn" style="position:absolute;top:336px;right:14px;width:32px;height:32px;background:rgba(2,10,20,.85);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="Desafios semanais">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#40ffaa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>
+</div>
+
+<div id="weekly-panel" class="game-panel" style="display:none;position:absolute;top:326px;right:54px;width:340px;height:420px;background:rgba(2,10,20,.92);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;font-family:'Inter',sans-serif;color:#fff;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:300">
+  <div class="panel-handle" id="weekly-panel-handle" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:grab;border-bottom:1px solid rgba(80,255,160,.15);user-select:none;touch-action:none">
+    <span class="panel-title" id="weekly-panel-title" style="font-family:'Orbitron',monospace;font-size:11px;color:#40ffaa;letter-spacing:.12em">DESAFIOS SEMANAIS</span>
+    <div style="display:flex;gap:4px">
+      <button class="panel-pin" data-panel="weekly-panel" title="Fixar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u25CB</button>
+      <button class="panel-min" data-panel="weekly-panel" title="Minimizar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">_</button>
+      <button class="panel-close" data-panel="weekly-panel" data-btn="weekly-btn" title="Fechar" style="width:20px;height:20px;padding:0;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.4);color:#40ffaa;font-size:11px;cursor:pointer;border-radius:3px">\u00D7</button>
+    </div>
+  </div>
+  <div class="panel-body" style="overflow-y:auto;padding:10px;height:calc(100% - 36px)">
+    <div id="weekly-list" style="font-size:11px;color:rgba(255,255,255,.7)">Loading...</div>
+  </div>
+  <div class="panel-resize" data-panel="weekly-panel" style="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,rgba(80,255,160,.5) 50%,rgba(80,255,160,.5) 60%,transparent 60%,transparent 70%,rgba(80,255,160,.5) 70%,rgba(80,255,160,.5) 80%,transparent 80%);touch-action:none"></div>
+</div>
+
 <div id="instrument-dock" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:6px;background:rgba(2,10,20,.85);backdrop-filter:blur(12px);border:1px solid rgba(80,255,160,.3);border-radius:8px;pointer-events:auto;box-shadow:0 0 12px rgba(0,255,128,.1);z-index:250">
   <div id="pfd-btn" style="width:32px;height:32px;background:rgba(2,10,20,.6);border:1px solid rgba(80,255,160,.3);border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:border-color .2s,box-shadow .2s" title="PFD (Shift+I)">
     <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><path d="M3.6 12a8.4 8.4 0 0 1 16.8 0z" fill="#2e6db4"/><path d="M3.6 12a8.4 8.4 0 0 0 16.8 0z" fill="#6b4a2a"/><circle cx="12" cy="12" r="9" fill="none" stroke="#40ffaa" stroke-width="1.6"/><line x1="7" y1="12" x2="17" y2="12" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="12" r="1.2" fill="#fff"/></svg>
@@ -2397,6 +2439,10 @@ export class HudSystem {
         this.scene._leaderboardBtnEl = document.getElementById('leaderboard-btn');
         this.scene._leaderboardPanelEl = document.getElementById('leaderboard-panel');
         this.setupLeaderboardBtn();
+
+        this.scene._weeklyBtnEl = document.getElementById('weekly-btn');
+        this.scene._weeklyPanelEl = document.getElementById('weekly-panel');
+        this.scene._weeklyChallengesSystem?.setup();
 
         this.scene._setupPanelControls();
         this.setupPfdPanel();
@@ -2661,15 +2707,42 @@ export class HudSystem {
             const resp = await fetch('/api/flight-stats', { headers: { 'Authorization': `Bearer ${token}` } });
             if (!resp.ok) return;
             const data = await resp.json();
-            const rank = typeof data?.pilot_rank === 'string' ? data.pilot_rank : '';
-            const label = HudSystem.PILOT_RANK_LABELS[rank];
-            if (label) {
-                el.textContent = label;
-                el.style.display = '';
-            }
+            this.applyPilotRank(typeof data?.pilot_rank === 'string' ? data.pilot_rank : '');
         } catch (err) {
             console.warn('[HUD] Failed to load pilot rank badge:', err);
         }
+    }
+
+    applyPilotRank(code: unknown, name?: unknown): void {
+        const el = document.getElementById('h-rank');
+        if (!el) return;
+        const label = HudSystem.PILOT_RANK_LABELS[String(code ?? '')]
+            ?? (typeof name === 'string' && name.trim() ? name.trim().toUpperCase() : '');
+        if (!label) return;
+        el.textContent = label;
+        el.style.display = '';
+    }
+
+    showPostLandingStats(msg: any, shownAchievementCodes: Set<string>): void {
+        const queue: Array<{ header: string; items: { title: string }[] }> = [];
+        const rankUp = msg?.rankUp;
+        if (rankUp && typeof rankUp === 'object') {
+            const previous = String(rankUp.previous_rank_name ?? rankUp.previous_rank_code ?? '');
+            const next = String(rankUp.new_rank_name ?? rankUp.new_rank_code ?? '');
+            queue.push({ header: I18n.t('rank.upTitle'), items: [{ title: I18n.format('rank.upBody', { previous, next }) }] });
+            this.applyPilotRank(rankUp.new_rank_code, rankUp.new_rank_name);
+            console.log(`[PostLanding] Rank up ${rankUp.previous_rank_code ?? '?'} -> ${rankUp.new_rank_code ?? '?'}`);
+        }
+        const achievements: any[] = Array.isArray(msg?.newlyUnlockedAchievements) ? msg.newlyUnlockedAchievements : [];
+        for (const achievement of achievements) {
+            const code = String(achievement?.code ?? achievement?.id ?? '');
+            if (!code || shownAchievementCodes.has(code)) continue;
+            shownAchievementCodes.add(code);
+            queue.push({ header: I18n.t('achievements.unlockedTitle'), items: [{ title: String(achievement?.title ?? code) }] });
+        }
+        queue.forEach((entry, index) => {
+            this.scene._safeSetTimeout(() => this.showAchievementToast(entry.items, entry.header), index * POST_LANDING_TOAST_SPACING_MS);
+        });
     }
 
     private _getCachedElementById(id: string): HTMLElement | null {

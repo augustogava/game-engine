@@ -141,6 +141,7 @@ const flight3dOpts = {
     external: ['three', 'three/*'],
     define: {
         '__GOOGLE_MAPS_API_KEY__': JSON.stringify(env.GOOGLE_MAPS_API_KEY || ''),
+        '__MISSION_SCENARIO_CONFIG_JSON__': JSON.stringify(env.MISSION_SCENARIO_CONFIG_JSON || ''),
     },
 };
 

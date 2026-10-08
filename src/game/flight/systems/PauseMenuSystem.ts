@@ -1,6 +1,7 @@
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import { I18n } from '../../I18n.js';
 import { InputManager } from '../../../engine/input/InputManager.js';
+import { END_REASON_PILOT_QUIT } from '../constants/index.js';
 
 const PAUSE_MENU_ID = 'pause-menu';
 const PAUSE_MENU_Z_INDEX = '9000';
@@ -95,6 +96,7 @@ export class PauseMenuSystem {
                     this.scene._togglePhotoMode();
                     break;
                 case 'quit':
+                    try { this.scene.mpClient?.endFlight(END_REASON_PILOT_QUIT); } catch (err) { console.warn('[PauseMenu] endFlight failed:', err); }
                     window.location.href = DASHBOARD_URL;
                     break;
             }
