@@ -252,6 +252,7 @@ export class SpawnSystem {
     }
 
     onWorldReady(): void {
+        this.scene._terrainTilesSystem?.setSpawnLoadingMode?.(false);
         if (this.scene.planeRoot && this.scene.terrainY !== TERRAIN_UNKNOWN_Y) {
             const cfg = this.scene.aircraftConfig;
             const gearHeight = cfg.gear_positions.length > 0
@@ -360,6 +361,7 @@ export class SpawnSystem {
         BABYLON.Quaternion.RotationAxisToRef(BABYLON.Vector3.Up(), yawRad, this.scene.planeRoot.rotationQuaternion!);
         this.scene.angularVelocity.set(0, 0, 0);
         this.scene._worldReady = false;
+        this.scene._terrainTilesSystem?.setSpawnLoadingMode?.(true);
         this.scene._worldReadyStartMs = 0;
         this.scene.terrainY = GROUND_Y;
         this.scene._lastKnownSpawnTerrainY = TERRAIN_UNKNOWN_Y;

@@ -15,6 +15,8 @@ declare const __GOOGLE_MAPS_API_KEY__: string;
 
 const TILES_ERROR_TARGET_MOBILE = 12;
 const TILES_ERROR_TARGET_DESKTOP = 6;
+const TILES_SPAWN_ERROR_THRESHOLD = 60;
+const TILES_FLIGHT_ERROR_THRESHOLD = Infinity;
 const TILES_LRU_MAX_SIZE_MOBILE = 800;
 const TILES_LRU_MIN_SIZE_MOBILE = 300;
 const TILES_LRU_MAX_SIZE_DESKTOP = 2000;
@@ -170,6 +172,7 @@ export class TerrainTilesSystem {
         const isMobile = this.scene.isMobile === true;
         this.scene.tiles.errorTarget = isMobile ? TILES_ERROR_TARGET_MOBILE : TILES_ERROR_TARGET_DESKTOP;
         (this.scene.tiles as any).maxDepth = 100;
+        this.setSpawnLoadingMode(true);
         this.scene.tiles.lruCache.maxSize = isMobile ? TILES_LRU_MAX_SIZE_MOBILE : TILES_LRU_MAX_SIZE_DESKTOP;
         this.scene.tiles.lruCache.minSize = isMobile ? TILES_LRU_MIN_SIZE_MOBILE : TILES_LRU_MIN_SIZE_DESKTOP;
         try {
@@ -380,6 +383,19 @@ export class TerrainTilesSystem {
             console.debug('[3DTiles] Visual handlers attached (shadow receivers + PBR polish + fade hook)');
         } catch (err) {
             console.warn('[3DTiles] Failed to attach visual handlers:', err);
+        }
+    }
+
+    setSpawnLoadingMode(active: boolean): void {
+        const tiles: any = this.scene.tiles;
+        if (!tiles) return;
+        const target = active ? TILES_SPAWN_ERROR_THRESHOLD : TILES_FLIGHT_ERROR_THRESHOLD;
+        if (tiles.errorThreshold === target) return;
+        try {
+            tiles.errorThreshold = target;
+            console.debug(`[3DTiles] Spawn loading mode ${active ? 'on' : 'off'} (errorThreshold=${target})`);
+        } catch (err) {
+            console.warn('[3DTiles] Failed to set errorThreshold:', err);
         }
     }
 
