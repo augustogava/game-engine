@@ -25,13 +25,6 @@ import {
     CLOUD_NEAR_FADE_NEAR_M,
     CLOUD_NEAR_FADE_FAR_M,
     CLOUD_WRAP_FADE_S,
-    OVERCAST_TEXTURE_SIZE,
-    OVERCAST_TEXTURE_TILES,
-    OVERCAST_NOISE_FREQ,
-    OVERCAST_DECK_Y_M,
-    OVERCAST_DECK_SIZE_M,
-    OVERCAST_DECK_ALPHA,
-    OVERCAST_ALPHA_INDEX,
     MILKY_WAY_BAND_TILT_DEG,
     MILKY_WAY_BAND_HALF_WIDTH_DEG,
     MILKY_WAY_BAND_COUNT,
@@ -161,118 +154,6 @@ export class CloudsSystem {
         for (const m of this.scene._cloudMats) { try { m.dispose(true, true); } catch (_) { /* ignore */ } }
         this.scene._cloudMats = [];
         this.buildClouds(scene);
-    }
-
-    buildOvercastTexture(scene: BABYLON.Scene): BABYLON.DynamicTexture {
-        const SIZE = OVERCAST_TEXTURE_SIZE;
-        const tex = new BABYLON.DynamicTexture(
-            'overcastTex',
-            SIZE,
-            scene,
-            true,
-            BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
-        );
-        const ctx = tex.getContext() as CanvasRenderingContext2D;
-        const img = ctx.createImageData(SIZE, SIZE);
-
-        const FREQ = OVERCAST_NOISE_FREQ;
-        const FEATURE_COUNT = FREQ * FREQ;
-        const features: { x: number; y: number }[] = [];
-        for (let i = 0; i < FEATURE_COUNT; i++) {
-            features.push({ x: Math.random(), y: Math.random() });
-        }
-
-        const detailFeatures: { x: number; y: number }[] = [];
-        const DETAIL_COUNT = FREQ * FREQ * 4;
-        for (let i = 0; i < DETAIL_COUNT; i++) {
-            detailFeatures.push({ x: Math.random(), y: Math.random() });
-        }
-
-        const wrapDistSq = (ax: number, ay: number, bx: number, by: number) => {
-            let dx = ax - bx;
-            let dy = ay - by;
-            if (dx >  0.5) dx -= 1;
-            if (dx < -0.5) dx += 1;
-            if (dy >  0.5) dy -= 1;
-            if (dy < -0.5) dy += 1;
-            return dx * dx + dy * dy;
-        };
-
-        for (let y = 0; y < SIZE; y++) {
-            for (let x = 0; x < SIZE; x++) {
-                const fx = x / SIZE;
-                const fy = y / SIZE;
-                let minBase = 10;
-                for (const f of features) {
-                    const d = wrapDistSq(fx, fy, f.x, f.y);
-                    if (d < minBase) minBase = d;
-                }
-                let minDetail = 10;
-                for (const f of detailFeatures) {
-                    const d = wrapDistSq(fx, fy, f.x, f.y);
-                    if (d < minDetail) minDetail = d;
-                }
-                const baseDist = Math.sqrt(minBase) * FREQ;
-                const detailDist = Math.sqrt(minDetail) * (FREQ * 2);
-                const baseLayer   = Math.max(0, 1 - baseDist * 1.0);
-                const detailLayer = Math.max(0, 1 - detailDist * 1.2);
-                const cloud = Math.max(0, Math.min(1, baseLayer * 0.75 + detailLayer * 0.35));
-                const alpha = Math.pow(cloud, 0.8);
-                const i4 = (y * SIZE + x) * 4;
-                img.data[i4]     = 255;
-                img.data[i4 + 1] = 255;
-                img.data[i4 + 2] = 255;
-                img.data[i4 + 3] = Math.round(alpha * 255);
-            }
-        }
-
-        ctx.putImageData(img, 0, 0);
-        tex.update(true);
-        tex.hasAlpha = true;
-        tex.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
-        tex.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
-        return tex;
-    }
-
-    setOvercast(scene: BABYLON.Scene, enabled: boolean): void {
-        if (enabled) {
-            if (this.scene._overcastMesh) {
-                this.scene._overcastMesh.isVisible = true;
-                return;
-            }
-            const deck = BABYLON.MeshBuilder.CreateGround('overcastDeck', { width: OVERCAST_DECK_SIZE_M, height: OVERCAST_DECK_SIZE_M, subdivisions: 1 }, scene);
-            deck.position.y = OVERCAST_DECK_Y_M;
-            deck.isPickable = false;
-            deck.applyFog = true;
-            deck.renderingGroupId = 0;
-            deck.alphaIndex = OVERCAST_ALPHA_INDEX;
-
-            const mat = new BABYLON.StandardMaterial('overcastMat', scene);
-            const tex = this.buildOvercastTexture(scene);
-            tex.uScale = OVERCAST_TEXTURE_TILES;
-            tex.vScale = OVERCAST_TEXTURE_TILES;
-            mat.diffuseTexture = tex;
-            mat.opacityTexture = tex;
-            mat.useAlphaFromDiffuseTexture = true;
-            mat.emissiveColor = new BABYLON.Color3(0.85, 0.85, 0.9);
-            mat.diffuseColor = new BABYLON.Color3(0, 0, 0);
-            mat.specularColor = new BABYLON.Color3(0, 0, 0);
-            mat.disableLighting = true;
-            mat.backFaceCulling = false;
-            mat.alpha = OVERCAST_DECK_ALPHA;
-            mat.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
-            mat.disableDepthWrite = true;
-            mat.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
-            mat.freeze();
-            deck.material = mat;
-            deck.freezeWorldMatrix();
-
-            this.scene._overcastMesh = deck;
-            this.scene._overcastMat = mat;
-            console.debug(`[Overcast] Deck created with seamless Worley overcast texture (${OVERCAST_TEXTURE_SIZE}px, ${OVERCAST_TEXTURE_TILES}x tiling)`);
-        } else if (this.scene._overcastMesh) {
-            this.scene._overcastMesh.isVisible = false;
-        }
     }
 
     setMilkyWay(scene: BABYLON.Scene, enabled: boolean): void {

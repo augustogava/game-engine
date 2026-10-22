@@ -300,14 +300,7 @@ import {
     CLOUD_ASPECT_Y_JITTER_MIN,
     CLOUD_ASPECT_Y_JITTER_MAX,
     CLOUD_FLIP_X_PROBABILITY,
-    OVERCAST_DECK_Y_M,
-    OVERCAST_DECK_SIZE_M,
-    OVERCAST_DECK_ALPHA,
-    OVERCAST_TEXTURE_SIZE,
-    OVERCAST_TEXTURE_TILES,
-    OVERCAST_NOISE_FREQ,
     CLOUD_ALPHA_INDEX,
-    OVERCAST_ALPHA_INDEX,
     TILE_PBR_ROUGHNESS_FLOOR,
     TILE_FADE_DURATION_S,
     AERIAL_FOG_ALT_FADE_REF_M,
@@ -888,8 +881,6 @@ export class FlightSceneSimple extends Scene3D {
     private _moonMat: BABYLON.StandardMaterial | null = null;
     private _moonHaloMesh: BABYLON.Mesh | null = null;
     private _moonHaloMat: BABYLON.StandardMaterial | null = null;
-    private _overcastMesh: BABYLON.Mesh | null = null;
-    private _overcastMat: BABYLON.StandardMaterial | null = null;
     private _rainPS: BABYLON.ParticleSystem | null = null;
     private _rainEmitter: BABYLON.TransformNode | null = null;
     private _rainTexture: BABYLON.DynamicTexture | null = null;
@@ -1653,8 +1644,6 @@ export class FlightSceneSimple extends Scene3D {
         this._cloudTemplates = [];
         for (const mat of this._cloudMats) { try { mat.dispose(true, true); } catch (_) { /* ignore */ } }
         this._cloudMats = [];
-        if (this._overcastMat) { try { this._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this._overcastMat = null; }
-        if (this._overcastMesh) { try { this._overcastMesh.dispose(); } catch (_) { /* ignore */ } this._overcastMesh = null; }
         if (this._milkyWayRoot) { try { this._milkyWayRoot.dispose(); } catch (_) { /* ignore */ } this._milkyWayRoot = null; }
         for (const s of this._starInstances) { try { s.dispose(); } catch (_) { /* ignore */ } }
         this._starInstances = [];
@@ -1875,24 +1864,12 @@ export class FlightSceneSimple extends Scene3D {
         this._cloudsSystem.rebuildClouds(scene);
     }
 
-    private _buildOvercastTexture(scene: BABYLON.Scene): BABYLON.DynamicTexture {
-        return this._cloudsSystem.buildOvercastTexture(scene);
-    }
-
-    private _setOvercast(scene: BABYLON.Scene, enabled: boolean): void {
-        this._cloudsSystem.setOvercast(scene, enabled);
-    }
-
     /** Applies the fetched METAR conditions (cloud cover + precipitation) to the graphics. */
     /** @internal */ public _applyMetarWeatherVisuals(): void {
         try {
-            const overcastOn = this._currentCloudCoverage >= 0.6;
             if (this.scene) {
-                this._setOvercast(this.scene, overcastOn);
                 this._applyPrecipitationVisibility(this.scene);
             }
-            const ocEl = document.getElementById('gfx-overcast') as HTMLInputElement | null;
-            if (ocEl) ocEl.checked = overcastOn;
             this._setRain(this._precipitationIntensity, this._precipitationType);
             const ptEl = document.getElementById('gfx-precip-type') as HTMLSelectElement | null;
             const piEl = document.getElementById('gfx-precip-intensity') as HTMLInputElement | null;

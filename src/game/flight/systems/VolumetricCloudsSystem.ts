@@ -90,7 +90,6 @@ export class VolumetricCloudsSystem {
                 }
                 try {
                     for (const c of this.scene.cloudInstances) c.mesh.isVisible = false;
-                    if (this.scene._overcastMesh) this.scene._overcastMesh.isVisible = false;
 
                     let depthRenderer: BABYLON.DepthRenderer | null = null;
                     try {
