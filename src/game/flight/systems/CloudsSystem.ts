@@ -270,9 +270,8 @@ export class CloudsSystem {
             this.scene._overcastMesh = deck;
             this.scene._overcastMat = mat;
             console.debug(`[Overcast] Deck created with seamless Worley overcast texture (${OVERCAST_TEXTURE_SIZE}px, ${OVERCAST_TEXTURE_TILES}x tiling)`);
-        } else {
-            if (this.scene._overcastMesh) { try { this.scene._overcastMesh.dispose(); } catch (_) { /* ignore */ } this.scene._overcastMesh = null; }
-            if (this.scene._overcastMat) { try { this.scene._overcastMat.dispose(true, true); } catch (_) { /* ignore */ } this.scene._overcastMat = null; }
+        } else if (this.scene._overcastMesh) {
+            this.scene._overcastMesh.isVisible = false;
         }
     }
 

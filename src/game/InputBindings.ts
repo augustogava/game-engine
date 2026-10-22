@@ -117,6 +117,7 @@ type Listener = (bindings: KeyBindings) => void;
 export class InputBindings {
     private static _bindings: KeyBindings = InputBindings._load();
     private static _listeners: Listener[] = [];
+    private static _boundCodes: readonly string[] | null = null;
 
     private static _load(): KeyBindings {
         try {
@@ -151,9 +152,15 @@ export class InputBindings {
         return this._bindings[action];
     }
 
+    public static boundCodes(): readonly string[] {
+        if (!this._boundCodes) this._boundCodes = Object.values(this._bindings);
+        return this._boundCodes;
+    }
+
     public static setBinding(action: ActionId, code: string): void {
         if (!action || !code) return;
         this._bindings[action] = code;
+        this._boundCodes = null;
         this._save();
         for (const l of this._listeners) {
             try { l({ ...this._bindings }); } catch (err) { console.warn('[InputBindings] listener failed:', err); }
@@ -162,6 +169,7 @@ export class InputBindings {
 
     public static reset(): void {
         this._bindings = { ...DEFAULT_KEY_BINDINGS };
+        this._boundCodes = null;
         this._save();
         for (const l of this._listeners) {
             try { l({ ...this._bindings }); } catch (err) { console.warn('[InputBindings] listener failed:', err); }

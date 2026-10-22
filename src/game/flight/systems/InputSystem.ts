@@ -251,7 +251,7 @@ export class InputSystem {
         const KEY_ROLL_MAGNITUDE  = 0.55;
         const KEY_YAW_MAGNITUDE   = 0.65;
 
-        const prefs = UiPreferences.get();
+        const prefs = UiPreferences.peek();
         const bind = (action: ActionId): string => InputBindings.codeFor(action);
         const gpDeadzone = Math.max(0, Math.min(0.4, prefs.desktopDeadzone));
         const gpExpo = Math.max(1, Math.min(4, prefs.desktopExpo));
@@ -289,7 +289,7 @@ export class InputSystem {
             };
             const keyPitchRaw = (p(bind('pitchUp')) ? -1 : p(bind('pitchDown')) ? 1 : 0);
             const keyRollRaw  = (p(bind('rollRight')) ? -1 : p(bind('rollLeft')) ? 1 : 0);
-            const boundCodes = Object.values(InputBindings.get());
+            const boundCodes = InputBindings.boundCodes();
             const altYawLeft = !boundCodes.includes(LEGACY_YAW_LEFT_CODE) && p(LEGACY_YAW_LEFT_CODE);
             const altYawRight = !boundCodes.includes(LEGACY_YAW_RIGHT_CODE) && p(LEGACY_YAW_RIGHT_CODE);
             const keyYawRaw   = ((p(bind('yawLeft')) || altYawLeft) ? 1 : (p(bind('yawRight')) || altYawRight) ? -1 : 0);
@@ -338,7 +338,12 @@ export class InputSystem {
             if (gpEdges.flapDown) this.scene.flapIndex = Math.max(0, this.scene.flapIndex - 1);
             if (gpEdges.flapUp)   this.scene.flapIndex = Math.min(this.scene.FLAP_STEPS.length - 1, this.scene.flapIndex + 1);
 
-            if (p(bind('respawn')) || gpEdges.respawn) this.scene._spawnPlane();
+            const respawnCode = bind('respawn');
+            if ((p(respawnCode) && !this.scene._respawnKeyLock) || gpEdges.respawn) {
+                this.scene._respawnKeyLock = true;
+                this.scene._spawnPlane();
+            }
+            if (!p(respawnCode)) this.scene._respawnKeyLock = false;
 
             const brakeCode = bind('brakeToggle');
             if ((p(brakeCode) && !this.scene.brakeKeyLock) || gpEdges.brake) {
@@ -423,6 +428,7 @@ export class InputSystem {
 
             for (let i = 0; i < 4; i++) {
                 const code = `Digit${i + 1}`;
+                if (boundCodes.includes(code)) continue;
                 if (p(code) && !this.scene._killEngineKeyLock[i]) {
                     this.scene._killEngineKeyLock[i] = true;
                     this.scene._killEngine(i);

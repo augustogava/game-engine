@@ -37,6 +37,8 @@ import {
 
 const LIVE_TRAFFIC_MODEL_LOAD_TIMEOUT_MS = 15000;
 const LIVE_TRAFFIC_MAX_ENTITIES = 200;
+const LIVE_TRAFFIC_CREATES_PER_FRAME = 3;
+const LIVE_TRAFFIC_DISPOSES_PER_FRAME = 6;
 const LIVE_TRAFFIC_LOD_DISTANCE_M = 20000;
 const LIVE_TRAFFIC_LOD_BOX_WIDTH_M = 30;
 const LIVE_TRAFFIC_LOD_BOX_HEIGHT_M = 8;
@@ -92,6 +94,8 @@ function wrapLongitudeDeg(lon: number): number {
 export class LiveTrafficSystem {
     private readonly scene: any;
     private readonly entities = new Map<string, LiveTrafficEntity>();
+    private readonly _pendingCreates = new Map<string, { flight: LiveTrafficFlight; receivedMs: number }>();
+    private readonly _pendingDisposals: LiveTrafficEntity[] = [];
     private readonly _axisUp = BABYLON.Vector3.Up();
     private _lastFetchMs = 0;
     private _firstFetchDone = false;
@@ -134,6 +138,8 @@ export class LiveTrafficSystem {
             }
         }
 
+        this._processPendingCreates();
+
         for (const [, entity] of this.entities) {
             this._updateEntity(entity, now);
         }
@@ -141,10 +147,38 @@ export class LiveTrafficSystem {
         if (!rateLimited) {
             for (const [id, entity] of this.entities) {
                 if (now - entity.lastSeenMs > LIVE_TRAFFIC_STALE_MS) {
-                    this._disposeEntity(entity);
+                    this._queueEntityDisposal(entity);
                     this.entities.delete(id);
                 }
             }
+        }
+
+        this._processPendingDisposals();
+    }
+
+    private _processPendingCreates(): void {
+        if (this._pendingCreates.size === 0) return;
+        let created = 0;
+        for (const [id, pending] of this._pendingCreates) {
+            if (created >= LIVE_TRAFFIC_CREATES_PER_FRAME) break;
+            this._pendingCreates.delete(id);
+            if (this.entities.has(id) || this.entities.size >= LIVE_TRAFFIC_MAX_ENTITIES) continue;
+            const entity = this._createEntity(pending.flight, pending.receivedMs);
+            if (entity) this.entities.set(id, entity);
+            created++;
+        }
+    }
+
+    private _queueEntityDisposal(entity: LiveTrafficEntity): void {
+        try { entity.root.setEnabled(false); } catch (_) { /* ignore */ }
+        this._pendingDisposals.push(entity);
+    }
+
+    private _processPendingDisposals(): void {
+        if (this._pendingDisposals.length === 0) return;
+        const batch = this._pendingDisposals.splice(0, LIVE_TRAFFIC_DISPOSES_PER_FRAME);
+        for (const entity of batch) {
+            this._disposeEntity(entity);
         }
     }
 
@@ -177,6 +211,10 @@ export class LiveTrafficSystem {
             this._disposeEntity(entity);
         }
         this.entities.clear();
+        this._pendingCreates.clear();
+        for (const entity of this._pendingDisposals.splice(0)) {
+            this._disposeEntity(entity);
+        }
         if (this._trafficAssetContainer) {
             try { this._trafficAssetContainer.dispose(); } catch (err) { console.warn('[LiveTraffic] Failed to dispose model asset container:', err); }
             this._trafficAssetContainer = null;
@@ -276,9 +314,10 @@ export class LiveTrafficSystem {
             if (!flight.fr24_id) continue;
             if (!this._isAirborneFlight(flight)) {
                 skippedGrounded++;
+                this._pendingCreates.delete(flight.fr24_id);
                 const existing = this.entities.get(flight.fr24_id);
                 if (existing) {
-                    this._disposeEntity(existing);
+                    this._queueEntityDisposal(existing);
                     this.entities.delete(flight.fr24_id);
                 }
                 continue;
@@ -286,15 +325,15 @@ export class LiveTrafficSystem {
             const existing = this.entities.get(flight.fr24_id);
             if (existing) {
                 this._refreshEntity(existing, flight, now);
-            } else if (this.entities.size < LIVE_TRAFFIC_MAX_ENTITIES) {
-                const created = this._createEntity(flight, now);
-                if (created) this.entities.set(flight.fr24_id, created);
+            } else if (this._pendingCreates.has(flight.fr24_id)
+                || this.entities.size + this._pendingCreates.size < LIVE_TRAFFIC_MAX_ENTITIES) {
+                this._pendingCreates.set(flight.fr24_id, { flight, receivedMs: now });
             }
         }
         if (skippedGrounded > 0) {
             console.debug(`[LiveTraffic] Skipped ${skippedGrounded} grounded/slow flight(s) (alt<${LIVE_TRAFFIC_MIN_ALT_FT}ft or gspeed<${LIVE_TRAFFIC_MIN_GSPEED_KTS}kts)`);
         }
-        console.debug(`[LiveTraffic] Active entities: ${this.entities.size}`);
+        console.debug(`[LiveTraffic] Active entities: ${this.entities.size} (pending creates=${this._pendingCreates.size})`);
     }
 
     private _isAirborneFlight(flight: LiveTrafficFlight): boolean {
@@ -656,14 +695,12 @@ export class LiveTrafficSystem {
         entity.currentAltFt = altFt;
 
         const altM = altFt * FT_TO_M;
-        let localPos: BABYLON.Vector3;
         try {
-            localPos = this.scene._latLonToLocal(lat, lon, altM);
+            this.scene._latLonToLocalToRef(lat, lon, altM, entity.root.position);
         } catch (err) {
-            console.warn(`[LiveTraffic] _latLonToLocal failed for ${entity.fr24Id}:`, err);
+            console.warn(`[LiveTraffic] _latLonToLocalToRef failed for ${entity.fr24Id}:`, err);
             return;
         }
-        entity.root.position.copyFrom(localPos);
 
         const yawRad = (180 - (Number.isFinite(entity.trackDeg) ? entity.trackDeg : 0)) * Math.PI / 180;
         if (!entity.root.rotationQuaternion) {

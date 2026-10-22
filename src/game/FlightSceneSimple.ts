@@ -368,7 +368,7 @@ import { NavLightsSystem } from './flight/systems/NavLightsSystem.js';
 import { RunwayCollidersSystem } from './flight/systems/RunwayCollidersSystem.js';
 import { VolumetricCloudsSystem } from './flight/systems/VolumetricCloudsSystem.js';
 import { HighCloudsSystem } from './flight/systems/HighCloudsSystem.js';
-import { SeascapeSkySystem } from './flight/systems/SeascapeSkySystem.js';
+import { FrameSpikeMonitor } from './flight/systems/FrameSpikeMonitor.js';
 import { CameraSystem } from './flight/systems/CameraSystem.js';
 import { PostProcessingSystem } from './flight/systems/PostProcessingSystem.js';
 import { LightingSystem } from './flight/systems/LightingSystem.js';
@@ -415,7 +415,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _runwayCollidersSystem = new RunwayCollidersSystem(this);
     /** @internal */ private readonly _volumetricCloudsSystem = new VolumetricCloudsSystem(this);
     /** @internal */ private readonly _highCloudsSystem = new HighCloudsSystem(this);
-    /** @internal */ private readonly _seascapeSkySystem = new SeascapeSkySystem(this);
+    private _frameSpikeMonitor: FrameSpikeMonitor | null = null;
     /** @internal */ private readonly _cameraSystem = new CameraSystem(this);
     /** @internal */ private readonly _postProcessingSystem = new PostProcessingSystem(this);
     /** @internal */ private readonly _lightingSystem = new LightingSystem(this);
@@ -493,6 +493,7 @@ export class FlightSceneSimple extends Scene3D {
     private isOnGround = false;
     private brakesOn = false;
     private brakeKeyLock = false;
+    private _respawnKeyLock = false;
     private aircraftConfig: AircraftConfig = DEFAULT_AIRCRAFT_CONFIG;
     private _lastSentAircraftId: number | undefined = undefined;
     private FLAP_STEPS: number[] = DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
@@ -892,6 +893,7 @@ export class FlightSceneSimple extends Scene3D {
     private _rainPS: BABYLON.ParticleSystem | null = null;
     private _rainEmitter: BABYLON.TransformNode | null = null;
     private _rainTexture: BABYLON.DynamicTexture | null = null;
+    private _rainTextureIsSnow: boolean | null = null;
     private _milkyWayRoot: BABYLON.TransformNode | null = null;
     private _milkyWayEnabled = false;
     private _cloudDensityMult = CLOUD_DENSITY_MULT_MEDIUM;
@@ -1097,7 +1099,6 @@ export class FlightSceneSimple extends Scene3D {
         this._buildSkybox(scene);
         this._buildClouds(scene);
         this._buildHighClouds(scene);
-        this._buildSeascapeSky(scene);
         this._buildGround(scene);
         this._buildPlane(scene);
         this._buildCamera(scene);
@@ -1111,11 +1112,15 @@ export class FlightSceneSimple extends Scene3D {
             this._fogColorBase.copyFrom(scene.fogColor);
             this._fogDensityBase = scene.fogDensity;
         }
+        if (FrameSpikeMonitor.isRequested()) this._frameSpikeMonitor = new FrameSpikeMonitor(scene);
 
     }
 
     update(dt: number): void {
+        const spike = this._frameSpikeMonitor;
+        let spikeT = spike ? spike.beginFrame(this.tiles) : 0;
         if (this.tiles) this.tiles.update();
+        if (spike) spikeT = spike.mark('tiles', spikeT);
         if (!this.spawned) return;
         this._frameTick++;
         if (this._premium.tileFade) this._updateTileFade(dt);
@@ -1123,6 +1128,7 @@ export class FlightSceneSimple extends Scene3D {
         this._airportOverlaysSystem.update(dt);
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
         if (this._premium.vegetation) this._updateVegetation();
+        if (spike) spikeT = spike.mark('terrainFx', spikeT);
         if (this._crashed) return;
 
         if (!this._worldReady) {
@@ -1132,6 +1138,7 @@ export class FlightSceneSimple extends Scene3D {
 
         this._handleInput(dt);
         this._pauseMenuSystem.update();
+        if (spike) spikeT = spike.mark('input', spikeT);
 
         const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
         if (replayFrame && this.planeRoot && this.planeRoot.rotationQuaternion) {
@@ -1179,6 +1186,7 @@ export class FlightSceneSimple extends Scene3D {
                 throttle: this.thrust,
             });
         }
+        if (spike) spikeT = spike.mark('physics', spikeT);
         
                 if (!this.isMobile && !this._disableDynamicLighting) {
                     this._sunUpdateTimer += dt;
@@ -1188,6 +1196,7 @@ export class FlightSceneSimple extends Scene3D {
                         if (scene) this._applyDayNightCycle(scene);
                     }
                 }
+        if (spike) spikeT = spike.mark('dayNight', spikeT);
         if (this._skyMaterial && this.camera) {
             this._skyMaterial.cameraOffset.y = this.camera.position.y;
         }
@@ -1203,7 +1212,6 @@ export class FlightSceneSimple extends Scene3D {
         this._windshieldRainSystem.update(dt);
         this._vfxSystem.updateLightning(dt);
         this._updateHighClouds(dt);
-        this._updateSeascapeSky(dt);
         this._updatePropellerAnim();
         this._aircraftModelSystem.updateSpoilerAnim();
         this._updateControlSurfaceAnim();
@@ -1213,20 +1221,24 @@ export class FlightSceneSimple extends Scene3D {
         this._updateHeatHaze();
         this._updateLensFlareOcclusion(dt * 1000);
         this._updateMotionBlurAndDof();
+        if (spike) spikeT = spike.mark('environment', spikeT);
         const updatePlayerUi = !this._paused || (this._frameTick % PAUSED_UI_UPDATE_INTERVAL_FRAMES === 0);
         if (updatePlayerUi) {
             this._updateHUD();
             this._updateGEffectsOverlay(dt);
         }
+        if (spike) spikeT = spike.mark('hud', spikeT);
         if (!this._paused) {
             this._sendOwnState();
         }
         this._updateRemotePlayers();
+        if (spike) spikeT = spike.mark('multiplayer', spikeT);
         try {
             this._liveTrafficSystem.update(dt);
         } catch (err) {
             console.warn('[LiveTraffic] update failed:', err);
         }
+        if (spike) spikeT = spike.mark('traffic', spikeT);
         this._atcSystem.update(dt);
         this._tcasSystem.update(dt);
         this._flightSchoolCoachSystem.update(dt);
@@ -1237,6 +1249,7 @@ export class FlightSceneSimple extends Scene3D {
         } catch (err) {
             console.warn('[Tutorial] update failed:', err);
         }
+        if (spike) spike.mark('systems', spikeT);
     }
 
     /** @internal */
@@ -1517,7 +1530,7 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _convertDistanceNm(nm: number): { value: number; unit: string } {
-        const units = UiPreferences.get().unitSystem;
+        const units = UiPreferences.peek().unitSystem;
         if (units === UNIT_SYSTEM_METRIC) {
             return { value: nm * 1.852, unit: I18n.t('units.km') };
         }
@@ -1525,7 +1538,7 @@ export class FlightSceneSimple extends Scene3D {
     }
 
     private _convertVsFpm(fpm: number): { value: number; unit: string } {
-        const units = UiPreferences.get().unitSystem;
+        const units = UiPreferences.peek().unitSystem;
         if (units === UNIT_SYSTEM_METRIC) {
             return { value: Math.round(fpm * 0.00508 * 100) / 100, unit: I18n.t('units.mps') };
         }
@@ -1586,7 +1599,7 @@ export class FlightSceneSimple extends Scene3D {
         if (this.tiles) { this.tiles.dispose(); this.tiles = null; }
         try { this._liveTrafficSystem.dispose(); } catch (err) { console.warn('[FlightSimple] LiveTrafficSystem dispose failed:', err); }
         try { this._highCloudsSystem.dispose(); } catch (err) { console.warn('[FlightSimple] HighCloudsSystem dispose failed:', err); }
-        try { this._seascapeSkySystem.dispose(); } catch (err) { console.warn('[FlightSimple] SeascapeSkySystem dispose failed:', err); }
+        if (this._frameSpikeMonitor) { try { this._frameSpikeMonitor.dispose(); } catch (err) { console.warn('[FlightSimple] FrameSpikeMonitor dispose failed:', err); } this._frameSpikeMonitor = null; }
         try { this._terrainTilesSystem.disposeGround(); } catch (err) { console.warn('[FlightSimple] Ground dispose failed:', err); }
         try {
             this._loadedAnimGroups.forEach((g) => { try { g.dispose(); } catch (_) { /* ignore */ } });
@@ -1873,10 +1886,13 @@ export class FlightSceneSimple extends Scene3D {
     /** Applies the fetched METAR conditions (cloud cover + precipitation) to the graphics. */
     /** @internal */ public _applyMetarWeatherVisuals(): void {
         try {
+            const overcastOn = this._currentCloudCoverage >= 0.6;
             if (this.scene) {
-                this._setOvercast(this.scene, this._currentCloudCoverage >= 0.6);
+                this._setOvercast(this.scene, overcastOn);
                 this._applyPrecipitationVisibility(this.scene);
             }
+            const ocEl = document.getElementById('gfx-overcast') as HTMLInputElement | null;
+            if (ocEl) ocEl.checked = overcastOn;
             this._setRain(this._precipitationIntensity, this._precipitationType);
             const ptEl = document.getElementById('gfx-precip-type') as HTMLSelectElement | null;
             const piEl = document.getElementById('gfx-precip-intensity') as HTMLInputElement | null;
@@ -1948,6 +1964,7 @@ export class FlightSceneSimple extends Scene3D {
             const capacity = this.isMobile ? 600 : 1800;
             const ps = new BABYLON.ParticleSystem('precip', capacity, this.scene);
             this._rainTexture = this._buildRainTexture(this.scene, snow);
+            this._rainTextureIsSnow = snow;
             ps.particleTexture = this._rainTexture;
             ps.emitter = this._rainEmitter as unknown as BABYLON.AbstractMesh;
             ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
@@ -1956,6 +1973,14 @@ export class FlightSceneSimple extends Scene3D {
             ps.start();
         }
         const ps = this._rainPS;
+        if (this._rainTextureIsSnow !== snow) {
+            const previousTexture = this._rainTexture;
+            this._rainTexture = this._buildRainTexture(this.scene, snow);
+            this._rainTextureIsSnow = snow;
+            ps.particleTexture = this._rainTexture;
+            if (previousTexture) { try { previousTexture.dispose(); } catch (_) { /* ignore */ } }
+            console.debug(`[Precip] Particle texture switched to ${snow ? 'snow' : 'rain'}`);
+        }
         const box = 28;
         ps.minEmitBox = new BABYLON.Vector3(-box, snow ? 6 : 14, -box);
         ps.maxEmitBox = new BABYLON.Vector3(box, snow ? 12 : 20, box);
@@ -1964,6 +1989,7 @@ export class FlightSceneSimple extends Scene3D {
             ps.color2 = new BABYLON.Color4(0.95, 0.97, 1, 0.8);
             ps.colorDead = new BABYLON.Color4(1, 1, 1, 0);
             ps.minSize = 0.12; ps.maxSize = 0.28;
+            ps.minScaleY = 1; ps.maxScaleY = 1;
             ps.minLifeTime = 1.4; ps.maxLifeTime = 2.2;
             ps.gravity = new BABYLON.Vector3(0, -2.2, 0);
             ps.direction1 = new BABYLON.Vector3(-1.2, -1, -1.2);
@@ -2020,18 +2046,6 @@ export class FlightSceneSimple extends Scene3D {
 
     /** @internal */ getHighCloudsSystem(): HighCloudsSystem {
         return this._highCloudsSystem;
-    }
-
-    private _buildSeascapeSky(scene: BABYLON.Scene): void {
-        void this._seascapeSkySystem.build(scene);
-    }
-
-    private _updateSeascapeSky(dt: number): void {
-        this._seascapeSkySystem.update(dt);
-    }
-
-    /** @internal */ getSeascapeSkySystem(): SeascapeSkySystem {
-        return this._seascapeSkySystem;
     }
 
     // ── Ground ────────────────────────────────────────────────────────────────

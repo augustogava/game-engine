@@ -109,6 +109,7 @@ const {
     TOWER_CAMERA_MIN_RADIUS_M,
     TOWER_CAMERA_BETA_RAD,
     CAMERA_MODE_CHASE,
+    ENGINE_SOUND_FADE_IN_MS,
 } = CONST as any;
 import { UiPreferences } from '../../UiPreferences.js';
 import { I18n } from '../../I18n.js';
@@ -122,6 +123,7 @@ const TOUCHDOWN_CENTERLINE_MAX_ALONG_M = 6000;
 const CRASH_RETRY_BUTTON_ID = 'crash-retry-btn';
 const CRASH_STATUS_ID = 'crash-overlay-status';
 const CRASH_RETRY_FALLBACK_DELAY_MS = 3000;
+const GEAR_VISUAL_SNAP_SPEED_RATIO = 100;
 
 export class FlightPhysicsSystem {
     private readonly scene: any;
@@ -306,6 +308,7 @@ export class FlightPhysicsSystem {
         this.scene.velocity.setAll(0);
         this.scene.angularVelocity.setAll(0);
         this.scene.thrust = 0;
+        this._silenceAudioOnCrash();
         if (this.scene._crashOverlayEl) this.scene._crashOverlayEl.style.display = 'block';
         console.log(`[Crash] Ground impact detected reason=${reason} altFt=${altFtBefore.toFixed(0)} vsFpm=${vsFpmBefore.toFixed(0)} — respawning in 3s`);
         try {
@@ -331,6 +334,21 @@ export class FlightPhysicsSystem {
         this.scene._spawnSnapFramesLeft = 0;
         console.debug('[Crash] Respawning at session origin');
         this.scene._spawnPlane();
+        try { this.scene._engineSound?.fadeIn?.(ENGINE_SOUND_FADE_IN_MS); } catch (err) { console.warn('[Crash] Engine sound fade-in failed:', err); }
+    }
+
+    private _silenceAudioOnCrash(): void {
+        try {
+            this.scene._engineSound?.silence?.();
+            this.scene._flightAudio?.setStallActive?.(false);
+            this.scene._flightAudio?.setOverspeedActive?.(false);
+            this.scene._flightAudio?.setAirspeed?.(0);
+            this.scene._lastStallState = false;
+            this.scene._overspeedActive = false;
+            console.debug('[Crash] Engine sound and alerts silenced');
+        } catch (err) {
+            console.warn('[Crash] Audio silence failed:', err);
+        }
     }
 
     private _showLessonRetry(): void {
@@ -986,7 +1004,7 @@ export class FlightPhysicsSystem {
 
         this.scene.groundSpeed = Math.hypot(this.scene.velocity.x, this.scene.velocity.z);
 
-        this.scene._tmpAirVel.copyFrom(this.scene.velocity).subtractInPlace(windWorld);
+        this.scene._tmpAirVel.copyFrom(this.scene.velocity).subtractInPlace(aeroWindWorld);
         this.scene._lastTasMs = this.scene._tmpAirVel.length();
         const qDyn = 0.5 * Math.max(0, airDensity) * this.scene._lastTasMs * this.scene._lastTasMs;
         this.scene._lastIasMs = Math.sqrt(Math.max(0, 2 * qDyn / SEA_LEVEL_AIR_DENSITY_KG_PER_M3));
@@ -1200,7 +1218,7 @@ export class FlightPhysicsSystem {
     }
 
     easyModeAssistEnabled(): boolean {
-        return UiPreferences.get().easyMode && !this.scene.isOnGround;
+        return UiPreferences.peek().easyMode && !this.scene.isOnGround;
     }
 
     easyModeStabilization(): { pitch: number; roll: number } {
@@ -1222,7 +1240,7 @@ export class FlightPhysicsSystem {
 
     easyModeAutoThrottle(dt: number): void {
         const tasKts = (Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length()) * MS_TO_KT;
-        const targetKts = UiPreferences.get().autoThrottleTargetKts;
+        const targetKts = UiPreferences.peek().autoThrottleTargetKts;
         const errorKts = targetKts - tasKts;
         const k = 0.005;
         const delta = Math.max(-0.5, Math.min(0.5, errorKts * k));
@@ -1256,6 +1274,26 @@ export class FlightPhysicsSystem {
                 }
             }
             console.log(`[Gear] Extending... (${hasExplicitDown ? 'explicit' : 'reversed gear_up'})`);
+        }
+    }
+
+    snapGearVisualDown(): void {
+        const upGroups: BABYLON.AnimationGroup[] = Array.isArray(this.scene._gearUpAnimGroups) ? this.scene._gearUpAnimGroups : [];
+        const explicitDown: BABYLON.AnimationGroup[] = Array.isArray(this.scene._gearDownAnimGroups) ? this.scene._gearDownAnimGroups : [];
+        const hasExplicitDown = explicitDown.length > 0;
+        const downGroups = hasExplicitDown ? explicitDown : upGroups;
+        if (downGroups.length === 0) return;
+        try {
+            for (const g of downGroups) {
+                if (hasExplicitDown) {
+                    g.start(false, GEAR_VISUAL_SNAP_SPEED_RATIO, g.from, g.to);
+                } else {
+                    g.start(false, GEAR_VISUAL_SNAP_SPEED_RATIO, g.to, g.from);
+                }
+            }
+            console.debug(`[Gear] Visual pose snapped to DOWN (${hasExplicitDown ? 'explicit' : 'reversed gear_up'})`);
+        } catch (err) {
+            console.warn('[Gear] Visual snap to DOWN failed:', err);
         }
     }
 

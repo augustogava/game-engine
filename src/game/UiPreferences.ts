@@ -184,6 +184,10 @@ export class UiPreferences {
         return { ...this._data };
     }
 
+    public static peek(): Readonly<UiPreferencesData> {
+        return this._data;
+    }
+
     public static set(partial: Partial<UiPreferencesData>): void {
         this._data = this._sanitize({ ...this._data, ...partial });
         this._save();

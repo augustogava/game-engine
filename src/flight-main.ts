@@ -82,6 +82,10 @@ function dismissLoading() {
     if (!sceneReady) return;
     dismissed = true;
     if (statusInterval) clearInterval(statusInterval);
+    if (spawnedPollTimer !== undefined) {
+        clearInterval(spawnedPollTimer);
+        spawnedPollTimer = undefined;
+    }
     loadingEl.style.transition = 'opacity 1s ease';
     requestAnimationFrame(() => {
         loadingEl.style.opacity = '0';

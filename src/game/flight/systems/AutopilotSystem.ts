@@ -263,6 +263,16 @@ export class AutopilotSystem {
         }
     }
 
+    disengageAll(): void {
+        this.scene._autopilotMaster = false;
+        this.scene._autopilotHdgHold = false;
+        this.scene._autopilotAltHold = false;
+        this.scene._autopilotVsHold = false;
+        this.scene._autopilotNavHold = false;
+        this.scene._autopilotAprHold = false;
+        this.scene._autopilotAtHold = false;
+    }
+
     engageAutopilotMaster(): void {
         this.scene._autopilotMaster = !this.scene._autopilotMaster;
         if (this.scene._autopilotMaster) {
@@ -270,12 +280,7 @@ export class AutopilotSystem {
             if (!this.scene._autopilotAltHold) this.engageAutopilotAltHold(true);
             console.log('[AP] Master ON');
         } else {
-            this.scene._autopilotHdgHold = false;
-            this.scene._autopilotAltHold = false;
-            this.scene._autopilotVsHold = false;
-            this.scene._autopilotNavHold = false;
-            this.scene._autopilotAprHold = false;
-            this.scene._autopilotAtHold = false;
+            this.disengageAll();
             console.log('[AP] Master OFF');
         }
     }
@@ -645,14 +650,8 @@ export class AutopilotSystem {
             Math.abs(this.scene.smoothedYaw),
         );
         if (stick > AP_INPUT_DISENGAGE_THRESHOLD) {
-            this.scene._autopilotMaster = false;
-            this.scene._autopilotHdgHold = false;
-            this.scene._autopilotAltHold = false;
-            this.scene._autopilotVsHold = false;
-            this.scene._autopilotNavHold = false;
-            this.scene._autopilotAprHold = false;
             const autothrottleWasOn = this.scene._autopilotAtHold === true;
-            this.scene._autopilotAtHold = false;
+            this.disengageAll();
             console.debug(`[AP] Disengaged by stick input (autothrottle ${autothrottleWasOn ? 'also disengaged' : 'was off'})`);
         }
     }

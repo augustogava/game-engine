@@ -35,6 +35,7 @@ import {
     FLIGHT_SCHOOL_APPROACH_THRUST,
     FLIGHT_SCHOOL_APPROACH_TRIM_PITCH,
     FLIGHT_SCHOOL_APPROACH_MIN_AGL_M,
+    AUTOBRAKE_OFF,
 } from '../constants/index.js';
 
 const SAVED_FLIGHT_VERSION = 1;
@@ -365,6 +366,18 @@ export class SpawnSystem {
         this.scene.fuelRemaining = cfg.fuel_capacity_kg;
         this.scene.trimPitch = 0;
         this.scene.trimYaw = 0;
+        const apWasEngaged = this.scene._autopilotMaster === true || this.scene._autopilotAtHold === true;
+        this.scene._autopilotSystem.disengageAll();
+        if (apWasEngaged) console.debug('[Spawn] Autopilot and autothrottle disengaged on respawn');
+        this.scene.brakesOn = false;
+        this.scene._autobrakeActive = false;
+        this.scene._autobrakeLevel = AUTOBRAKE_OFF;
+        this.scene._spoilerTarget = 0;
+        this.scene._spoilerDeflection = 0;
+        this.scene._spoilerArmed = false;
+        this.scene._reverseThrustRequested = false;
+        this.scene._reverseThrustActive = false;
+        this.scene._resetEngines();
         this.scene.gearCompression = new Array(cfg.gear_positions.length).fill(0);
         this.scene.gearState = GEAR_STATE_DOWN;
         this.scene._gearTransitionStartMs = 0;
@@ -413,6 +426,7 @@ export class SpawnSystem {
 
         if (useAirborne) this.applyApproachSpawnConfig();
         this.scene._inputSystem.applyMissionStartThrottle();
+        if (this.scene.gearState === GEAR_STATE_DOWN) this.scene._flightPhysicsSystem?.snapGearVisualDown?.();
     }
 
     resolveApproachSpawnY(): number | null {
@@ -459,13 +473,7 @@ export class SpawnSystem {
         this.scene._inputSystem.refreshTouchThrottleVisual();
         this.scene.trimPitch = FLIGHT_SCHOOL_APPROACH_TRIM_PITCH;
 
-        this.scene._autopilotMaster = false;
-        this.scene._autopilotHdgHold = false;
-        this.scene._autopilotAltHold = false;
-        this.scene._autopilotVsHold = false;
-        this.scene._autopilotNavHold = false;
-        this.scene._autopilotAprHold = false;
-        this.scene._autopilotAtHold = false;
+        this.scene._autopilotSystem.disengageAll();
         this.scene._spawnSnapFramesLeft = 0;
 
         console.debug(`[FlightSchool] Approach spawn: vapp=${vappKt.toFixed(0)}kt glideslope=${FLIGHT_SCHOOL_GLIDESLOPE_DEG}deg flaps=${this.scene.currentFlapDeg}deg thrust=${FLIGHT_SCHOOL_APPROACH_THRUST} trim=${FLIGHT_SCHOOL_APPROACH_TRIM_PITCH} posY=${this.scene.planeRoot.position.y.toFixed(1)}m gear=DOWN ap=OFF`);

@@ -39,7 +39,8 @@ const ADAPT_FPS_HIGH = 40;
 const ADAPT_MAX_STEPS = 4;
 const ADAPT_STEP_COOLDOWN_MS = 7000;
 const ADAPT_TILE_SHADOW_FPS_OFF = 30;
-const ADAPT_UPGRADE_STREAK = 2;
+const ADAPT_TILE_SHADOW_LOW_STREAK = 2;
+const ADAPT_UPGRADE_STREAK = 4;
 const ADAPT_ERROR_TARGET_MULT_PER_STEP = 2.0;
 const ADAPT_LRU_MULT_PER_STEP = 0.75;
 const ADAPT_SCALE_DOWN_PER_STEP = 0.15;
@@ -55,6 +56,7 @@ export class TerrainTilesSystem {
     private _adaptLastEvalMs = 0;
     private _adaptLastStepMs = 0;
     private _highFpsStreak = 0;
+    private _lowFpsShadowStreak = 0;
     private _tileShadowsAdaptiveOff = false;
     private readonly _tileShadowReceivers = new Set<any>();
     private _tilesWithHandlers: any = null;
@@ -81,19 +83,17 @@ export class TerrainTilesSystem {
 
     /**
      * Night "city lights": the tile albedo is reused as emissive so bright urban imagery glows while dark
-     * terrain stays dark. The texture is only bound once the sun is low enough, to avoid daytime shader recompiles.
+     * terrain stays dark. The texture is bound when the tile loads (zero intensity by day), so dusk only changes
+     * a uniform instead of recompiling every tile material at once.
      */
     private _applyCityLightToMaterial(pbr: BABYLON.PBRMaterial, factor: number): void {
         try {
-            if (factor <= 0) {
-                if (pbr.emissiveIntensity !== 0) pbr.emissiveIntensity = 0;
-                return;
-            }
             if (pbr.emissiveTexture !== pbr.albedoTexture && pbr.albedoTexture) {
                 pbr.emissiveTexture = pbr.albedoTexture;
                 pbr.emissiveColor.set(1, CITY_LIGHTS_TINT_G, CITY_LIGHTS_TINT_B);
             }
-            pbr.emissiveIntensity = factor * CITY_LIGHTS_MAX_INTENSITY;
+            const intensity = Math.max(0, factor) * CITY_LIGHTS_MAX_INTENSITY;
+            if (pbr.emissiveIntensity !== intensity) pbr.emissiveIntensity = intensity;
         } catch (err) {
             console.warn('[3DTiles] City light material apply failed:', err);
         }
@@ -102,7 +102,7 @@ export class TerrainTilesSystem {
     private _registerCityLightMaterial(pbr: BABYLON.PBRMaterial): void {
         if (this.scene.isMobile === true) return;
         this._cityLightMats.add(pbr);
-        if (this._cityLightFactor > 0) this._applyCityLightToMaterial(pbr, this._cityLightFactor);
+        this._applyCityLightToMaterial(pbr, this._cityLightFactor);
     }
 
     updateCityLights(sunElevationDeg: number): void {
@@ -170,7 +170,6 @@ export class TerrainTilesSystem {
         const isMobile = this.scene.isMobile === true;
         this.scene.tiles.errorTarget = isMobile ? TILES_ERROR_TARGET_MOBILE : TILES_ERROR_TARGET_DESKTOP;
         (this.scene.tiles as any).maxDepth = 100;
-        (this.scene.tiles as any).errorThreshold = 60;
         this.scene.tiles.lruCache.maxSize = isMobile ? TILES_LRU_MAX_SIZE_MOBILE : TILES_LRU_MAX_SIZE_DESKTOP;
         this.scene.tiles.lruCache.minSize = isMobile ? TILES_LRU_MIN_SIZE_MOBILE : TILES_LRU_MIN_SIZE_DESKTOP;
         try {
@@ -188,6 +187,7 @@ export class TerrainTilesSystem {
         this._adaptLastEvalMs = 0;
         this._adaptLastStepMs = 0;
         this._highFpsStreak = 0;
+        this._lowFpsShadowStreak = 0;
         console.info(`[3DTiles] errorTarget=${this.scene.tiles.errorTarget} lruMax=${this.scene.tiles.lruCache.maxSize} (mobile=${isMobile})`);
         try {
             this.scene.tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
@@ -404,23 +404,22 @@ export class TerrainTilesSystem {
         try { fps = engine.getFps(); } catch (_) { fps = 0; }
         if (!Number.isFinite(fps) || fps <= 0) return;
 
-        if (this.scene._premium?.tileShadows) {
-            if (!this._tileShadowsAdaptiveOff && fps < ADAPT_TILE_SHADOW_FPS_OFF) {
+        if (this.scene._premium?.tileShadows && !this._tileShadowsAdaptiveOff) {
+            this._lowFpsShadowStreak = fps < ADAPT_TILE_SHADOW_FPS_OFF ? this._lowFpsShadowStreak + 1 : 0;
+            if (this._lowFpsShadowStreak >= ADAPT_TILE_SHADOW_LOW_STREAK) {
+                this._lowFpsShadowStreak = 0;
                 this._setTileShadowsEnabled(false);
-                console.log(`[3DTiles] Tile shadows disabled adaptively (fps=${fps.toFixed(0)})`);
-            } else if (this._tileShadowsAdaptiveOff && fps > ADAPT_FPS_HIGH) {
-                this._setTileShadowsEnabled(true);
-                console.log(`[3DTiles] Tile shadows re-enabled (fps=${fps.toFixed(0)})`);
+                console.debug(`[3DTiles] Tile shadows disabled adaptively for this session (fps=${fps.toFixed(0)})`);
             }
         }
 
         const prevStep = this._adaptStep;
+        const cooldownElapsed = now - this._adaptLastStepMs >= ADAPT_STEP_COOLDOWN_MS;
         if (fps < ADAPT_FPS_LOW && this._adaptStep < ADAPT_MAX_STEPS) {
-            this._adaptStep++;
             this._highFpsStreak = 0;
+            if (cooldownElapsed) this._adaptStep++;
         } else if (fps > ADAPT_FPS_HIGH && this._adaptStep > 0) {
             this._highFpsStreak++;
-            const cooldownElapsed = now - this._adaptLastStepMs >= ADAPT_STEP_COOLDOWN_MS;
             if (this._highFpsStreak >= ADAPT_UPGRADE_STREAK && cooldownElapsed) {
                 this._adaptStep--;
                 this._highFpsStreak = 0;

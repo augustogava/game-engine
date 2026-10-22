@@ -24,6 +24,8 @@ import {
     MOTION_BLUR_MAX_STRENGTH,
     MOTION_BLUR_SAMPLES,
     MOTION_BLUR_TRIGGER_G,
+    MOTION_BLUR_RELEASE_G,
+    MOTION_BLUR_MIN_ACTIVE_MS,
     DOF_COCKPIT_FOCUS_DISTANCE_MM,
     DOF_COCKPIT_FSTOP,
     DOF_COCKPIT_FOCAL_LENGTH_MM,
@@ -102,6 +104,7 @@ export class VfxSystem {
     private readonly _flareToSun = new BABYLON.Vector3();
     private readonly _flareRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), BABYLON.Vector3.Up(), 1);
     private _sharedParticleTexture: BABYLON.Texture | null = null;
+    private _motionBlurActivatedMs = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -620,7 +623,16 @@ export class VfxSystem {
             return;
         }
         const gAbs = Math.abs(Number.isFinite(this.scene._gForce) ? this.scene._gForce : 1);
-        const wantMb = gAbs > MOTION_BLUR_TRIGGER_G;
+        const mbActive = !!this.scene._motionBlurPP;
+        const nowMs = performance.now();
+        let wantMb = mbActive;
+        if (!mbActive && gAbs > MOTION_BLUR_TRIGGER_G) {
+            wantMb = true;
+            this._motionBlurActivatedMs = nowMs;
+        } else if (mbActive && gAbs < MOTION_BLUR_RELEASE_G && nowMs - this._motionBlurActivatedMs >= MOTION_BLUR_MIN_ACTIVE_MS) {
+            wantMb = false;
+        }
+        if (wantMb !== mbActive) console.debug(`[MotionBlur] ${wantMb ? 'enabled' : 'disabled'} (g=${gAbs.toFixed(2)})`);
         this.ensureMotionBlur(wantMb);
         if (!this.scene._pipeline) return;
         const wantDof = this.scene._cameraMode === CAMERA_MODE_COCKPIT;

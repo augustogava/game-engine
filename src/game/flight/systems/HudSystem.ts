@@ -178,6 +178,9 @@ export class HudSystem {
         return Math.atan2(BABYLON.Vector3.Dot(fwdFlat, this._axisX), BABYLON.Vector3.Dot(fwdFlat, this._axisNorth));
     }
     private _lastHudCanvasDrawMs = 0;
+    private _lastHudClockSecond = Number.NaN;
+    private _touchGearBtn: HTMLElement | null = null;
+    private _touchSplBtn: HTMLElement | null = null;
     private _lastMapUpdateMs = 0;
     private static readonly HUD_CANVAS_DRAW_INTERVAL_MS = 33;
     private static readonly MINIMAP_UPDATE_INTERVAL_MS = 80;
@@ -241,7 +244,7 @@ export class HudSystem {
     }
 
     convertSpeedKts(kts: number): { value: number; unit: string } {
-        const units = UiPreferences.get().unitSystem;
+        const units = UiPreferences.peek().unitSystem;
         if (units === _C.UNIT_SYSTEM_METRIC) {
             return { value: Math.round(kts * 1.852), unit: I18n.t('units.kmh') };
         }
@@ -249,7 +252,7 @@ export class HudSystem {
     }
 
     convertAltitudeFt(ft: number): { value: number; unit: string } {
-        const units = UiPreferences.get().unitSystem;
+        const units = UiPreferences.peek().unitSystem;
         if (units === _C.UNIT_SYSTEM_METRIC) {
             return { value: Math.round(ft * 0.3048), unit: I18n.t('units.m') };
         }
@@ -1220,12 +1223,6 @@ export class HudSystem {
             s.overcast = (document.getElementById('gfx-overcast') as HTMLInputElement)?.checked ?? false;
             s.precipType = parseInt((document.getElementById('gfx-precip-type') as HTMLSelectElement)?.value || '0') || 0;
             s.precipIntensity = parseInt((document.getElementById('gfx-precip-intensity') as HTMLInputElement)?.value || '0') / 100;
-            s.seascapeSky = (document.getElementById('gfx-seascapesky') as HTMLInputElement)?.checked ?? false;
-            s.seascapeSkyCover = parseInt((document.getElementById('gfx-seascapesky-cover') as HTMLInputElement)?.value || '35') / 100;
-            s.seascapeSkyIntensity = parseInt((document.getElementById('gfx-seascapesky-intensity') as HTMLInputElement)?.value || '100') / 100;
-            s.seascapeSkySpeed = parseInt((document.getElementById('gfx-seascapesky-speed') as HTMLInputElement)?.value || '6') / 100;
-            s.seascapeSkyScale = parseInt((document.getElementById('gfx-seascapesky-scale') as HTMLInputElement)?.value || '302') / 100;
-            s.seascapeSkyColor = (document.getElementById('gfx-seascapesky-color') as HTMLInputElement)?.value || '#f0cb7a';
             s.hdrEnv = (document.getElementById('gfx-hdr-env') as HTMLSelectElement)?.value || 'auto';
             s.preset = (document.getElementById('gfx-preset') as HTMLSelectElement)?.value || 'high';
             s.tileShadows      = this.scene._premium.tileShadows;
@@ -1356,45 +1353,8 @@ export class HudSystem {
                         this.scene._setRain(intensity, type);
                         if (precipIntLbl) precipIntLbl.textContent = Math.round(intensity * 100) + '%';
                     }
-                    let seascapeOn = false;
-                    const seascapeSys = this.scene.getSeascapeSkySystem?.();
-                    if (seascapeSys) {
-                        const ssEnableEl = document.getElementById('gfx-seascapesky') as HTMLInputElement | null;
-                        const ssCoverEl = document.getElementById('gfx-seascapesky-cover') as HTMLInputElement | null;
-                        const ssCoverLbl = document.getElementById('gfx-seascapesky-cover-val');
-                        const ssIntensityEl = document.getElementById('gfx-seascapesky-intensity') as HTMLInputElement | null;
-                        const ssIntensityLbl = document.getElementById('gfx-seascapesky-intensity-val');
-                        const ssSpeedEl = document.getElementById('gfx-seascapesky-speed') as HTMLInputElement | null;
-                        const ssSpeedLbl = document.getElementById('gfx-seascapesky-speed-val');
-                        const ssScaleEl = document.getElementById('gfx-seascapesky-scale') as HTMLInputElement | null;
-                        const ssScaleLbl = document.getElementById('gfx-seascapesky-scale-val');
-                        const ssColorEl = document.getElementById('gfx-seascapesky-color') as HTMLInputElement | null;
-                        if (ssCoverEl) {
-                            const v = parseInt(ssCoverEl.value) / 100;
-                            seascapeSys.setCover(v);
-                            if (ssCoverLbl) ssCoverLbl.textContent = v.toFixed(2);
-                        }
-                        if (ssIntensityEl) {
-                            const v = parseInt(ssIntensityEl.value) / 100;
-                            seascapeSys.setIntensity(v);
-                            if (ssIntensityLbl) ssIntensityLbl.textContent = v.toFixed(2);
-                        }
-                        if (ssSpeedEl) {
-                            const v = parseInt(ssSpeedEl.value) / 100;
-                            seascapeSys.setSpeed(v);
-                            if (ssSpeedLbl) ssSpeedLbl.textContent = v.toFixed(2);
-                        }
-                        if (ssScaleEl) {
-                            const v = parseInt(ssScaleEl.value) / 100;
-                            seascapeSys.setScale(v);
-                            if (ssScaleLbl) ssScaleLbl.textContent = v.toFixed(2);
-                        }
-                        if (ssColorEl) seascapeSys.setColorHex(ssColorEl.value);
-                        seascapeOn = ssEnableEl?.checked ?? false;
-                        seascapeSys.setEnabled(seascapeOn);
-                    }
                     const hdrEnvEl = document.getElementById('gfx-hdr-env') as HTMLSelectElement | null;
-                    if (hdrEnvEl && !seascapeOn) {
+                    if (hdrEnvEl) {
                         try {
                             this.scene._applyHdrEnvironment(scene, hdrEnvEl.value || 'none');
                         } catch (err) {
@@ -1521,12 +1481,6 @@ export class HudSystem {
             setCheck('gfx-overcast', cfg.overcast);
             if (cfg.precipType !== undefined) setVal('gfx-precip-type', cfg.precipType);
             if (cfg.precipIntensity !== undefined) setVal('gfx-precip-intensity', Math.round(cfg.precipIntensity * 100));
-            setCheck('gfx-seascapesky', cfg.seascapeSky);
-            if (cfg.seascapeSkyCover !== undefined) setVal('gfx-seascapesky-cover', Math.round(cfg.seascapeSkyCover * 100));
-            if (cfg.seascapeSkyIntensity !== undefined) setVal('gfx-seascapesky-intensity', Math.round(cfg.seascapeSkyIntensity * 100));
-            if (cfg.seascapeSkySpeed !== undefined) setVal('gfx-seascapesky-speed', Math.round(cfg.seascapeSkySpeed * 100));
-            if (cfg.seascapeSkyScale !== undefined) setVal('gfx-seascapesky-scale', Math.round(cfg.seascapeSkyScale * 100));
-            if (cfg.seascapeSkyColor !== undefined) setVal('gfx-seascapesky-color', cfg.seascapeSkyColor);
             if (cfg.hdrEnv !== undefined) setVal('gfx-hdr-env', cfg.hdrEnv);
             if (cfg.preset) { const el = document.getElementById('gfx-preset') as HTMLSelectElement | null; if (el) el.value = cfg.preset; }
 
@@ -1578,7 +1532,7 @@ export class HudSystem {
             }, 100);
         }
 
-        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-precip-type', 'gfx-precip-intensity', 'gfx-seascapesky', 'gfx-seascapesky-cover', 'gfx-seascapesky-intensity', 'gfx-seascapesky-speed', 'gfx-seascapesky-scale', 'gfx-seascapesky-color', 'gfx-hdr-env'];
+        const ids = ['gfx-bloom', 'gfx-bloom-weight', 'gfx-ssao', 'gfx-shadows', 'gfx-shadow-quality', 'gfx-fog', 'gfx-fog-density', 'gfx-aa', 'gfx-vignette', 'gfx-chromatic', 'gfx-render-scale', 'gfx-fps-limit', 'gfx-cloud-density', 'gfx-overcast', 'gfx-precip-type', 'gfx-precip-intensity', 'gfx-hdr-env'];
         for (const id of ids) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => applySettings());
@@ -2924,19 +2878,43 @@ export class HudSystem {
         }
     }
 
+    private _resolveCachedElement(current: HTMLElement | null, id: string): HTMLElement | null {
+        if (current && current.isConnected) return current;
+        return document.getElementById(id);
+    }
+
+    private _setRollingDigit(inner: HTMLElement, digit: number): void {
+        const cur = String(digit);
+        if (inner.dataset.cur === cur) return;
+        if (inner.children.length !== 2) {
+            inner.textContent = '';
+            inner.appendChild(document.createElement('span'));
+            inner.appendChild(document.createElement('span'));
+        }
+        inner.children[0].textContent = cur;
+        inner.children[1].textContent = String((digit + 1) % 10);
+        inner.dataset.cur = cur;
+    }
+
     updateHUD(): void {
-        const now = this.scene._getSimDate();
-        const hh = String(now.getUTCHours()).padStart(2, '0');
-        const mm = String(now.getUTCMinutes()).padStart(2, '0');
-        const ss = String(now.getUTCSeconds()).padStart(2, '0');
-        const dd = String(now.getUTCDate()).padStart(2, '0');
-        const mo = String(now.getUTCMonth() + 1).padStart(2, '0');
-        const lonForLocal = Number.isFinite(this.scene.originLon) ? this.scene.originLon : 0;
-        const localMs = now.getTime() + (lonForLocal / 15) * 3600 * 1000;
-        const localDate = new Date(localMs);
-        const lhh = String(localDate.getUTCHours()).padStart(2, '0');
-        const lmm = String(localDate.getUTCMinutes()).padStart(2, '0');
-        this._setText(this.scene.hudUtc, `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC \u00B7 ${lhh}:${lmm} LCL`);
+        const simOffsetMs = Number(this.scene._simTimeOffsetMs);
+        const simMs = Date.now() + (Number.isFinite(simOffsetMs) ? simOffsetMs : 0);
+        const simSecond = Math.floor(simMs / 1000);
+        if (simSecond !== this._lastHudClockSecond) {
+            this._lastHudClockSecond = simSecond;
+            const now = new Date(simMs);
+            const hh = String(now.getUTCHours()).padStart(2, '0');
+            const mm = String(now.getUTCMinutes()).padStart(2, '0');
+            const ss = String(now.getUTCSeconds()).padStart(2, '0');
+            const dd = String(now.getUTCDate()).padStart(2, '0');
+            const mo = String(now.getUTCMonth() + 1).padStart(2, '0');
+            const lonForLocal = Number.isFinite(this.scene.originLon) ? this.scene.originLon : 0;
+            const localMs = now.getTime() + (lonForLocal / 15) * 3600 * 1000;
+            const localDate = new Date(localMs);
+            const lhh = String(localDate.getUTCHours()).padStart(2, '0');
+            const lmm = String(localDate.getUTCMinutes()).padStart(2, '0');
+            this._setText(this.scene.hudUtc, `${dd}/${mo}/${now.getUTCFullYear()} ${hh}:${mm}:${ss} UTC \u00B7 ${lhh}:${lmm} LCL`);
+        }
 
         const tasMs = Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length();
         const iasMs = Number.isFinite(this.scene._lastIasMs) ? this.scene._lastIasMs : tasMs;
@@ -2982,14 +2960,7 @@ export class HudSystem {
         const spdOne  = spdAbs % 10;
         this._setText(this.scene.hudSpdH, spdAbs >= 100 ? String(spdHund) : '');
         this._setText(this.scene.hudSpdT, spdAbs >= 10  ? String(spdTen)  : '0');
-        if (this.scene.hudSpdUInner) {
-            const nextOne = (spdOne + 1) % 10;
-            const inner = this.scene.hudSpdUInner;
-            if (inner.dataset.cur !== String(spdOne)) {
-                inner.innerHTML = `<span>${spdOne}</span><span>${nextOne}</span>`;
-                inner.dataset.cur = String(spdOne);
-            }
-        }
+        if (this.scene.hudSpdUInner) this._setRollingDigit(this.scene.hudSpdUInner, spdOne);
 
         const altAbs = Math.max(0, Number.isFinite(altitudeMslFt) ? altitudeMslFt : 0);
         const altDH    = Math.floor(altAbs / 10000) % 10;
@@ -3001,14 +2972,7 @@ export class HudSystem {
         this._setText(this.scene.hudAltT, altAbs >= 1000  ? String(altDT) : '');
         this._setText(this.scene.hudAltU, String(altDU));
         this._setText(this.scene.hudAltTens, String(altDTens));
-        if (this.scene.hudAltUnitsInner) {
-            const nextOne = (altDOne + 1) % 10;
-            const inner = this.scene.hudAltUnitsInner;
-            if (inner.dataset.cur !== String(altDOne)) {
-                inner.innerHTML = `<span>${altDOne}</span><span>${nextOne}</span>`;
-                inner.dataset.cur = String(altDOne);
-            }
-        }
+        if (this.scene.hudAltUnitsInner) this._setRollingDigit(this.scene.hudAltUnitsInner, altDOne);
 
         if (this.scene.hudAltSel) {
             const apTargetAltFt = Number(this.scene._autopilotTargetAltFt);
@@ -3046,7 +3010,8 @@ export class HudSystem {
             this._setText(this.scene.hudGearState, label);
             this._setStyle(this.scene.hudGearState, 'color', color);
             if (this.scene.isMobile) {
-                const gearBtn = document.getElementById('touch-gear');
+                this._touchGearBtn = this._resolveCachedElement(this._touchGearBtn, 'touch-gear');
+                const gearBtn = this._touchGearBtn;
                 if (gearBtn) {
                     const btnLabel = gs === GEAR_STATE_DOWN ? 'GR\u25BC'
                         : gs === GEAR_STATE_UP ? 'GR\u25B2'
@@ -3195,7 +3160,8 @@ export class HudSystem {
                 this._setStyle(this.scene.hudSpoilerState, 'color', '#888');
             }
             if (this.scene.isMobile) {
-                const splBtn = document.getElementById('touch-spl');
+                this._touchSplBtn = this._resolveCachedElement(this._touchSplBtn, 'touch-spl');
+                const splBtn = this._touchSplBtn;
                 if (splBtn) {
                     splBtn.classList.toggle('active', this.scene._spoilerDeflection > 0.01);
                     splBtn.classList.toggle('armed', this.scene._spoilerArmed && this.scene._spoilerDeflection <= 0.01);
@@ -3255,7 +3221,7 @@ export class HudSystem {
         if (this.scene.hudAoaVal) this._setText(this.scene.hudAoaVal, `${aoaDeg}\u00B0`);
 
         const vsFpm = Math.round(this.scene.velocity.y * 196.85);
-        if (this.scene.hudVsVal) this._setText(this.scene.hudVsVal, String(vsFpm));
+        if (this.scene.hudVsVal) this._setText(this.scene.hudVsVal, String(this.scene._convertVsFpm(vsFpm).value));
 
         if (this.scene.hudVsPointer) {
             const vsForPointer = Number.isFinite(vsFpm) ? vsFpm : 0;

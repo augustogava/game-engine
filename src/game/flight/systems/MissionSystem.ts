@@ -8,6 +8,7 @@ import {
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
 import { initialBearingDeg, haversineNm } from '../physics/NavMath.js';
 import { isValidFlightLogId, publishAndShareFlightLog } from './FlightShareService.js';
+import { fetchJsonWithTimeout } from '../api/fetchWithTimeout.js';
 
 function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -22,10 +23,12 @@ const HTTP_STATUS_CONFLICT = 409;
 const MISSION_LAUNCH_PRESERVED_PARAMS = ['simTime', 'lang'];
 const GAME_REQUESTED_WITH_HEADER = 'SimFlightProGame';
 const POINTS_MULTIPLIER_DEFAULT = 1;
+const METAR_FETCH_TIMEOUT_MS = 10000;
 
 export class MissionSystem {
     private readonly scene: any;
     private _lastWxRefreshMs = 0;
+    private _wxRefreshInFlight = false;
     private _lastWxLat = Number.NaN;
     private _lastWxLon = Number.NaN;
     private _completeRetries = 0;
@@ -1371,6 +1374,7 @@ export class MissionSystem {
 
     /** Fetches the METAR of the nearest airport to the aircraft and applies it (on-demand). */
     async refreshWeatherAtPosition(reason: string, force: boolean = false): Promise<void> {
+        let ownsRequest = false;
         try {
             const ll = typeof this.scene._getCurrentLatLon === 'function' ? this.scene._getCurrentLatLon() : null;
             if (!ll || !Number.isFinite(ll.lat) || !Number.isFinite(ll.lon)) {
@@ -1386,13 +1390,19 @@ export class MissionSystem {
                     return;
                 }
             }
-            const res = await fetch(`/api/weather/metar/nearest?lat=${ll.lat.toFixed(4)}&lon=${ll.lon.toFixed(4)}`);
-            if (!res.ok) {
-                console.warn(`[METAR] nearest HTTP ${res.status} (${reason})`);
+            if (this._wxRefreshInFlight) {
+                console.debug(`[METAR] refreshWeatherAtPosition skipped (${reason}): request already in flight`);
                 return;
             }
-            const json = await res.json();
-            const m = json.data;
+            this._wxRefreshInFlight = true;
+            ownsRequest = true;
+            const result = await fetchJsonWithTimeout(`/api/weather/metar/nearest?lat=${ll.lat.toFixed(4)}&lon=${ll.lon.toFixed(4)}`, {}, METAR_FETCH_TIMEOUT_MS);
+            if (!result.ok) {
+                console.warn(`[METAR] nearest HTTP ${result.status} (${reason})`);
+                return;
+            }
+            const json = result.data;
+            const m = json?.data;
             if (!m) {
                 console.warn(`[METAR] nearest no data (${reason})`);
                 return;
@@ -1407,6 +1417,8 @@ export class MissionSystem {
             if (el) this._renderMetarEl(el, m, weather, !!json.stale);
         } catch (err) {
             console.warn(`[METAR] refreshWeatherAtPosition failed (${reason}):`, err);
+        } finally {
+            if (ownsRequest) this._wxRefreshInFlight = false;
         }
     }
 

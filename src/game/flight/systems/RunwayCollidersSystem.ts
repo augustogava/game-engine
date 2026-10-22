@@ -13,7 +13,9 @@ import {
     SPAWN_TERRAIN_RAY_LENGTH_M,
     TERRAIN_UNKNOWN_Y,
 } from '../constants/index.js';
+import { fetchJsonWithTimeout } from '../api/fetchWithTimeout.js';
 
+const RUNWAY_NEARBY_FETCH_TIMEOUT_MS = 15000;
 const RUNWAY_TILE_ALIGN_LOG_DELTA_M = 1.0;
 const RUNWAY_NEAR_ORIGIN_FALLBACK_M = 8000;
 const RUNWAY_MAX_GRADIENT = 0.03;
@@ -40,12 +42,12 @@ export class RunwayCollidersSystem {
         this._dbFallbackColliders = [];
         try {
             const url = `/api/airports/nearby?lat=${centerLat}&lng=${centerLon}&radius_km=${RUNWAY_COLLIDER_RADIUS_KM}`;
-            const resp = await fetch(url);
-            if (!resp.ok) {
-                console.warn(`[Runway] /api/airports/nearby returned HTTP ${resp.status}`);
+            const result = await fetchJsonWithTimeout(url, {}, RUNWAY_NEARBY_FETCH_TIMEOUT_MS);
+            if (!result.ok) {
+                console.warn(`[Runway] /api/airports/nearby returned HTTP ${result.status}`);
                 return;
             }
-            const json = await resp.json();
+            const json = result.data;
             const airports: any[] = json?.data || [];
             let count = 0;
             for (const ap of airports) {
