@@ -354,6 +354,10 @@ export class HudSystem {
         this.scene._gLimiterEnabled = prefs.gLimiterEnabled === true;
         this.scene._vfxSystem.setSmokeColorIndex(prefs.smokeColor);
 
+        const settingsTitle = document.getElementById('dbg-title');
+        if (settingsTitle) settingsTitle.textContent = I18n.t('pause.settings');
+        else console.warn('[Settings] #dbg-title element not found; settings panel title keeps its default text');
+
         const replayBtn = document.getElementById('ux-replay-btn');
         if (replayBtn) replayBtn.addEventListener('click', () => this.scene._toggleReplay());
         const saveFlightBtn = document.getElementById('ux-save-flight-btn');

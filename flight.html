@@ -471,15 +471,24 @@
             position: sticky;
             top: 0;
             margin: -16px -16px 0;
-            padding: 16px 16px 8px;
-            background: rgba(2, 10, 20, 0.95);
-            z-index: 1;
+            padding: 12px 16px;
+            background: rgb(2, 10, 20);
+            border-bottom: 1px solid rgba(64, 255, 170, 0.2);
+            z-index: 2;
         }
         #debug-ui h3 {
             font-family: 'Orbitron', monospace;
             font-size: 12px;
             color: #40ffaa;
             margin: 0;
+        }
+        #debug-ui #dbg-title {
+            font-size: 13px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+        body:has(#debug-ui:not(.minimized)) #debug-toggle {
+            display: none;
         }
         #debug-toggle {
             position: fixed;
@@ -711,10 +720,11 @@
     <!-- Debug UI Panel (toggle with Shift+S or the gear button) -->
     <div id="debug-ui" class="minimized">
         <header>
-            <h3>LOCATION</h3>
-            <button id="dbg-close" title="Fechar" style="background:rgba(255,85,85,.12);border:1px solid rgba(255,85,85,.4);color:#ff8888;width:26px;height:26px;border-radius:4px;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;touch-action:manipulation">&times;</button>
+            <h3 id="dbg-title">Configurações</h3>
+            <button id="dbg-close" title="Fechar" style="background:rgba(255,85,85,.12);border:1px solid rgba(255,85,85,.4);color:#ff8888;width:26px;height:26px;border-radius:4px;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;touch-action:manipulation;flex:none">&times;</button>
         </header>
         <div class="debug-form">
+            <h3>LOCATION</h3>
             <label>Search address or airport</label>
             <input type="text" id="dbg-address" placeholder="e.g. Guarulhos Airport, São Paulo">
             <div id="dbg-geocode-status" style="font-size:9px;color:rgba(255,255,255,0.4);min-height:14px"></div>
@@ -1224,7 +1234,24 @@
         // --- Keys helper: show after loading, hide on first gameplay key, toggle with H ---
         const keysHelper = document.getElementById('keys-helper');
         const loadingNode = document.getElementById('loading');
-        let keysHelperDismissed = false;
+        const KEYS_HELPER_TOUCH_UA_PATTERN = /Android|iPhone|iPad|iPod|Mobile|Tablet/i;
+        const isTouchOnlyDevice = () => {
+            try {
+                if (typeof window.matchMedia === 'function') {
+                    const coarse = window.matchMedia('(pointer: coarse)').matches;
+                    const canHover = window.matchMedia('(hover: hover)').matches;
+                    const anyFine = window.matchMedia('(any-pointer: fine)').matches;
+                    if (coarse && !canHover && !anyFine) return true;
+                    if (anyFine || canHover) return false;
+                }
+            } catch (err) {
+                console.warn('[KeysHelper] Pointer detection failed:', err);
+            }
+            const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            return hasTouch && KEYS_HELPER_TOUCH_UA_PATTERN.test(navigator.userAgent);
+        };
+        let keysHelperDismissed = isTouchOnlyDevice();
+        if (keysHelperDismissed) console.debug('[KeysHelper] Touch-only device: keyboard helper stays hidden unless toggled from a keyboard');
 
         const showKeysHelper = () => {
             if (!keysHelper) return;

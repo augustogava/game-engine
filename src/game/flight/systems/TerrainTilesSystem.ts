@@ -17,6 +17,10 @@ const TILES_ERROR_TARGET_MOBILE = 12;
 const TILES_ERROR_TARGET_DESKTOP = 6;
 const TILES_SPAWN_ERROR_THRESHOLD = 60;
 const TILES_FLIGHT_ERROR_THRESHOLD = Infinity;
+const TILES_ERROR_THRESHOLD_STAGE_FACTOR = 8;
+const TILES_ERROR_THRESHOLD_STAGE_LIMIT = 250000;
+const TILES_SETTLE_IDLE_FRAMES = 3;
+const TILES_SETTLE_WAIT_LOG_INTERVAL_MS = 10000;
 const TILES_LRU_MAX_SIZE_MOBILE = 800;
 const TILES_LRU_MIN_SIZE_MOBILE = 300;
 const TILES_LRU_MAX_SIZE_DESKTOP = 2000;
@@ -64,6 +68,9 @@ export class TerrainTilesSystem {
     private _tilesWithHandlers: any = null;
     private _onTileLoadModel: ((event: any) => void) | null = null;
     private _onTileDisposeModel: ((event: any) => void) | null = null;
+    private _flightLoadingModePending = false;
+    private _tileQueuesIdleFrames = 0;
+    private _lastSettleWaitLogMs = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -174,6 +181,7 @@ export class TerrainTilesSystem {
 
         const url = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${apiKey}`;
         this.scene.tiles = new FrameCachedTilesRenderer(url, scene);
+        this.scene.tiles.setTerrainProbeSource(() => this.scene.planeRoot?.position ?? null);
         const isMobile = this.scene.isMobile === true;
         this.scene.tiles.errorTarget = isMobile ? TILES_ERROR_TARGET_MOBILE : TILES_ERROR_TARGET_DESKTOP;
         (this.scene.tiles as any).maxDepth = 100;
@@ -396,6 +404,8 @@ export class TerrainTilesSystem {
     setSpawnLoadingMode(active: boolean): void {
         const tiles: any = this.scene.tiles;
         if (!tiles) return;
+        this._flightLoadingModePending = false;
+        this._tileQueuesIdleFrames = 0;
         const target = active ? TILES_SPAWN_ERROR_THRESHOLD : TILES_FLIGHT_ERROR_THRESHOLD;
         if (tiles.errorThreshold === target) return;
         try {
@@ -403,6 +413,80 @@ export class TerrainTilesSystem {
             console.debug(`[3DTiles] Spawn loading mode ${active ? 'on' : 'off'} (errorThreshold=${target})`);
         } catch (err) {
             console.warn('[3DTiles] Failed to set errorThreshold:', err);
+        }
+    }
+
+    requestFlightLoadingMode(): void {
+        const tiles: any = this.scene.tiles;
+        if (!tiles) return;
+        this._tileQueuesIdleFrames = 0;
+        if (tiles.errorThreshold === TILES_FLIGHT_ERROR_THRESHOLD) {
+            this._flightLoadingModePending = false;
+            return;
+        }
+        this._flightLoadingModePending = true;
+        console.debug(`[3DTiles] Flight loading mode requested (errorThreshold=${tiles.errorThreshold}); it is raised in steps once the tile queues are idle so loaded terrain stays displayed`);
+    }
+
+    private areTileQueuesIdle(tiles: any): boolean {
+        const stats = tiles.stats;
+        const pending = (Number(stats?.queued) || 0) + (Number(stats?.downloading) || 0) + (Number(stats?.parsing) || 0);
+        if (pending > 0 || tiles.isLoading === true) return false;
+        return tiles.downloadQueue?.running !== true
+            && tiles.parseQueue?.running !== true
+            && tiles.processNodeQueue?.running !== true;
+    }
+
+    private raiseErrorThresholdStage(tiles: any): void {
+        const current = Number(tiles.errorThreshold);
+        const staged = current * TILES_ERROR_THRESHOLD_STAGE_FACTOR;
+        const next = Number.isFinite(staged) && staged > 0 && staged <= TILES_ERROR_THRESHOLD_STAGE_LIMIT
+            ? staged
+            : TILES_FLIGHT_ERROR_THRESHOLD;
+        try {
+            tiles.errorThreshold = next;
+        } catch (err) {
+            this._flightLoadingModePending = false;
+            console.warn('[3DTiles] Failed to raise errorThreshold; flight loading mode left unchanged:', err);
+            return;
+        }
+        console.debug(`[3DTiles] Tile queues idle: errorThreshold ${current} -> ${next}`);
+        if (next === TILES_FLIGHT_ERROR_THRESHOLD) {
+            this._flightLoadingModePending = false;
+            console.debug('[3DTiles] Flight loading mode active');
+        }
+    }
+
+    updateTerrainSettle(): void {
+        const runway = this.scene._runwayCollidersSystem;
+        const realignRequested = runway?.isRealignRequested?.() === true;
+        if (!this._flightLoadingModePending && !realignRequested) return;
+        const tiles: any = this.scene.tiles;
+        if (!tiles) {
+            this._flightLoadingModePending = false;
+            return;
+        }
+        this._tileQueuesIdleFrames = this.areTileQueuesIdle(tiles) ? this._tileQueuesIdleFrames + 1 : 0;
+        const settled = this._tileQueuesIdleFrames >= TILES_SETTLE_IDLE_FRAMES;
+        if (!settled && this._flightLoadingModePending) {
+            const nowMs = performance.now();
+            if (nowMs - this._lastSettleWaitLogMs >= TILES_SETTLE_WAIT_LOG_INTERVAL_MS) {
+                this._lastSettleWaitLogMs = nowMs;
+                const stats = tiles.stats;
+                console.debug(`[3DTiles] Waiting for tile queues before raising errorThreshold=${tiles.errorThreshold}: queued=${stats?.queued ?? '?'} downloading=${stats?.downloading ?? '?'} parsing=${stats?.parsing ?? '?'}`);
+            }
+        }
+        if (settled && this._flightLoadingModePending) {
+            if (tiles.errorThreshold === TILES_SPAWN_ERROR_THRESHOLD) {
+                try { runway?.requestRealign?.('terrain settled after spawn'); } catch (err) { console.warn('[3DTiles] Runway re-align request failed:', err); }
+            }
+            this.raiseErrorThresholdStage(tiles);
+            this._tileQueuesIdleFrames = 0;
+        }
+        try {
+            runway?.updateRealign?.(settled);
+        } catch (err) {
+            console.warn('[3DTiles] Runway re-align update failed:', err);
         }
     }
 

@@ -1,0 +1,16 @@
+---
+description: Do not test locally; the user tests on the deployed build
+alwaysApply: true
+---
+
+# No Local Testing
+
+Do not test locally.
+
+- Do not start local servers (`node server.js`, `scripts/dev.js`, static file servers).
+- Do not open the game in a local or headless browser.
+- Do not write or run local test harnesses or test scripts.
+
+Checks that stay allowed because they do not run the game: the type-check (`node node_modules/typescript/bin/tsc --noEmit -p .`), the build and `node --check` on server files.
+
+The user tests on the deployed build. End the task by listing what has to be checked there.

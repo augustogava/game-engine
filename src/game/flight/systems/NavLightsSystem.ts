@@ -23,6 +23,23 @@ import {
 const NAV_LIGHT_PRIORITY_LANDING = 50;
 const NAV_GLOW_BLUR_KERNEL_SIZE = 64;
 const NAV_LIGHT_PRIORITY_MINOR = 0;
+const NAV_STROBE_AFT_OFFSET_M = 0.5;
+const NAV_PORT_WING_LOCAL_X_SIGN = 1;
+const NAV_STARBOARD_WING_LOCAL_X_SIGN = -1;
+
+export interface NavLightWingTips {
+    left: BABYLON.Vector3;
+    right: BABYLON.Vector3;
+}
+
+export interface NavLightDims {
+    halfSpan: number;
+    height: number;
+    halfLen: number;
+    center?: BABYLON.Vector3;
+    wingY?: number;
+    wingTips?: NavLightWingTips | null;
+}
 
 export class NavLightsSystem {
     private readonly scene: any;
@@ -31,13 +48,26 @@ export class NavLightsSystem {
         this.scene = scene;
     }
 
+    private static resolveWingTips(tips: NavLightWingTips | null | undefined): NavLightWingTips | null {
+        if (!tips || !tips.left || !tips.right) return null;
+        const values = [tips.left.x, tips.left.y, tips.left.z, tips.right.x, tips.right.y, tips.right.z];
+        if (values.some((v) => !Number.isFinite(v))) return null;
+        if (tips.left.x <= tips.right.x) return null;
+        return tips;
+    }
+
     buildNavLights(
         scene: BABYLON.Scene,
         parent: BABYLON.TransformNode,
-        dims: { halfSpan: number; height: number; halfLen: number; center?: BABYLON.Vector3; wingY?: number },
+        dims: NavLightDims,
     ): void {
         if (this.scene.isMobile === true) {
             console.info('[NavLights] Skipped on mobile (lights/glow disabled for performance)');
+            return;
+        }
+        if (!dims || !Number.isFinite(dims.halfSpan) || !Number.isFinite(dims.height) || !Number.isFinite(dims.halfLen)) {
+            console.warn('[NavLights] Skipped: aircraft dimensions are missing or not numeric');
+            this.disposeNavLights();
             return;
         }
         const hs = dims.halfSpan * 0.97;
@@ -58,13 +88,18 @@ export class NavLightsSystem {
         const GREEN = new BABYLON.Color3(0.05, 1, 0.05);
         const WHITE = new BABYLON.Color3(1.0, 1.0, 0.95);
 
+        const wingTips = NavLightsSystem.resolveWingTips(dims.wingTips);
+        const portPos = wingTips ? wingTips.left.clone() : new BABYLON.Vector3(cx + NAV_PORT_WING_LOCAL_X_SIGN * hs, wingY, wingZ);
+        const stbdPos = wingTips ? wingTips.right.clone() : new BABYLON.Vector3(cx + NAV_STARBOARD_WING_LOCAL_X_SIGN * hs, wingY, wingZ);
+        console.debug(`[NavLights] Wing lights from ${wingTips ? 'model wingtips' : 'bounding-box estimate'}: port(red)=(${portPos.x.toFixed(2)},${portPos.y.toFixed(2)},${portPos.z.toFixed(2)}) starboard(green)=(${stbdPos.x.toFixed(2)},${stbdPos.y.toFixed(2)},${stbdPos.z.toFixed(2)})`);
+
         const defs: { name: string; color: BABYLON.Color3; pos: BABYLON.Vector3; kind: number; intensity: number; range: number; phase: number; spot?: { dirZ: number; angleRad: number; exponent: number } }[] = [
-            { name: 'navPort',     color: RED,   pos: new BABYLON.Vector3(cx - hs, wingY, wingZ), kind: NAV_LIGHT_KIND_STATIC,  intensity: 40, range: 200, phase: 0 },
-            { name: 'navStbd',     color: GREEN, pos: new BABYLON.Vector3(cx + hs, wingY, wingZ), kind: NAV_LIGHT_KIND_STATIC,  intensity: 40, range: 200, phase: 0 },
+            { name: 'navPort',     color: RED,   pos: portPos.clone(), kind: NAV_LIGHT_KIND_STATIC,  intensity: 40, range: 200, phase: 0 },
+            { name: 'navStbd',     color: GREEN, pos: stbdPos.clone(), kind: NAV_LIGHT_KIND_STATIC,  intensity: 40, range: 200, phase: 0 },
             { name: 'beaconTop',   color: RED,   pos: new BABYLON.Vector3(cx, topY, cz),          kind: NAV_LIGHT_KIND_BEACON,  intensity: 80, range: 300, phase: 0 },
             { name: 'beaconBot',   color: RED,   pos: new BABYLON.Vector3(cx, botY, cz),          kind: NAV_LIGHT_KIND_BEACON,  intensity: 80, range: 300, phase: 0.5 },
-            { name: 'strobePort',  color: WHITE, pos: new BABYLON.Vector3(cx - hs, wingY, wingZ - 0.5), kind: NAV_LIGHT_KIND_STROBE, intensity: 200, range: 600, phase: 0 },
-            { name: 'strobeStbd',  color: WHITE, pos: new BABYLON.Vector3(cx + hs, wingY, wingZ - 0.5), kind: NAV_LIGHT_KIND_STROBE, intensity: 200, range: 600, phase: 0.5 },
+            { name: 'strobePort',  color: WHITE, pos: new BABYLON.Vector3(portPos.x, portPos.y, portPos.z - NAV_STROBE_AFT_OFFSET_M), kind: NAV_LIGHT_KIND_STROBE, intensity: 200, range: 600, phase: 0 },
+            { name: 'strobeStbd',  color: WHITE, pos: new BABYLON.Vector3(stbdPos.x, stbdPos.y, stbdPos.z - NAV_STROBE_AFT_OFFSET_M), kind: NAV_LIGHT_KIND_STROBE, intensity: 200, range: 600, phase: 0.5 },
             { name: 'antiColTail', color: RED,   pos: new BABYLON.Vector3(cx, topY, tailZ),       kind: NAV_LIGHT_KIND_ANTICOL, intensity: 120, range: 400, phase: 0 },
             { name: 'landLeft',    color: WHITE, pos: new BABYLON.Vector3(cx - hs * 0.6, wingY * 0.5, noseZ), kind: NAV_LIGHT_KIND_LANDING, intensity: 600, range: 1500, phase: 0, spot: { dirZ: 1, angleRad: Math.PI / 5, exponent: 2 } },
             { name: 'landRight',   color: WHITE, pos: new BABYLON.Vector3(cx + hs * 0.6, wingY * 0.5, noseZ), kind: NAV_LIGHT_KIND_LANDING, intensity: 600, range: 1500, phase: 0, spot: { dirZ: 1, angleRad: Math.PI / 5, exponent: 2 } },

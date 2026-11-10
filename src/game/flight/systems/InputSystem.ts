@@ -382,7 +382,7 @@ export class InputSystem {
                 const norm = (a - dz) / Math.max(0.0001, 1 - dz);
                 return sign * Math.pow(Math.max(0, Math.min(1, norm)), gpExpo) * gpSens;
             };
-            const keyPitchRaw = (p(bind('pitchUp')) ? -1 : p(bind('pitchDown')) ? 1 : 0);
+            const keyPitchRaw = (p(bind('pitchDown')) ? -1 : p(bind('pitchUp')) ? 1 : 0);
             const keyRollRaw  = (p(bind('rollRight')) ? -1 : p(bind('rollLeft')) ? 1 : 0);
             const boundCodes = InputBindings.boundCodes();
             const altYawLeft = !boundCodes.includes(LEGACY_YAW_LEFT_CODE) && p(LEGACY_YAW_LEFT_CODE);

@@ -361,7 +361,7 @@ import { getSunPosition } from './flight/physics/SolarPosition.js';
 import * as NavMath from './flight/physics/NavMath.js';
 import { WaterSystem } from './flight/systems/WaterSystem.js';
 import { VegetationSystem } from './flight/systems/VegetationSystem.js';
-import { NavLightsSystem } from './flight/systems/NavLightsSystem.js';
+import { NavLightsSystem, type NavLightDims } from './flight/systems/NavLightsSystem.js';
 import { RunwayCollidersSystem } from './flight/systems/RunwayCollidersSystem.js';
 import { VolumetricCloudsSystem } from './flight/systems/VolumetricCloudsSystem.js';
 import { HighCloudsSystem } from './flight/systems/HighCloudsSystem.js';
@@ -1129,6 +1129,7 @@ export class FlightSceneSimple extends Scene3D {
         this._frameTick++;
         if (this._premium.tileFade) this._updateTileFade(dt);
         this._terrainTilesSystem.updateAdaptiveQuality();
+        this._terrainTilesSystem.updateTerrainSettle();
         this._airportOverlaysSystem.update(dt);
         if (this._premium.aerialFog && this.scene) this._applyAerialFogDensity(this.scene);
         if (this._premium.vegetation) this._updateVegetation();
@@ -2096,7 +2097,7 @@ export class FlightSceneSimple extends Scene3D {
     private _buildNavLights(
         scene: BABYLON.Scene,
         parent: BABYLON.TransformNode,
-        dims: { halfSpan: number; height: number; halfLen: number; center?: BABYLON.Vector3; wingY?: number },
+        dims: NavLightDims,
     ): void {
         this._navLightsSystem.buildNavLights(scene, parent, dims);
     }

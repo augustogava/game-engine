@@ -132,29 +132,32 @@ export async function fetchStoredUserMissionScore(userMissionId: number, token: 
     }
 }
 
-export async function submitUserMissionScore(userMissionId: number, score: number, token: string): Promise<boolean> {
+export async function submitUserMissionScore(userMissionId: number, score: number, token: string): Promise<number | null> {
     if (!Number.isInteger(userMissionId) || userMissionId <= 0 || !token) {
         console.warn(`[Ranking] Score not submitted: invalid user mission ${userMissionId} or missing session`);
-        return false;
+        return null;
     }
     if (!Number.isFinite(score) || score < 0 || score > SCORE_MAX) {
         console.warn(`[Ranking] Score not submitted: value ${score} is outside 0-${SCORE_MAX}`);
-        return false;
+        return null;
     }
+    const submitted = Math.round(score);
     try {
-        const result = await fetchJsonWithTimeout(`/api/user-missions/${userMissionId}`, {
+        const result = await fetchJsonWithTimeout(`/api/user-missions/${userMissionId}/score`, {
             method: 'PUT',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ score: Math.round(score) }),
+            body: JSON.stringify({ score: submitted }),
         }, SCORE_SUBMIT_TIMEOUT_MS);
         if (!result.ok) {
             console.warn(`[Ranking] Score submit failed for user mission ${userMissionId}: HTTP ${result.status}`);
-            return false;
+            return null;
         }
-        console.debug(`[Ranking] Score ${Math.round(score)} stored for user mission ${userMissionId}`);
-        return true;
+        const acceptedRaw = result.data?.result == null ? Number.NaN : Number(result.data.result);
+        const accepted = Number.isFinite(acceptedRaw) ? acceptedRaw : submitted;
+        console.debug(`[Ranking] Score accepted for user mission ${userMissionId}: submitted=${submitted} accepted=${accepted} verified=${result.data?.verified === true}`);
+        return accepted;
     } catch (err) {
         console.warn(`[Ranking] Score submit error for user mission ${userMissionId}:`, err);
-        return false;
+        return null;
     }
 }

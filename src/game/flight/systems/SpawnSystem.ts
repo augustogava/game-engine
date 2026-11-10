@@ -269,7 +269,7 @@ export class SpawnSystem {
     }
 
     onWorldReady(): void {
-        this.scene._terrainTilesSystem?.setSpawnLoadingMode?.(false);
+        this.scene._terrainTilesSystem?.requestFlightLoadingMode?.();
         if (this.scene.planeRoot && this.scene.terrainY !== TERRAIN_UNKNOWN_Y) {
             const cfg = this.scene.aircraftConfig;
             const gearHeight = cfg.gear_positions.length > 0
@@ -439,6 +439,9 @@ export class SpawnSystem {
             this.scene.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);
             this.scene.velocity.set(0, 0, 0);
             this.scene.thrust = 0;
+            this.scene.touchThrust = 0;
+            this.scene._inputSystem.refreshTouchThrottleVisual();
+            console.debug('[Spawn] Ground spawn: throttle and touch throttle slider reset to idle');
             this.scene.flapIndex = cfg.default_flap_index_ground;
             this.scene.currentFlapDeg = this.scene.FLAP_STEPS[this.scene.flapIndex] || 15;
         }

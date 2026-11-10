@@ -663,8 +663,8 @@ export class MissionScenarioSystem {
                 const storedScore = await fetchStoredUserMissionScore(userMissionId, token);
                 const beatsStored = isBetterScenarioResult(result, storedScore, order);
                 if (!beatsStored) console.debug(`[Scenario] Result ${result} does not beat the stored value ${storedScore}; keeping the stored value`);
-                const saved = beatsStored ? await this.submitResult(userMissionId, result, token) : true;
-                this.showResultToast(result, previousBest, order, saved);
+                const accepted = beatsStored ? await this.submitResult(userMissionId, result, token) : result;
+                this.showResultToast(accepted ?? result, previousBest, order, accepted != null);
             } else {
                 this.showToast(I18n.t('scenario.success'));
             }
@@ -675,16 +675,17 @@ export class MissionScenarioSystem {
         this.stop('completed');
     }
 
-    private async submitResult(userMissionId: number, result: number, token: string): Promise<boolean> {
+    private async submitResult(userMissionId: number, result: number, token: string): Promise<number | null> {
         for (let attempt = 1; attempt <= SCORE_SUBMIT_MAX_ATTEMPTS; attempt++) {
-            if (await submitUserMissionScore(userMissionId, result, token)) return true;
+            const accepted = await submitUserMissionScore(userMissionId, result, token);
+            if (accepted != null) return accepted;
             if (attempt < SCORE_SUBMIT_MAX_ATTEMPTS) {
                 console.debug(`[Scenario] Score submit attempt ${attempt}/${SCORE_SUBMIT_MAX_ATTEMPTS} failed; retrying in ${SCORE_SUBMIT_RETRY_MS}ms`);
                 await new Promise<void>((resolve) => { setTimeout(resolve, SCORE_SUBMIT_RETRY_MS); });
             }
         }
         console.warn(`[Scenario] Score for user mission ${userMissionId} could not be stored after ${SCORE_SUBMIT_MAX_ATTEMPTS} attempts`);
-        return false;
+        return null;
     }
 
     private showResultToast(result: number, previousBest: number | null, order: number, saved: boolean): void {

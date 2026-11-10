@@ -1,4 +1,5 @@
-export const KEY_BINDINGS_STORAGE_KEY = 'flight_keybindings_v1';
+export const KEY_BINDINGS_STORAGE_KEY = 'flight_keybindings_v2';
+const LEGACY_KEY_BINDINGS_STORAGE_KEY = 'flight_keybindings_v1';
 
 export type ActionId =
     | 'throttleUp'
@@ -50,8 +51,8 @@ export type KeyBindings = Record<ActionId, string>;
 export const DEFAULT_KEY_BINDINGS: KeyBindings = {
     throttleUp: 'KeyW',
     throttleDown: 'KeyS',
-    pitchUp: 'ArrowUp',
-    pitchDown: 'ArrowDown',
+    pitchUp: 'ArrowDown',
+    pitchDown: 'ArrowUp',
     rollLeft: 'ArrowLeft',
     rollRight: 'ArrowRight',
     yawLeft: 'KeyQ',
@@ -146,17 +147,29 @@ export class InputBindings {
     private static _listeners: Listener[] = [];
     private static _boundCodes: readonly string[] | null = null;
 
+    private static _merge(saved: Partial<KeyBindings> | null | undefined): KeyBindings {
+        const merged: KeyBindings = { ...DEFAULT_KEY_BINDINGS };
+        if (!saved || typeof saved !== 'object') return merged;
+        for (const k of Object.keys(DEFAULT_KEY_BINDINGS) as ActionId[]) {
+            const v = saved[k];
+            if (typeof v === 'string' && v.length > 0) merged[k] = v;
+        }
+        return merged;
+    }
+
     private static _load(): KeyBindings {
         try {
             const raw = localStorage.getItem(KEY_BINDINGS_STORAGE_KEY);
-            if (!raw) return { ...DEFAULT_KEY_BINDINGS };
-            const obj = JSON.parse(raw) as Partial<KeyBindings>;
-            const merged: KeyBindings = { ...DEFAULT_KEY_BINDINGS };
-            for (const k of Object.keys(DEFAULT_KEY_BINDINGS) as ActionId[]) {
-                const v = obj[k];
-                if (typeof v === 'string' && v.length > 0) merged[k] = v;
-            }
-            return merged;
+            if (raw) return InputBindings._merge(JSON.parse(raw) as Partial<KeyBindings>);
+            const legacyRaw = localStorage.getItem(LEGACY_KEY_BINDINGS_STORAGE_KEY);
+            if (!legacyRaw) return { ...DEFAULT_KEY_BINDINGS };
+            const legacy = JSON.parse(legacyRaw) as Partial<KeyBindings> | null;
+            const migrated = InputBindings._merge(legacy && typeof legacy === 'object'
+                ? { ...legacy, pitchUp: legacy.pitchDown, pitchDown: legacy.pitchUp }
+                : null);
+            localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(migrated));
+            console.debug('[InputBindings] Saved key bindings migrated: pitch up and pitch down now name the direction the nose moves');
+            return migrated;
         } catch (err) {
             console.warn('[InputBindings] load failed:', err);
             return { ...DEFAULT_KEY_BINDINGS };

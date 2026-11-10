@@ -25,6 +25,22 @@ const RUNWAY_TILE_ABOVE_MAX_M = 8;
 const RUNWAY_COLLIDER_FLOAT_TOLERANCE_M = 1.0;
 const RUNWAY_COLLIDER_HOLE_GUARD_M = 5;
 const RUNWAY_GROUND_SOURCE_LOG_INTERVAL_MS = 5000;
+const RUNWAY_REALIGN_MIN_DELTA_M = 0.15;
+const RUNWAY_REALIGN_MIN_INTERVAL_MS = 2000;
+const RUNWAY_REALIGN_MAX_GROUND_SPEED_MS = 3;
+const RUNWAY_FOOTPRINT_MARGIN_M = 30;
+const RUNWAY_PROBE_SOURCE_CENTER = 'center';
+const RUNWAY_PROBE_SOURCE_LE = 'LE';
+const RUNWAY_PROBE_SOURCE_HE = 'HE';
+const RUNWAY_PROBE_SOURCE_SCENE_TERRAIN = 'scene.terrainY';
+const DEG_TO_RAD = Math.PI / 180;
+
+interface RunwayProbePoint {
+    source: string;
+    x: number;
+    z: number;
+    toCenterM: number;
+}
 
 export class RunwayCollidersSystem {
     private readonly scene: any;
@@ -32,6 +48,8 @@ export class RunwayCollidersSystem {
     private _dbFallbackColliders: BABYLON.Mesh[] = [];
     private _lastPreferTile: boolean | null = null;
     private _lastGroundSourceLogMs = 0;
+    private _realignRequested = false;
+    private _lastRealignMs = 0;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -59,9 +77,124 @@ export class RunwayCollidersSystem {
             console.log(`[Runway] loaded ${count} collider(s) from ${airports.length} airport(s) near (${centerLat.toFixed(4)}, ${centerLon.toFixed(4)})`);
             this._applyDbFallbackOffset();
             try { this.scene._rebuildRunwayLights?.(); } catch (err) { console.warn('[Runway] runway lights rebuild failed:', err); }
+            if (count > 0) this.requestRealign('colliders built');
         } catch (err) {
             console.warn('[Runway] failed to load nearby runways:', err);
         }
+    }
+
+    requestRealign(reason: string): void {
+        if (!this._realignRequested) console.debug(`[Runway] Re-align to terrain requested (${reason})`);
+        this._realignRequested = true;
+    }
+
+    isRealignRequested(): boolean {
+        return this._realignRequested;
+    }
+
+    updateRealign(terrainSettled: boolean): void {
+        if (!this._realignRequested || terrainSettled !== true) return;
+        const nowMs = performance.now();
+        if (nowMs - this._lastRealignMs < RUNWAY_REALIGN_MIN_INTERVAL_MS) return;
+        this._lastRealignMs = nowMs;
+        this._realignRequested = this.realignCollidersToTiles();
+    }
+
+    private realignCollidersToTiles(): boolean {
+        const colliders: BABYLON.Mesh[] = Array.isArray(this.scene._runwayColliders) ? this.scene._runwayColliders : [];
+        if (colliders.length === 0) return false;
+        let moved = 0;
+        let unchanged = 0;
+        let deferred = 0;
+        let unprobed = 0;
+        for (const mesh of colliders) {
+            if (!mesh || mesh.isDisposed()) continue;
+            const points: RunwayProbePoint[] | undefined = mesh.metadata?.probePoints;
+            if (!Array.isArray(points) || points.length === 0) {
+                unprobed++;
+                continue;
+            }
+            if (this._isAircraftRollingOn(mesh)) {
+                deferred++;
+                continue;
+            }
+            const probe = this._probeNearestFirst(points);
+            if (!probe) {
+                unprobed++;
+                continue;
+            }
+            const centerY = probe.tileY + RUNWAY_COLLIDER_Y_BIAS_M + probe.point.toCenterM;
+            const delta = centerY - mesh.position.y;
+            if (!Number.isFinite(delta) || Math.abs(delta) < RUNWAY_REALIGN_MIN_DELTA_M) {
+                unchanged++;
+                continue;
+            }
+            const carriesParkedAircraft = this._isAircraftParkedOn(mesh);
+            try {
+                mesh.unfreezeWorldMatrix();
+                mesh.position.y = centerY;
+                mesh.computeWorldMatrix(true);
+                mesh.freezeWorldMatrix();
+                moved++;
+                console.debug(`[Runway] ${mesh.name}: re-aligned to refined terrain via ${probe.point.source} (delta=${delta.toFixed(2)}m, y=${centerY.toFixed(2)}m)`);
+            } catch (err) {
+                console.warn(`[Runway] Failed to re-align ${mesh.name}:`, err);
+                continue;
+            }
+            if (carriesParkedAircraft) this._shiftParkedAircraft(delta);
+        }
+        if (moved > 0) {
+            try { this.scene._rebuildRunwayLights?.(); } catch (err) { console.warn('[Runway] runway lights rebuild after re-align failed:', err); }
+        }
+        console.debug(`[Runway] Re-align pass: moved=${moved} unchanged=${unchanged} deferred=${deferred} unprobed=${unprobed}`);
+        return deferred > 0;
+    }
+
+    private _probeNearestFirst(points: RunwayProbePoint[]): { point: RunwayProbePoint; tileY: number } | null {
+        const plane = this.scene.planeRoot?.position;
+        const ordered = points.slice();
+        if (plane && Number.isFinite(plane.x) && Number.isFinite(plane.z)) {
+            ordered.sort((a, b) => Math.hypot(a.x - plane.x, a.z - plane.z) - Math.hypot(b.x - plane.x, b.z - plane.z));
+        }
+        for (const point of ordered) {
+            const tileY = this._probeTilesYAt(point.x, point.z);
+            if (tileY != null && Number.isFinite(tileY)) return { point, tileY };
+        }
+        return null;
+    }
+
+    private _isAircraftParkedOn(mesh: BABYLON.Mesh): boolean {
+        if (this.scene.isOnGround !== true || !this.scene.planeRoot) return false;
+        return this.scene._cachedTerrainHit?.pickedMesh === mesh;
+    }
+
+    private _shiftParkedAircraft(deltaM: number): void {
+        const root = this.scene.planeRoot;
+        if (!root || !Number.isFinite(deltaM)) return;
+        root.position.y += deltaM;
+        for (const key of ['terrainY', '_lastValidTerrainY', '_lastKnownSpawnTerrainY']) {
+            const value = this.scene[key];
+            if (typeof value === 'number' && Number.isFinite(value) && value !== TERRAIN_UNKNOWN_Y) this.scene[key] = value + deltaM;
+        }
+        console.debug(`[Runway] Parked aircraft moved ${deltaM.toFixed(2)}m with its runway collider (pos.y=${root.position.y.toFixed(2)}m)`);
+    }
+
+    private _isAircraftRollingOn(mesh: BABYLON.Mesh): boolean {
+        const plane = this.scene.planeRoot?.position;
+        if (!plane || this.scene.isOnGround !== true) return false;
+        const velocity = this.scene.velocity;
+        const groundSpeedMs = velocity ? Math.hypot(Number(velocity.x) || 0, Number(velocity.z) || 0) : 0;
+        if (groundSpeedMs <= RUNWAY_REALIGN_MAX_GROUND_SPEED_MS) return false;
+        const lengthM = Number(mesh.metadata?.lengthM);
+        const widthM = Number(mesh.metadata?.widthM);
+        const headingRad = Number(mesh.metadata?.headingDeg) * DEG_TO_RAD;
+        if (!Number.isFinite(lengthM) || !Number.isFinite(widthM) || !Number.isFinite(headingRad)) return false;
+        const dx = plane.x - mesh.position.x;
+        const dz = plane.z - mesh.position.z;
+        const along = dx * Math.sin(headingRad) - dz * Math.cos(headingRad);
+        const lateral = dx * Math.cos(headingRad) + dz * Math.sin(headingRad);
+        return Math.abs(along) <= lengthM / 2 + RUNWAY_FOOTPRINT_MARGIN_M
+            && Math.abs(lateral) <= widthM / 2 + RUNWAY_FOOTPRINT_MARGIN_M;
     }
 
     buildRunwayCollider(r: any, icao: string): boolean {
@@ -97,36 +230,42 @@ export class RunwayCollidersSystem {
         const sceneX = eastM;
         const sceneZ = -northM;
         const dbSceneY = (elevationFt * FT_TO_M - this.scene.refAlt) + RUNWAY_COLLIDER_Y_BIAS_M;
-        let tileY = this._probeTilesYAt(sceneX, sceneZ);
-        let probeSource = 'center';
-        if (tileY == null) {
-            const leEastM = (Number(r.le_longitude_deg) - this.scene.originLon) * METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
-            const leNorthM = (Number(r.le_latitude_deg) - this.scene.originLat) * METERS_PER_DEG_LAT;
-            tileY = this._probeTilesYAt(leEastM, -leNorthM);
-            if (tileY != null) probeSource = 'LE';
+        const lonScaleM = METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
+        const probePoints: RunwayProbePoint[] = [
+            { source: RUNWAY_PROBE_SOURCE_CENTER, x: sceneX, z: sceneZ, toCenterM: 0 },
+            {
+                source: RUNWAY_PROBE_SOURCE_LE,
+                x: (Number(r.le_longitude_deg) - this.scene.originLon) * lonScaleM,
+                z: -(Number(r.le_latitude_deg) - this.scene.originLat) * METERS_PER_DEG_LAT,
+                toCenterM: elevationDiffM / 2,
+            },
+        ];
+        if (hasHE) {
+            probePoints.push({
+                source: RUNWAY_PROBE_SOURCE_HE,
+                x: (Number(r.he_longitude_deg) - this.scene.originLon) * lonScaleM,
+                z: -(Number(r.he_latitude_deg) - this.scene.originLat) * METERS_PER_DEG_LAT,
+                toCenterM: -elevationDiffM / 2,
+            });
         }
-        if (tileY == null && hasHE) {
-            const heEastM = (Number(r.he_longitude_deg) - this.scene.originLon) * METERS_PER_DEG_LAT * Math.max(cosOriginLat, 0.01);
-            const heNorthM = (Number(r.he_latitude_deg) - this.scene.originLat) * METERS_PER_DEG_LAT;
-            tileY = this._probeTilesYAt(heEastM, -heNorthM);
-            if (tileY != null) probeSource = 'HE';
-        }
+        const probe = this._probeNearestFirst(probePoints);
+        let tileY: number | null = probe ? probe.tileY : null;
+        let probeSource = probe ? probe.point.source : RUNWAY_PROBE_SOURCE_CENTER;
+        let probeToCenterM = probe ? probe.point.toCenterM : 0;
         if (tileY == null
             && Number.isFinite(this.scene.terrainY)
             && this.scene.terrainY !== TERRAIN_UNKNOWN_Y
             && Math.hypot(sceneX, sceneZ) < RUNWAY_NEAR_ORIGIN_FALLBACK_M) {
             tileY = this.scene.terrainY - RUNWAY_COLLIDER_Y_BIAS_M;
-            probeSource = 'scene.terrainY';
+            probeSource = RUNWAY_PROBE_SOURCE_SCENE_TERRAIN;
+            probeToCenterM = 0;
         }
         let sceneY: number;
         let usedDbElevation = false;
         if (tileY != null && Number.isFinite(tileY)) {
-            const probeToCenterM = probeSource === 'LE' ? elevationDiffM / 2
-                : probeSource === 'HE' ? -elevationDiffM / 2
-                : 0;
             sceneY = tileY + RUNWAY_COLLIDER_Y_BIAS_M + probeToCenterM;
             const delta = sceneY - dbSceneY;
-            if (probeSource !== 'scene.terrainY' && Number.isFinite(delta)) this._tileAlignDeltasM.push(delta);
+            if (probeSource !== RUNWAY_PROBE_SOURCE_SCENE_TERRAIN && Number.isFinite(delta)) this._tileAlignDeltasM.push(delta);
             if (Math.abs(delta) >= RUNWAY_TILE_ALIGN_LOG_DELTA_M) {
                 console.log(`[Runway] ${icao} ${r.le_ident || ''}/${r.he_ident || ''}: aligned to tile terrain y=${sceneY.toFixed(2)}m via ${probeSource} (db-derived=${dbSceneY.toFixed(2)}m, delta=${delta.toFixed(2)}m)`);
             }
@@ -159,6 +298,7 @@ export class RunwayCollidersSystem {
             widthM,
             headingDeg: Number(r.le_heading_deg_true),
             elevationDiffM,
+            probePoints,
         };
         mesh.renderingGroupId = RUNWAY_RENDERING_GROUP_ID;
 
@@ -219,6 +359,7 @@ export class RunwayCollidersSystem {
         }
         this.scene._runwayColliders = [];
         this.scene._runwayCollidersLoaded = false;
+        this._realignRequested = false;
     }
 
     private _probeTilesYAt(x: number, z: number): number | null {

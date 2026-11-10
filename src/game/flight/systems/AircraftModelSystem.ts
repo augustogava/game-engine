@@ -21,6 +21,10 @@ const AIRCRAFT_TEXTURE_ANISOTROPY = 8;
 const GLB_LOAD_TIMEOUT_MS = 12000;
 const SPOILER_ANIM_NAME_RE = /spoiler|speed[_\s-]?brake/i;
 const SPOILER_ANIM_FRAME_EPSILON = 0.002;
+const WING_TIP_BAND_SPAN_FRACTION = 0.03;
+const WING_TIP_BAND_MIN_M = 0.05;
+const WING_TIP_MIN_HALF_SPAN_M = 0.5;
+const VERTEX_POSITION_STRIDE = 3;
 
 export class AircraftModelSystem {
     private readonly scene: any;
@@ -276,6 +280,7 @@ export class AircraftModelSystem {
                     worldBB.max.y - planePos.y,
                     worldBB.max.z - planePos.z,
                 );
+                const wingTips = this.scene.isMobile === true ? null : this.findWingTips(meshes, planePos);
 
                 if (savedPlaneQuat) {
                     this.scene.planeRoot.rotationQuaternion = savedPlaneQuat;
@@ -319,6 +324,7 @@ export class AircraftModelSystem {
                     halfLen: bbD / 2,
                     center: localCenter,
                     wingY: detectedWingY,
+                    wingTips,
                 });
                 this.detectControlSurfaceNodes(meshes);
                 this.scene._buildContrails(scene, bbW / 2);
@@ -387,6 +393,69 @@ export class AircraftModelSystem {
             console.warn(`[FlightSimple] GLB load watchdog fired after ${GLB_LOAD_TIMEOUT_MS}ms (${cfg.code}) — ImportMesh did not complete; showing placeholder mesh while load continues.`);
             this.buildFallbackMesh(scene);
         }, GLB_LOAD_TIMEOUT_MS);
+    }
+
+    private findWingTips(
+        meshes: BABYLON.AbstractMesh[],
+        origin: BABYLON.Vector3,
+    ): { left: BABYLON.Vector3; right: BABYLON.Vector3 } | null {
+        if (!Array.isArray(meshes) || meshes.length === 0 || !origin) return null;
+        try {
+            const sources: { positions: ArrayLike<number>; m: ArrayLike<number> }[] = [];
+            let maxX = -Infinity;
+            let minX = Infinity;
+            for (const mesh of meshes) {
+                if (!mesh || typeof mesh.getVerticesData !== 'function') continue;
+                const positions = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+                if (!positions || positions.length < VERTEX_POSITION_STRIDE) continue;
+                const m = mesh.getWorldMatrix().m;
+                sources.push({ positions, m });
+                for (let i = 0; i + 2 < positions.length; i += VERTEX_POSITION_STRIDE) {
+                    const x = positions[i] * m[0] + positions[i + 1] * m[4] + positions[i + 2] * m[8] + m[12];
+                    if (x > maxX) maxX = x;
+                    if (x < minX) minX = x;
+                }
+            }
+            if (sources.length === 0 || !Number.isFinite(maxX) || !Number.isFinite(minX)) {
+                console.debug('[NavLights] Wingtip detection found no vertex data; using the bounding-box estimate');
+                return null;
+            }
+            const halfSpan = (maxX - minX) / 2;
+            if (halfSpan < WING_TIP_MIN_HALF_SPAN_M) {
+                console.debug(`[NavLights] Wingtip detection skipped: half span ${halfSpan.toFixed(2)}m is below ${WING_TIP_MIN_HALF_SPAN_M}m`);
+                return null;
+            }
+            const band = Math.max(WING_TIP_BAND_MIN_M, halfSpan * WING_TIP_BAND_SPAN_FRACTION);
+            const leftLimit = maxX - band;
+            const rightLimit = minX + band;
+            let leftX = 0; let leftY = 0; let leftZ = 0; let leftCount = 0;
+            let rightX = 0; let rightY = 0; let rightZ = 0; let rightCount = 0;
+            for (const source of sources) {
+                const positions = source.positions;
+                const m = source.m;
+                for (let i = 0; i + 2 < positions.length; i += VERTEX_POSITION_STRIDE) {
+                    const px = positions[i];
+                    const py = positions[i + 1];
+                    const pz = positions[i + 2];
+                    const x = px * m[0] + py * m[4] + pz * m[8] + m[12];
+                    const onLeftTip = x >= leftLimit;
+                    const onRightTip = x <= rightLimit;
+                    if (!onLeftTip && !onRightTip) continue;
+                    const y = px * m[1] + py * m[5] + pz * m[9] + m[13];
+                    const z = px * m[2] + py * m[6] + pz * m[10] + m[14];
+                    if (onLeftTip) { leftX += x; leftY += y; leftZ += z; leftCount++; }
+                    if (onRightTip) { rightX += x; rightY += y; rightZ += z; rightCount++; }
+                }
+            }
+            if (leftCount === 0 || rightCount === 0) return null;
+            const left = new BABYLON.Vector3(leftX / leftCount - origin.x, leftY / leftCount - origin.y, leftZ / leftCount - origin.z);
+            const right = new BABYLON.Vector3(rightX / rightCount - origin.x, rightY / rightCount - origin.y, rightZ / rightCount - origin.z);
+            console.debug(`[NavLights] Wingtips detected from ${sources.length} mesh(es): left=(${left.x.toFixed(2)},${left.y.toFixed(2)},${left.z.toFixed(2)}) right=(${right.x.toFixed(2)},${right.y.toFixed(2)},${right.z.toFixed(2)}) band=${band.toFixed(2)}m`);
+            return { left, right };
+        } catch (err) {
+            console.warn('[NavLights] Wingtip detection failed; using the bounding-box estimate:', err);
+            return null;
+        }
     }
 
     private disposeCurrentModelMeshes(): void {

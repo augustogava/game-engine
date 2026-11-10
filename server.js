@@ -601,6 +601,254 @@ function toMySqlUtcDatetime(date) {
     return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
+const MISSION_SCENARIO_AEROBATICS = 9;
+const MISSION_SCENARIO_GATE_TIME_TRIAL = 10;
+const MISSION_SCENARIO_HOLD_SLOT = 11;
+const AEROBATIC_MANEUVERS_SUPPORTED = [1, 2, 3];
+const HOLD_SLOT_MODE_REFUEL = 3;
+const ACTIVE_USER_MISSION_STATUSES = ['started', 'in_progress'];
+const SCORE_MAX_VALUE = 2147483647;
+const SCORE_MANEUVER_MAX_POINTS = 100;
+const SCORE_HOLD_DEFAULT_S = 30;
+const SCORE_ROUNDING_TOLERANCE_MS = 5;
+const SCORE_LIVE_SESSION_MAX_AGE_MS = 15000;
+const MS_PER_SECOND = 1000;
+const FEET_TO_METERS = 0.3048;
+const RANKED_METERS_PER_DEG_LAT = 111320;
+const RANKED_GATE_RADIUS_DEFAULT_M = 120;
+const RANKED_GATE_RADIUS_MIN_M = 30;
+const RANKED_GATE_RADIUS_MAX_M = 600;
+const RANKED_GATE_RADIUS_MARGIN_FACTOR = 1.5;
+const RANKED_GATE_RADIUS_MARGIN_M = 50;
+const RANKED_GATE_MIN_COUNT = 2;
+const RANKED_DIRECTION_MIN_LENGTH_M = 0.001;
+const RANKED_RUN_FINISHED = -1;
+const RANKED_RUN_TIME_TOLERANCE_MS = 2000;
+const RANKED_RUN_MAX_AGE_MS = 120000;
+const RANKED_RUN_JUMP_MIN_M = 5000;
+const RANKED_RUN_MAX_SPEED_MS = 900;
+const RANKED_RUN_PAUSE_MAX_SPEED_MS = 10;
+const RANKED_RUN_PAUSE_MIN_GAP_MS = 500;
+const RANKED_COURSE_CACHE_TTL_MS = 5 * 60 * 1000;
+const RANKED_COURSE_CACHE_MAX_ENTRIES = 200;
+const rankedCourseCache = new Map();
+const rankedRuns = new Map();
+
+function rankedHorizontalDirection(fromLat, fromLon, toLat, toLon) {
+    const cosLat = Math.max(NEARBY_MIN_COS_LAT, Math.cos(toLat * Math.PI / 180));
+    const east = (toLon - fromLon) * cosLat * RANKED_METERS_PER_DEG_LAT;
+    const north = (toLat - fromLat) * RANKED_METERS_PER_DEG_LAT;
+    const length = Math.hypot(east, north);
+    if (length < RANKED_DIRECTION_MIN_LENGTH_M) return null;
+    return { east: east / length, north: north / length };
+}
+
+function rankedGateNormal(gates, index, approach) {
+    const gate = gates[index];
+    const incomingFrom = index > 0 ? gates[index - 1] : approach;
+    const incoming = incomingFrom ? rankedHorizontalDirection(incomingFrom.lat, incomingFrom.lon, gate.lat, gate.lon) : null;
+    const next = index < gates.length - 1 ? gates[index + 1] : null;
+    const outgoing = next ? rankedHorizontalDirection(gate.lat, gate.lon, next.lat, next.lon) : null;
+    if (!incoming && !outgoing) return { east: 0, north: 1 };
+    if (!incoming) return outgoing;
+    if (!outgoing) return incoming;
+    const east = incoming.east + outgoing.east;
+    const north = incoming.north + outgoing.north;
+    const length = Math.hypot(east, north);
+    if (length < RANKED_DIRECTION_MIN_LENGTH_M) return incoming;
+    return { east: east / length, north: north / length };
+}
+
+function buildRankedGateCourse(mission, config, waypointRows) {
+    const gates = [];
+    for (const wp of waypointRows) {
+        const lat = Number(wp.latitude);
+        const lon = Number(wp.longitude);
+        if (wp.latitude == null || wp.longitude == null || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const altFt = wp.altitude_ft == null ? Number.NaN : Number(wp.altitude_ft);
+        gates.push({
+            lat,
+            lon,
+            altM: Number.isFinite(altFt) ? altFt * FEET_TO_METERS : null,
+            cosLat: Math.max(NEARBY_MIN_COS_LAT, Math.cos(lat * Math.PI / 180)),
+            normalEast: 0,
+            normalNorth: 1,
+        });
+    }
+    if (gates.length < RANKED_GATE_MIN_COUNT) return null;
+    const spawnLat = mission.spawn_latitude == null ? Number.NaN : Number(mission.spawn_latitude);
+    const spawnLon = mission.spawn_longitude == null ? Number.NaN : Number(mission.spawn_longitude);
+    const approach = Number.isFinite(spawnLat) && Number.isFinite(spawnLon) ? { lat: spawnLat, lon: spawnLon } : null;
+    for (let i = 0; i < gates.length; i++) {
+        const normal = rankedGateNormal(gates, i, approach);
+        gates[i].normalEast = normal.east;
+        gates[i].normalNorth = normal.north;
+    }
+    const requestedRadius = Number(config.gateRadiusM);
+    const radiusM = Number.isFinite(requestedRadius) && requestedRadius > 0
+        ? Math.max(RANKED_GATE_RADIUS_MIN_M, Math.min(RANKED_GATE_RADIUS_MAX_M, requestedRadius))
+        : RANKED_GATE_RADIUS_DEFAULT_M;
+    const verifyRadiusM = radiusM * RANKED_GATE_RADIUS_MARGIN_FACTOR + RANKED_GATE_RADIUS_MARGIN_M;
+    let shortestPathM = 0;
+    for (let i = 1; i < gates.length; i++) {
+        const from = gates[i - 1];
+        const to = gates[i];
+        const legM = Math.hypot(
+            (to.lon - from.lon) * to.cosLat * RANKED_METERS_PER_DEG_LAT,
+            (to.lat - from.lat) * RANKED_METERS_PER_DEG_LAT,
+            from.altM != null && to.altM != null ? to.altM - from.altM : 0);
+        shortestPathM += Math.max(0, legM - 2 * verifyRadiusM);
+    }
+    return {
+        gates,
+        radiusM,
+        verifyRadiusM,
+        minTimeMs: Math.floor(shortestPathM / RANKED_RUN_MAX_SPEED_MS * MS_PER_SECOND),
+        hasApproach: approach != null,
+    };
+}
+
+async function loadRankedGateCourse(missionId) {
+    if (!dbPool) return null;
+    const configHolder = [{ id: missionId }];
+    await attachMissionScenarioConfigs(configHolder);
+    const config = configHolder[0].scenario_config;
+    if (!config || Number(config.scenario) !== MISSION_SCENARIO_GATE_TIME_TRIAL) return null;
+    const [missionRows] = await dbPool.execute(
+        `SELECT spawn_latitude, spawn_longitude FROM missions WHERE id = ? LIMIT 1`, [missionId]);
+    if (!missionRows.length) return null;
+    const waypointsByMission = await loadWaypointsForMissionIds([missionId]);
+    const course = buildRankedGateCourse(missionRows[0], config, waypointsByMission.get(missionId) || []);
+    if (!course) {
+        console.warn(`[Ranking] Mission ${missionId} is a gate time trial without at least ${RANKED_GATE_MIN_COUNT} valid gates; runs cannot be verified`);
+        return null;
+    }
+    if (!course.hasApproach) {
+        console.warn(`[Ranking] Mission ${missionId} has no spawn coordinates; the first gate is checked along the outbound direction`);
+    }
+    return course;
+}
+
+function getRankedGateCourse(missionId) {
+    const nowMs = Date.now();
+    let cached = rankedCourseCache.get(missionId);
+    if (!cached) {
+        if (rankedCourseCache.size >= RANKED_COURSE_CACHE_MAX_ENTRIES) {
+            console.warn(`[Ranking] Gate course cache reached ${rankedCourseCache.size} entries; clearing it`);
+            rankedCourseCache.clear();
+        }
+        cached = { course: null, loadedAtMs: 0, loading: false };
+        rankedCourseCache.set(missionId, cached);
+    }
+    if (!cached.loading && (cached.loadedAtMs === 0 || nowMs - cached.loadedAtMs > RANKED_COURSE_CACHE_TTL_MS)) {
+        cached.loading = true;
+        loadRankedGateCourse(missionId)
+            .then((course) => {
+                cached.course = course;
+                if (course) console.debug(`[Ranking] Gate course ready: mission=${missionId} gates=${course.gates.length} radiusM=${course.radiusM} verifyRadiusM=${course.verifyRadiusM}`);
+            })
+            .catch((err) => console.error(`[Ranking] Gate course load failed for mission ${missionId}:`, err.message))
+            .finally(() => {
+                cached.loadedAtMs = Date.now();
+                cached.loading = false;
+            });
+    }
+    return cached.course;
+}
+
+function rankedGateCrossing(gate, radiusM, prev, cur) {
+    const metersPerDegLon = gate.cosLat * RANKED_METERS_PER_DEG_LAT;
+    const prevEast = (prev.lon - gate.lon) * metersPerDegLon;
+    const prevNorth = (prev.lat - gate.lat) * RANKED_METERS_PER_DEG_LAT;
+    const curEast = (cur.lon - gate.lon) * metersPerDegLon;
+    const curNorth = (cur.lat - gate.lat) * RANKED_METERS_PER_DEG_LAT;
+    const before = prevEast * gate.normalEast + prevNorth * gate.normalNorth;
+    const after = curEast * gate.normalEast + curNorth * gate.normalNorth;
+    if (!(before < 0 && after >= 0)) return -1;
+    const fraction = before / (before - after);
+    const crossEast = prevEast + (curEast - prevEast) * fraction;
+    const crossNorth = prevNorth + (curNorth - prevNorth) * fraction;
+    const crossUp = gate.altM == null ? 0 : prev.alt + (cur.alt - prev.alt) * fraction - gate.altM;
+    return Math.hypot(crossEast, crossNorth, crossUp) <= radiusM ? fraction : -1;
+}
+
+function advanceRankedRun(run, course, prev, cur, segmentMs, countFrom, nowMs) {
+    const gates = course.gates;
+    let crossed = 0;
+    let from = countFrom;
+    while (run.nextIndex > 0 && run.nextIndex < gates.length) {
+        const fraction = rankedGateCrossing(gates[run.nextIndex], course.verifyRadiusM, prev, cur);
+        if (fraction < from) break;
+        crossed++;
+        if (run.nextIndex === gates.length - 1) {
+            run.finish = { timeMs: run.elapsedMs + (fraction - countFrom) * segmentMs, atMs: nowMs, userMissionId: null };
+            run.nextIndex = 0;
+            run.elapsedMs = 0;
+            return RANKED_RUN_FINISHED;
+        }
+        from = fraction;
+        run.nextIndex++;
+    }
+    return crossed;
+}
+
+function trackRankedGateRun(userId, state, nowMs) {
+    const missionId = state.missionId;
+    if (!missionId) {
+        rankedRuns.delete(userId);
+        return;
+    }
+    const course = getRankedGateCourse(missionId);
+    if (!course) return;
+    let run = rankedRuns.get(userId);
+    if (!run || run.missionId !== missionId) {
+        run = { missionId, nextIndex: 0, elapsedMs: 0, finish: null, prev: null };
+        rankedRuns.set(userId, run);
+    }
+    const prev = run.prev;
+    const cur = { lat: state.lat, lon: state.lon, alt: state.alt, ms: nowMs };
+    run.prev = cur;
+    if (!prev) return;
+    const segmentMs = cur.ms - prev.ms;
+    if (segmentMs <= 0) return;
+    const cosLat = Math.max(NEARBY_MIN_COS_LAT, Math.cos(cur.lat * Math.PI / 180));
+    const movedM = Math.hypot(
+        (cur.lon - prev.lon) * cosLat * RANKED_METERS_PER_DEG_LAT,
+        (cur.lat - prev.lat) * RANKED_METERS_PER_DEG_LAT,
+        cur.alt - prev.alt);
+    if (movedM > RANKED_RUN_JUMP_MIN_M) {
+        if (run.nextIndex > 0) console.log(`[Ranking] Run reset: user=${userId} mission=${missionId} position jump of ${movedM.toFixed(0)} m`);
+        run.nextIndex = 0;
+        run.elapsedMs = 0;
+        return;
+    }
+    let countFrom = 0;
+    let outcome = run.nextIndex > 0 ? advanceRankedRun(run, course, prev, cur, segmentMs, countFrom, nowMs) : 0;
+    if (outcome === 0) {
+        const startFraction = rankedGateCrossing(course.gates[0], course.verifyRadiusM, prev, cur);
+        if (startFraction >= 0) {
+            run.nextIndex = 1;
+            run.elapsedMs = 0;
+            countFrom = startFraction;
+            console.debug(`[Ranking] Run started: user=${userId} mission=${missionId}`);
+            outcome = advanceRankedRun(run, course, prev, cur, segmentMs, countFrom, nowMs);
+        }
+    }
+    if (outcome === RANKED_RUN_FINISHED) {
+        console.log(`[Ranking] Run observed: user=${userId} mission=${missionId} timeMs=${Math.round(run.finish.timeMs)} gates=${course.gates.length}`);
+        return;
+    }
+    const paused = segmentMs > RANKED_RUN_PAUSE_MIN_GAP_MS
+        && movedM * MS_PER_SECOND / segmentMs < RANKED_RUN_PAUSE_MAX_SPEED_MS;
+    if (run.nextIndex > 0 && !paused) run.elapsedMs += (1 - countFrom) * segmentMs;
+}
+
+function minimumHoldSlotMs(slot) {
+    if (!slot || typeof slot !== 'object' || Number(slot.mode) === HOLD_SLOT_MODE_REFUEL) return 0;
+    const seconds = Number(slot.holdSeconds);
+    return (Number.isFinite(seconds) && seconds > 0 ? seconds : SCORE_HOLD_DEFAULT_S) * MS_PER_SECOND;
+}
+
 // ── Proxy to main API ────────────────────────────────────────────────────────
 const PROXY_FETCH_TIMEOUT_MS = 15000;
 const PROXY_FORWARDED_RESPONSE_HEADERS = ['ratelimit', 'ratelimit-limit', 'ratelimit-remaining', 'ratelimit-reset', 'ratelimit-policy', 'retry-after'];
@@ -1902,6 +2150,88 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/score'))) {
+        const user = authenticateRequest(req);
+        if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
+        if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
+        const userMissionId = Number(routeParams.id);
+        if (!Number.isInteger(userMissionId) || userMissionId <= 0) return jsonResponse(res, 400, { error: 'Invalid user mission id' });
+        const body = await parseBody(req);
+        const score = Number(body?.score);
+        if (!body || body.score == null || !Number.isInteger(score) || score < 0 || score > SCORE_MAX_VALUE) {
+            return jsonResponse(res, 400, { error: 'score must be a whole number' });
+        }
+        try {
+            const [rows] = await dbPool.execute(
+                `SELECT id, mission_id, status FROM user_missions WHERE id = ? AND user_id = ? LIMIT 1`,
+                [userMissionId, user.id]);
+            if (!rows.length) return jsonResponse(res, 404, { error: 'User mission not found' });
+            if (!ACTIVE_USER_MISSION_STATUSES.includes(rows[0].status)) return jsonResponse(res, 409, { error: 'Mission is not in progress' });
+            const missionId = Number(rows[0].mission_id);
+            const configHolder = [{ id: missionId }];
+            await attachMissionScenarioConfigs(configHolder);
+            const config = configHolder[0].scenario_config;
+            const scenario = Number(config?.scenario);
+            const lowerWins = MISSION_SCENARIOS_RANKED_LOWER_WINS.includes(scenario);
+            if (!lowerWins && !MISSION_SCENARIOS_RANKED_HIGHER_WINS.includes(scenario)) {
+                return jsonResponse(res, 400, { error: 'Mission has no ranked result' });
+            }
+            const session = players.get(user.id);
+            const sessionAgeMs = Date.now() - (Number(session?.lastUpdateRecvMs) || 0);
+            if (!session || Number(session.state?.missionId) !== missionId || sessionAgeMs > SCORE_LIVE_SESSION_MAX_AGE_MS) {
+                console.warn(`[Ranking] Score rejected: user=${user.id} userMission=${userMissionId} has no live flight on mission ${missionId}`);
+                return jsonResponse(res, 409, { error: 'No live flight on this mission' });
+            }
+            let accepted = score;
+            let verified = false;
+            if (scenario === MISSION_SCENARIO_AEROBATICS) {
+                const maneuverCount = Array.isArray(config.maneuvers)
+                    ? config.maneuvers.filter((m) => AEROBATIC_MANEUVERS_SUPPORTED.includes(Number(m))).length
+                    : 0;
+                if (maneuverCount === 0 || score > maneuverCount * SCORE_MANEUVER_MAX_POINTS) {
+                    console.warn(`[Ranking] Score rejected: user=${user.id} userMission=${userMissionId} points=${score} exceed the maximum for ${maneuverCount} maneuver(s)`);
+                    return jsonResponse(res, 400, { error: 'Score is outside the possible range' });
+                }
+            } else if (scenario === MISSION_SCENARIO_HOLD_SLOT) {
+                const minimumMs = minimumHoldSlotMs(config.slot);
+                if (score + SCORE_ROUNDING_TOLERANCE_MS < minimumMs) {
+                    console.warn(`[Ranking] Score rejected: user=${user.id} userMission=${userMissionId} timeMs=${score} is below the minimum ${minimumMs}`);
+                    return jsonResponse(res, 400, { error: 'Score is outside the possible range' });
+                }
+            } else {
+                const run = rankedRuns.get(user.id);
+                const finish = run && run.missionId === missionId ? run.finish : null;
+                const finishUsable = !!finish
+                    && Date.now() - finish.atMs <= RANKED_RUN_MAX_AGE_MS
+                    && (finish.userMissionId == null || finish.userMissionId === userMissionId);
+                if (!finishUsable) {
+                    console.warn(`[Ranking] Score rejected: user=${user.id} userMission=${userMissionId} mission=${missionId} has no run observed by the server (submitted ${score})`);
+                    return jsonResponse(res, 409, { error: 'Run was not observed by the server' });
+                }
+                accepted = Math.max(score, Math.round(finish.timeMs) - RANKED_RUN_TIME_TOLERANCE_MS);
+                const minimumMs = Number(getRankedGateCourse(missionId)?.minTimeMs) || 0;
+                if (accepted < minimumMs) {
+                    console.warn(`[Ranking] Score rejected: user=${user.id} userMission=${userMissionId} timeMs=${accepted} is below the fastest possible ${minimumMs} for mission ${missionId}`);
+                    return jsonResponse(res, 400, { error: 'Score is outside the possible range' });
+                }
+                finish.userMissionId = userMissionId;
+                verified = true;
+            }
+            const comparator = lowerWins ? '>' : '<';
+            const [updateResult] = await dbPool.execute(
+                `UPDATE user_missions SET score = ?
+                  WHERE id = ? AND user_id = ? AND status IN ('started','in_progress') AND (score IS NULL OR score ${comparator} ?)`,
+                [accepted, userMissionId, user.id, accepted]);
+            const [storedRows] = await dbPool.execute(`SELECT score FROM user_missions WHERE id = ? LIMIT 1`, [userMissionId]);
+            const storedScore = storedRows.length && storedRows[0].score != null ? Number(storedRows[0].score) : accepted;
+            console.log(`[Ranking] Score processed: user=${user.id} userMission=${userMissionId} mission=${missionId} scenario=${scenario} submitted=${score} accepted=${accepted} stored=${storedScore} updated=${updateResult.affectedRows > 0} verified=${verified}`);
+            return jsonResponse(res, 200, { message: 'Score processed', score: storedScore, result: accepted, verified });
+        } catch (err) {
+            console.error('[API] PUT /api/user-missions/:id/score error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id/complete'))) {
         return proxyToMainApi(`/api/user-missions/${routeParams.id}/complete`, req, res);
     }
@@ -1911,14 +2241,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'PUT' && (routeParams = matchRoute(req.method, urlPath, '/api/user-missions/:id'))) {
+        const body = await parseBody(req);
+        if (body && body.score !== undefined) {
+            delete body.score;
+            console.warn(`[Ranking] Score ignored on PUT /api/user-missions/${routeParams.id}: results are only accepted by the score route`);
+        }
         if (MAIN_API_URL) {
-            return proxyToMainApi(`/api/user-missions/${routeParams.id}`, req, res, await parseBody(req));
+            return proxyToMainApi(`/api/user-missions/${routeParams.id}`, req, res, body);
         }
         const user = authenticateRequest(req);
         if (!user) return jsonResponse(res, 401, { error: 'Authentication required' });
         if (!dbPool) return jsonResponse(res, 503, { error: 'Database unavailable' });
         const { id } = routeParams;
-        const body = await parseBody(req);
         if (!body) return jsonResponse(res, 400, { error: 'Request body required' });
         try {
             const [rows] = await dbPool.execute(
@@ -1926,7 +2260,6 @@ const server = http.createServer(async (req, res) => {
             if (!rows.length) return jsonResponse(res, 404, { error: 'User mission not found' });
             const sets = []; const vals = [];
             if (body.status) { sets.push('status = ?'); vals.push(body.status); }
-            if (body.score !== undefined) { sets.push('score = ?'); vals.push(body.score); }
             if (body.notes !== undefined) { sets.push('notes = ?'); vals.push(body.notes); }
             if (body.status === 'completed') { sets.push('completed_at = NOW()'); }
             if (!sets.length) return jsonResponse(res, 400, { error: 'No fields to update' });
@@ -2871,12 +3204,21 @@ wss.on('connection', (ws) => {
                         heading: ((clampNumber(msg.heading, -720, 720, 0) % 360) + 360) % 360,
                         pitch: clampNumber(msg.pitch, -90, 90, 0),
                         roll: clampNumber(msg.roll, -180, 180, 0),
+                        onGround: msg.onGround === true,
                         smoke: Math.round(clampNumber(msg.smoke, 0, WS_MAX_SMOKE_COLOR, 0)),
                         aircraft: msg.aircraft || null,
                         aircraftId: Number.isInteger(Number(msg.aircraftId)) && Number(msg.aircraftId) > 0 ? Number(msg.aircraftId) : null,
                         aircraftCode: msg.aircraftCode || null,
                         missionId: Number.isInteger(Number(msg.missionId)) && Number(msg.missionId) > 0 ? Number(msg.missionId) : null,
                     };
+                    try {
+                        trackRankedGateRun(playerId, entry.state, recvNowMs);
+                    } catch (err) {
+                        if (!entry.lastRankedTrackErrorMs || recvNowMs - entry.lastRankedTrackErrorMs > WS_REJECTION_LOG_INTERVAL_MS) {
+                            entry.lastRankedTrackErrorMs = recvNowMs;
+                            console.error(`[Ranking] Run tracking error for user ${playerId}:`, err.message);
+                        }
+                    }
 
                     let stepNm = 0;
                     if (entry.prevLat !== null && entry.prevLon !== null) {
@@ -3233,6 +3575,7 @@ wss.on('connection', (ws) => {
         }
 
         players.delete(playerId);
+        rankedRuns.delete(playerId);
         const onlineCount = players.size;
         broadcast({ type: 'playerLeft', userId: playerId, onlineCount });
         console.log(`[WS] Player left: ${playerId} (online: ${onlineCount})`);
