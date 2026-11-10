@@ -3,6 +3,7 @@ import { FlightSceneSimple } from './game/FlightSceneSimple.js';
 import { PreflightController, applyPreflightToUrlAndScene, applyPreflightSpawnForMission, ensureHomeBaseSpawnConfig } from './preflight/PreflightController.js';
 import { FLIGHT_PLAN_STATUS_CANCELLED } from './game/flight/constants/flightPlanConstants.js';
 import { END_REASON_TAB_CLOSED } from './game/flight/constants/flightEndConstants.js';
+import { AIR_START_URL_PARAM } from './game/flight/constants/terrainConstants.js';
 
 const WEBSITE_LOGIN_URL = 'https://simflightpro.com/login';
 const FLIGHT_HOURS_URL = 'https://simflightpro.com/flight-time';
@@ -28,6 +29,10 @@ const spawnAirportId = params.get('airportId');
 const spawnRunwayId = params.get('runwayId');
 const spawnRunwayEnd = params.get('end') === 'he' ? 'he' : 'le';
 const spawnSimTime = params.get('simTime');
+const spawnAirStartParam = params.get(AIR_START_URL_PARAM);
+const spawnAirStartFt = spawnAirStartParam != null && spawnAirStartParam !== '' && Number.isFinite(Number(spawnAirStartParam)) && Number(spawnAirStartParam) > 0
+    ? Number(spawnAirStartParam)
+    : null;
 
 if (params.has('token')) {
     params.delete('token');
@@ -223,7 +228,7 @@ function ensureGameCore(): GameCore3D {
     return game;
 }
 
-async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end: 'le' | 'he', simTimeIso: string | null): Promise<void> {
+async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end: 'le' | 'he', simTimeIso: string | null, airStartFt: number | null): Promise<void> {
     const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
     try {
         loadingStatus.textContent = 'Carregando aeroporto...';
@@ -270,12 +275,14 @@ async function applyAirportRunwaySpawn(airportId: string, runwayId: string, end:
         }
         const elevationFt = Number.isFinite(elevFt) ? elevFt : 0;
         scene.setFreeFlightGroundSpawn(lat, lon, hdg, elevationFt);
+        if (airStartFt != null) scene.setFreeFlightAirStart(airStartFt);
         if (simTimeIso) scene.setSimTimeOffsetFromIso(simTimeIso);
         const cleanParams = new URLSearchParams(window.location.search);
         cleanParams.delete('airportId');
         cleanParams.delete('runwayId');
         cleanParams.delete('end');
         cleanParams.delete('simTime');
+        cleanParams.delete(AIR_START_URL_PARAM);
         const cleanQs = cleanParams.toString();
         history.replaceState(null, '', window.location.pathname + (cleanQs ? `?${cleanQs}` : ''));
         console.log(`[flight-main] Free-flight ground spawn airport=${airportId} runway=${runwayId} end=${end} lat=${lat} lon=${lon} hdg=${hdg} elevFt=${elevationFt}`);
@@ -559,7 +566,7 @@ async function startFlightGame(): Promise<void> {
             if (spawnSimTime) scene.setSimTimeOffsetFromIso(spawnSimTime);
             console.log('[flight-main] Resuming saved free flight');
         } else if (spawnAirportId && spawnRunwayId) {
-            await applyAirportRunwaySpawn(spawnAirportId, spawnRunwayId, spawnRunwayEnd, spawnSimTime);
+            await applyAirportRunwaySpawn(spawnAirportId, spawnRunwayId, spawnRunwayEnd, spawnSimTime, spawnAirStartFt);
         } else {
             await ensureHomeBaseSpawnConfig(token);
             applyPreflightToUrlAndScene(scene);

@@ -22,6 +22,7 @@ import {
     COLOR_GRADE_CONTRAST_DAY,
     COLOR_GRADE_CONTRAST_NIGHT,
     MOTION_BLUR_MAX_STRENGTH,
+    MOTION_BLUR_IDLE_STRENGTH,
     MOTION_BLUR_SAMPLES,
     MOTION_BLUR_TRIGGER_G,
     MOTION_BLUR_RELEASE_G,
@@ -118,6 +119,8 @@ export class VfxSystem {
     private readonly _flareRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), BABYLON.Vector3.Up(), 1);
     private _sharedParticleTexture: BABYLON.Texture | null = null;
     private _motionBlurActivatedMs = 0;
+    private _motionBlurActive = false;
+    private _motionBlurInitFailed = false;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
@@ -686,28 +689,39 @@ export class VfxSystem {
 
     ensureMotionBlur(active: boolean): void {
         if (!this.scene.scene || !this.scene.camera) return;
-        if (active) {
-            if (this.scene._motionBlurPP) return;
+        if (!this.scene._motionBlurPP) {
+            if (this._motionBlurInitFailed) return;
             try {
                 const cam = this.scene.camera;
                 const mb = new BABYLON.MotionBlurPostProcess('motionBlur', this.scene.scene, 1.0, cam);
-                mb.motionStrength = MOTION_BLUR_MAX_STRENGTH;
+                mb.motionStrength = MOTION_BLUR_IDLE_STRENGTH;
                 mb.motionBlurSamples = MOTION_BLUR_SAMPLES;
                 this.scene._motionBlurPP = mb;
+                console.debug('[MotionBlur] Post-process created once; strength is switched instead of rebuilding the pipeline');
             } catch (err) {
+                this._motionBlurInitFailed = true;
                 console.warn('[MotionBlur] init failed:', err);
+                return;
             }
-            return;
         }
-        if (this.scene._motionBlurPP) {
-            try { this.scene._motionBlurPP.dispose(this.scene.camera); } catch (_) { /* ignore */ }
-            this.scene._motionBlurPP = null;
+        this.scene._motionBlurPP.motionStrength = active ? MOTION_BLUR_MAX_STRENGTH : MOTION_BLUR_IDLE_STRENGTH;
+        this._motionBlurActive = active;
+    }
+
+    disposeMotionBlur(): void {
+        this._motionBlurActive = false;
+        if (!this.scene._motionBlurPP) return;
+        try {
+            this.scene._motionBlurPP.dispose(this.scene.camera);
+        } catch (err) {
+            console.warn('[MotionBlur] dispose failed:', err);
         }
+        this.scene._motionBlurPP = null;
     }
 
     updateMotionBlurAndDof(): void {
         if (this.scene.isMobile) {
-            if (this.scene._motionBlurPP) this.ensureMotionBlur(false);
+            if (this.scene._motionBlurPP) this.disposeMotionBlur();
             if (this.scene._dofEnabledInCockpit && this.scene._pipeline) {
                 try { this.scene._pipeline.depthOfFieldEnabled = false; } catch (_) { /* ignore */ }
                 this.scene._dofEnabledInCockpit = false;
@@ -715,7 +729,7 @@ export class VfxSystem {
             return;
         }
         const gAbs = Math.abs(Number.isFinite(this.scene._gForce) ? this.scene._gForce : 1);
-        const mbActive = !!this.scene._motionBlurPP;
+        const mbActive = this._motionBlurActive;
         const nowMs = performance.now();
         let wantMb = mbActive;
         if (!mbActive && gAbs > MOTION_BLUR_TRIGGER_G) {
@@ -725,7 +739,7 @@ export class VfxSystem {
             wantMb = false;
         }
         if (wantMb !== mbActive) console.debug(`[MotionBlur] ${wantMb ? 'enabled' : 'disabled'} (g=${gAbs.toFixed(2)})`);
-        this.ensureMotionBlur(wantMb);
+        if (wantMb !== mbActive || !this.scene._motionBlurPP) this.ensureMotionBlur(wantMb);
         if (!this.scene._pipeline) return;
         const wantDof = this.scene._cameraMode === CAMERA_MODE_COCKPIT;
         if (wantDof === this.scene._dofEnabledInCockpit) return;

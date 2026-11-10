@@ -188,7 +188,7 @@ export class AtcSystem {
         if (!me) return;
         for (const [, remote] of players) {
             const pos = remote?.root?.position;
-            if (!pos) continue;
+            if (!pos || remote.isLocalNpc === true) continue;
             if (typeof remote.root.isEnabled === 'function' && !remote.root.isEnabled(false)) continue;
             const dxz = Math.hypot(pos.x - me.x, pos.z - me.z);
             const dy = Math.abs(pos.y - me.y);

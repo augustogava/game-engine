@@ -49,6 +49,8 @@ import {
     GEAR_INSTANT_TRANSITION_MS,
     SPAWN_SNAP_FRAMES,
     AIRBORNE_MISSION_MIN_OFFSET_M,
+    AIR_START_MIN_FT,
+    AIR_START_MAX_FT,
     TERRAIN_RAY_HEIGHT_M,
     TERRAIN_RAY_LENGTH_M,
     SPAWN_TERRAIN_RAY_HEIGHT_M,
@@ -398,6 +400,8 @@ import { FlightSchoolCoachSystem } from './flight/systems/FlightSchoolCoachSyste
 import { MissionScenarioSystem } from './flight/systems/MissionScenarioSystem.js';
 import { WeeklyChallengesSystem } from './flight/systems/WeeklyChallengesSystem.js';
 import { PlatformSystem } from './flight/systems/PlatformSystem.js';
+import { GateCourseSystem } from './flight/systems/GateCourseSystem.js';
+import { NpcAircraftSystem } from './flight/systems/NpcAircraftSystem.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 const PAUSED_UI_UPDATE_INTERVAL_FRAMES = 6;
@@ -447,6 +451,8 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _missionScenarioSystem = new MissionScenarioSystem(this);
     /** @internal */ private readonly _weeklyChallengesSystem = new WeeklyChallengesSystem(this);
     /** @internal */ private readonly _platformSystem = new PlatformSystem(this);
+    /** @internal */ private readonly _gateCourseSystem = new GateCourseSystem(this);
+    /** @internal */ private readonly _npcAircraftSystem = new NpcAircraftSystem(this);
     /** @internal */ _weeklyBtnEl: HTMLElement | null = null;
     /** @internal */ _weeklyPanelEl: HTMLElement | null = null;
     /** @internal */ _pointsMultiplier: number | null = null;
@@ -820,6 +826,7 @@ export class FlightSceneSimple extends Scene3D {
     private _pendingMissionHdg: number | null = null;
     private _pendingMissionAltM: number | null = null;
     private _pendingMissionAirborne = false;
+    private _pendingAirStartAglM: number | null = null;
     private _pendingApproachSpawn = false;
     private _activeTrainingOrder: number | null = null;
     private _missionAwaitingLanding = false;
@@ -1066,7 +1073,7 @@ export class FlightSceneSimple extends Scene3D {
             if (this.planeRoot) {
                 const modelStillLoading = this._gearUpAnimGroups.length === 0 && this._gearDownAnimGroups.length === 0;
                 this._spawnPlane();
-                if (this._pendingMissionAirborne && !this._pendingApproachSpawn && modelStillLoading) {
+                if ((this._pendingMissionAirborne || this._spawnSystem.isAirStart()) && !this._pendingApproachSpawn && modelStillLoading) {
                     this._pendingAirborneGearRetract = true;
                 }
                 console.log(`[FlightSimple] Initial spawn re-applied with active config (${cfg.code}) after async fetch`);
@@ -1588,6 +1595,8 @@ export class FlightSceneSimple extends Scene3D {
         try { this._missionScenarioSystem.dispose(); } catch (err) { console.warn('[FlightSimple] MissionScenarioSystem dispose failed:', err); }
         try { this._chatSystem.dispose(); } catch (err) { console.warn('[FlightSimple] ChatSystem dispose failed:', err); }
         try { this._platformSystem.dispose(); } catch (err) { console.warn('[FlightSimple] PlatformSystem dispose failed:', err); }
+        try { this._gateCourseSystem.dispose(); } catch (err) { console.warn('[FlightSimple] GateCourseSystem dispose failed:', err); }
+        try { this._npcAircraftSystem.dispose(); } catch (err) { console.warn('[FlightSimple] NpcAircraftSystem dispose failed:', err); }
         try { this._photoModeSystem.dispose(); } catch (err) { console.warn('[FlightSimple] PhotoModeSystem dispose failed:', err); }
         try { this._hudSystem.disposeResizeListener(); } catch (err) { console.warn('[FlightSimple] HudSystem resize listener dispose failed:', err); }
         document.getElementById('aircraft-btn')?.remove();
@@ -1640,7 +1649,7 @@ export class FlightSceneSimple extends Scene3D {
         this._disposeHeatHaze();
         try { this._vfxSystem.disposeSharedResources(); } catch (err) { console.warn('[FlightSimple] VfxSystem shared resources dispose failed:', err); }
         this._disposeWater();
-        this._ensureMotionBlur(false);
+        this._vfxSystem.disposeMotionBlur();
         if (this._pipeline) { this._pipeline.dispose(); this._pipeline = null; }
         if (this._ssao) { this._ssao.dispose(); this._ssao = null; }
         if (this._lensFlareSystem) { this._lensFlareSystem.dispose(); this._lensFlareSystem = null; }
@@ -1716,6 +1725,20 @@ export class FlightSceneSimple extends Scene3D {
         this._pendingFlightPlanHdg = Number.isFinite(hdg) ? hdg : 0;
         this._pendingFlightPlanAltM = (Number.isFinite(elevationFt) ? elevationFt : 0) * 0.3048;
         console.debug(`[Flight] Free-flight ground spawn lat=${lat} lon=${lon} hdg=${this._pendingFlightPlanHdg} elevFt=${elevationFt}`);
+    }
+
+    setFreeFlightAirStart(airStartFt: number): boolean {
+        if (!Number.isFinite(airStartFt) || airStartFt < AIR_START_MIN_FT || airStartFt > AIR_START_MAX_FT) {
+            console.warn(`[Flight] Ignoring air start: height ${airStartFt} ft is outside ${AIR_START_MIN_FT}-${AIR_START_MAX_FT} ft`);
+            return false;
+        }
+        if (this._pendingFlightPlanLat == null || this._pendingFlightPlanLon == null) {
+            console.warn('[Flight] Ignoring air start: no runway spawn is set');
+            return false;
+        }
+        this._pendingAirStartAglM = airStartFt * FT_TO_M;
+        console.debug(`[Flight] Air start requested ${airStartFt} ft above the runway (${this._pendingAirStartAglM.toFixed(0)} m)`);
+        return true;
     }
 
     initMultiplayer(token: string, onAuthFailure?: () => void, onNoFlightHours?: () => void): void {
@@ -2169,10 +2192,6 @@ export class FlightSceneSimple extends Scene3D {
 
     private _updateColorGrading(elevationDeg: number): void {
         this._vfxSystem.updateColorGrading(elevationDeg);
-    }
-
-    private _ensureMotionBlur(active: boolean): void {
-        this._vfxSystem.ensureMotionBlur(active);
     }
 
     private _updateMotionBlurAndDof(): void {

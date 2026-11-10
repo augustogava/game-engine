@@ -5,6 +5,7 @@ import {
     GROUND_Y,
     SPAWN_SNAP_FRAMES,
     AIRBORNE_MISSION_MIN_OFFSET_M,
+    AIRBORNE_FREE_MIN_OFFSET_M,
     TERRAIN_UNKNOWN_Y,
     WORLD_READY_PROBE_HEIGHT_M,
     WORLD_READY_PROBE_LENGTH_M,
@@ -199,6 +200,22 @@ export class SpawnSystem {
         }
     }
 
+    isAirStart(): boolean {
+        const airStartM = this.scene._pendingAirStartAglM;
+        return this.scene.spawnAirborne === true
+            && this.scene._pendingMissionAirborne !== true
+            && typeof airStartM === 'number'
+            && Number.isFinite(airStartM)
+            && airStartM > 0;
+    }
+
+    resolveAirborneAltOffsetM(): number {
+        if (this.isAirStart()) return this.scene._pendingAirStartAglM;
+        const minOffset = this.scene._pendingMissionAirborne === true ? AIRBORNE_MISSION_MIN_OFFSET_M : AIRBORNE_FREE_MIN_OFFSET_M;
+        const cfgOffset = Number(this.scene.aircraftConfig?.spawn_alt_offset_m);
+        return Math.max(minOffset, Number.isFinite(cfgOffset) ? cfgOffset : 0);
+    }
+
     private resolveSpawnHeadingDeg(): number {
         const missionHdg = this.scene._pendingMissionHdg;
         if (this.scene._pendingMissionLat != null && missionHdg != null && Number.isFinite(missionHdg)) {
@@ -259,9 +276,7 @@ export class SpawnSystem {
                 ? Math.abs(Math.min(...cfg.gear_positions.map((g: { y: number }) => g.y)))
                 : 0;
             if (this.scene.spawnAirborne) {
-                const isAirborneMission = this.scene._pendingMissionAirborne === true;
-                const minOffset = isAirborneMission ? AIRBORNE_MISSION_MIN_OFFSET_M : 100;
-                const altOffset = Math.max(minOffset, cfg.spawn_alt_offset_m);
+                const altOffset = this.resolveAirborneAltOffsetM();
                 const minSafeY = this.scene.terrainY + altOffset;
                 const resumeY = this._pendingResume && Number.isFinite(this.scene.refAlt)
                     ? this._pendingResume.altMslM - this.scene.refAlt
@@ -397,17 +412,19 @@ export class SpawnSystem {
         const useAirborne = this.scene.spawnAirborne && !forceGround;
         if (useAirborne) {
             const isAirborneMission = this.scene._pendingMissionAirborne === true;
-            const minOffset = isAirborneMission ? AIRBORNE_MISSION_MIN_OFFSET_M : 100;
-            const altOffset = Math.max(minOffset, cfg.spawn_alt_offset_m);
+            const isAirStart = this.isAirStart();
+            const altOffset = this.resolveAirborneAltOffsetM();
             this.scene.planeRoot.position.set(0, GROUND_Y + altOffset, 0);
             this.scene.thrust = cfg.spawn_airborne_thrust || 0.7;
+            this.scene.touchThrust = this.scene.thrust;
+            this.scene._inputSystem.refreshTouchThrottleVisual();
             this.scene.flapIndex = cfg.default_flap_index_air;
             this.scene.currentFlapDeg = this.scene.FLAP_STEPS[this.scene.flapIndex] || 0;
             const rotMat = new BABYLON.Matrix();
             BABYLON.Matrix.FromQuaternionToRef(this.scene.planeRoot.rotationQuaternion!, rotMat);
             const fwd = BABYLON.Vector3.TransformNormal(new BABYLON.Vector3(0, 0, 1), rotMat);
             this.scene.velocity = fwd.scale(cfg.spawn_airborne_speed_ms || 80);
-            if (isAirborneMission) {
+            if (isAirborneMission || isAirStart) {
                 this.scene._spawnSnapFramesLeft = 0;
                 if (this.scene._gearUpAnimGroups.length > 0 && this.scene._pendingApproachSpawn !== true) {
                     this.scene.gearState = GEAR_STATE_UP;
@@ -416,7 +433,7 @@ export class SpawnSystem {
                 this.scene._pendingAirborneGearRetract = false;
                 const missionAlt = this.scene._pendingMissionAltM ?? 0;
                 const gearLabel = this.scene._gearUpAnimGroups.length > 0 ? 'UP' : 'DOWN(fixed)';
-                console.debug(`[FlightSimple] Airborne mission respawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.scene.refAlt.toFixed(1)}m posY=${this.scene.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapDisabled gear=${gearLabel} terrainY=${this.scene.terrainY.toFixed(1)}m`);
+                console.debug(`[FlightSimple] ${isAirStart ? 'Air start' : 'Airborne mission'} respawn: mission_alt=${missionAlt.toFixed(1)}m refAlt=${this.scene.refAlt.toFixed(1)}m posY=${this.scene.planeRoot.position.y.toFixed(1)}m altOffset=${altOffset.toFixed(1)}m snapDisabled gear=${gearLabel} terrainY=${this.scene.terrainY.toFixed(1)}m`);
             }
         } else {
             this.scene.planeRoot.position.set(0, GROUND_Y + gearHeight, 0);

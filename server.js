@@ -519,6 +519,88 @@ async function loadWaypointsForMissionIds(missionIds) {
     return byMission;
 }
 
+const MISSION_SCENARIO_COLUMN = 'scenario_config';
+const MISSION_SCENARIO_COLUMN_RECHECK_MS = 5 * 60 * 1000;
+const MISSION_SCENARIOS_RANKED_HIGHER_WINS = [9];
+const MISSION_SCENARIOS_RANKED_LOWER_WINS = [10, 11];
+const MISSION_RANKING_ORDER_HIGHER_WINS = 0;
+const MISSION_RANKING_ORDER_LOWER_WINS = 1;
+const MISSION_RANKING_PERIOD_ALL_TIME = 0;
+const MISSION_RANKING_PERIOD_THIS_WEEK = 1;
+const MISSION_RANKING_LIMIT = 20;
+const MISSION_RANKING_DAYS_PER_WEEK = 7;
+let missionScenarioColumnAvailable = false;
+let missionScenarioColumnCheckedAtMs = 0;
+
+async function hasMissionScenarioColumn() {
+    if (missionScenarioColumnAvailable) return true;
+    if (!dbPool) return false;
+    const nowMs = Date.now();
+    if (missionScenarioColumnCheckedAtMs > 0 && nowMs - missionScenarioColumnCheckedAtMs < MISSION_SCENARIO_COLUMN_RECHECK_MS) return false;
+    missionScenarioColumnCheckedAtMs = nowMs;
+    try {
+        const [rows] = await dbPool.execute(
+            `SELECT 1 FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = ? LIMIT 1`,
+            [MISSION_SCENARIO_COLUMN]);
+        missionScenarioColumnAvailable = rows.length > 0;
+        if (missionScenarioColumnAvailable) console.log('[Missions] missions.scenario_config column detected');
+        else console.warn('[Missions] missions.scenario_config column not found yet; scenario settings use the game defaults');
+    } catch (err) {
+        console.warn('[Missions] scenario_config column check failed:', err.message);
+    }
+    return missionScenarioColumnAvailable;
+}
+
+function parseMissionScenarioConfig(raw) {
+    if (raw == null) return null;
+    let value = raw;
+    try {
+        if (Buffer.isBuffer(raw)) value = JSON.parse(raw.toString('utf8'));
+        else if (typeof raw === 'string') value = JSON.parse(raw);
+    } catch (err) {
+        console.warn('[Missions] Invalid scenario_config JSON ignored:', err.message);
+        return null;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    if (!Number.isInteger(Number(value.scenario))) return null;
+    return value;
+}
+
+async function attachMissionScenarioConfigs(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+    for (const r of rows) r.scenario_config = null;
+    if (!(await hasMissionScenarioColumn())) return;
+    const ids = rows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
+    if (!ids.length) return;
+    try {
+        const placeholders = ids.map(() => '?').join(',');
+        const [configRows] = await dbPool.execute(
+            `SELECT id, scenario_config FROM missions WHERE id IN (${placeholders})`, ids);
+        const byId = new Map(configRows.map((c) => [Number(c.id), parseMissionScenarioConfig(c.scenario_config)]));
+        for (const r of rows) r.scenario_config = byId.get(Number(r.id)) ?? null;
+    } catch (err) {
+        console.warn('[Missions] scenario_config load failed:', err.message);
+    }
+}
+
+function parseRankingEnum(raw, allowed) {
+    if (raw === undefined || raw === null || raw === '') return null;
+    const value = Number(raw);
+    return Number.isInteger(value) && allowed.includes(value) ? value : Number.NaN;
+}
+
+function startOfIsoWeekUtc(date) {
+    const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const daysSinceMonday = (start.getUTCDay() + MISSION_RANKING_DAYS_PER_WEEK - 1) % MISSION_RANKING_DAYS_PER_WEEK;
+    start.setUTCDate(start.getUTCDate() - daysSinceMonday);
+    return start;
+}
+
+function toMySqlUtcDatetime(date) {
+    return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 // ── Proxy to main API ────────────────────────────────────────────────────────
 const PROXY_FETCH_TIMEOUT_MS = 15000;
 const PROXY_FORWARDED_RESPONSE_HEADERS = ['ratelimit', 'ratelimit-limit', 'ratelimit-remaining', 'ratelimit-reset', 'ratelimit-policy', 'retry-after'];
@@ -1560,6 +1642,7 @@ const server = http.createServer(async (req, res) => {
             const missionIds = rows.map(r => r.id);
             const wps = await loadWaypointsForMissionIds(missionIds);
             for (const r of rows) r.waypoints = wps.get(r.id) || [];
+            await attachMissionScenarioConfigs(rows);
             stripMissionImagesFromList(rows);
             return jsonResponse(res, 200, { data: rows, total, page, limit });
         } catch (err) {
@@ -1625,6 +1708,81 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/missions/:id/leaderboard'))) {
+        const missionId = Number(routeParams.id);
+        if (!Number.isInteger(missionId) || missionId <= 0) return jsonResponse(res, 400, { error: 'Invalid mission id' });
+        const orderParam = parseRankingEnum(query.order, [MISSION_RANKING_ORDER_HIGHER_WINS, MISSION_RANKING_ORDER_LOWER_WINS]);
+        const periodParam = parseRankingEnum(query.period, [MISSION_RANKING_PERIOD_ALL_TIME, MISSION_RANKING_PERIOD_THIS_WEEK]);
+        if (Number.isNaN(orderParam)) return jsonResponse(res, 400, { error: 'order must be 0 (higher wins) or 1 (lower wins)' });
+        if (Number.isNaN(periodParam)) return jsonResponse(res, 400, { error: 'period must be 0 (all time) or 1 (this week)' });
+        const period = periodParam ?? MISSION_RANKING_PERIOD_ALL_TIME;
+        if (!dbPool) {
+            return jsonResponse(res, 200, { mission_id: missionId, ranked: false, order: orderParam ?? MISSION_RANKING_ORDER_HIGHER_WINS, period, data: [], me: null });
+        }
+        try {
+            const [missionRows] = await dbPool.execute(`SELECT id FROM missions WHERE id = ? AND is_active = 1 LIMIT 1`, [missionId]);
+            if (!missionRows.length) return jsonResponse(res, 404, { error: 'Mission not found' });
+            const configHolder = [{ id: missionId }];
+            await attachMissionScenarioConfigs(configHolder);
+            const scenario = Number(configHolder[0].scenario_config?.scenario);
+            const scenarioLowerWins = MISSION_SCENARIOS_RANKED_LOWER_WINS.includes(scenario);
+            const ranked = scenarioLowerWins || MISSION_SCENARIOS_RANKED_HIGHER_WINS.includes(scenario);
+            const order = orderParam ?? (scenarioLowerWins ? MISSION_RANKING_ORDER_LOWER_WINS : MISSION_RANKING_ORDER_HIGHER_WINS);
+            const lowerWins = order === MISSION_RANKING_ORDER_LOWER_WINS;
+            const aggregate = lowerWins ? 'MIN' : 'MAX';
+            const direction = lowerWins ? 'ASC' : 'DESC';
+            const better = lowerWins ? '<' : '>';
+            const periodParams = [];
+            let periodSql = '';
+            if (period === MISSION_RANKING_PERIOD_THIS_WEEK) {
+                periodSql = ' AND um.completed_at >= ?';
+                periodParams.push(toMySqlUtcDatetime(startOfIsoWeekUtc(new Date())));
+            }
+            const baseWhere = `um.mission_id = ? AND um.status = 'completed' AND um.score IS NOT NULL${periodSql}`;
+            const [rows] = await dbPool.execute(
+                `SELECT um.user_id, u.username, ${aggregate}(um.score) AS best_score, COUNT(*) AS runs
+                   FROM user_missions um
+                   JOIN users u ON u.id = um.user_id
+                  WHERE ${baseWhere}
+                  GROUP BY um.user_id, u.username
+                  ORDER BY best_score ${direction}, um.user_id ASC
+                  LIMIT ${MISSION_RANKING_LIMIT}`,
+                [missionId, ...periodParams]);
+            const data = rows.map((r, index) => ({
+                rank: index + 1,
+                user_id: r.user_id,
+                username: r.username,
+                score: Number(r.best_score),
+                runs: Number(r.runs),
+            }));
+            let me = null;
+            const user = tryAuthenticate(req);
+            if (user) {
+                const [[mine]] = await dbPool.execute(
+                    `SELECT ${aggregate}(um.score) AS best_score, COUNT(*) AS runs
+                       FROM user_missions um
+                      WHERE ${baseWhere} AND um.user_id = ?`,
+                    [missionId, ...periodParams, user.id]);
+                if (mine && mine.best_score != null) {
+                    const [[{ ahead }]] = await dbPool.execute(
+                        `SELECT COUNT(*) AS ahead FROM (
+                             SELECT ${aggregate}(um.score) AS best_score
+                               FROM user_missions um
+                              WHERE ${baseWhere}
+                              GROUP BY um.user_id
+                         ) ranked WHERE ranked.best_score ${better} ?`,
+                        [missionId, ...periodParams, Number(mine.best_score)]);
+                    me = { rank: (Number(ahead) || 0) + 1, score: Number(mine.best_score), runs: Number(mine.runs) };
+                }
+            }
+            console.debug(`[API] GET /api/missions/${missionId}/leaderboard ranked=${ranked} order=${order} period=${period} rows=${data.length} me=${me ? me.rank : 'none'}`);
+            return jsonResponse(res, 200, { mission_id: missionId, ranked, order, period, data, me });
+        } catch (err) {
+            console.error('[API] GET /api/missions/:id/leaderboard error:', err.message);
+            return jsonResponse(res, 500, { error: 'Internal server error' });
+        }
+    }
+
     if (req.method === 'GET' && (routeParams = matchRoute(req.method, urlPath, '/api/missions/:id'))) {
         if (!dbPool) return jsonResponse(res, 404, { error: 'Mission not found' });
         const user = tryAuthenticate(req);
@@ -1638,6 +1796,7 @@ const server = http.createServer(async (req, res) => {
             if (!rows.length) return jsonResponse(res, 404, { error: 'Mission not found' });
             const wps = await loadWaypointsForMissionIds([rows[0].id]);
             rows[0].waypoints = wps.get(rows[0].id) || [];
+            await attachMissionScenarioConfigs(rows);
             return jsonResponse(res, 200, rows[0]);
         } catch (err) {
             console.error('[API] GET /api/missions/:id error:', err.message);

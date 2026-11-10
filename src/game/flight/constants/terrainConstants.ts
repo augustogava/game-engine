@@ -1,5 +1,9 @@
 export const SPAWN_SNAP_FRAMES = 600;
 export const AIRBORNE_MISSION_MIN_OFFSET_M = 300;
+export const AIRBORNE_FREE_MIN_OFFSET_M = 100;
+export const AIR_START_URL_PARAM = 'airStartFt';
+export const AIR_START_MIN_FT = 500;
+export const AIR_START_MAX_FT = 45000;
 export const TERRAIN_RAY_HEIGHT_M = 200;
 export const TERRAIN_RAY_LENGTH_M = 1000;
 export const SPAWN_TERRAIN_RAY_HEIGHT_M = 5000;

@@ -64,7 +64,7 @@ export class MultiplayerSystem {
         this.scene = scene;
     }
 
-    private stateToQuaternionToRef(state: PlayerState, out: BABYLON.Quaternion): BABYLON.Quaternion {
+    stateToQuaternionToRef(state: PlayerState, out: BABYLON.Quaternion): BABYLON.Quaternion {
         const yawRad = (180 - (Number(state.heading) || 0)) * DEG_TO_RAD;
         const pitchRad = -(Number(state.pitch) || 0) * DEG_TO_RAD;
         const rollRad = (Number(state.roll) || 0) * DEG_TO_RAD;
@@ -80,6 +80,7 @@ export class MultiplayerSystem {
         let hidden = 0;
         for (const [, remote] of this.scene.remotePlayers) {
             try {
+                if (remote.isLocalNpc === true) continue;
                 if (!remote.root.isEnabled(false)) continue;
                 remote.root.setEnabled(false);
                 remote.engineSound?.silence();
@@ -150,6 +151,7 @@ export class MultiplayerSystem {
             }
 
             for (const [id, remote] of this.scene.remotePlayers) {
+                if (remote.isLocalNpc === true) continue;
                 if (!activeIds.has(id)) {
                     this.disposeRemotePlayer(remote);
                     this.scene.remotePlayers.delete(id);
@@ -764,8 +766,9 @@ export class MultiplayerSystem {
 
         for (const [id, remote] of this.scene.remotePlayers) {
             if (!remote.nextState) continue;
+            const isLocalNpc = remote.isLocalNpc === true;
 
-            if (remote.lastUpdateTime > 0 && now - remote.lastUpdateTime > REMOTE_STALE_TIMEOUT_MS) {
+            if (!isLocalNpc && remote.lastUpdateTime > 0 && now - remote.lastUpdateTime > REMOTE_STALE_TIMEOUT_MS) {
                 try { this.disposeRemotePlayer(remote); } catch (err) { console.warn('[MP] Stale remote dispose failed:', err); }
                 this.scene.remotePlayers.delete(id);
                 continue;
@@ -777,7 +780,10 @@ export class MultiplayerSystem {
             const targetPos = this.scene._latLonToLocalToRef(ns.lat, ns.lon, ns.alt, this._tmpTargetPos);
             this.stateToQuaternionToRef(ns, this._tmpTargetQ);
 
-            if (remote.prevState) {
+            if (isLocalNpc) {
+                remote.root.position.copyFrom(targetPos);
+                remote.root.rotationQuaternion!.copyFrom(this._tmpTargetQ);
+            } else if (remote.prevState) {
                 const elapsed = now - remote.lastUpdateTime;
                 const interval = Math.max(REMOTE_STATE_INTERVAL_MIN_MS, remote.updateIntervalMs);
                 // t > 1 extrapolates along the last measured motion so remotes keep moving between packets.

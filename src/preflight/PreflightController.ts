@@ -1,10 +1,23 @@
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../game/api/hudImageUrl.js';
 import { UiPreferences, UI_PREF_STORAGE_KEY, LANGUAGE_EN, LANGUAGE_PT } from '../game/UiPreferences.js';
 import { TRAINER_AIRCRAFT_CODE } from '../game/flight/constants/aircraftConstants.js';
+import { AIR_START_URL_PARAM } from '../game/flight/constants/terrainConstants.js';
+import {
+    isScenarioMissionType,
+    SCENARIO_RANKING_PERIOD_ALL_TIME,
+    SCENARIO_RANKING_PERIOD_THIS_WEEK,
+} from '../game/flight/constants/missionScenarioConstants.js';
+import { fetchMissionRanking, formatScenarioResult, type MissionRanking } from '../game/flight/api/ScenarioRankingApi.js';
 
 export const PREFLIGHT_AIRCRAFT_KEY = 'preflight_aircraft_id';
 export const PREFLIGHT_SPAWN_KEY = 'preflight_spawn';
 const HOME_BASE_FLAG = 1;
+const START_MODE_SELECT_ID = 'preflight-start-mode';
+const START_MODE_RUNWAY = 0;
+const AIR_START_OPTIONS_FT: readonly number[] = [3000, 10000];
+const MISSION_RANKING_BOX_ID = 'preflight-mission-ranking';
+const MISSION_RANKING_PREVIEW_ROWS = 5;
+const MISSION_RANKING_RESULT_WIDTH_PX = 84;
 
 export type PreflightSpawnConfig = {
     airportId: number;
@@ -16,6 +29,7 @@ export type PreflightSpawnConfig = {
     hdg: number;
     elevationFt: number;
     simTimeIso: string;
+    airStartFt?: number;
 };
 
 export const DEFAULT_SBGR_SPAWN: PreflightSpawnConfig = {
@@ -48,10 +62,19 @@ const I18N: Record<Lang, Record<string, string>> = {
         'leaderboard.loading': 'Carregando ranking...',
         'leaderboard.empty': 'Sem dados de ranking ainda',
         'leaderboard.error': 'Falha ao carregar ranking',
+        'ranking.title': 'Ranking da missão',
+        'ranking.week': 'Esta semana',
+        'ranking.allTime': 'Geral',
+        'ranking.empty': 'Sem resultados ainda',
+        'ranking.you': 'Você',
+        'ranking.result': 'Resultado',
         'airport.airport': 'Aeroporto',
         'airport.runway': 'Pista',
         'airport.end': 'Extremidade',
         'airport.datetime': 'Data e hora do voo',
+        'airport.startMode': 'Início do voo',
+        'airport.startRunway': 'Na pista',
+        'airport.startAir': 'No ar a {ft} ft',
         'airport.searchPlaceholder': 'ICAO ou nome (ex. SBGR)',
         'airport.setHomeBase': 'DEFINIR COMO HOME BASE',
         'airport.homeBaseSet': 'HOME BASE DEFINIDO',
@@ -109,10 +132,19 @@ const I18N: Record<Lang, Record<string, string>> = {
         'leaderboard.loading': 'Loading leaderboard...',
         'leaderboard.empty': 'No leaderboard data yet',
         'leaderboard.error': 'Failed to load leaderboard',
+        'ranking.title': 'Mission ranking',
+        'ranking.week': 'This week',
+        'ranking.allTime': 'All time',
+        'ranking.empty': 'No results yet',
+        'ranking.you': 'You',
+        'ranking.result': 'Result',
         'airport.airport': 'Airport',
         'airport.runway': 'Runway',
         'airport.end': 'Runway end',
         'airport.datetime': 'Flight date & time',
+        'airport.startMode': 'Flight start',
+        'airport.startRunway': 'On the runway',
+        'airport.startAir': 'In the air at {ft} ft',
         'airport.searchPlaceholder': 'ICAO or name (e.g. SBGR)',
         'airport.setHomeBase': 'SET AS HOME BASE',
         'airport.homeBaseSet': 'HOME BASE SET',
@@ -362,6 +394,7 @@ export class PreflightController {
         this.wireDetailBack();
         this.wireAirportFields();
         this.wireHomeBaseButton();
+        this.restoreStartMode();
         this.setDefaultDateTime();
         this.updateFooterVisibility('aircraft');
         setPreflightUiActive(true);
@@ -434,6 +467,19 @@ export class PreflightController {
         set('label[for="preflight-runway-select"]', this.t('airport.runway'));
         set('label[for="preflight-runway-end"]', this.t('airport.end'));
         set('label[for="preflight-datetime"]', this.t('airport.datetime'));
+        set(`label[for="${START_MODE_SELECT_ID}"]`, this.t('airport.startMode'));
+        const startSel = document.getElementById(START_MODE_SELECT_ID) as HTMLSelectElement | null;
+        if (startSel) {
+            const locale = this.lang === 'pt' ? 'pt-BR' : 'en-US';
+            for (const option of Array.from(startSel.options)) {
+                const ft = Number(option.value);
+                option.textContent = ft > START_MODE_RUNWAY
+                    ? this.t('airport.startAir').replace('{ft}', ft.toLocaleString(locale))
+                    : this.t('airport.startRunway');
+            }
+        } else {
+            console.warn('[Preflight] Start mode select missing');
+        }
         const search = document.getElementById('preflight-airport-search') as HTMLInputElement | null;
         if (search) search.placeholder = this.t('airport.searchPlaceholder');
         const fly = document.getElementById('preflight-fly-btn');
@@ -568,6 +614,23 @@ export class PreflightController {
         end?.addEventListener('change', () => this.persistSpawnFromForm());
         const dt = document.getElementById('preflight-datetime') as HTMLInputElement | null;
         dt?.addEventListener('change', () => this.persistSpawnFromForm());
+        const startMode = document.getElementById(START_MODE_SELECT_ID) as HTMLSelectElement | null;
+        startMode?.addEventListener('change', () => this.persistSpawnFromForm());
+    }
+
+    private readAirStartFt(): number {
+        const sel = document.getElementById(START_MODE_SELECT_ID) as HTMLSelectElement | null;
+        if (!sel) return START_MODE_RUNWAY;
+        const ft = Number(sel.value);
+        return AIR_START_OPTIONS_FT.includes(ft) ? ft : START_MODE_RUNWAY;
+    }
+
+    private restoreStartMode(): void {
+        const sel = document.getElementById(START_MODE_SELECT_ID) as HTMLSelectElement | null;
+        if (!sel) return;
+        const stored = Number(readStoredSpawn()?.airStartFt);
+        sel.value = String(AIR_START_OPTIONS_FT.includes(stored) ? stored : START_MODE_RUNWAY);
+        console.debug(`[Preflight] Start mode restored: ${sel.value === String(START_MODE_RUNWAY) ? 'runway' : `${sel.value} ft`}`);
     }
 
     private clearRunwaySelection(): void {
@@ -814,6 +877,7 @@ export class PreflightController {
             hdg: Number.isFinite(hdg) ? hdg : 0,
             elevationFt: Number.isFinite(elevationFt) ? elevationFt : 0,
             simTimeIso,
+            airStartFt: this.readAirStartFt(),
         };
         try {
             localStorage.setItem(PREFLIGHT_SPAWN_KEY, JSON.stringify(spawn));
@@ -1014,6 +1078,7 @@ export class PreflightController {
             ${rows.join('')}
             ${desc ? `<p style="font-size:12px;color:rgba(255,255,255,.6);line-height:1.5;margin:12px 0">${escapeHtml(desc)}</p>` : ''}
             <button type="button" class="preflight-cta-btn" id="preflight-mission-fly" ${canFly ? '' : 'disabled'}>${ctaText}</button>
+            <div id="${MISSION_RANKING_BOX_ID}" data-mission-id="${item.mission_id}" style="display:none;margin-top:14px"></div>
         `;
         attachImgFallback(body);
         const flyBtn = document.getElementById('preflight-mission-fly');
@@ -1021,6 +1086,58 @@ export class PreflightController {
             if (!canFly) return;
             void this.startMissionFlight(item);
         });
+        if (isScenarioMissionType(m.type)) void this.loadMissionRanking(item.mission_id);
+    }
+
+    private async loadMissionRanking(missionId: number): Promise<void> {
+        if (!Number.isInteger(missionId) || missionId <= 0) return;
+        try {
+            const [week, allTime] = await Promise.all([
+                fetchMissionRanking(missionId, SCENARIO_RANKING_PERIOD_THIS_WEEK, this.token),
+                fetchMissionRanking(missionId, SCENARIO_RANKING_PERIOD_ALL_TIME, this.token),
+            ]);
+            const box = document.getElementById(MISSION_RANKING_BOX_ID);
+            if (!box || box.dataset.missionId !== String(missionId)) return;
+            if (!allTime || !allTime.ranked) {
+                console.debug(`[Preflight] Mission ${missionId} has no ranking`);
+                return;
+            }
+            box.innerHTML = `
+                <h3 style="font-family:Orbitron,monospace;font-size:12px;color:#40ffaa;letter-spacing:.1em;margin-bottom:8px">${this.t('ranking.title')}</h3>
+                ${this.missionRankingBoardHtml(this.t('ranking.week'), week)}
+                ${this.missionRankingBoardHtml(this.t('ranking.allTime'), allTime)}`;
+            box.style.display = '';
+            console.debug(`[Preflight] Mission ${missionId} ranking shown: week=${week?.data.length ?? 0} allTime=${allTime.data.length}`);
+        } catch (err) {
+            console.warn(`[Preflight] Mission ${missionId} ranking load error:`, err);
+        }
+    }
+
+    private missionRankingBoardHtml(title: string, ranking: MissionRanking | null): string {
+        const heading = `<div style="font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.08em;margin:8px 0 4px">${escapeHtml(title)}</div>`;
+        if (!ranking || ranking.data.length === 0) {
+            return `${heading}<div class="preflight-msg">${this.t('ranking.empty')}</div>`;
+        }
+        const pointsText = (points: number) => `${points} ${this.t('unit.pts')}`;
+        const row = (pos: string, pilot: string, result: string, cls = '') => `
+            <div class="preflight-lb-row${cls}">
+                <div class="preflight-lb-pos">${pos}</div>
+                <div class="preflight-lb-pilot">${pilot}</div>
+                <div class="preflight-lb-num" style="width:${MISSION_RANKING_RESULT_WIDTH_PX}px">${result}</div>
+            </div>`;
+        const header = row(this.t('leaderboard.rank'), this.t('leaderboard.pilot'), this.t('ranking.result'), ' preflight-lb-head');
+        const top = ranking.data.slice(0, MISSION_RANKING_PREVIEW_ROWS);
+        const rows = top.map((entry) => row(
+            String(entry.rank),
+            escapeHtml(entry.username || '—'),
+            escapeHtml(formatScenarioResult(entry.score, ranking.order, pointsText)),
+            entry.rank <= 3 ? ' preflight-lb-top' : '',
+        )).join('');
+        const me = ranking.me;
+        const meRow = me && me.rank > top.length
+            ? row(String(me.rank), escapeHtml(this.t('ranking.you')), escapeHtml(formatScenarioResult(me.score, ranking.order, pointsText)))
+            : '';
+        return heading + header + rows + meRow;
     }
 
     private async startMissionFlight(item: MissionItem): Promise<void> {
@@ -1214,6 +1331,8 @@ export class PreflightController {
                 params.set('airportId', String(this.selectedAirportId));
                 params.set('runwayId', String(runwayId));
                 params.set('end', end);
+                const airStartFt = this.readAirStartFt();
+                if (airStartFt > START_MODE_RUNWAY) params.set(AIR_START_URL_PARAM, String(airStartFt));
             } else {
                 console.warn('[Preflight] No airport/runway selected — game will use default spawn');
             }

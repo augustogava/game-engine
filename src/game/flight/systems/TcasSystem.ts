@@ -67,7 +67,7 @@ export class TcasSystem {
         this._seen.clear();
 
         let worst: TcasState = 'none';
-        const consider = (id: string, pos: BABYLON.Vector3) => {
+        const consider = (id: string, pos: BABYLON.Vector3, advisoryOnly = false) => {
             this._seen.add(id);
             const range = Math.hypot(pos.x - own.x, pos.z - own.z);
             const vertical = Math.abs(pos.y - own.y);
@@ -80,7 +80,7 @@ export class TcasSystem {
             }
             this._samples.set(id, { range, sampleMs: now });
 
-            const isRa = raAllowed && (
+            const isRa = raAllowed && !advisoryOnly && (
                 (range < TCAS_RA_RANGE_M && vertical < TCAS_RA_VERTICAL_M)
                 || (tau < TCAS_RA_TAU_S && vertical < TCAS_RA_VERTICAL_M * TCAS_TAU_VERTICAL_MULT)
             );
@@ -98,7 +98,7 @@ export class TcasSystem {
             for (const [id, remote] of remotes) {
                 const root = remote?.root;
                 if (!root || (typeof root.isEnabled === 'function' && !root.isEnabled(false))) continue;
-                consider(`mp:${id}`, root.position);
+                consider(`mp:${id}`, root.position, remote.isLocalNpc === true);
             }
         }
         const traffic = this.scene._liveTrafficSystem?.getTrafficEntries?.();

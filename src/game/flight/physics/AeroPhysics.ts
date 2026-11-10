@@ -122,7 +122,7 @@ export function computeSurfaceForces(
 
     if (spanValid && surface.zeroLiftCm !== 0) {
         const pitchingMomentMag = surface.zeroLiftCm * q * surface.chord;
-        torque.addInPlace(_spanAxis.scaleToRef(pitchingMomentMag, _pitchMoment));
+        torque.subtractInPlace(_spanAxis.scaleToRef(pitchingMomentMag, _pitchMoment));
     }
 
     return { force, torque, liftVec };

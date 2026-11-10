@@ -1,0 +1,16 @@
+{
+    "name": "SimFlightPro",
+    "short_name": "SimFlightPro",
+    "description": "Simulador de voo 3D com terreno fotorrealista.",
+    "lang": "pt-BR",
+    "start_url": "/flight.html",
+    "scope": "/",
+    "display": "fullscreen",
+    "background_color": "#020810",
+    "theme_color": "#020810",
+    "icons": [
+        { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+        { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ]
+}

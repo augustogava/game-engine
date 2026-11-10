@@ -68,9 +68,9 @@ CREATE TABLE IF NOT EXISTS aircrafts (
     -- Physics: Mass & Inertia
     mass_kg                   DECIMAL(12,2) NOT NULL COMMENT 'Aircraft mass in kilograms. Used for F=ma and gravity calculations',
     max_thrust_n              DECIMAL(12,2) NOT NULL COMMENT 'Maximum engine thrust in Newtons. Thrust vector = throttle * max_thrust_n along forward axis',
-    inertia_xx                DECIMAL(12,2) NOT NULL COMMENT 'Moment of inertia around X axis (roll). Higher = harder to roll',
-    inertia_yy                DECIMAL(12,2) NOT NULL COMMENT 'Moment of inertia around Y axis (yaw). Higher = harder to yaw',
-    inertia_zz                DECIMAL(12,2) NOT NULL COMMENT 'Moment of inertia around Z axis (pitch). Higher = harder to pitch',
+    inertia_xx                DECIMAL(12,2) NOT NULL COMMENT 'Moment of inertia around the engine X axis (pitch; X points along the wing). Higher = harder to pitch',
+    inertia_yy                DECIMAL(12,2) NOT NULL COMMENT 'Moment of inertia around the engine Y axis (yaw; Y points up). Higher = harder to yaw',
+    inertia_zz                DECIMAL(12,2) NOT NULL COMMENT 'Moment of inertia around the engine Z axis (roll; Z points forward). Higher = harder to roll',
 
     -- Aerodynamics
     lift_slope                DECIMAL(6,3) NOT NULL COMMENT 'Lift curve slope (dCL/dAlpha). Higher = more lift per degree of AoA. Typical: 4.0-6.0',

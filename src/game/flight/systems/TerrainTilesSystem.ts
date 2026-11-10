@@ -160,8 +160,13 @@ export class TerrainTilesSystem {
             this.scene.initialHeading = parseFloat(params.get('hdg') || '74');
         }
         const hasFlightPlanParam = params.has('flightPlanId');
-        this.scene.spawnAirborne = this.scene._pendingMissionAirborne ? true : ((hasPlan || hasFlightPlanParam) ? false : params.has('lat'));
-        if (hasPlan) console.log(`[FlightPlan] Ground spawn at runway lat=${lat} lon=${lon} hdg=${this.scene.initialHeading}`);
+        const airStart = !hasMission && hasPlan && !hasFlightPlanParam && this.scene._pendingAirStartAglM != null;
+        if (!airStart && this.scene._pendingAirStartAglM != null) {
+            console.debug('[Flight] Air start dropped: it only applies to a free flight from a runway');
+            this.scene._pendingAirStartAglM = null;
+        }
+        this.scene.spawnAirborne = this.scene._pendingMissionAirborne ? true : ((hasPlan || hasFlightPlanParam) ? airStart : params.has('lat'));
+        if (hasPlan) console.log(`[FlightPlan] ${airStart ? `Air start ${this.scene._pendingAirStartAglM.toFixed(0)}m above` : 'Ground spawn at'} runway lat=${lat} lon=${lon} hdg=${this.scene.initialHeading}`);
         if (hasMission) console.log(`[Mission] Spawn at lat=${lat} lon=${lon} hdg=${this.scene.initialHeading} airborne=${this.scene._pendingMissionAirborne}`);
         this.scene.originLat = lat;
         this.scene.originLon = lon;

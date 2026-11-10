@@ -9,6 +9,14 @@
 
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a1628'/%3E%3Cpath d='M32 12 L18 42 L32 36 L46 42 Z' fill='%2306b6d4'/%3E%3Cpath d='M26 40 L32 36 L38 40 L32 52 Z' fill='%233b82f6'/%3E%3C/svg%3E" />
 
+    <link rel="manifest" href="src/game/assets/pwa/flight-manifest.json">
+    <meta name="theme-color" content="#020810">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SimFlightPro">
+    <link rel="apple-touch-icon" href="src/game/assets/pwa/icon-180.png">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
 
@@ -624,6 +632,10 @@
                     <div class="preflight-field">
                         <label for="preflight-runway-end">Extremidade</label>
                         <select id="preflight-runway-end"><option value="le">LE</option><option value="he">HE</option></select>
+                    </div>
+                    <div class="preflight-field">
+                        <label for="preflight-start-mode">Início do voo</label>
+                        <select id="preflight-start-mode"><option value="0">Na pista</option><option value="3000">No ar a 3.000 ft</option><option value="10000">No ar a 10.000 ft</option></select>
                     </div>
                     <div class="preflight-field">
                         <label for="preflight-datetime">Data e hora do voo</label>

@@ -17,6 +17,9 @@ export class FrameSpikeMonitor {
     private _pickMs = 0;
     private _tilesLoaded = 0;
     private _tilesDisposed = 0;
+    private _engine: BABYLON.AbstractEngine | null = null;
+    private _lastRenderWidth = 0;
+    private _lastRenderHeight = 0;
 
     static isRequested(): boolean {
         try {
@@ -28,6 +31,7 @@ export class FrameSpikeMonitor {
 
     constructor(scene: BABYLON.Scene) {
         try {
+            this._engine = scene.getEngine();
             this._engineInstrumentation = new BABYLON.EngineInstrumentation(scene.getEngine());
             this._engineInstrumentation.captureShaderCompilationTime = true;
             this._sceneInstrumentation = new BABYLON.SceneInstrumentation(scene);
@@ -43,11 +47,16 @@ export class FrameSpikeMonitor {
         const nowMs = performance.now();
         const intervalMs = this._lastFrameStartMs > 0 ? nowMs - this._lastFrameStartMs : 0;
         this._lastFrameStartMs = nowMs;
+        const renderWidth = this._engine ? this._engine.getRenderWidth() : 0;
+        const renderHeight = this._engine ? this._engine.getRenderHeight() : 0;
+        const resized = this._lastRenderWidth > 0 && (renderWidth !== this._lastRenderWidth || renderHeight !== this._lastRenderHeight);
+        this._lastRenderWidth = renderWidth;
+        this._lastRenderHeight = renderHeight;
         if (intervalMs > FRAME_SPIKE_THRESHOLD_MS
             && intervalMs < FRAME_SPIKE_IGNORE_ABOVE_MS
             && nowMs - this._lastLogMs >= FRAME_SPIKE_LOG_MIN_INTERVAL_MS) {
             this._lastLogMs = nowMs;
-            this._report(intervalMs, tiles);
+            this._report(intervalMs, tiles, `${renderWidth}x${renderHeight}${resized ? ' (resized)' : ''}`);
         }
         this._sections.clear();
         this._pickCount = 0;
@@ -82,10 +91,11 @@ export class FrameSpikeMonitor {
         try { this._sceneInstrumentation?.dispose(); } catch (_) { /* ignore */ }
         this._engineInstrumentation = null;
         this._sceneInstrumentation = null;
+        this._engine = null;
         this._sections.clear();
     }
 
-    private _report(intervalMs: number, tiles: any): void {
+    private _report(intervalMs: number, tiles: any, renderSize: string): void {
         try {
             let updateMs = 0;
             const parts: string[] = [];
@@ -102,7 +112,7 @@ export class FrameSpikeMonitor {
             const tilesInfo = stats
                 ? ` tiles(queued=${stats.queued ?? '?'} downloading=${stats.downloading ?? '?'} parsing=${stats.parsing ?? '?'} visible=${stats.visible ?? '?'} lru=${lruSize ?? '?'})`
                 : '';
-            const picksInfo = ` picks=${this._pickCount} pickMs=${this._pickMs.toFixed(1)} tilesLoaded=${this._tilesLoaded} tilesDisposed=${this._tilesDisposed}`;
+            const picksInfo = ` picks=${this._pickCount} pickMs=${this._pickMs.toFixed(1)} tilesLoaded=${this._tilesLoaded} tilesDisposed=${this._tilesDisposed} size=${renderSize}`;
             console.debug(`[FrameSpike] frame=${intervalMs.toFixed(0)}ms update=${updateMs.toFixed(1)}ms [${parts.join(' ')}] render=${renderMs.toFixed(1)}ms activeMeshes=${activeMeshesMs.toFixed(1)}ms shaderCompile=${shaderMs.toFixed(1)}ms${tilesInfo}${picksInfo}`);
         } catch (err) {
             console.warn('[FrameSpike] Report failed:', err);

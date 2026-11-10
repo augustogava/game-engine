@@ -8,6 +8,7 @@ export const MOTION_BLUR_TRIGGER_G = 2.0;
 export const MOTION_BLUR_RELEASE_G = 1.6;
 export const MOTION_BLUR_MIN_ACTIVE_MS = 3000;
 export const MOTION_BLUR_MAX_STRENGTH = 1.0;
+export const MOTION_BLUR_IDLE_STRENGTH = 0;
 export const MOTION_BLUR_SAMPLES = 16;
 export const DOF_COCKPIT_FOCUS_DISTANCE_MM = 60000;
 export const DOF_COCKPIT_FSTOP = 5.6;

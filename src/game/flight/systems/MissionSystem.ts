@@ -4,6 +4,7 @@ import {
     MISSION_TOAST_VISIBLE_MS, MISSION_TOAST_FADE_MS,
     FLIGHT_PLAN_STATUS_IN_PROGRESS, isFlightPlanStatusCode, type FlightPlanStatusCode,
     FLIGHT_SCHOOL_LANDING_COMPLETE_NM, FLIGHT_SCHOOL_LANDING_CONFIRM_MS,
+    isScenarioMissionType,
 } from '../constants/index.js';
 import { resolveHudImageUrl, HUD_IMAGE_PLACEHOLDER, hudImgOnError } from '../../api/hudImageUrl.js';
 import { initialBearingDeg, haversineNm } from '../physics/NavMath.js';
@@ -133,6 +134,7 @@ export class MissionSystem {
         const isDiscovery = missionType === 'discovery';
         const isFreeFlight = missionType === 'free_flight';
         const isRoute = missionType === 'route';
+        const isScenario = isScenarioMissionType(missionType);
 
         const waypoints = this.normalizeMissionWaypoints(mission.waypoints);
         this.scene._missionWaypoints = waypoints;
@@ -148,7 +150,7 @@ export class MissionSystem {
             return initialBearingDeg(fromLat, fromLon, firstWpLat, firstWpLon);
         };
 
-        if ((isDiscovery || isFreeFlight) && mission.spawn_latitude != null && mission.spawn_longitude != null) {
+        if ((isDiscovery || isFreeFlight || isScenario) && mission.spawn_latitude != null && mission.spawn_longitude != null) {
             const spawnLat = Number(mission.spawn_latitude);
             const spawnLon = Number(mission.spawn_longitude);
             this.scene._pendingMissionLat = spawnLat;
@@ -165,7 +167,7 @@ export class MissionSystem {
             } else if (waypoints.length > 0) {
                 console.warn(`[Mission] Mission ${mission.id} has waypoints but first waypoint coordinates are invalid — spawn heading defaults to 0°`);
             }
-        } else if (isRoute && mission.dep_rwy_latitude != null && mission.dep_rwy_longitude != null) {
+        } else if ((isRoute || isScenario) && mission.dep_rwy_latitude != null && mission.dep_rwy_longitude != null) {
             this.scene._pendingMissionLat = Number(mission.dep_rwy_latitude);
             this.scene._pendingMissionLon = Number(mission.dep_rwy_longitude);
             const rwyHdg = mission.dep_rwy_heading != null ? Number(mission.dep_rwy_heading) : null;
@@ -175,7 +177,7 @@ export class MissionSystem {
             this.scene._pendingMissionAltM = mission.dep_rwy_elevation_ft != null ? Number(mission.dep_rwy_elevation_ft) * 0.3048 : 0;
             this.scene._pendingMissionAirborne = false;
             console.log(`[Mission] Spawning at runway centerline lat=${this.scene._pendingMissionLat} lon=${this.scene._pendingMissionLon} hdg=${this.scene._pendingMissionHdg}`);
-        } else if (isRoute && mission.departure_lat != null && mission.departure_lon != null) {
+        } else if ((isRoute || isScenario) && mission.departure_lat != null && mission.departure_lon != null) {
             const depLat = Number(mission.departure_lat);
             const depLon = Number(mission.departure_lon);
             this.scene._pendingMissionLat = depLat;
@@ -242,6 +244,7 @@ export class MissionSystem {
     }
 
     checkWaypointProgress(lat: number, lon: number): void {
+        if (this.scene._gateCourseSystem?.isActive?.() === true) return;
         if (!this.scene._missionWaypoints.length) {
             this.checkDirectMissionArrival(lat, lon);
             return;

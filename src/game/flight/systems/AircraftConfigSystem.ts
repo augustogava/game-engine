@@ -1,7 +1,7 @@
 import * as BABYLON from '@babylonjs/core';
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import type { AircraftConfig } from '../types/index.js';
-import { DEFAULT_AIRCRAFT_CONFIG } from '../types/index.js';
+import { DEFAULT_AIRCRAFT_CONFIG, positiveConfigValue } from '../types/index.js';
 import { fetchAircraftConfig } from '../api/AircraftConfigApi.js';
 import {
     ENGINE_TYPE_PISTON,
@@ -22,6 +22,32 @@ import {
     ENGINE_SOUND_TYPE_TURBOFAN,
     ENGINE_SOUND_TYPE_ELECTRIC,
 } from '../../EngineSound.js';
+
+const GEAR_LEGS_MIN_COUNT = 3;
+
+function resolveGearPositions(raw: unknown, code: unknown): { x: number; y: number; z: number }[] {
+    if (raw == null) return DEFAULT_AIRCRAFT_CONFIG.gear_positions;
+    let value: unknown = raw;
+    if (typeof value === 'string') {
+        try {
+            value = JSON.parse(value);
+        } catch (err) {
+            console.warn(`[AircraftConfig] gear_positions for ${code ?? 'unknown'} is not valid JSON, using the default gear:`, err);
+            return DEFAULT_AIRCRAFT_CONFIG.gear_positions;
+        }
+    }
+    if (!Array.isArray(value) || value.length < GEAR_LEGS_MIN_COUNT) {
+        if (Array.isArray(value) && value.length === 0) return DEFAULT_AIRCRAFT_CONFIG.gear_positions;
+        console.warn(`[AircraftConfig] gear_positions for ${code ?? 'unknown'} needs at least ${GEAR_LEGS_MIN_COUNT} legs, using the default gear`);
+        return DEFAULT_AIRCRAFT_CONFIG.gear_positions;
+    }
+    const legs = value.map((leg: any) => ({ x: Number(leg?.x), y: Number(leg?.y), z: Number(leg?.z) }));
+    if (legs.some((leg) => !Number.isFinite(leg.x) || !Number.isFinite(leg.y) || !Number.isFinite(leg.z))) {
+        console.warn(`[AircraftConfig] gear_positions for ${code ?? 'unknown'} has a leg without numeric x, y, z, using the default gear`);
+        return DEFAULT_AIRCRAFT_CONFIG.gear_positions;
+    }
+    return legs;
+}
 
 export class AircraftConfigSystem {
     private readonly scene: any;
@@ -56,9 +82,10 @@ export class AircraftConfigSystem {
         if (cfg.flap_type == null) cfg.flap_type = DEFAULT_AIRCRAFT_CONFIG.flap_type;
         if (cfg.gear_spring_k == null) cfg.gear_spring_k = DEFAULT_AIRCRAFT_CONFIG.gear_spring_k;
         if (cfg.gear_damping_c == null) cfg.gear_damping_c = DEFAULT_AIRCRAFT_CONFIG.gear_damping_c;
-        if (!cfg.gear_positions || !cfg.gear_positions.length) cfg.gear_positions = DEFAULT_AIRCRAFT_CONFIG.gear_positions;
-        if (cfg.fuselage_side_area == null) cfg.fuselage_side_area = DEFAULT_AIRCRAFT_CONFIG.fuselage_side_area;
-        if (cfg.fuselage_cn_beta == null) cfg.fuselage_cn_beta = DEFAULT_AIRCRAFT_CONFIG.fuselage_cn_beta;
+        cfg.gear_positions = resolveGearPositions(cfg.gear_positions, cfg.code);
+        cfg.fuselage_side_area = positiveConfigValue(cfg.fuselage_side_area) ?? DEFAULT_AIRCRAFT_CONFIG.fuselage_side_area;
+        const cnBeta = Number(cfg.fuselage_cn_beta);
+        cfg.fuselage_cn_beta = cfg.fuselage_cn_beta != null && Number.isFinite(cnBeta) ? cnBeta : DEFAULT_AIRCRAFT_CONFIG.fuselage_cn_beta;
         if (cfg.afterburner_thrust_mult == null) cfg.afterburner_thrust_mult = 1.0;
         if (cfg.afterburner_fuel_mult   == null) cfg.afterburner_fuel_mult   = 1.0;
         if (cfg.wave_drag_coef          == null) cfg.wave_drag_coef          = MACH_DRAG_RISE_COEF;
