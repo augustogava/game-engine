@@ -13,6 +13,10 @@ export class FrameSpikeMonitor {
     private _sceneInstrumentation: BABYLON.SceneInstrumentation | null = null;
     private _lastFrameStartMs = 0;
     private _lastLogMs = 0;
+    private _pickCount = 0;
+    private _pickMs = 0;
+    private _tilesLoaded = 0;
+    private _tilesDisposed = 0;
 
     static isRequested(): boolean {
         try {
@@ -46,6 +50,10 @@ export class FrameSpikeMonitor {
             this._report(intervalMs, tiles);
         }
         this._sections.clear();
+        this._pickCount = 0;
+        this._pickMs = 0;
+        this._tilesLoaded = 0;
+        this._tilesDisposed = 0;
         return nowMs;
     }
 
@@ -54,6 +62,19 @@ export class FrameSpikeMonitor {
         if (!Number.isFinite(startMs)) return nowMs;
         this._sections.set(label, (this._sections.get(label) ?? 0) + (nowMs - startMs));
         return nowMs;
+    }
+
+    recordPick(durationMs: number): void {
+        this._pickCount++;
+        if (Number.isFinite(durationMs) && durationMs > 0) this._pickMs += durationMs;
+    }
+
+    recordTileLoaded(): void {
+        this._tilesLoaded++;
+    }
+
+    recordTileDisposed(): void {
+        this._tilesDisposed++;
     }
 
     dispose(): void {
@@ -81,7 +102,8 @@ export class FrameSpikeMonitor {
             const tilesInfo = stats
                 ? ` tiles(queued=${stats.queued ?? '?'} downloading=${stats.downloading ?? '?'} parsing=${stats.parsing ?? '?'} visible=${stats.visible ?? '?'} lru=${lruSize ?? '?'})`
                 : '';
-            console.debug(`[FrameSpike] frame=${intervalMs.toFixed(0)}ms update=${updateMs.toFixed(1)}ms [${parts.join(' ')}] render=${renderMs.toFixed(1)}ms activeMeshes=${activeMeshesMs.toFixed(1)}ms shaderCompile=${shaderMs.toFixed(1)}ms${tilesInfo}`);
+            const picksInfo = ` picks=${this._pickCount} pickMs=${this._pickMs.toFixed(1)} tilesLoaded=${this._tilesLoaded} tilesDisposed=${this._tilesDisposed}`;
+            console.debug(`[FrameSpike] frame=${intervalMs.toFixed(0)}ms update=${updateMs.toFixed(1)}ms [${parts.join(' ')}] render=${renderMs.toFixed(1)}ms activeMeshes=${activeMeshesMs.toFixed(1)}ms shaderCompile=${shaderMs.toFixed(1)}ms${tilesInfo}${picksInfo}`);
         } catch (err) {
             console.warn('[FrameSpike] Report failed:', err);
         }

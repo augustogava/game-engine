@@ -113,6 +113,7 @@ const {
 } = CONST as any;
 import { UiPreferences } from '../../UiPreferences.js';
 import { I18n } from '../../I18n.js';
+import { positiveConfigValue } from '../types/index.js';
 
 const INERTIA_MIN_KGM2 = 1e-3;
 const AUTOBRAKE_TOAST_MS = 2500;
@@ -504,7 +505,7 @@ export class FlightPhysicsSystem {
             this.scene._terrainRay.origin.set(pos.x, pos.y + rayHeight, pos.z);
             this.scene._terrainRay.length = rayLength;
             let hit: BABYLON.PickingInfo | null;
-            if (!inSpawnWindow && this.scene._terrainPickFrameTick === this.scene._frameTick && this.scene._cachedTerrainHit) {
+            if (this.scene._terrainPickFrameTick === this.scene._frameTick) {
                 hit = this.scene._cachedTerrainHit;
             } else {
                 hit = this.scene._pickTerrainPreferRunway(this.scene._terrainRay);
@@ -620,10 +621,11 @@ export class FlightPhysicsSystem {
         const isElectric = cfg.engine_type === ENGINE_TYPE_ELECTRIC;
 
         // ── Engine spool-up (N1 lags throttle) ───────────────────────────────
-        const spoolTauS = isPiston ? SPOOL_TAU_PISTON_S
+        const spoolTauS = positiveConfigValue(cfg.engine_spool_tau_s)
+            ?? (isPiston ? SPOOL_TAU_PISTON_S
             : isTurboprop ? SPOOL_TAU_TURBOPROP_S
             : isElectric ? SPOOL_TAU_ELECTRIC_S
-            : SPOOL_TAU_JET_S;
+            : SPOOL_TAU_JET_S);
         const spoolAlpha = Math.max(0, Math.min(1, dt / Math.max(0.01, spoolTauS)));
         const throttleTarget = Number.isFinite(this.scene.thrust) ? this.scene.thrust : 0;
         this.scene._engineN1 = this.scene._engineN1 + (throttleTarget - this.scene._engineN1) * spoolAlpha;

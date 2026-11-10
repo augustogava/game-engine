@@ -233,6 +233,8 @@ import {
     JOYSTICK_DEFAULT_RADIUS_PX,
     JOYSTICK_DEFAULT_DEADZONE_NORM,
     JOYSTICK_DEFAULT_EXPO,
+    TOUCH_ROLL_SENSITIVITY_DEFAULT,
+    SMOKE_TOAST_MS,
     JOYSTICK_MAX_RADIUS_PX,
     JOYSTICK_MIN_RADIUS_PX,
     JOYSTICK_MAX_DEADZONE_NORM,
@@ -395,6 +397,7 @@ import { PhotoModeSystem } from './flight/systems/PhotoModeSystem.js';
 import { FlightSchoolCoachSystem } from './flight/systems/FlightSchoolCoachSystem.js';
 import { MissionScenarioSystem } from './flight/systems/MissionScenarioSystem.js';
 import { WeeklyChallengesSystem } from './flight/systems/WeeklyChallengesSystem.js';
+import { PlatformSystem } from './flight/systems/PlatformSystem.js';
 
 // ── FlightSceneSimple ─────────────────────────────────────────────────────────
 const PAUSED_UI_UPDATE_INTERVAL_FRAMES = 6;
@@ -443,6 +446,7 @@ export class FlightSceneSimple extends Scene3D {
     /** @internal */ private readonly _flightSchoolCoachSystem = new FlightSchoolCoachSystem(this);
     /** @internal */ private readonly _missionScenarioSystem = new MissionScenarioSystem(this);
     /** @internal */ private readonly _weeklyChallengesSystem = new WeeklyChallengesSystem(this);
+    /** @internal */ private readonly _platformSystem = new PlatformSystem(this);
     /** @internal */ _weeklyBtnEl: HTMLElement | null = null;
     /** @internal */ _weeklyPanelEl: HTMLElement | null = null;
     /** @internal */ _pointsMultiplier: number | null = null;
@@ -535,6 +539,7 @@ export class FlightSceneSimple extends Scene3D {
         deadzone: JOYSTICK_DEFAULT_DEADZONE_NORM,
         expo: JOYSTICK_DEFAULT_EXPO,
         pitchInvert: false,
+        rollSensitivity: TOUCH_ROLL_SENSITIVITY_DEFAULT,
     };
     private _twoFingerActive = false;
     private _twoFingerInitialDist = 0;
@@ -1096,6 +1101,7 @@ export class FlightSceneSimple extends Scene3D {
         this._setupPostProcessing(scene);
         this._buildHUD();
         if (this.isMobile) this._setupTouchControls();
+        this._platformSystem.init(scene);
         if (this.tiles) {
             this.ground.isVisible = false;
             scene.fogColor   = new BABYLON.Color3(0.65, 0.75, 0.90);
@@ -1129,6 +1135,7 @@ export class FlightSceneSimple extends Scene3D {
 
         this._handleInput(dt);
         this._pauseMenuSystem.update();
+        this._platformSystem.update();
         if (spike) spikeT = spike.mark('input', spikeT);
 
         const replayFrame = this._replayActive ? this._replayBuffer.sampleAtNow() : null;
@@ -1230,10 +1237,12 @@ export class FlightSceneSimple extends Scene3D {
             console.warn('[LiveTraffic] update failed:', err);
         }
         if (spike) spikeT = spike.mark('traffic', spikeT);
-        this._atcSystem.update(dt);
-        this._tcasSystem.update(dt);
-        this._flightSchoolCoachSystem.update(dt);
-        this._missionScenarioSystem.update(dt);
+        if (physicsActive) {
+            this._atcSystem.update(dt);
+            this._tcasSystem.update(dt);
+            this._flightSchoolCoachSystem.update(dt);
+            this._missionScenarioSystem.update(dt);
+        }
         this._chatSystem.update();
         try {
             this._tutorialSystem.update(dt);
@@ -1578,6 +1587,7 @@ export class FlightSceneSimple extends Scene3D {
         try { this._flightSchoolCoachSystem.dispose(); } catch (err) { console.warn('[FlightSimple] FlightSchoolCoachSystem dispose failed:', err); }
         try { this._missionScenarioSystem.dispose(); } catch (err) { console.warn('[FlightSimple] MissionScenarioSystem dispose failed:', err); }
         try { this._chatSystem.dispose(); } catch (err) { console.warn('[FlightSimple] ChatSystem dispose failed:', err); }
+        try { this._platformSystem.dispose(); } catch (err) { console.warn('[FlightSimple] PlatformSystem dispose failed:', err); }
         try { this._photoModeSystem.dispose(); } catch (err) { console.warn('[FlightSimple] PhotoModeSystem dispose failed:', err); }
         try { this._hudSystem.disposeResizeListener(); } catch (err) { console.warn('[FlightSimple] HudSystem resize listener dispose failed:', err); }
         document.getElementById('aircraft-btn')?.remove();
@@ -2476,6 +2486,12 @@ export class FlightSceneSimple extends Scene3D {
 
     private _toggleSpoilers(): void {
         this._flightPhysicsSystem.toggleSpoilers();
+    }
+
+    private _toggleSmoke(): boolean {
+        const smokeOn = this._vfxSystem.toggleSmoke();
+        this._showToast(I18n.t(smokeOn ? 'smoke.on' : 'smoke.off'), SMOKE_TOAST_MS);
+        return smokeOn;
     }
 
     private _armGroundSpoilers(): void {

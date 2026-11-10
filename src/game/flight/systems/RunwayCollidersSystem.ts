@@ -243,7 +243,10 @@ export class RunwayCollidersSystem {
                 if (planeRoot && mesh.isDescendantOf(planeRoot)) return false;
                 return true;
             };
+            const spike = this.scene._frameSpikeMonitor;
+            const pickStartMs = spike ? performance.now() : 0;
             const hit = babylonScene.pickWithRay(ray, predicate);
+            if (spike) spike.recordPick(performance.now() - pickStartMs);
             if (hit?.hit && hit.pickedPoint && Number.isFinite(hit.pickedPoint.y)) {
                 return hit.pickedPoint.y;
             }
@@ -273,7 +276,10 @@ export class RunwayCollidersSystem {
             return true;
         };
         const babylonScene: BABYLON.Scene = this.scene.scene;
+        const spike = this.scene._frameSpikeMonitor;
+        const pickStartMs = spike ? performance.now() : 0;
         const hits = babylonScene.multiPickWithRay(ray, predicate);
+        if (spike) spike.recordPick(performance.now() - pickStartMs);
         if (!hits || hits.length === 0) return null;
         let bestRunway: BABYLON.PickingInfo | null = null;
         let bestOther: BABYLON.PickingInfo | null = null;

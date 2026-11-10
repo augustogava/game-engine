@@ -11,6 +11,7 @@ export interface PlayerState {
     pitch: number;
     roll: number;
     onGround?: boolean;
+    smoke?: number;
     missionId?: number;
     flightPlanId?: number;
     aircraftRegistration?: string;

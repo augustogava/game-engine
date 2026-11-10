@@ -278,6 +278,7 @@ const WS_MIN_ALT_M = -500;
 const WS_MAX_ALT_M = 30000;
 const WS_MAX_AIRSPEED_KMH = 4000;
 const WS_MAX_THROTTLE = 3;
+const WS_MAX_SMOKE_COLOR = 5;
 const WS_MAX_IMPLIED_GROUND_SPEED_KT = 3000;
 const WS_TELEPORT_COOLDOWN_MS = 5000;
 const WS_REJECTION_LOG_INTERVAL_MS = 10000;
@@ -2711,6 +2712,7 @@ wss.on('connection', (ws) => {
                         heading: ((clampNumber(msg.heading, -720, 720, 0) % 360) + 360) % 360,
                         pitch: clampNumber(msg.pitch, -90, 90, 0),
                         roll: clampNumber(msg.roll, -180, 180, 0),
+                        smoke: Math.round(clampNumber(msg.smoke, 0, WS_MAX_SMOKE_COLOR, 0)),
                         aircraft: msg.aircraft || null,
                         aircraftId: Number.isInteger(Number(msg.aircraftId)) && Number(msg.aircraftId) > 0 ? Number(msg.aircraftId) : null,
                         aircraftCode: msg.aircraftCode || null,

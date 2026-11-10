@@ -6,6 +6,10 @@ export const JOYSTICK_MIN_RADIUS_PX = 50;
 export const JOYSTICK_MAX_DEADZONE_NORM = 0.30;
 export const JOYSTICK_MAX_EXPO = 3.0;
 export const JOYSTICK_MIN_EXPO = 1.0;
+export const TOUCH_ROLL_SENSITIVITY_DEFAULT = 1;
+export const TOUCH_ROLL_SENSITIVITY_MIN = 0.5;
+export const TOUCH_ROLL_SENSITIVITY_MAX = 3;
+export const TOUCH_ROLL_SENSITIVITY_STEP = 0.1;
 
 export const PINCH_THROTTLE_PX_TO_DELTA = 0.005;
 export const PINCH_ZOOM_PX_TO_RADIUS = 0.35;

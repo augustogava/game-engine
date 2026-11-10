@@ -34,7 +34,16 @@ export type ActionId =
     | 'reverseThrust'
     | 'autobrakeCycle'
     | 'chatOpen'
-    | 'photoMode';
+    | 'photoMode'
+    | 'landingLights'
+    | 'autopilotMaster'
+    | 'autopilotHeading'
+    | 'autopilotAltitude'
+    | 'autopilotVerticalSpeed'
+    | 'autopilotNav'
+    | 'autopilotApproach'
+    | 'spoilersToggle'
+    | 'smokeToggle';
 
 export type KeyBindings = Record<ActionId, string>;
 
@@ -73,6 +82,15 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
     autobrakeCycle: 'Digit4',
     chatOpen: 'Enter',
     photoMode: 'F9',
+    landingLights: 'KeyL',
+    autopilotMaster: 'KeyZ',
+    autopilotHeading: 'KeyF',
+    autopilotAltitude: 'KeyJ',
+    autopilotVerticalSpeed: 'KeyK',
+    autopilotNav: 'KeyU',
+    autopilotApproach: 'KeyI',
+    spoilersToggle: 'Backslash',
+    smokeToggle: 'Comma',
 };
 
 export const ACTION_LABELS: Record<ActionId, string> = {
@@ -110,6 +128,15 @@ export const ACTION_LABELS: Record<ActionId, string> = {
     autobrakeCycle: 'Autobrake',
     chatOpen: 'Chat',
     photoMode: 'Photo Mode',
+    landingLights: 'Landing Lights',
+    autopilotMaster: 'AP Master',
+    autopilotHeading: 'AP Heading',
+    autopilotAltitude: 'AP Altitude',
+    autopilotVerticalSpeed: 'AP Vertical Speed',
+    autopilotNav: 'AP Nav',
+    autopilotApproach: 'AP Approach',
+    spoilersToggle: 'Spoilers',
+    smokeToggle: 'Smoke',
 };
 
 type Listener = (bindings: KeyBindings) => void;

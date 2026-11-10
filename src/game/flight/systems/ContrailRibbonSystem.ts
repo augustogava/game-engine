@@ -57,6 +57,7 @@ export interface ContrailRibbonHandle {
     prevPerpZ: number;
     prevPerpValid: boolean;
     canceled: boolean;
+    color: BABYLON.Color3;
 }
 
 export class ContrailRibbonSystem {
@@ -195,11 +196,11 @@ export class ContrailRibbonSystem {
      * Build a pair of ribbon emitters + meshes attached to a given parent root.
      * Returns handles synchronously; mesh/material are created once shaders finish loading.
      */
-    buildPair(scene: BABYLON.Scene, parentRoot: BABYLON.TransformNode, halfSpan: number, idTag: string): {
+    buildPair(scene: BABYLON.Scene, parentRoot: BABYLON.TransformNode, halfSpan: number, idTag: string, allowMobile: boolean = false): {
         emL: BABYLON.TransformNode; emR: BABYLON.TransformNode;
         ribL: ContrailRibbonHandle; ribR: ContrailRibbonHandle;
     } | null {
-        if (this.scene.isMobile === true) return null;
+        if (this.scene.isMobile === true && !allowMobile) return null;
         this._sceneRef = scene;
         const safeHalf = Math.max(2, halfSpan);
 
@@ -242,7 +243,22 @@ export class ContrailRibbonSystem {
             prevPerpZ: 1,
             prevPerpValid: false,
             canceled: false,
+            color: new BABYLON.Color3(CONTRAIL_RIBBON_DEFAULT_COLOR_R, CONTRAIL_RIBBON_DEFAULT_COLOR_G, CONTRAIL_RIBBON_DEFAULT_COLOR_B),
         };
+    }
+
+    setPairColor(handle: ContrailRibbonHandle | null, r: number, g: number, b: number): void {
+        if (!handle) return;
+        if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+            console.warn(`[ContrailRibbon] Ignoring invalid color r=${r} g=${g} b=${b} (${handle.idTag})`);
+            return;
+        }
+        handle.color.set(r, g, b);
+        if (handle.material) handle.material.setColor3('cloudColor', handle.color);
+    }
+
+    resetPairColor(handle: ContrailRibbonHandle | null): void {
+        this.setPairColor(handle, CONTRAIL_RIBBON_DEFAULT_COLOR_R, CONTRAIL_RIBBON_DEFAULT_COLOR_G, CONTRAIL_RIBBON_DEFAULT_COLOR_B);
     }
 
     private async _initMeshAsync(scene: BABYLON.Scene, handle: ContrailRibbonHandle): Promise<void> {
@@ -257,6 +273,7 @@ export class ContrailRibbonSystem {
             if (!handle.parentRoot || (handle.parentRoot as any).isDisposed && (handle.parentRoot as any).isDisposed()) return;
             const mat = this._buildMaterial(scene, handle.idTag);
             const mesh = this._buildMesh(scene, handle.idTag, handle.positions, handle.uvs, handle.indices);
+            mat.setColor3('cloudColor', handle.color);
             mesh.material = mat;
             mesh.setEnabled(false);
             handle.material = mat;

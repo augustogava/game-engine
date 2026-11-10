@@ -53,7 +53,7 @@ export async function fetchAircraftConfig(aircraftId: number): Promise<AircraftC
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = resp.data;
         if (!data || typeof data !== 'object') throw new Error('Empty aircraft config response');
-        console.debug('[Aircraft] fetchAircraftConfig raw response:', JSON.stringify(data));
+        console.debug(`[Aircraft] fetchAircraftConfig id=${data.id} code=${data.code} name=${data.name} surfaces=${Array.isArray(data.surfaces) ? data.surfaces.length : 0}`);
         if (typeof data.flap_steps_json === 'string') {
             data.flap_steps_json = JSON.parse(data.flap_steps_json);
         }
@@ -76,8 +76,8 @@ export async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
         const resp = await fetchJsonWithTimeout('/api/user-aircrafts', { headers }, AIRCRAFT_CONFIG_FETCH_TIMEOUT_MS);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = resp.data;
-        console.debug('[Aircraft] fetchSelectedAircraftConfig raw response:', JSON.stringify(data));
         const list: any[] = Array.isArray(data?.data) ? data.data : [];
+        console.debug(`[Aircraft] fetchSelectedAircraftConfig entries=${list.length}`);
         let selected: any = null;
         const preflightIdRaw = localStorage.getItem(PREFLIGHT_AIRCRAFT_KEY);
         if (preflightIdRaw) {
@@ -96,7 +96,7 @@ export async function fetchSelectedAircraftConfig(): Promise<AircraftConfig> {
         }
         if (selected?.aircraft) {
             const embedded = selected.aircraft as AircraftConfig;
-            console.debug('[Aircraft] selected aircraft config:', JSON.stringify(embedded));
+            console.debug(`[Aircraft] selected aircraft id=${embedded.id} code=${embedded.code} name=${embedded.name} surfaces=${Array.isArray(embedded.surfaces) ? embedded.surfaces.length : 0}`);
             const selectionLabel = selected.is_selected === 1 ? 'SELECTED' : isTrainer(selected) ? 'FALLBACK (trainer)' : 'FALLBACK (first owned)';
             console.log(`[Aircraft] Using ${selectionLabel} aircraft: id=${embedded.id} code=${embedded.code} name=${embedded.name}`);
             let cfg = embedded;

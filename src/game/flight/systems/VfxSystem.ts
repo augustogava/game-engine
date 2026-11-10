@@ -63,8 +63,18 @@ import {
     CONTRAIL_MODE_RIBBON,
     CONTRAIL_MODE_PARTICLES,
     CONTRAIL_MODE_DEFAULT,
+    SMOKE_COLOR_NONE,
+    SMOKE_COLOR_DEFAULT_INDEX,
+    SMOKE_COLORS,
 } from '../constants/index.js';
 import { ContrailRibbonSystem, type ContrailRibbonHandle } from './ContrailRibbonSystem.js';
+
+export interface TrailColorTarget {
+    ribL?: ContrailRibbonHandle | null;
+    ribR?: ContrailRibbonHandle | null;
+    psL?: BABYLON.ParticleSystem | null;
+    psR?: BABYLON.ParticleSystem | null;
+}
 
 const COLOR_GRADE_TINT_HUE_EPSILON_DEG = 1.0;
 const COLOR_GRADE_TINT_DENSITY_EPSILON = 0.5;
@@ -99,6 +109,9 @@ export class VfxSystem {
     private _lastColorGradingEnabled: boolean | null = null;
     private _ribbonSystem: ContrailRibbonSystem | null = null;
     private _contrailMode: string = CONTRAIL_MODE_DEFAULT;
+    private _smokeOn = false;
+    private _smokeColorIndex: number = SMOKE_COLOR_DEFAULT_INDEX;
+    private _trailColorIndex: number = SMOKE_COLOR_NONE;
 
     private readonly _flareSunWorld = new BABYLON.Vector3();
     private readonly _flareToSun = new BABYLON.Vector3();
@@ -227,6 +240,84 @@ export class VfxSystem {
             this._ribbonSystem = new ContrailRibbonSystem(this.scene);
         }
         return this._ribbonSystem;
+    }
+
+    isSmokeOn(): boolean {
+        return this._smokeOn;
+    }
+
+    getSmokeState(): number {
+        return this._smokeOn ? this._smokeColorIndex : SMOKE_COLOR_NONE;
+    }
+
+    setSmokeColorIndex(index: number): void {
+        const parsed = Math.round(Number(index));
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > SMOKE_COLORS.length) {
+            console.warn(`[Smoke] Ignoring invalid color index ${index}`);
+            return;
+        }
+        this._smokeColorIndex = parsed;
+    }
+
+    toggleSmoke(): boolean {
+        const next = !this._smokeOn;
+        if (next && !this._ensureSmokeTrail()) {
+            console.warn('[Smoke] Trail unavailable; smoke stays off');
+            this._smokeOn = false;
+            return false;
+        }
+        this._smokeOn = next;
+        console.debug(`[Smoke] ${next ? 'ON' : 'OFF'} colorIndex=${this._smokeColorIndex}`);
+        return next;
+    }
+
+    applyTrailColor(target: TrailColorTarget, colorIndex: number): void {
+        const color = colorIndex > SMOKE_COLOR_NONE ? SMOKE_COLORS[colorIndex - 1] : null;
+        if (colorIndex > SMOKE_COLOR_NONE && !color) {
+            console.warn(`[Smoke] Unknown trail color index ${colorIndex}`);
+            return;
+        }
+        if (this._ribbonSystem) {
+            if (color) {
+                this._ribbonSystem.setPairColor(target.ribL ?? null, color.r, color.g, color.b);
+                this._ribbonSystem.setPairColor(target.ribR ?? null, color.r, color.g, color.b);
+            } else {
+                this._ribbonSystem.resetPairColor(target.ribL ?? null);
+                this._ribbonSystem.resetPairColor(target.ribR ?? null);
+            }
+        }
+        const r = color ? color.r : 1;
+        const g = color ? color.g : 1;
+        const b = color ? color.b : 1;
+        if (target.psL) this._tintContrailParticles(target.psL, r, g, b);
+        if (target.psR) this._tintContrailParticles(target.psR, r, g, b);
+    }
+
+    private _tintContrailParticles(ps: BABYLON.ParticleSystem, r: number, g: number, b: number): void {
+        ps.color1.set(r, g, b, CONTRAIL_INITIAL_ALPHA);
+        ps.color2.set(r, g, b, CONTRAIL_INITIAL_ALPHA * 0.9);
+        ps.colorDead.set(r, g, b, 0);
+    }
+
+    private _hasTrailPair(): boolean {
+        return !!(this.scene._contrailRibbonLeft || this.scene._contrailRibbonRight
+            || (this.scene._contrailPSLeft && this.scene._contrailPSRight));
+    }
+
+    private _ensureSmokeTrail(): boolean {
+        if (this._hasTrailPair()) return true;
+        const babylonScene: BABYLON.Scene | null = this.scene.scene ?? null;
+        if (!babylonScene || !this.scene.planeRoot) return false;
+        const halfSpan = Math.max(2, Number(this.scene._contrailHalfSpan) || 0);
+        const pair = this._getOrCreateRibbonSystem().buildPair(babylonScene, this.scene.planeRoot, halfSpan, 'self', true);
+        if (!pair) return false;
+        this.scene._contrailEmitterLeft = pair.emL;
+        this.scene._contrailEmitterRight = pair.emR;
+        this.scene._contrailRibbonLeft = pair.ribL;
+        this.scene._contrailRibbonRight = pair.ribR;
+        this._trailColorIndex = SMOKE_COLOR_NONE;
+        console.debug(`[Smoke] Ribbon trail created on demand halfSpan=${halfSpan.toFixed(1)}m`);
+        return true;
     }
 
     /**
@@ -360,6 +451,7 @@ export class VfxSystem {
         this.scene._contrailRibbonRight = null;
         this.scene._contrailEmitterLeft = null;
         this.scene._contrailEmitterRight = null;
+        this._trailColorIndex = SMOKE_COLOR_NONE;
     }
 
     buildVaporCone(scene: BABYLON.Scene): void {
@@ -660,7 +752,21 @@ export class VfxSystem {
         const tempC = this.isaTempC(altM);
         const speedMs = Number.isFinite(this.scene._lastTasMs) ? this.scene._lastTasMs : this.scene.velocity.length();
         const enginePower = Number.isFinite(this.scene.enginePower) ? this.scene.enginePower : 0;
-        const targetRate = this.computeContrailEmitRate(altM, tempC, speedMs, enginePower);
+        const naturalRate = this.computeContrailEmitRate(altM, tempC, speedMs, enginePower);
+        if (this._smokeOn && !this._hasTrailPair()) this._ensureSmokeTrail();
+        const targetRate = this._smokeOn ? CONTRAIL_EMIT_RATE_MAX : naturalRate;
+        const wantedColorIndex = this._smokeOn
+            ? this._smokeColorIndex
+            : (naturalRate > 0 ? SMOKE_COLOR_NONE : this._trailColorIndex);
+        if (wantedColorIndex !== this._trailColorIndex) {
+            this.applyTrailColor({
+                ribL: this.scene._contrailRibbonLeft,
+                ribR: this.scene._contrailRibbonRight,
+                psL: this.scene._contrailPSLeft,
+                psR: this.scene._contrailPSRight,
+            }, wantedColorIndex);
+            this._trailColorIndex = wantedColorIndex;
+        }
 
         if (this.scene._contrailPSLeft && this.scene._contrailPSRight) {
             const curL = this.scene._contrailPSLeft.emitRate || 0;

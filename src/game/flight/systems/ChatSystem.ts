@@ -34,7 +34,8 @@ export class ChatSystem {
         this.scene = scene;
         this._keyHandler = (e: KeyboardEvent) => {
             if (e.repeat || e.code !== InputBindings.codeFor('chatOpen')) return;
-            if (InputManager.isEditableTarget(e.target) || this.scene.spawned !== true || this.scene.isMobile === true) return;
+            if (InputManager.isEditableTarget(e.target) || this.scene.spawned !== true) return;
+            if (this.scene._inputSystem?.isHardwareInputActive?.() !== true) return;
             e.preventDefault();
             this.open();
         };
@@ -55,10 +56,10 @@ export class ChatSystem {
         input.style.cssText = 'display:none;width:100%;box-sizing:border-box;padding:7px 9px;background:rgba(0,20,15,.88);border:1px solid rgba(80,255,160,.45);border-radius:6px;color:#e8fff4;font-size:12px;outline:none;pointer-events:auto';
         input.addEventListener('keydown', (ev) => {
             ev.stopPropagation();
-            if (ev.code === CHAT_SEND_CODE) {
+            if (ev.code === CHAT_SEND_CODE || ev.key === CHAT_SEND_CODE) {
                 ev.preventDefault();
                 this.send(input.value);
-            } else if (ev.code === CHAT_CLOSE_CODE) {
+            } else if (ev.code === CHAT_CLOSE_CODE || ev.key === CHAT_CLOSE_CODE) {
                 ev.preventDefault();
                 this.close();
             }

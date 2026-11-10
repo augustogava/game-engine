@@ -65,6 +65,17 @@ export const CONTRAIL_ENABLE_MIN_SPEED_MS = 60;
 export const CONTRAIL_ENABLE_MAX_TEMP_C = -35;
 export const CONTRAIL_ENABLE_MIN_ENGINE_POWER = 0.15;
 export const CONTRAIL_EMIT_LERP_RATE = 0.08;
+
+export const SMOKE_COLOR_NONE = 0;
+export const SMOKE_COLOR_DEFAULT_INDEX = 1;
+export const SMOKE_COLORS: readonly { r: number; g: number; b: number }[] = [
+    { r: 1.0, g: 1.0, b: 1.0 },
+    { r: 0.95, g: 0.16, b: 0.12 },
+    { r: 0.16, g: 0.72, b: 0.26 },
+    { r: 0.22, g: 0.46, b: 0.95 },
+    { r: 0.98, g: 0.84, b: 0.16 },
+];
+export const SMOKE_TOAST_MS = 2000;
 export const CONTRAIL_WAKE_SINK_RATE_MS = 0.05;
 export const CONTRAIL_NOISE_STRENGTH_LATERAL = 0.15;
 export const CONTRAIL_NOISE_STRENGTH_VERTICAL = 0.08;

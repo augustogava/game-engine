@@ -503,6 +503,39 @@ export class AutopilotSystem {
             window.addEventListener('mouseup', onUp);
         });
 
+        let activePointerId: number | null = null;
+        const onPointerMove = (e: PointerEvent) => {
+            if (e.pointerId !== activePointerId) return;
+            e.preventDefault();
+            onMove(e);
+        };
+        const onPointerUp = (e: PointerEvent) => {
+            if (e.pointerId !== activePointerId) return;
+            activePointerId = null;
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+            window.removeEventListener('pointercancel', onPointerUp);
+            if (!dragging) return;
+            dragging = false;
+            if (movedSignificantly) {
+                try { this.scene._cockpitClick(); } catch { /* ignore */ }
+            }
+        };
+        knob.style.touchAction = 'none';
+        knob.addEventListener('pointerdown', (e: PointerEvent) => {
+            if (e.pointerType === 'mouse' || activePointerId !== null) return;
+            e.stopPropagation();
+            activePointerId = e.pointerId;
+            dragging = true;
+            movedSignificantly = false;
+            dragShift = false;
+            lastAngle = angleFrom(e.clientX, e.clientY);
+            accumDeg = 0;
+            window.addEventListener('pointermove', onPointerMove, { passive: false });
+            window.addEventListener('pointerup', onPointerUp);
+            window.addEventListener('pointercancel', onPointerUp);
+        });
+
         knob.addEventListener('wheel', (e) => {
             e.preventDefault();
             e.stopPropagation();

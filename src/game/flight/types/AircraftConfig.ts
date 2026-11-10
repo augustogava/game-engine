@@ -76,6 +76,10 @@ export interface AircraftConfig {
     control_q_reference_pa?: number | null;
     control_input_magnitude?: number | null;
     control_smoothing_rate?: number | null;
+    control_roll_smoothing_rate?: number | null;
+    control_roll_input_magnitude?: number | null;
+    control_return_rate?: number | null;
+    engine_spool_tau_s?: number | null;
     vne_kts?: number | null;
     vfe_kts?: number | null;
     mmo?: number | null;
@@ -87,6 +91,12 @@ export interface AircraftConfig {
     g_limit_negative?: number | null;
     fuselage_cd_vertical?: number | null;
     fuselage_planform_area?: number | null;
+}
+
+export function positiveConfigValue(value: unknown): number | null {
+    if (value == null) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 export const DEFAULT_AIRCRAFT_CONFIG: AircraftConfig = {

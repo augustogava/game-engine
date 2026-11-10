@@ -9,6 +9,7 @@ import { AudioCore } from '../../AudioCore.js';
 import { I18n } from '../../I18n.js';
 import {
     CONTRAIL_EMIT_LERP_RATE, CONTRAIL_EMIT_RATE_MAX,
+    SMOKE_COLOR_NONE, SMOKE_COLORS,
     FLIGHT_PLAN_STATUS_COMPLETED, FLIGHT_PLAN_STATUS_CANCELLED,
 } from '../constants/index.js';
 
@@ -22,6 +23,7 @@ const LABEL_PLANE_WIDTH = 18;
 const LABEL_PLANE_HEIGHT = 5.6;
 const LABEL_Y_OFFSET = 10;
 const REMOTE_AIRSPEED_KMH_TO_MS = 1 / 3.6;
+const OWN_AIRSPEED_MS_TO_KMH = 3.6;
 const REMOTE_CONTRAIL_FALLBACK_HALF_SPAN = 8;
 const REMOTE_RIBBON_FAR_DIST_M = 8000;
 const REMOTE_RIBBON_FAR_UPDATE_INTERVAL_S = 0.2;
@@ -817,7 +819,23 @@ export class MultiplayerSystem {
                     const tempC = vfx.isaTempC(altM);
                     const speedMs = Number.isFinite(ns.airspeed) ? ns.airspeed * REMOTE_AIRSPEED_KMH_TO_MS : 0;
                     const throttle = Number.isFinite(ns.throttle) ? Math.max(0, Math.min(1.5, ns.throttle)) : 0;
-                    const targetRate = ns.onGround ? 0 : vfx.computeContrailEmitRate(altM, tempC, speedMs, throttle);
+                    const naturalRate = ns.onGround ? 0 : vfx.computeContrailEmitRate(altM, tempC, speedMs, throttle);
+                    const smokeRaw = Math.round(Number(ns.smoke));
+                    const smokeIndex = Number.isFinite(smokeRaw) && smokeRaw > SMOKE_COLOR_NONE && smokeRaw <= SMOKE_COLORS.length ? smokeRaw : SMOKE_COLOR_NONE;
+                    const targetRate = smokeIndex > SMOKE_COLOR_NONE ? CONTRAIL_EMIT_RATE_MAX : naturalRate;
+                    const currentTrailColor = remote.trailColorIndex ?? SMOKE_COLOR_NONE;
+                    const wantedTrailColor = smokeIndex > SMOKE_COLOR_NONE
+                        ? smokeIndex
+                        : (naturalRate > 0 ? SMOKE_COLOR_NONE : currentTrailColor);
+                    if (wantedTrailColor !== currentTrailColor) {
+                        vfx.applyTrailColor({
+                            ribL: remote.contrailRibbonLeft,
+                            ribR: remote.contrailRibbonRight,
+                            psL: remote.contrailPSLeft,
+                            psR: remote.contrailPSRight,
+                        }, wantedTrailColor);
+                        remote.trailColorIndex = wantedTrailColor;
+                    }
 
                     if (remote.contrailPSLeft && remote.contrailPSRight) {
                         const curL = remote.contrailPSLeft.emitRate || 0;
@@ -871,15 +889,20 @@ export class MultiplayerSystem {
             this.scene._lastSentAircraftId = aircraftIdToSend;
         }
 
+        const trueAirspeedMs = Number.isFinite(this.scene._lastTasMs) && this.scene._lastTasMs >= 0
+            ? this.scene._lastTasMs
+            : this.scene.velocity.length();
+
         this.scene.mpClient.sendUpdate({
             lat, lon,
             alt: this.scene.refAlt + pos.y,
-            airspeed: this.scene.velocity.length() * 3.6,
+            airspeed: trueAirspeedMs * OWN_AIRSPEED_MS_TO_KMH,
             throttle: this.scene.thrust,
             heading: hdg,
             pitch: pitchDeg,
             roll: rollDeg,
             onGround: this.scene.isOnGround,
+            smoke: this.scene._vfxSystem.getSmokeState(),
             aircraftId: aircraftIdToSend,
             aircraftCode: this.scene.aircraftConfig.code || undefined,
             aircraftModelFile: this.scene.aircraftConfig.model_file || undefined,

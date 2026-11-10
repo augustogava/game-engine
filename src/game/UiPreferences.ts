@@ -1,3 +1,5 @@
+import { SMOKE_COLORS, SMOKE_COLOR_DEFAULT_INDEX } from './flight/constants/vfxConstants.js';
+
 export const UI_PREF_STORAGE_KEY = 'flight_ui_prefs_v1';
 
 export const UNIT_SYSTEM_IMPERIAL = 'imperial';
@@ -48,6 +50,7 @@ export interface UiPreferencesData {
     gpBtnCamera: number;
     gpBtnRespawn: number;
     gpBtnPause: number;
+    smokeColor: number;
 }
 
 const DEFAULT_PREFS: UiPreferencesData = {
@@ -84,6 +87,7 @@ const DEFAULT_PREFS: UiPreferencesData = {
     gpBtnCamera: 4,
     gpBtnRespawn: 5,
     gpBtnPause: 9,
+    smokeColor: SMOKE_COLOR_DEFAULT_INDEX,
 };
 
 const PREF_GP_AXIS_MAX = 15;
@@ -169,6 +173,7 @@ export class UiPreferences {
             gpBtnCamera: clamp(Math.round(Number(input.gpBtnCamera ?? DEFAULT_PREFS.gpBtnCamera)), 0, PREF_GP_BTN_MAX),
             gpBtnRespawn: clamp(Math.round(Number(input.gpBtnRespawn ?? DEFAULT_PREFS.gpBtnRespawn)), 0, PREF_GP_BTN_MAX),
             gpBtnPause: clamp(Math.round(Number(input.gpBtnPause ?? DEFAULT_PREFS.gpBtnPause)), 0, PREF_GP_BTN_MAX),
+            smokeColor: clamp(Math.round(Number(input.smokeColor ?? DEFAULT_PREFS.smokeColor)), 1, SMOKE_COLORS.length),
         };
     }
 

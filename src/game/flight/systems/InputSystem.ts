@@ -5,6 +5,8 @@ import { InputBindings, type ActionId } from '../../InputBindings.js';
 import { UiPreferences } from '../../UiPreferences.js';
 import * as CONST from '../constants/index.js';
 import { getAirDensity } from '../physics/AeroPhysics.js';
+import { positiveConfigValue } from '../types/index.js';
+import { InputManager } from '../../../engine/input/InputManager.js';
 
 const {
     CAMERA_MODE_CHASE,
@@ -15,6 +17,7 @@ const {
     MAGNETO_OFF, MAGNETO_LEFT, MAGNETO_RIGHT, MAGNETO_BOTH, MAGNETO_START,
     JOYSTICK_MIN_RADIUS_PX, JOYSTICK_MAX_RADIUS_PX, JOYSTICK_MAX_DEADZONE_NORM,
     JOYSTICK_MIN_EXPO, JOYSTICK_MAX_EXPO,
+    TOUCH_ROLL_SENSITIVITY_DEFAULT, TOUCH_ROLL_SENSITIVITY_MIN, TOUCH_ROLL_SENSITIVITY_MAX, TOUCH_ROLL_SENSITIVITY_STEP,
     HAPTIC_MIN_INTERVAL_MS,
     MS_TO_KT,
     ENGINE_TYPE_PISTON, ENGINE_TYPE_TURBOFAN, ENGINE_TYPE_TURBOJET,
@@ -32,13 +35,22 @@ const CONTROL_SETTINGS_STORAGE_KEY = 'flight_controls_v1';
 const LEGACY_YAW_LEFT_CODE = 'KeyA';
 const LEGACY_YAW_RIGHT_CODE = 'KeyD';
 const TOUCH_RUDDER_INPUT = 1;
+const TOUCH_PITCH_GAIN = 0.7;
+const TOUCH_ROLL_GAIN_DEFAULT = 0.18;
+const KEY_ROLL_MAGNITUDE_DEFAULT = 0.55;
+const TOUCH_TRIM_PITCH_STEP = 0.005;
+const TOUCH_TRIM_PITCH_LIMIT = 0.15;
+const TOUCH_TRIM_YAW_STEP = 0.005;
+const TOUCH_TRIM_YAW_LIMIT = 0.1;
+const TOUCH_TRIM_CLICK_HZ = 2200;
+const SPOILER_LONG_PRESS_MS = 500;
 const TOUCH_WIDGET_SELECTOR = [
     '#preflight', '#touch-throttle', '#touch-flap-btns', '#touch-rudder', '#ap-panel',
     '#missions-btn', '#aircraft-btn', '#flight-plans-btn', '#logbook-btn', '#efb-btn',
     '#achievements-btn', '#leaderboard-btn',
     '#missions-panel', '#aircraft-panel', '#flight-plans-panel', '#logbook-panel', '#efb-panel',
     '#achievements-panel', '#leaderboard-panel',
-    '#touch-controls-btn', '#touch-controls-panel', '#gps-zoom-controls',
+    '#touch-controls-btn', '#touch-controls-panel', '#touch-more-btn', '#touch-more-panel', '#touch-settings-btn', '#gps-zoom-controls',
     '#instrument-dock', '#pfd-btn', '#pfd-panel', '#nav-info', '#debug-ui', '#dbg-panel',
     '#tutorial-overlay .tut-card',
 ].join(',');
@@ -52,12 +64,39 @@ export class InputSystem {
     private _touchCancelHandler: ((e: TouchEvent) => void) | null = null;
     private _gamepadThrottleBaseline: number | null = null;
     private _gamepadOwnsThrottle = false;
+    private _hardwareInputSeen = false;
+    private _touchReverseHeld = false;
+    private _smokeKeyLock = false;
+    private _hardwareKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
     constructor(scene: FlightSceneSimple) {
         this.scene = scene;
     }
 
+    private touchRollSensitivity(): number {
+        const value = Number(this.scene._controlSettings?.rollSensitivity);
+        if (!Number.isFinite(value)) return TOUCH_ROLL_SENSITIVITY_DEFAULT;
+        return Math.max(TOUCH_ROLL_SENSITIVITY_MIN, Math.min(TOUCH_ROLL_SENSITIVITY_MAX, value));
+    }
+
+    private installHardwareKeyboardDetection(): void {
+        if (this._hardwareKeyHandler) return;
+        const handler = (e: KeyboardEvent) => {
+            if (this._hardwareInputSeen) return;
+            if (InputManager.isEditableTarget(e.target)) return;
+            if (!e.code || !InputBindings.boundCodes().includes(e.code)) return;
+            this._hardwareInputSeen = true;
+            console.debug(`[InputSystem] Hardware keyboard detected on a touch device (code=${e.code}); keyboard input enabled`);
+        };
+        this._hardwareKeyHandler = handler;
+        window.addEventListener('keydown', handler);
+    }
+
     dispose(): void {
+        if (this._hardwareKeyHandler) {
+            window.removeEventListener('keydown', this._hardwareKeyHandler);
+            this._hardwareKeyHandler = null;
+        }
         try {
             if (this._touchCanvas) {
                 if (this._touchStartHandler) this._touchCanvas.removeEventListener('touchstart', this._touchStartHandler);
@@ -232,24 +271,79 @@ export class InputSystem {
         });
     }
 
+    isHardwareInputActive(): boolean {
+        return !this.scene.isMobile || this._hardwareInputSeen;
+    }
+
+    private handlePauseKey(p: (code: string) => boolean, gamepadPressed: boolean): void {
+        const pauseCode = InputBindings.codeFor('pauseToggle');
+        if ((p(pauseCode) && !this.scene._pauseKeyLock) || gamepadPressed) {
+            this.scene._pauseKeyLock = true;
+            this.scene._togglePause();
+        }
+        if (!p(pauseCode)) this.scene._pauseKeyLock = false;
+    }
+
+    private handleReplayKey(p: (code: string) => boolean): void {
+        const replayCode = InputBindings.codeFor('replayToggle');
+        if (p(replayCode) && !this.scene._replayKeyLock) {
+            this.scene._replayKeyLock = true;
+            this.scene._toggleReplay();
+        }
+        if (!p(replayCode)) this.scene._replayKeyLock = false;
+    }
+
+    private handleCameraKey(p: (code: string) => boolean, gamepadPressed: boolean): void {
+        const camCode = InputBindings.codeFor('cameraCycle');
+        if ((p(camCode) && !this.scene._cameraModeKeyLock) || gamepadPressed) {
+            this.scene._cameraModeKeyLock = true;
+            this.scene._cycleCameraMode();
+            this.scene._cockpitClick();
+        }
+        if (!p(camCode)) this.scene._cameraModeKeyLock = false;
+    }
+
+    private handleSuspendedInput(): void {
+        const gamepadEnabled = UiPreferences.peek().gamepadEnabled === true;
+        const gpEdges = gamepadEnabled ? this.scene._gamepad.readEdges() : null;
+        const hardwareActive = this.isHardwareInputActive();
+        const p = (code: string) => hardwareActive && this.scene.input.isKeyDown(code);
+        this.handlePauseKey(p, gpEdges?.pause === true);
+        this.handleReplayKey(p);
+        this.handleCameraKey(p, gpEdges?.camera === true);
+    }
+
     handleInput(_dt: number): void {
-        let targetPitch: number;
-        let targetRoll: number;
-        let targetYaw: number;
+        if (this.scene._paused === true || this.scene._replayActive === true) {
+            this.handleSuspendedInput();
+            return;
+        }
+
+        let targetPitch = 0;
+        let targetRoll = 0;
+        let targetYaw = 0;
+        let keyThrottleMoved = false;
+        let keyReverseHeld = false;
 
         const LATERAL_SMOOTHING_RATE = this.scene.isMobile ? 0.9 : 1.2;
         const LATERAL_RETURN_RATE    = this.scene.isMobile ? 0.7 : 0.9;
         const cfgSmoothing = this.scene.aircraftConfig.control_smoothing_rate;
+        const cfgReturnRate = positiveConfigValue(this.scene.aircraftConfig.control_return_rate);
+        const cfgRollSmoothing = positiveConfigValue(this.scene.aircraftConfig.control_roll_smoothing_rate);
+        const cfgRollMagnitude = positiveConfigValue(this.scene.aircraftConfig.control_roll_input_magnitude);
         const PITCH_SMOOTHING_RATE = (cfgSmoothing != null && cfgSmoothing > 0)
             ? cfgSmoothing
             : LATERAL_SMOOTHING_RATE;
-        const PITCH_RETURN_RATE    = (cfgSmoothing != null && cfgSmoothing > 0)
+        const PITCH_RETURN_RATE    = cfgReturnRate ?? ((cfgSmoothing != null && cfgSmoothing > 0)
             ? cfgSmoothing * 0.35
-            : LATERAL_RETURN_RATE;
+            : LATERAL_RETURN_RATE);
+        const ROLL_SMOOTHING_RATE = cfgRollSmoothing ?? LATERAL_SMOOTHING_RATE;
+        const ROLL_RETURN_RATE    = cfgReturnRate ?? LATERAL_RETURN_RATE;
         const cfgInputMag = this.scene.aircraftConfig.control_input_magnitude;
         const KEY_PITCH_MAGNITUDE = (cfgInputMag != null && cfgInputMag > 0) ? cfgInputMag : 0.75;
-        const KEY_ROLL_MAGNITUDE  = 0.55;
+        const KEY_ROLL_MAGNITUDE  = cfgRollMagnitude ?? KEY_ROLL_MAGNITUDE_DEFAULT;
         const KEY_YAW_MAGNITUDE   = 0.65;
+        const TOUCH_ROLL_MAGNITUDE = cfgRollMagnitude ?? TOUCH_ROLL_GAIN_DEFAULT;
 
         const prefs = UiPreferences.peek();
         const bind = (action: ActionId): string => InputBindings.codeFor(action);
@@ -260,17 +354,18 @@ export class InputSystem {
         this.scene._gamepadAxes = gpAxes;
         const gpEdges = prefs.gamepadEnabled ? this.scene._gamepad.readEdges() : { gear: false, brake: false, flapDown: false, flapUp: false, camera: false, respawn: false, pause: false };
 
-        if (this.scene.isMobile) {
-            targetPitch = this.scene.touchPitchInput * 0.7;
-            targetRoll = this.scene.touchRollInput * 0.18;
-            const touchYaw = Number(this.scene.touchYawInput) || 0;
-            targetYaw = Math.max(-1, Math.min(1, touchYaw)) * KEY_YAW_MAGNITUDE;
-            this.scene.thrust = this.scene.touchThrust;
-        } else {
+        if (this.scene.isMobile && gpAxes.connected && !this._hardwareInputSeen) {
+            this._hardwareInputSeen = true;
+            console.debug('[InputSystem] Gamepad detected on a touch device; keyboard and gamepad input enabled');
+        }
+        const hardwareInputActive = this.isHardwareInputActive();
+
+        if (hardwareInputActive) {
             const p = (code: string) => this.scene.input.isKeyDown(code);
 
             const keyThrottleUp = p(bind('throttleUp'));
             const keyThrottleDown = p(bind('throttleDown'));
+            keyThrottleMoved = keyThrottleUp || keyThrottleDown;
             if (keyThrottleUp) this.scene.thrust = Math.min(this.scene.aircraftConfig.afterburner_thrust_mult ?? 1.0, this.scene.thrust + _dt * this.scene.aircraftConfig.throttle_up_rate);
             if (keyThrottleDown) this.scene.thrust = Math.max(0, this.scene.thrust - _dt * this.scene.aircraftConfig.throttle_down_rate);
             if ((keyThrottleUp || keyThrottleDown) && this._gamepadOwnsThrottle) {
@@ -357,7 +452,7 @@ export class InputSystem {
             }
             if (!p(brakeCode)) this.scene.brakeKeyLock = false;
 
-            this.scene._reverseThrustRequested = p(bind('reverseThrust'));
+            keyReverseHeld = p(bind('reverseThrust'));
             const autobrakeCode = bind('autobrakeCycle');
             if (p(autobrakeCode) && !this.scene._autobrakeKeyLock) {
                 this.scene._autobrakeKeyLock = true;
@@ -366,65 +461,59 @@ export class InputSystem {
             }
             if (!p(autobrakeCode)) this.scene._autobrakeKeyLock = false;
 
-            const camCode = bind('cameraCycle');
-            if ((p(camCode) && !this.scene._cameraModeKeyLock) || gpEdges.camera) {
-                this.scene._cameraModeKeyLock = true;
-                this.scene._cycleCameraMode();
-                this.scene._cockpitClick();
-            }
-            if (!p(camCode)) this.scene._cameraModeKeyLock = false;
+            this.handleCameraKey(p, gpEdges.camera === true);
 
-            if (p('KeyL') && !this.scene._landingKeyLock) {
+            if (p(bind('landingLights')) && !this.scene._landingKeyLock) {
                 this.scene._landingKeyLock = true;
                 this.scene._landingLightsOn = !this.scene._landingLightsOn;
                 this.scene._cockpitClick();
             }
-            if (!p('KeyL')) this.scene._landingKeyLock = false;
+            if (!p(bind('landingLights'))) this.scene._landingKeyLock = false;
 
-            if (p('KeyZ') && !this.scene._apKeyLockMaster) {
+            if (p(bind('autopilotMaster')) && !this.scene._apKeyLockMaster) {
                 this.scene._apKeyLockMaster = true;
                 this.scene._engageAutopilotMaster();
                 this.scene._cockpitClick();
             }
-            if (!p('KeyZ')) this.scene._apKeyLockMaster = false;
-            if (p('KeyF') && !this.scene._apKeyLockHdg) {
+            if (!p(bind('autopilotMaster'))) this.scene._apKeyLockMaster = false;
+            if (p(bind('autopilotHeading')) && !this.scene._apKeyLockHdg) {
                 this.scene._apKeyLockHdg = true;
                 this.scene._engageAutopilotHdgHold();
                 this.scene._cockpitClick();
             }
-            if (!p('KeyF')) this.scene._apKeyLockHdg = false;
-            if (p('KeyJ') && !this.scene._apKeyLockAlt) {
+            if (!p(bind('autopilotHeading'))) this.scene._apKeyLockHdg = false;
+            if (p(bind('autopilotAltitude')) && !this.scene._apKeyLockAlt) {
                 this.scene._apKeyLockAlt = true;
                 this.scene._engageAutopilotAltHold();
                 this.scene._cockpitClick();
             }
-            if (!p('KeyJ')) this.scene._apKeyLockAlt = false;
-            if (p('KeyK') && !this.scene._apKeyLockVs) {
+            if (!p(bind('autopilotAltitude'))) this.scene._apKeyLockAlt = false;
+            if (p(bind('autopilotVerticalSpeed')) && !this.scene._apKeyLockVs) {
                 this.scene._apKeyLockVs = true;
                 this.scene._engageAutopilotVsHold();
                 this.scene._cockpitClick();
             }
-            if (!p('KeyK')) this.scene._apKeyLockVs = false;
-            if (p('KeyU') && !this.scene._apKeyLockNav) {
+            if (!p(bind('autopilotVerticalSpeed'))) this.scene._apKeyLockVs = false;
+            if (p(bind('autopilotNav')) && !this.scene._apKeyLockNav) {
                 this.scene._apKeyLockNav = true;
                 this.scene._engageAutopilotNavHold();
                 this.scene._cockpitClick();
             }
-            if (!p('KeyU')) this.scene._apKeyLockNav = false;
-            if (p('KeyI') && !this.scene._apKeyLockApr) {
+            if (!p(bind('autopilotNav'))) this.scene._apKeyLockNav = false;
+            if (p(bind('autopilotApproach')) && !this.scene._apKeyLockApr) {
                 this.scene._apKeyLockApr = true;
                 this.scene._engageAutopilotAprHold();
                 this.scene._cockpitClick();
             }
-            if (!p('KeyI')) this.scene._apKeyLockApr = false;
+            if (!p(bind('autopilotApproach'))) this.scene._apKeyLockApr = false;
 
-            if (p('Backslash') && !this.scene._spoilerKeyLock) {
+            if (p(bind('spoilersToggle')) && !this.scene._spoilerKeyLock) {
                 this.scene._spoilerKeyLock = true;
                 if (p('ShiftLeft') || p('ShiftRight')) this.scene._armGroundSpoilers();
                 else this.scene._toggleSpoilers();
                 this.scene._cockpitClick();
             }
-            if (!p('Backslash')) this.scene._spoilerKeyLock = false;
+            if (!p(bind('spoilersToggle'))) this.scene._spoilerKeyLock = false;
 
             for (let i = 0; i < 4; i++) {
                 const code = `Digit${i + 1}`;
@@ -489,12 +578,7 @@ export class InputSystem {
                 if (!p(magCode)) this.scene.magnetoKeyLockN = false;
             }
 
-            const pauseCode = bind('pauseToggle');
-            if ((p(pauseCode) && !this.scene._pauseKeyLock) || gpEdges.pause) {
-                this.scene._pauseKeyLock = true;
-                this.scene._togglePause();
-            }
-            if (!p(pauseCode)) this.scene._pauseKeyLock = false;
+            this.handlePauseKey(p, gpEdges.pause === true);
 
             const tsUpCode = bind('timeScaleUp');
             if (p(tsUpCode) && !this.scene._timeScaleUpKeyLock) {
@@ -532,12 +616,15 @@ export class InputSystem {
             }
             if (!p(towerCode)) this.scene._towerCamKeyLock = false;
 
-            const replayCode = bind('replayToggle');
-            if (p(replayCode) && !this.scene._replayKeyLock) {
-                this.scene._replayKeyLock = true;
-                this.scene._toggleReplay();
+            this.handleReplayKey(p);
+
+            const smokeCode = bind('smokeToggle');
+            if (p(smokeCode) && !this._smokeKeyLock) {
+                this._smokeKeyLock = true;
+                const smokeOn = this.scene._toggleSmoke() === true;
+                document.getElementById('touch-smk')?.classList.toggle('active', smokeOn);
             }
-            if (!p(replayCode)) this.scene._replayKeyLock = false;
+            if (!p(smokeCode)) this._smokeKeyLock = false;
 
             const atCode = bind('autothrottleToggle');
             if (p(atCode) && !this.scene._autothrottleKeyLock) {
@@ -545,6 +632,23 @@ export class InputSystem {
                 this.scene._toggleAutothrottle();
             }
             if (!p(atCode)) this.scene._autothrottleKeyLock = false;
+        }
+
+        this.scene._reverseThrustRequested = keyReverseHeld || this._touchReverseHeld;
+
+        if (this.scene.isMobile) {
+            const touchYaw = Math.max(-1, Math.min(1, Number(this.scene.touchYawInput) || 0)) * KEY_YAW_MAGNITUDE;
+            if (!hardwareInputActive || this.scene.joystickTouchId !== null) {
+                targetPitch = this.scene.touchPitchInput * TOUCH_PITCH_GAIN;
+                targetRoll = this.scene.touchRollInput * TOUCH_ROLL_MAGNITUDE * this.touchRollSensitivity();
+            }
+            if (!hardwareInputActive || touchYaw !== 0) targetYaw = touchYaw;
+            if (hardwareInputActive && (keyThrottleMoved || this._gamepadOwnsThrottle)) {
+                this.scene.touchThrust = this.scene.thrust;
+                this.refreshTouchThrottleVisual();
+            } else {
+                this.scene.thrust = this.scene.touchThrust;
+            }
         }
 
         if (this.scene._easyModeAssistEnabled()) {
@@ -573,7 +677,7 @@ export class InputSystem {
         }
 
         this.scene.smoothedPitch = lerpAxis(this.scene.smoothedPitch, targetPitch, PITCH_SMOOTHING_RATE, PITCH_RETURN_RATE);
-        this.scene.smoothedRoll  = lerpAxis(this.scene.smoothedRoll, targetRoll, LATERAL_SMOOTHING_RATE, LATERAL_RETURN_RATE);
+        this.scene.smoothedRoll  = lerpAxis(this.scene.smoothedRoll, targetRoll, ROLL_SMOOTHING_RATE, ROLL_RETURN_RATE);
         this.scene.smoothedYaw   = lerpAxis(this.scene.smoothedYaw, targetYaw, LATERAL_SMOOTHING_RATE, LATERAL_RETURN_RATE);
 
         this.scene.surfaces[0].controlInput =  this.scene.smoothedRoll;
@@ -666,20 +770,21 @@ export class InputSystem {
 
     setupTouchControls(): void {
         this.scene._loadControlSettings();
+        this.installHardwareKeyboardDetection();
 
         const overlay = document.createElement('div');
         overlay.id = 'touch-overlay';
         overlay.innerHTML = `
 <style>
-#touch-overlay{position:fixed;inset:0;pointer-events:none;z-index:150}
+#touch-overlay{position:fixed;inset:0;pointer-events:none;z-index:150;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 #touch-joy{position:absolute;width:120px;height:120px;border-radius:50%;border:none;background:none;display:none;pointer-events:none}
 #touch-joy-deadzone{position:absolute;top:50%;left:50%;border-radius:50%;border:2px dashed rgba(80,255,160,.0);pointer-events:none;transition:border-color .12s}
 #touch-joy-knob{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(0,255,128,.25);border:1px solid rgba(0,255,128,.15)}
 #touch-throttle{position:absolute;bottom:calc(160px + var(--safe-bottom));left:calc(10px + var(--safe-left));width:40px;height:150px;border-radius:20px;border:2px solid rgba(80,255,160,.35);background:rgba(0,20,15,.3);pointer-events:auto;touch-action:none}
 #touch-thr-fill{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(0deg,rgba(0,255,128,.35),rgba(0,255,128,.1));border-radius:0 0 20px 20px}
 #touch-thr-knob{position:absolute;left:50%;transform:translateX(-50%);width:36px;height:12px;border-radius:6px;background:rgba(0,255,128,.5);border:1px solid rgba(0,255,128,.7)}
-#touch-flap-btns{position:absolute;bottom:calc(340px + var(--safe-bottom));left:calc(6px + var(--safe-left));display:grid;grid-template-columns:repeat(2,38px);grid-auto-rows:26px;gap:4px;pointer-events:auto}
-#touch-flap-btns button{width:38px;height:26px;padding:0;border-radius:5px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.04em;cursor:pointer;touch-action:manipulation;transition:transform .1s,background .1s,border-color .1s;backdrop-filter:blur(2px)}
+#touch-flap-btns{position:absolute;bottom:calc(318px + var(--safe-bottom));left:calc(6px + var(--safe-left));display:grid;grid-template-columns:repeat(3,44px);grid-auto-rows:33px;gap:4px;pointer-events:auto}
+#touch-flap-btns button{width:44px;height:33px;padding:0;border-radius:5px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:9px;letter-spacing:.04em;cursor:pointer;touch-action:manipulation;transition:transform .1s,background .1s,border-color .1s;backdrop-filter:blur(2px)}
 #touch-flap-btns button:active{transform:scale(.92);background:rgba(0,40,25,.55);border-color:rgba(80,255,160,.45)}
 #touch-brk.active{background:rgba(255,40,40,.32);border-color:rgba(255,80,80,.5);color:#ff6060}
 #touch-spl.active{background:rgba(80,255,160,.32);border-color:rgba(80,255,160,.6);color:#80ffa0}
@@ -691,34 +796,66 @@ export class InputSystem {
 #touch-rudder{position:absolute;bottom:calc(150px + var(--safe-bottom));right:calc(12px + var(--safe-right));display:flex;gap:6px;pointer-events:auto}
 #touch-rudder button{width:56px;height:44px;padding:0;border-radius:8px;border:1px solid rgba(80,255,160,.22);background:rgba(0,20,15,.32);color:rgba(125,249,200,.78);font-family:'Orbitron',monospace;font-size:11px;letter-spacing:.04em;cursor:pointer;touch-action:none;backdrop-filter:blur(2px);transition:transform .1s,background .1s,border-color .1s}
 #touch-rudder button.active{transform:scale(.94);background:rgba(0,60,35,.6);border-color:rgba(80,255,160,.55);color:#80ffa0}
-#touch-controls-btn{position:absolute;top:calc(336px + var(--safe-top));right:calc(14px + var(--safe-right));width:32px;height:32px;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
-#touch-controls-panel{display:none;position:absolute;top:calc(372px + var(--safe-top));right:calc(14px + var(--safe-right));width:240px;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+#touch-controls-btn,#touch-more-btn,#touch-settings-btn{position:absolute;right:calc(14px + var(--safe-right));width:32px;height:32px;padding:0;border-radius:6px;border:1px solid rgba(80,255,160,.32);background:rgba(0,20,15,.45);color:rgba(125,249,200,.85);font-family:'Orbitron',monospace;font-size:11px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+#touch-controls-panel,#touch-more-panel{display:none;position:absolute;right:calc(56px + var(--safe-right));width:240px;overflow-y:auto;padding:10px 12px;border-radius:8px;border:1px solid rgba(80,255,160,.32);background:rgba(2,10,20,.92);color:#fff;font-family:'Inter',sans-serif;font-size:11px;pointer-events:auto;backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
 #touch-controls-panel label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 #touch-controls-panel input[type=range]{width:120px}
 @media(max-width:768px){
-#touch-controls-btn{top:calc(288px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
-#touch-controls-panel{top:calc(324px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#touch-controls-btn{top:calc(326px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#touch-more-btn{top:calc(364px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#touch-settings-btn{display:block!important;top:calc(402px + var(--safe-top))!important;right:calc(10px + var(--safe-right))!important}
+#touch-controls-panel{top:calc(324px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;max-height:calc(100dvh - 336px - var(--safe-top))!important}
+#touch-more-panel{top:calc(362px + var(--safe-top))!important;right:calc(50px + var(--safe-right))!important;max-height:calc(100dvh - 374px - var(--safe-top))!important}
 }
 @media(max-width:480px){
-#touch-controls-btn{top:calc(244px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
-#touch-controls-panel{top:calc(278px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:200px!important}
+#touch-controls-btn{top:calc(278px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#touch-more-btn{top:calc(312px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#touch-settings-btn{top:calc(346px + var(--safe-top))!important;right:calc(6px + var(--safe-right))!important;width:28px!important;height:28px!important}
+#touch-controls-panel{top:calc(276px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:200px!important;max-height:calc(100dvh - 288px - var(--safe-top))!important}
+#touch-more-panel{top:calc(310px + var(--safe-top))!important;right:calc(40px + var(--safe-right))!important;width:210px!important;max-height:calc(100dvh - 322px - var(--safe-top))!important}
 #touch-rudder{bottom:calc(140px + var(--safe-bottom))!important;right:calc(8px + var(--safe-right))!important}
-#touch-rudder button{width:48px!important;height:38px!important}
+#touch-rudder button{width:48px!important;height:44px!important}
+}
+#touch-controls-btn{top:calc(372px + var(--safe-top));font-size:9px}
+#touch-more-btn{top:calc(408px + var(--safe-top));font-size:16px}
+#touch-settings-btn{display:none;top:calc(444px + var(--safe-top));font-size:14px}
+#touch-controls-panel{top:calc(370px + var(--safe-top));max-height:calc(100dvh - 382px - var(--safe-top))}
+#touch-more-panel{top:calc(406px + var(--safe-top));max-height:calc(100dvh - 418px - var(--safe-top))}
+#touch-more-panel .touch-more-row{display:flex;gap:6px;margin-bottom:6px}
+#touch-more-panel .touch-more-row button{flex:1;min-height:44px;padding:0 6px;border-radius:6px;border:1px solid rgba(80,255,160,.3);background:rgba(0,20,15,.5);color:#7df9c8;font-family:'Orbitron',monospace;font-size:10px;letter-spacing:.06em;cursor:pointer;touch-action:manipulation}
+#touch-more-panel .touch-more-row button.active{background:rgba(0,60,35,.7);border-color:rgba(80,255,160,.6);color:#80ffa0}
+#touch-more-panel .touch-more-row span{flex:1.4;align-self:center;font-size:10px;color:rgba(255,255,255,.75)}
+#touch-smk.active{background:rgba(255,255,255,.28);border-color:rgba(255,255,255,.6);color:#fff}
+@media(min-height:720px){
+#touch-flap-btns{bottom:calc(340px + var(--safe-bottom));grid-auto-rows:44px}
+#touch-flap-btns button{height:44px;font-size:10px}
 }
 </style>
 <div id="touch-joy"><div id="touch-joy-deadzone"></div><div id="touch-joy-knob"></div></div>
 <div id="touch-throttle"><div id="touch-thr-fill"></div><div id="touch-thr-knob"></div></div>
-<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button><button id="touch-spl" title="Spoilers (toque longo: arma)">SPL</button><button id="touch-lgt" title="Luzes de pouso">LGT</button><button id="touch-cam" title="Trocar c\u00E2mera">CAM</button></div>
+<div id="touch-flap-btns"><button id="touch-flap-up">F+</button><button id="touch-flap-dn">F\u2212</button><button id="touch-gear" class="down" title="Trem de pouso">GR\u25BC</button><button id="touch-brk">BRK</button><button id="touch-spl" title="Spoilers (toque longo: arma)">SPL</button><button id="touch-lgt" title="Luzes de pouso">LGT</button><button id="touch-smk" title="${I18n.t('touch.smoke')}">SMK</button><button id="touch-cam" title="Trocar c\u00E2mera">CAM</button><button id="touch-pause" title="${I18n.t('touch.pause')}">\u275A\u275A</button></div>
 <div id="touch-rudder"><button id="touch-rud-l" title="Leme esquerda">\u25C0 RUD</button><button id="touch-rud-r" title="Leme direita">RUD \u25B6</button></div>
-<button id="touch-controls-btn" title="Controles">\u2699</button>
+<button id="touch-controls-btn" title="Controles">CTL</button>
+<button id="touch-more-btn" title="${I18n.t('touch.more')}">+</button>
+<button id="touch-settings-btn" title="${I18n.t('touch.settings')}">\u2699</button>
 <div id="touch-controls-panel">
   <div style="font-family:'Orbitron',monospace;font-size:10px;color:#40ffaa;letter-spacing:.12em;margin-bottom:8px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:4px">CONTROLES</div>
   <label>Raio<input id="ctl-radius" type="range" min="${JOYSTICK_MIN_RADIUS_PX}" max="${JOYSTICK_MAX_RADIUS_PX}" step="5"><span id="ctl-radius-v">\u2014</span></label>
   <label>Zona morta<input id="ctl-deadzone" type="range" min="0" max="${JOYSTICK_MAX_DEADZONE_NORM}" step="0.01"><span id="ctl-deadzone-v">\u2014</span></label>
   <label>Curva (expo)<input id="ctl-expo" type="range" min="${JOYSTICK_MIN_EXPO}" max="${JOYSTICK_MAX_EXPO}" step="0.1"><span id="ctl-expo-v">\u2014</span></label>
   <label>Inverter pitch<input id="ctl-invert" type="checkbox"></label>
+  <label>${I18n.t('touch.rollSensitivity')}<input id="ctl-roll-sens" type="range" min="${TOUCH_ROLL_SENSITIVITY_MIN}" max="${TOUCH_ROLL_SENSITIVITY_MAX}" step="${TOUCH_ROLL_SENSITIVITY_STEP}"><span id="ctl-roll-sens-v">\u2014</span></label>
   <button id="ctl-open-settings" style="margin-top:8px;width:100%;background:rgba(64,255,170,.16);border:1px solid rgba(80,255,160,.4);color:#7df9c8;padding:8px;border-radius:6px;font-family:'Orbitron',monospace;font-size:10px;letter-spacing:.08em;cursor:pointer;touch-action:manipulation">CONFIGURA\u00C7\u00D5ES \u2699</button>
   <button id="ctl-open-tutorial" style="margin-top:6px;width:100%;background:rgba(0,20,15,.5);border:1px solid rgba(80,255,160,.3);color:#7df9c8;padding:8px;border-radius:6px;font-family:'Orbitron',monospace;font-size:10px;letter-spacing:.08em;cursor:pointer;touch-action:manipulation">${I18n.t('settings.tutorial').toUpperCase()}</button>
+</div>
+<div id="touch-more-panel">
+  <div style="font-family:'Orbitron',monospace;font-size:10px;color:#40ffaa;letter-spacing:.12em;margin-bottom:8px;border-bottom:1px solid rgba(80,255,160,.15);padding-bottom:4px">${I18n.t('touch.more.title')}</div>
+  <div class="touch-more-row"><span>${I18n.t('touch.more.trimPitch')}</span><button id="more-trim-pitch-dn">\u25BC</button><button id="more-trim-pitch-up">\u25B2</button></div>
+  <div class="touch-more-row"><span>${I18n.t('touch.more.trimYaw')}</span><button id="more-trim-yaw-l">\u25C0</button><button id="more-trim-yaw-r">\u25B6</button></div>
+  <div class="touch-more-row"><span>${I18n.t('touch.more.timeScale')}</span><button id="more-time-dn">\u2212</button><button id="more-time-up">+</button></div>
+  <div class="touch-more-row"><button id="more-reverse">${I18n.t('touch.more.reverse')}</button><button id="more-autobrake">AUTOBRAKE</button></div>
+  <div class="touch-more-row"><button id="more-replay">REPLAY</button><button id="more-chat">CHAT</button></div>
+  <div class="touch-more-row"><button id="more-respawn">${I18n.t('touch.more.respawn')}</button></div>
 </div>`;
         document.body.appendChild(overlay);
 
@@ -737,6 +874,20 @@ export class InputSystem {
         const ctlRadiusV = document.getElementById('ctl-radius-v');
         const ctlDzV = document.getElementById('ctl-deadzone-v');
         const ctlExpoV = document.getElementById('ctl-expo-v');
+        const ctlRollSens = document.getElementById('ctl-roll-sens') as HTMLInputElement | null;
+        const ctlRollSensV = document.getElementById('ctl-roll-sens-v');
+        const moreBtn = document.getElementById('touch-more-btn');
+        const morePanel = document.getElementById('touch-more-panel');
+        const settingsBtn = document.getElementById('touch-settings-btn');
+        const closeTouchPanels = () => {
+            if (ctlPanel) ctlPanel.style.display = 'none';
+            if (morePanel) morePanel.style.display = 'none';
+        };
+        const toggleTouchPanel = (panel: HTMLElement) => {
+            const opening = panel.style.display === 'none' || !panel.style.display;
+            closeTouchPanels();
+            if (opening) panel.style.display = 'block';
+        };
 
         const updateDeadzoneVisual = () => {
             const radius = this.scene._controlSettings.radius;
@@ -758,14 +909,32 @@ export class InputSystem {
             if (ctlRadiusV) ctlRadiusV.textContent = `${this.scene._controlSettings.radius}px`;
             if (ctlDzV) ctlDzV.textContent = `${(this.scene._controlSettings.deadzone * 100).toFixed(0)}%`;
             if (ctlExpoV) ctlExpoV.textContent = this.scene._controlSettings.expo.toFixed(1);
+            if (ctlRollSens) ctlRollSens.value = String(this.touchRollSensitivity());
+            if (ctlRollSensV) ctlRollSensV.textContent = `${this.touchRollSensitivity().toFixed(1)}x`;
         };
         refreshCtlInputs();
         updateDeadzoneVisual();
 
         if (ctlBtn && ctlPanel) {
-            ctlBtn.addEventListener('click', () => {
-                ctlPanel.style.display = ctlPanel.style.display === 'none' || !ctlPanel.style.display ? 'block' : 'none';
+            ctlBtn.addEventListener('click', () => toggleTouchPanel(ctlPanel));
+        }
+        if (moreBtn && morePanel) {
+            moreBtn.addEventListener('click', () => toggleTouchPanel(morePanel));
+        } else {
+            console.warn('[Touch] More-controls button or panel not found');
+        }
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => {
+                const dbgUi = document.getElementById('debug-ui');
+                if (!dbgUi) {
+                    console.warn('[InputSystem] Settings panel not found');
+                    return;
+                }
+                closeTouchPanels();
+                dbgUi.classList.remove('minimized');
             });
+        } else {
+            console.warn('[Touch] #touch-settings-btn element not found');
         }
         const ctlOpenSettings = document.getElementById('ctl-open-settings');
         if (ctlOpenSettings) {
@@ -792,10 +961,17 @@ export class InputSystem {
             if (ctlDz) this.scene._controlSettings.deadzone = Math.max(0, Math.min(JOYSTICK_MAX_DEADZONE_NORM, Number(ctlDz.value)));
             if (ctlExpo) this.scene._controlSettings.expo = Math.max(JOYSTICK_MIN_EXPO, Math.min(JOYSTICK_MAX_EXPO, Number(ctlExpo.value)));
             if (ctlInvert) this.scene._controlSettings.pitchInvert = ctlInvert.checked;
+            if (ctlRollSens) {
+                const rollSensitivity = Number(ctlRollSens.value);
+                this.scene._controlSettings.rollSensitivity = Number.isFinite(rollSensitivity)
+                    ? Math.max(TOUCH_ROLL_SENSITIVITY_MIN, Math.min(TOUCH_ROLL_SENSITIVITY_MAX, rollSensitivity))
+                    : TOUCH_ROLL_SENSITIVITY_DEFAULT;
+            }
             this.scene._persistControlSettings();
             refreshCtlInputs();
             updateDeadzoneVisual();
         };
+        ctlRollSens?.addEventListener('input', onCtlChange);
         ctlRadius?.addEventListener('input', onCtlChange);
         ctlDz?.addEventListener('input', onCtlChange);
         ctlExpo?.addEventListener('input', onCtlChange);
@@ -1018,96 +1194,151 @@ export class InputSystem {
         throttleEl.addEventListener('touchend', resetThr);
         throttleEl.addEventListener('touchcancel', resetThr);
 
-        document.getElementById('touch-flap-up')!.addEventListener('touchstart', () => {
+        const press = (id: string, handler: (el: HTMLElement) => void): void => {
+            const el = document.getElementById(id);
+            if (!el) {
+                console.warn(`[Touch] #${id} element not found`);
+                return;
+            }
+            el.addEventListener('pointerdown', (ev: PointerEvent) => {
+                ev.preventDefault();
+                handler(el);
+            });
+        };
+        const hold = (id: string, onPress: (el: HTMLElement) => void, onRelease: (el: HTMLElement) => void): void => {
+            const el = document.getElementById(id);
+            if (!el) {
+                console.warn(`[Touch] #${id} element not found`);
+                return;
+            }
+            let activePointerId: number | null = null;
+            el.addEventListener('pointerdown', (ev: PointerEvent) => {
+                ev.preventDefault();
+                if (activePointerId !== null) return;
+                activePointerId = ev.pointerId;
+                try { el.setPointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
+                onPress(el);
+            });
+            const release = (ev: PointerEvent) => {
+                if (ev.pointerId !== activePointerId) return;
+                activePointerId = null;
+                onRelease(el);
+            };
+            el.addEventListener('pointerup', release);
+            el.addEventListener('pointercancel', release);
+            el.addEventListener('lostpointercapture', release);
+        };
+
+        press('touch-flap-up', () => {
             this.scene.flapIndex = Math.min(this.scene.FLAP_STEPS.length - 1, this.scene.flapIndex + 1);
         });
-        document.getElementById('touch-flap-dn')!.addEventListener('touchstart', () => {
+        press('touch-flap-dn', () => {
             this.scene.flapIndex = Math.max(0, this.scene.flapIndex - 1);
         });
-        const brkBtn = document.getElementById('touch-brk')!;
-        brkBtn.addEventListener('touchstart', () => {
+        press('touch-brk', (el) => {
             this.scene.brakesOn = !this.scene.brakesOn;
-            brkBtn.classList.toggle('active', this.scene.brakesOn);
+            el.classList.toggle('active', this.scene.brakesOn);
         });
-        const gearBtn = document.getElementById('touch-gear');
-        if (gearBtn) {
-            gearBtn.addEventListener('touchstart', (ev: TouchEvent) => {
-                ev.preventDefault();
-                if (this.scene.aircraftConfig?.gear_retractable !== true) {
-                    console.debug('[Touch] gear ignored: aircraft has fixed gear');
-                    return;
-                }
-                this.scene._toggleGear();
-            }, { passive: false });
-        } else {
-            console.warn('[Touch] #touch-gear element not found');
-        }
-        const splBtn = document.getElementById('touch-spl');
-        if (splBtn) {
-            const SPOILER_LONG_PRESS_MS = 500;
-            let splPressStart = 0;
-            let splLongPressFired = false;
-            let splTimer: ReturnType<typeof setTimeout> | null = null;
-            splBtn.addEventListener('touchstart', (ev: TouchEvent) => {
-                ev.preventDefault();
-                splPressStart = Date.now();
-                splLongPressFired = false;
-                if (splTimer) { clearTimeout(splTimer); }
-                splTimer = setTimeout(() => {
-                    splLongPressFired = true;
-                    this.scene._armGroundSpoilers();
-                }, SPOILER_LONG_PRESS_MS);
-            }, { passive: false });
-            const splRelease = (ev: TouchEvent) => {
-                ev.preventDefault();
-                if (splTimer) { clearTimeout(splTimer); splTimer = null; }
-                if (!splLongPressFired && Date.now() - splPressStart < SPOILER_LONG_PRESS_MS) {
-                    this.scene._toggleSpoilers();
-                }
-            };
-            splBtn.addEventListener('touchend', splRelease, { passive: false });
-            splBtn.addEventListener('touchcancel', splRelease, { passive: false });
-        } else {
-            console.warn('[Touch] #touch-spl element not found');
-        }
-        const lgtBtn = document.getElementById('touch-lgt');
-        if (lgtBtn) {
-            lgtBtn.addEventListener('touchstart', (ev: TouchEvent) => {
-                ev.preventDefault();
-                this.scene._landingLightsOn = !this.scene._landingLightsOn;
-                lgtBtn.classList.toggle('active', this.scene._landingLightsOn);
-            }, { passive: false });
-        } else {
-            console.warn('[Touch] #touch-lgt element not found');
-        }
-        const camBtn = document.getElementById('touch-cam');
-        if (camBtn) {
-            camBtn.addEventListener('touchstart', (ev: TouchEvent) => {
-                ev.preventDefault();
-                this.scene._cycleCameraMode();
-            }, { passive: false });
-        } else {
-            console.warn('[Touch] #touch-cam element not found');
-        }
+        press('touch-gear', () => {
+            if (this.scene.aircraftConfig?.gear_retractable !== true) {
+                console.debug('[Touch] gear ignored: aircraft has fixed gear');
+                return;
+            }
+            this.scene._toggleGear();
+        });
+        let splPressStart = 0;
+        let splLongPressFired = false;
+        let splTimer: ReturnType<typeof setTimeout> | null = null;
+        hold('touch-spl', () => {
+            splPressStart = Date.now();
+            splLongPressFired = false;
+            if (splTimer) clearTimeout(splTimer);
+            splTimer = setTimeout(() => {
+                splLongPressFired = true;
+                this.scene._armGroundSpoilers();
+            }, SPOILER_LONG_PRESS_MS);
+        }, () => {
+            if (splTimer) { clearTimeout(splTimer); splTimer = null; }
+            if (!splLongPressFired && Date.now() - splPressStart < SPOILER_LONG_PRESS_MS) {
+                this.scene._toggleSpoilers();
+            }
+        });
+        press('touch-lgt', (el) => {
+            this.scene._landingLightsOn = !this.scene._landingLightsOn;
+            el.classList.toggle('active', this.scene._landingLightsOn);
+        });
+        press('touch-smk', (el) => {
+            const smokeOn = this.scene._toggleSmoke() === true;
+            el.classList.toggle('active', smokeOn);
+        });
+        press('touch-cam', () => {
+            this.scene._cycleCameraMode();
+        });
+        press('touch-pause', () => {
+            closeTouchPanels();
+            this.scene._togglePause();
+        });
         const bindRudder = (id: string, value: number) => {
-            const btn = document.getElementById(id);
-            if (!btn) { console.warn(`[Touch] #${id} element not found`); return; }
-            const press = (ev: TouchEvent) => {
-                ev.preventDefault();
+            hold(id, (el) => {
                 this.scene.touchYawInput = value;
-                btn.classList.add('active');
-            };
-            const release = (ev: TouchEvent) => {
-                ev.preventDefault();
+                el.classList.add('active');
+            }, (el) => {
                 if (this.scene.touchYawInput === value) this.scene.touchYawInput = 0;
-                btn.classList.remove('active');
-            };
-            btn.addEventListener('touchstart', press, { passive: false });
-            btn.addEventListener('touchend', release, { passive: false });
-            btn.addEventListener('touchcancel', release, { passive: false });
+                el.classList.remove('active');
+            });
         };
         bindRudder('touch-rud-l', TOUCH_RUDDER_INPUT);
         bindRudder('touch-rud-r', -TOUCH_RUDDER_INPUT);
+
+        press('more-trim-pitch-dn', () => this.adjustTouchTrim('pitch', -1));
+        press('more-trim-pitch-up', () => this.adjustTouchTrim('pitch', 1));
+        press('more-trim-yaw-l', () => this.adjustTouchTrim('yaw', -1));
+        press('more-trim-yaw-r', () => this.adjustTouchTrim('yaw', 1));
+        press('more-time-dn', () => this.scene._adjustTimeScale(-1));
+        press('more-time-up', () => this.scene._adjustTimeScale(1));
+        hold('more-reverse', (el) => {
+            this._touchReverseHeld = true;
+            el.classList.add('active');
+        }, (el) => {
+            this._touchReverseHeld = false;
+            el.classList.remove('active');
+        });
+        press('more-autobrake', () => {
+            this.scene._cycleAutobrake();
+            this.scene._cockpitClick();
+        });
+        press('more-replay', () => {
+            closeTouchPanels();
+            this.scene._toggleReplay();
+        });
+        press('more-respawn', () => {
+            closeTouchPanels();
+            this.scene._spawnPlane();
+        });
+        const chatBtn = document.getElementById('more-chat');
+        if (chatBtn) {
+            chatBtn.addEventListener('click', () => {
+                closeTouchPanels();
+                try {
+                    this.scene._chatSystem.open();
+                } catch (err) {
+                    console.warn('[Touch] Chat open failed:', err);
+                }
+            });
+        } else {
+            console.warn('[Touch] #more-chat element not found');
+        }
+    }
+
+    private adjustTouchTrim(axis: 'pitch' | 'yaw', direction: 1 | -1): void {
+        if (axis === 'pitch') {
+            const next = (Number(this.scene.trimPitch) || 0) + direction * TOUCH_TRIM_PITCH_STEP;
+            this.scene.trimPitch = Math.max(-TOUCH_TRIM_PITCH_LIMIT, Math.min(TOUCH_TRIM_PITCH_LIMIT, next));
+        } else {
+            const next = (Number(this.scene.trimYaw) || 0) + direction * TOUCH_TRIM_YAW_STEP;
+            this.scene.trimYaw = Math.max(-TOUCH_TRIM_YAW_LIMIT, Math.min(TOUCH_TRIM_YAW_LIMIT, next));
+        }
+        this.scene._cockpitClick(TOUCH_TRIM_CLICK_HZ);
     }
 
     loadControlSettings(): void {
@@ -1127,6 +1358,9 @@ export class InputSystem {
             }
             if (typeof parsed.pitchInvert === 'boolean') {
                 this.scene._controlSettings.pitchInvert = parsed.pitchInvert;
+            }
+            if (Number.isFinite(parsed.rollSensitivity)) {
+                this.scene._controlSettings.rollSensitivity = Math.max(TOUCH_ROLL_SENSITIVITY_MIN, Math.min(TOUCH_ROLL_SENSITIVITY_MAX, Number(parsed.rollSensitivity)));
             }
             console.log('[Controls] Loaded settings:', this.scene._controlSettings);
         } catch (err) {

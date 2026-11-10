@@ -29,6 +29,8 @@ export interface RemotePlayer {
     contrailRibbonRight: ContrailRibbonHandle | null;
     contrailHalfSpan: number;
     ribbonDtAccum: number;
+    trailColorIndex?: number;
+    isLocalNpc?: boolean;
     modelPivot: BABYLON.TransformNode | null;
     modelOriginalSize: number;
     modelOriginalHalfWidth: number;

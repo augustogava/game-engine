@@ -73,6 +73,7 @@ export class AircraftConfigSystem {
             cfg.gear_retractable = cfg.gear_retractable === true || (cfg.gear_retractable as unknown as number) === 1;
         }
         this.scene.aircraftConfig = cfg;
+        console.debug(`[AircraftConfig] Control tuning for ${cfg.code ?? 'unknown'}: rollSmoothing=${cfg.control_roll_smoothing_rate ?? 'default'} rollMagnitude=${cfg.control_roll_input_magnitude ?? 'default'} returnRate=${cfg.control_return_rate ?? 'default'} spoolTauS=${cfg.engine_spool_tau_s ?? 'default'}`);
         this._updateTouchGearButtonVisibility(cfg.gear_retractable === true);
         this.scene.FLAP_STEPS = cfg.flap_steps_json || DEFAULT_AIRCRAFT_CONFIG.flap_steps_json;
         this.scene.baseZeroLiftAoA = cfg.base_zero_lift_aoa;

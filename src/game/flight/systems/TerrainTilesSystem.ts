@@ -1,6 +1,6 @@
 import * as BABYLON from '@babylonjs/core';
-import { TilesRenderer } from '3d-tiles-renderer/babylonjs';
 import { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
+import { FrameCachedTilesRenderer } from './FrameCachedTilesRenderer.js';
 import type { FlightSceneSimple } from '../../FlightSceneSimple.js';
 import {
     GROUND_Y,
@@ -168,7 +168,7 @@ export class TerrainTilesSystem {
         this.scene.mapApiKey = apiKey;
 
         const url = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${apiKey}`;
-        this.scene.tiles = new TilesRenderer(url, scene);
+        this.scene.tiles = new FrameCachedTilesRenderer(url, scene);
         const isMobile = this.scene.isMobile === true;
         this.scene.tiles.errorTarget = isMobile ? TILES_ERROR_TARGET_MOBILE : TILES_ERROR_TARGET_DESKTOP;
         (this.scene.tiles as any).maxDepth = 100;
@@ -242,6 +242,7 @@ export class TerrainTilesSystem {
         try {
             this._onTileLoadModel = (event: any) => {
                 try {
+                    this.scene._frameSpikeMonitor?.recordTileLoaded();
                     const tileScene: BABYLON.TransformNode | null = event && event.scene ? event.scene : null;
                     if (!tileScene) return;
                     const meshes = (tileScene as any).getChildMeshes
@@ -333,6 +334,7 @@ export class TerrainTilesSystem {
             };
             this._onTileDisposeModel = (event: any) => {
                 try {
+                    this.scene._frameSpikeMonitor?.recordTileDisposed();
                     const key = event && event.tile && event.tile.__h ? String(event.tile.__h) : null;
                     if (key) this.scene._tileFadeEntries.delete(key);
                     try {

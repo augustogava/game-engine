@@ -278,6 +278,7 @@ export class HudSystem {
         setCheck('ux-latency-overlay', prefs.showLatencyOverlay);
         setCheck('ux-g-effects', prefs.showGEffects);
         setCheck('ux-g-limiter', prefs.gLimiterEnabled);
+        setSel('ux-smoke-color', String(prefs.smokeColor));
         setSel('ux-colorblind', prefs.colorblindMode);
         setVal('ux-font-scale', Math.round(prefs.fontScale * 100));
         setCheck('ux-contrast', prefs.contrastBoost);
@@ -336,11 +337,22 @@ export class HudSystem {
         handleSelect('ux-language', 'language');
         handleSelect('ux-colorblind', 'colorblindMode');
 
+        const smokeColorEl = document.getElementById('ux-smoke-color') as HTMLSelectElement | null;
+        if (smokeColorEl) {
+            smokeColorEl.addEventListener('change', () => {
+                const smokeColor = parseInt(smokeColorEl.value, 10);
+                if (!Number.isFinite(smokeColor)) return;
+                UiPreferences.set({ smokeColor });
+            });
+        }
+
         UiPreferences.onChange((p) => {
             this.scene._setMouseYoke(p.mouseYoke);
             this.scene._gLimiterEnabled = p.gLimiterEnabled === true;
+            this.scene._vfxSystem.setSmokeColorIndex(p.smokeColor);
         });
         this.scene._gLimiterEnabled = prefs.gLimiterEnabled === true;
+        this.scene._vfxSystem.setSmokeColorIndex(prefs.smokeColor);
 
         const replayBtn = document.getElementById('ux-replay-btn');
         if (replayBtn) replayBtn.addEventListener('click', () => this.scene._toggleReplay());
@@ -946,13 +958,14 @@ export class HudSystem {
             ['Roll', [b.rollLeft, b.rollRight]],
             ['Yaw', [b.yawLeft, b.yawRight]],
             ['Flaps', [b.flapDown, b.flapUp]],
-            ['Spoilers', ['Backslash']],
+            ['Spoilers', [b.spoilersToggle]],
             ['Trim Pitch', [b.trimPitchDown, b.trimPitchUp]],
             ['Trim Yaw', [b.trimYawLeft, b.trimYawRight]],
             ['Trim Wheel', ['PageUp', 'PageDown']],
             ['Brake', [b.brakeToggle]],
             ['Gear', [b.gearToggle]],
-            ['Lights', ['KeyL']],
+            ['Lights', [b.landingLights]],
+            ['Smoke', [b.smokeToggle]],
             ['Camera', [b.cameraCycle]],
             ['Tower', [b.towerCamera]],
             ['Pause', [b.pauseToggle]],
@@ -963,12 +976,12 @@ export class HudSystem {
             ['Replay', [b.replayToggle]],
             ['Screenshot', [b.screenshot]],
             ['Respawn', [b.respawn]],
-            ['AP Master', ['KeyZ']],
-            ['AP HDG', ['KeyF']],
-            ['AP ALT', ['KeyJ']],
-            ['AP VS',  ['KeyK']],
-            ['AP NAV', ['KeyU']],
-            ['AP APR', ['KeyI']],
+            ['AP Master', [b.autopilotMaster]],
+            ['AP HDG', [b.autopilotHeading]],
+            ['AP ALT', [b.autopilotAltitude]],
+            ['AP VS',  [b.autopilotVerticalSpeed]],
+            ['AP NAV', [b.autopilotNav]],
+            ['AP APR', [b.autopilotApproach]],
             ['Kill Eng', ['Digit1', 'Digit2', 'Digit3', 'Digit4']],
             ['Helper', ['KeyH', 'Slash']],
             ['Settings', ['Shift+S']],
@@ -990,6 +1003,7 @@ export class HudSystem {
             if (code === 'Minus') return '-';
             if (code === 'Slash') return '/';
             if (code === 'Backslash') return '\\';
+            if (code === 'Comma') return ',';
             if (code === 'PageUp') return 'PgUp';
             if (code === 'PageDown') return 'PgDn';
             return code;
